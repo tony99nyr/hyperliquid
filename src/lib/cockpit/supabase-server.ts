@@ -13,15 +13,26 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 let client: SupabaseClient | null = null;
 
+/**
+ * Resolve the Supabase project URL on the server. The Vercel Supabase
+ * Marketplace integration injects `SUPABASE_URL`; the public client uses
+ * `NEXT_PUBLIC_SUPABASE_URL`. Accept either (server-only `SUPABASE_URL` first)
+ * so the same code works whether the URL is provisioned by the integration or
+ * set manually. See env.ts for the full expected-var-name documentation.
+ */
+function resolveServerUrl(): string | undefined {
+  return process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
+}
+
 /** Lazily construct the service-role client from server-only env vars. */
 export function getServiceRoleClient(): SupabaseClient {
   if (client) return client;
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const url = resolveServerUrl();
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceRoleKey) {
     throw new Error(
-      'Supabase service-role client not configured: set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY',
+      'Supabase service-role client not configured: set SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY',
     );
   }
 
@@ -29,4 +40,9 @@ export function getServiceRoleClient(): SupabaseClient {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   return client;
+}
+
+/** Reset the cached client (test hook only). */
+export function _resetServiceRoleClient(): void {
+  client = null;
 }

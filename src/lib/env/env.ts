@@ -6,12 +6,24 @@
  * mirrored into the schema here so `validateEnv()` can sanity-check the whole
  * set together. The service-role Supabase key is server-only and MUST NOT be
  * referenced from client code (ADR-0002).
+ *
+ * Expected Supabase env var names (match the Vercel Supabase Marketplace
+ * integration, which auto-injects these on link):
+ *   - SUPABASE_URL                    server-only project URL (integration-injected)
+ *   - NEXT_PUBLIC_SUPABASE_URL        public project URL (browser bundle)
+ *   - NEXT_PUBLIC_SUPABASE_ANON_KEY   public anon key (browser, RLS select-only)
+ *   - SUPABASE_SERVICE_ROLE_KEY       SERVER ONLY service-role key (bypasses RLS)
+ * The server client (supabase-server.ts) reads SUPABASE_URL first, falling back
+ * to NEXT_PUBLIC_SUPABASE_URL; the browser client reads the NEXT_PUBLIC_* pair.
  */
 
 import { z } from 'zod';
 
 const envSchema = z.object({
   TRADING_MODE: z.enum(['paper', 'live']).default('paper'),
+
+  // Supabase project URL — server-only var injected by the Vercel integration.
+  SUPABASE_URL: z.string().url().optional(),
 
   // Supabase (public — safe in the browser bundle).
   NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
@@ -35,6 +47,7 @@ export type CockpitEnv = z.infer<typeof envSchema>;
 export function validateEnv(source: NodeJS.ProcessEnv = process.env): CockpitEnv {
   return envSchema.parse({
     TRADING_MODE: source.TRADING_MODE,
+    SUPABASE_URL: source.SUPABASE_URL,
     NEXT_PUBLIC_SUPABASE_URL: source.NEXT_PUBLIC_SUPABASE_URL,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: source.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     SUPABASE_SERVICE_ROLE_KEY: source.SUPABASE_SERVICE_ROLE_KEY,
