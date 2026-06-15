@@ -1,0 +1,25 @@
+import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';
+import path from 'path';
+
+export default defineConfig({
+  plugins: [react()],
+  test: {
+    environment: 'node',
+    globals: true,
+    setupFiles: ['./tests/setup.ts'],
+    include: ['tests/lib/**/*.test.ts'],
+    pool: 'threads',
+    maxWorkers: 4,
+    testTimeout: 10000,
+    hookTimeout: 10000,
+    reporters: ['dot'],
+    env: { NODE_ENV: 'test' },
+  },
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+      '@styled-system': path.resolve(__dirname, './styled-system'),
+    },
+  },
+});

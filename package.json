@@ -1,0 +1,39 @@
+{
+  "name": "hl-cockpit",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.30.3",
+  "scripts": {
+    "panda:prepare": "panda codegen",
+    "postinstall": "panda codegen",
+    "dev": "panda codegen && next dev",
+    "build": "panda codegen && next build --webpack",
+    "start": "next start",
+    "lint": "next lint --max-warnings=0",
+    "type:check": "tsc --noEmit",
+    "test": "SUPPRESS_TEST_OUTPUT=true vitest run --reporter=dot",
+    "test:watch": "vitest",
+    "test:lib": "SUPPRESS_TEST_OUTPUT=true vitest run --config vitest.config.lib.ts --reporter=dot",
+    "test:ui": "SUPPRESS_TEST_OUTPUT=true vitest run --config vitest.config.ui.ts --reporter=dot",
+    "validate": "pnpm type:check && pnpm test && pnpm lint && pnpm build"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.47.10",
+    "next": "16.2.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "recharts": "^3.8.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@pandacss/dev": "^1.9.1",
+    "@types/node": "^25.5.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "16.2.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.2"
+  }
+}
