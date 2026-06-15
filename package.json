@@ -17,7 +17,13 @@
     "test:ui": "SUPPRESS_TEST_OUTPUT=true vitest run --config vitest.config.ui.ts --reporter=dot",
     "validate": "pnpm type:check && pnpm test && pnpm lint && pnpm build",
     "env:pull": "vercel env pull .env.local",
-    "env:help": "echo 'Run: pnpm env:pull to pull Vercel env vars into .env.local (repo must be linked: vercel link). Sensitive vars added manually if needed.'"
+    "env:help": "echo 'Run: pnpm env:pull to pull Vercel env vars into .env.local (repo must be linked: vercel link). Sensitive vars added manually if needed.'",
+    "skill:analyze-traders": "tsx --tsconfig tsconfig.scripts.json scripts/analyze-traders.ts",
+    "skill:analyze-market": "tsx --tsconfig tsconfig.scripts.json scripts/analyze-market.ts",
+    "skill:open-position": "tsx --tsconfig tsconfig.scripts.json scripts/open-position.ts",
+    "skill:assess-health": "tsx --tsconfig tsconfig.scripts.json scripts/assess-health.ts",
+    "skill:advise-exit": "tsx --tsconfig tsconfig.scripts.json scripts/advise-exit.ts",
+    "skill:report-context": "tsx --tsconfig tsconfig.scripts.json scripts/report-context.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.47.10",
@@ -42,6 +48,7 @@
     "eslint": "^9.39.4",
     "eslint-config-next": "16.2.1",
     "jsdom": "^26.1.0",
+    "tsx": "^4.22.4",
     "typescript": "^5.9.3",
     "vitest": "^4.1.2"
   }

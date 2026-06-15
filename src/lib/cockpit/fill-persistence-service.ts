@@ -36,6 +36,27 @@ function isDuplicateFill(error: { code?: string; message?: string } | null): boo
 }
 
 /**
+ * Load the current position for (session, coin), or null when none exists yet.
+ * Read-only. Used by advise-exit to build a reduce-only intent against the real
+ * open size. Returns null (rather than throwing) when Supabase is unconfigured.
+ */
+export async function loadPosition(
+  sessionId: string,
+  coin: string,
+  client: SupabaseClient = getServiceRoleClient(),
+): Promise<Position | null> {
+  const { data, error } = await client
+    .from('positions')
+    .select('coin, side, sz, avg_entry_px, realized_pnl_usd, fees_paid_usd')
+    .eq('session_id', sessionId)
+    .eq('coin', coin.trim().toUpperCase())
+    .maybeSingle();
+  if (error) throw new Error(`loadPosition failed: ${error.message}`);
+  if (!data) return null;
+  return positionFromRow(data as Parameters<typeof positionFromRow>[0]);
+}
+
+/**
  * Persist a canonical fill as a `fills` row. Idempotent: a duplicate
  * client_intent_id is silently treated as already-recorded (returns false).
  * Returns true when a new row was inserted.
