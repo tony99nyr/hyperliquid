@@ -22,3 +22,10 @@ export type {
   Position,
   PositionSide,
 } from './position';
+
+export type {
+  MarketBookLevel,
+  MarketTrade,
+  FeedStatus,
+  LiveMarketState,
+} from './market';
