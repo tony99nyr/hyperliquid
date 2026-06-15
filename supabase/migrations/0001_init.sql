@@ -135,14 +135,28 @@ begin
   end if;
 end$$;
 
-alter publication supabase_realtime add table public.sessions;
-alter publication supabase_realtime add table public.positions;
-alter publication supabase_realtime add table public.fills;
-alter publication supabase_realtime add table public.pnl;
-alter publication supabase_realtime add table public.analysis_log;
-alter publication supabase_realtime add table public.hypotheses;
-alter publication supabase_realtime add table public.health_snapshots;
-alter publication supabase_realtime add table public.context_gauge;
+-- Add each table to the publication only if it is not already a member, so the
+-- migration is safely re-runnable (a plain `add table` errors when the table is
+-- already in the publication).
+do $$
+declare
+  t text;
+  tables text[] := array[
+    'sessions','positions','fills','pnl',
+    'analysis_log','hypotheses','health_snapshots','context_gauge'
+  ];
+begin
+  foreach t in array tables loop
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime'
+        and schemaname = 'public'
+        and tablename = t
+    ) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
+end$$;
 
 -- ---------------------------------------------------------------------------
 -- Row Level Security: anon may SELECT only; all writes require service-role
@@ -158,6 +172,17 @@ alter table public.analysis_log     enable row level security;
 alter table public.hypotheses       enable row level security;
 alter table public.health_snapshots enable row level security;
 alter table public.context_gauge    enable row level security;
+
+-- DROP-then-CREATE so re-running the migration does not error on existing
+-- policies (Postgres has no `create policy if not exists`).
+drop policy if exists "anon read sessions"         on public.sessions;
+drop policy if exists "anon read positions"        on public.positions;
+drop policy if exists "anon read fills"            on public.fills;
+drop policy if exists "anon read pnl"              on public.pnl;
+drop policy if exists "anon read analysis_log"     on public.analysis_log;
+drop policy if exists "anon read hypotheses"       on public.hypotheses;
+drop policy if exists "anon read health_snapshots" on public.health_snapshots;
+drop policy if exists "anon read context_gauge"    on public.context_gauge;
 
 create policy "anon read sessions"         on public.sessions         for select using (true);
 create policy "anon read positions"        on public.positions        for select using (true);
