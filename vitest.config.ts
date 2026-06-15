@@ -31,7 +31,12 @@ export default defineConfig({
           setupFiles: ['./tests/setup.ts'],
           include: ['tests/ui/**/*.test.tsx'],
           pool: 'threads',
+          // Match the lib project's worker count so vitest's project grouping
+          // (which requires identical maxWorkers OR a distinct groupOrder)
+          // is satisfied when both projects run together via `pnpm test`.
+          maxWorkers: process.env.CI ? 2 : 4,
           testTimeout: 10000,
+          hookTimeout: 10000,
           env: { NODE_ENV: 'test' },
         },
       },

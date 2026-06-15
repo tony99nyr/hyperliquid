@@ -15,8 +15,14 @@ beforeAll(() => {
   process.env.TRADING_MODE = 'paper';
 });
 
-afterEach(() => {
+afterEach(async () => {
   vi.clearAllMocks();
+  // DOM cleanup for the jsdom (ui) project only — guarded so the node (lib)
+  // project, which has no `document`, skips it.
+  if (typeof document !== 'undefined') {
+    const { cleanup } = await import('@testing-library/react');
+    cleanup();
+  }
 });
 
 afterAll(() => {

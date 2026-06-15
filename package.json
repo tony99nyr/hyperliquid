@@ -15,7 +15,9 @@
     "test:watch": "vitest",
     "test:lib": "SUPPRESS_TEST_OUTPUT=true vitest run --config vitest.config.lib.ts --reporter=dot",
     "test:ui": "SUPPRESS_TEST_OUTPUT=true vitest run --config vitest.config.ui.ts --reporter=dot",
-    "validate": "pnpm type:check && pnpm test && pnpm lint && pnpm build"
+    "validate": "pnpm type:check && pnpm test && pnpm lint && pnpm build",
+    "env:pull": "vercel env pull .env.local",
+    "env:help": "echo 'Run: pnpm env:pull to pull Vercel env vars into .env.local (repo must be linked: vercel link). Sensitive vars added manually if needed.'"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.47.10",
@@ -30,6 +32,8 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
     "@pandacss/dev": "^1.9.1",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -37,6 +41,7 @@
     "@vitejs/plugin-react": "^5.2.0",
     "eslint": "^9.39.4",
     "eslint-config-next": "16.2.1",
+    "jsdom": "^26.1.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.2"
   }
