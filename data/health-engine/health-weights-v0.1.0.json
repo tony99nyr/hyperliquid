@@ -1,0 +1,28 @@
+{
+  "version": "0.1.0",
+  "description": "Initial health-engine weights. Per-timeframe regime weighting: higher TFs (1d/8h) weighted for trend direction, lower TFs (1h/15m) for timing. Probability + alert tuning constants. Tune via the paper trial (Phase 2), not in code.",
+  "timeframeWeights": {
+    "1d": 0.35,
+    "8h": 0.3,
+    "1h": 0.2,
+    "15m": 0.15
+  },
+  "score": {
+    "neutralBaseline": 50,
+    "regimeSpan": 50,
+    "alignmentBonusMax": 10,
+    "alertPenaltyEach": 8,
+    "alertPenaltyMax": 30
+  },
+  "probability": {
+    "baseContinuation": 0.5,
+    "scoreInfluence": 0.4,
+    "residualUncertainty": 0.1
+  },
+  "alerts": {
+    "divergenceTimeframe": "1h",
+    "divergenceMinStrength": 0.3,
+    "regimeFlipTimeframe": "8h",
+    "stopWithinAtrMultiplier": 1.0
+  }
+}

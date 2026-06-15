@@ -1,0 +1,7 @@
+{
+  "description": "Health-engine config manifest. `active` selects which versioned weights file the engine loads (config-manifest pattern: bump `active` to roll a new tuning forward; keep old files for reproducibility).",
+  "active": "0.1.0",
+  "versions": {
+    "0.1.0": "health-weights-v0.1.0.json"
+  }
+}
