@@ -87,7 +87,27 @@ the comments at the top of each vendored stub module.
 
 - **Phase 0 (DONE)**: scaffold, vendor, crux fill abstraction + mode-agnosticism
   test + pnl + orderbook-match, Supabase migration. Validate green.
-- **Phase 1**: candle-service, paper fill source, cockpit Supabase writers,
-  health engine, HL WS client, cockpit UI, the 6 skills. Deploy paper.
+- **Phase 1 (DONE)**: candle-service, paper fill source, cockpit Supabase writers,
+  health engine, HL WS client, cockpit UI, **and the 6 single-purpose skills**
+  (analyze-traders / analyze-market-timeframes / open-position /
+  assess-trade-health / advise-exit / report-context-budget) — each a
+  `.claude/skills/*/SKILL.md` + a thin `scripts/*.ts` entrypoint over a tested
+  `src/lib/skills/*-business-logic.ts`. The two ACTION skills (open-position,
+  advise-exit) surface the proposed order + rationale and require EXPLICIT user
+  confirmation before `executeIntent`; advisory skills never act. Skill scripts
+  run via `pnpm skill:*` (tsx, `tsconfig.scripts.json` stubs `server-only`).
+  Validate green. The remaining gate to USE it is the live-readiness checklist
+  (Supabase migration applied + env keys provisioned).
 - **Phase 3**: implement `fill-source-live.ts` + `hyperliquid-exchange-service.ts`,
   flip `TRADING_MODE=live`. No other code changes.
+
+## Skills (Phase 1d)
+
+Each skill: one `.claude/skills/<name>/SKILL.md` (frontmatter + protocol) + one
+`scripts/<name>.ts` thin entrypoint + (where it has decision logic) a tested
+`src/lib/skills/<name>-business-logic.ts`. **The user decides and confirms every
+ACTION.** Advisory skills (analyze-*, assess-*) never trade; action skills
+(open-position, advise-exit) require an explicit `yes` (or `--confirm yes`) before
+`executeIntent` — they never auto-fire. `analyze-traders` enforces the
+**INSUFFICIENT_HISTORY gate**: a thin/page-capped wallet is capped at B and can
+never be a clean A (the 0x418aa6 $16M-martingale lesson), pinned by tests.
