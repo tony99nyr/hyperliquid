@@ -13,6 +13,7 @@
 import type { CanonicalFill } from '@/types/fill';
 import type { Position } from '@/types/position';
 import { applyFill, emptyPosition } from './pnl-business-logic';
+import { applyFillToPositionRows } from '@/lib/cockpit/fill-persistence-service';
 
 /**
  * Pure core: given the prior position (or undefined when none exists yet) and a
@@ -25,12 +26,11 @@ export function nextPosition(prior: Position | undefined, fill: CanonicalFill): 
 }
 
 /**
- * I/O orchestration (Phase 1): load position for fill.coin + fill.sessionId
- * from Supabase, compute `nextPosition`, persist the updated position + a pnl
- * row, return the new position. Throws until the cockpit Supabase writers exist.
+ * I/O orchestration: load the position for fill.coin + fill.sessionId from
+ * Supabase, compute `nextPosition` (pure), upsert the positions row + insert a
+ * pnl row, and return the new position. Delegates to the cockpit persistence
+ * service. Mode-agnostic — never inspects `fill.source`.
  */
-export async function applyFillToPosition(_fill: CanonicalFill): Promise<Position> {
-  throw new Error(
-    'applyFillToPosition: I/O not implemented in Phase 0 (Phase 1 wires Supabase position/pnl rows); use nextPosition() for the pure fold',
-  );
+export async function applyFillToPosition(fill: CanonicalFill): Promise<Position> {
+  return applyFillToPositionRows(fill);
 }

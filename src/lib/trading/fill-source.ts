@@ -15,13 +15,16 @@ import { getTradingMode } from '@/lib/env/mode';
 import { paperFill } from './fill-source-paper';
 import { liveFill } from './fill-source-live';
 import { applyFillToPosition } from './position-tracker';
+import { persistFillRow } from '@/lib/cockpit/fill-persistence-service';
 
 /**
- * Persist a canonical fill (Phase 1: Supabase `fills` row, unique on
- * client_intent_id for idempotency). Skeleton until the cockpit writers exist.
+ * Persist a canonical fill as a Supabase `fills` row. Idempotent on
+ * client_intent_id (a duplicate is silently a no-op), so re-running
+ * executeIntent with the same intent records the fill exactly once. Identical in
+ * both modes — never branches on `fill.source`.
  */
-export async function persistFill(_fill: CanonicalFill): Promise<void> {
-  throw new Error('persistFill: not implemented in Phase 0 (Phase 1 wires the Supabase fills row)');
+export async function persistFill(fill: CanonicalFill): Promise<void> {
+  await persistFillRow(fill);
 }
 
 /**
