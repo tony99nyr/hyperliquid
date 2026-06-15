@@ -42,6 +42,32 @@ export async function openSession(
   return toSession(data as SessionRow);
 }
 
+/**
+ * Read the most-recent active session (the one the cockpit live-tracks). Returns
+ * null when none exists OR when Supabase is not yet configured — the cockpit page
+ * renders in a "no session" state rather than erroring, so it is viewable before
+ * the DB is provisioned.
+ */
+export async function getActiveSession(
+  clientFactory: () => SupabaseClient = getServiceRoleClient,
+): Promise<Session | null> {
+  let client: SupabaseClient;
+  try {
+    client = clientFactory();
+  } catch {
+    return null; // Supabase not configured yet — fail soft.
+  }
+  const { data, error } = await client
+    .from('sessions')
+    .select('*')
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+  return toSession(data as SessionRow);
+}
+
 /** Close a session (status → 'closed'). */
 export async function closeSession(
   sessionId: string,
