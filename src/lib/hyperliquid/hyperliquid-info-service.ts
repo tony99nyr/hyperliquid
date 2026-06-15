@@ -16,6 +16,7 @@
  */
 
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
+import type { L2Book, BookLevel } from './orderbook-match';
 
 const HL_INFO_URL = 'https://api.hyperliquid.xyz/info';
 const REQUEST_TIMEOUT_MS = 8000;
@@ -301,4 +302,48 @@ export async function fetchRecentFills(
     }
     return { address, fills: [], fetchedAt: Date.now(), stale: true, error: message };
   }
+}
+
+// --- l2Book (order book) ---
+
+interface RawL2Book {
+  coin?: string;
+  levels?: Array<Array<{ px?: string; sz?: string }>>;
+  time?: number;
+}
+
+/**
+ * Parse a raw HL `l2Book` response into the normalized `L2Book` shape the pure
+ * matcher consumes: `bids` best (highest) first, `asks` best (lowest) first.
+ * HL returns `levels: [bids, asks]` already in that order. PURE (exported for
+ * unit testing).
+ */
+export function parseL2Book(coin: string, raw: RawL2Book): L2Book {
+  const toLevels = (arr: Array<{ px?: string; sz?: string }> | undefined): BookLevel[] => {
+    if (!Array.isArray(arr)) return [];
+    const out: BookLevel[] = [];
+    for (const lvl of arr) {
+      const px = num(lvl?.px);
+      const sz = num(lvl?.sz);
+      if (px > 0 && sz > 0) out.push({ px, sz });
+    }
+    return out;
+  };
+  const levels = raw.levels ?? [];
+  return {
+    coin: raw.coin ?? coin.toUpperCase(),
+    bids: toLevels(levels[0]),
+    asks: toLevels(levels[1]),
+  };
+}
+
+/**
+ * Fetch a FRESH l2Book for a coin (NO cache — paper fills require a fresh book
+ * each time, ADR-0001/0004). Throws on failure so the caller (paperFill) can
+ * fail the intent rather than fill against stale/empty liquidity.
+ */
+export async function fetchL2Book(coin: string): Promise<L2Book> {
+  const normCoin = coin.trim().toUpperCase();
+  const raw = await hlInfoPost<RawL2Book>({ type: 'l2Book', coin: normCoin });
+  return parseL2Book(normCoin, raw);
 }
