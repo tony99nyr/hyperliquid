@@ -1,0 +1,49 @@
+import { describe, it, expect } from 'vitest';
+import {
+  userPositionDisplay,
+  leaderPositionDisplay,
+} from '@/app/cockpit/components/position-panel-helpers';
+import type { PositionRow, PnlSnapshot } from '@/hooks/realtime-row-mappers';
+import type { HlPosition } from '@/lib/hyperliquid/hyperliquid-info-service';
+
+const pos: PositionRow = {
+  id: 'p', sessionId: 's', coin: 'ETH', side: 'long', sz: 2, avgEntryPx: 2900, realizedPnlUsd: 0, feesPaidUsd: 0, updatedAt: 0,
+};
+
+describe('position-panel-helpers', () => {
+  it('uses the pnl snapshot mark + unrealized when present', () => {
+    const pnl: PnlSnapshot = { id: 'x', sessionId: 's', coin: 'ETH', realizedPnlUsd: 0, unrealizedPnlUsd: 200, feesPaidUsd: 0, markPx: 3000, createdAt: 0 };
+    const d = userPositionDisplay(pos, pnl);
+    expect(d.side).toBe('long');
+    expect(d.markPx).toBe(3000);
+    expect(d.unrealizedPnlUsd).toBe(200);
+    expect(d.entryPx).toBe(2900);
+  });
+
+  it('recomputes unrealized from mark when snapshot uPnL is 0/absent', () => {
+    const pnl: PnlSnapshot = { id: 'x', sessionId: 's', coin: 'ETH', realizedPnlUsd: 0, unrealizedPnlUsd: 0, feesPaidUsd: 0, markPx: 3000, createdAt: 0 };
+    const d = userPositionDisplay(pos, pnl);
+    // long 2 @ 2900, mark 3000 → +200
+    expect(d.unrealizedPnlUsd).toBe(200);
+  });
+
+  it('leaves uPnL null when no pnl snapshot', () => {
+    const d = userPositionDisplay(pos, undefined);
+    expect(d.unrealizedPnlUsd).toBeNull();
+    expect(d.markPx).toBeNull();
+  });
+
+  it('maps a leader HL position', () => {
+    const leader: HlPosition = {
+      coin: 'BTC', side: 'short', szi: -0.5, size: 0.5, entryPx: 60000, positionValue: 30000,
+      unrealizedPnl: -500, returnOnEquity: -0.1, leverage: 5, leverageType: 'cross', liquidationPx: 70000, marginUsed: 6000, maxLeverage: 50,
+    };
+    const d = leaderPositionDisplay(leader);
+    expect(d.side).toBe('short');
+    expect(d.sz).toBe(0.5);
+    expect(d.entryPx).toBe(60000);
+    expect(d.liqPx).toBe(70000);
+    expect(d.leverage).toBe(5);
+    expect(d.unrealizedPnlUsd).toBe(-500);
+  });
+});
