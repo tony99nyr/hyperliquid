@@ -20,6 +20,9 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
       '@styled-system': path.resolve(__dirname, './styled-system'),
+      // `server-only` throws when imported outside a React Server Component;
+      // stub it to a no-op so server modules (e.g. supabase-server) are testable.
+      'server-only': path.resolve(__dirname, './tests/stubs/server-only.ts'),
     },
   },
 });
