@@ -7,14 +7,19 @@
  * set together. The service-role Supabase key is server-only and MUST NOT be
  * referenced from client code (ADR-0002).
  *
- * Expected Supabase env var names (match the Vercel Supabase Marketplace
- * integration, which auto-injects these on link):
- *   - SUPABASE_URL                    server-only project URL (integration-injected)
- *   - NEXT_PUBLIC_SUPABASE_URL        public project URL (browser bundle)
- *   - NEXT_PUBLIC_SUPABASE_ANON_KEY   public anon key (browser, RLS select-only)
- *   - SUPABASE_SERVICE_ROLE_KEY       SERVER ONLY service-role key (bypasses RLS)
- * The server client (supabase-server.ts) reads SUPABASE_URL first, falling back
- * to NEXT_PUBLIC_SUPABASE_URL; the browser client reads the NEXT_PUBLIC_* pair.
+ * Expected Supabase env var names. The Vercel Supabase Marketplace integration
+ * for this project auto-injects every var with an `HL_` prefix, so those are the
+ * canonical names; the unprefixed names are accepted as fallbacks for local /
+ * portable setups.
+ *   - HL_SUPABASE_URL / SUPABASE_URL                       server-only project URL
+ *   - NEXT_PUBLIC_HL_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_URL  public project URL (browser bundle)
+ *   - NEXT_PUBLIC_HL_SUPABASE_ANON_KEY / NEXT_PUBLIC_SUPABASE_ANON_KEY  public anon key (RLS select-only)
+ *   - NEXT_PUBLIC_HL_SUPABASE_PUBLISHABLE_KEY              public publishable key (anon fallback)
+ *   - HL_SUPABASE_SERVICE_ROLE_KEY / SUPABASE_SERVICE_ROLE_KEY  SERVER ONLY (bypasses RLS)
+ *   - HL_SUPABASE_SECRET_KEY                               SERVER ONLY service-role fallback
+ * The server client (supabase-server.ts) reads the HL_-prefixed URL + service
+ * role first, falling back to the unprefixed names; the browser client reads the
+ * NEXT_PUBLIC_HL_* pair first, then the unprefixed NEXT_PUBLIC_* pair.
  */
 
 import { z } from 'zod';
@@ -22,14 +27,21 @@ import { z } from 'zod';
 const envSchema = z.object({
   TRADING_MODE: z.enum(['paper', 'live']).default('paper'),
 
-  // Supabase project URL — server-only var injected by the Vercel integration.
+  // Supabase project URL — server-only. The Vercel integration injects the
+  // HL_-prefixed name; the unprefixed name is accepted as a fallback.
+  HL_SUPABASE_URL: z.string().url().optional(),
   SUPABASE_URL: z.string().url().optional(),
 
-  // Supabase (public — safe in the browser bundle).
+  // Supabase (public — safe in the browser bundle). HL_-prefixed names first.
+  NEXT_PUBLIC_HL_SUPABASE_URL: z.string().url().optional(),
+  NEXT_PUBLIC_HL_SUPABASE_ANON_KEY: z.string().min(1).optional(),
+  NEXT_PUBLIC_HL_SUPABASE_PUBLISHABLE_KEY: z.string().min(1).optional(),
   NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1).optional(),
 
   // Supabase service role (SERVER ONLY — never ship to client).
+  HL_SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
+  HL_SUPABASE_SECRET_KEY: z.string().min(1).optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
 
   // Admin gate (vendored auth).
@@ -47,9 +59,15 @@ export type CockpitEnv = z.infer<typeof envSchema>;
 export function validateEnv(source: NodeJS.ProcessEnv = process.env): CockpitEnv {
   return envSchema.parse({
     TRADING_MODE: source.TRADING_MODE,
+    HL_SUPABASE_URL: source.HL_SUPABASE_URL,
     SUPABASE_URL: source.SUPABASE_URL,
+    NEXT_PUBLIC_HL_SUPABASE_URL: source.NEXT_PUBLIC_HL_SUPABASE_URL,
+    NEXT_PUBLIC_HL_SUPABASE_ANON_KEY: source.NEXT_PUBLIC_HL_SUPABASE_ANON_KEY,
+    NEXT_PUBLIC_HL_SUPABASE_PUBLISHABLE_KEY: source.NEXT_PUBLIC_HL_SUPABASE_PUBLISHABLE_KEY,
     NEXT_PUBLIC_SUPABASE_URL: source.NEXT_PUBLIC_SUPABASE_URL,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: source.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    HL_SUPABASE_SERVICE_ROLE_KEY: source.HL_SUPABASE_SERVICE_ROLE_KEY,
+    HL_SUPABASE_SECRET_KEY: source.HL_SUPABASE_SECRET_KEY,
     SUPABASE_SERVICE_ROLE_KEY: source.SUPABASE_SERVICE_ROLE_KEY,
     ADMIN_SECRET: source.ADMIN_SECRET,
     ADMIN_PIN: source.ADMIN_PIN,
