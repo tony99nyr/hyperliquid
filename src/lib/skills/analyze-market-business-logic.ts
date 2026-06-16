@@ -10,7 +10,10 @@
  */
 
 import type { PriceCandle } from '@/types/trading-core';
-import { detectMarketRegimeCached } from '@/lib/strategy/analysis/market-regime-detector-cached';
+import {
+  detectMarketRegimeCached,
+  clearIndicatorCache,
+} from '@/lib/strategy/analysis/market-regime-detector-cached';
 import { detectRSIDivergence, detectMACDDivergence } from '@/lib/strategy/analysis/divergence-detector';
 import { calculateRSI, getLatestIndicatorValue, getATRValue } from '@/lib/strategy/indicators/indicators';
 
@@ -71,6 +74,14 @@ export function readTimeframe(timeframe: MarketTimeframe, candles: PriceCandle[]
     };
   }
   const idx = candles.length - 1;
+  // The regime detector caches indicators in a MODULE-LEVEL buffer keyed only by
+  // (candle count, last close). Across timeframes those keys collide — every TF
+  // here is fetched up to "now", so they share the same candle count AND the same
+  // latest close — which would make the detector silently reuse the FIRST
+  // timeframe's indicators for all subsequent TFs (uniform regime/confidence).
+  // Clearing the cache before each TF guarantees a fresh, per-timeframe read.
+  // (Mirrors regime-region-calculator.ts, which clears before each fresh run.)
+  clearIndicatorCache();
   const signal = detectMarketRegimeCached(candles, idx);
   const rsiSeries = calculateRSI(candles.map((c) => c.close), 14);
   const rsi = getLatestIndicatorValue(rsiSeries, idx, 14);
