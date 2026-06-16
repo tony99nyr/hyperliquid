@@ -49,6 +49,18 @@ export function useHlOrderbook(coin: string): HlOrderbookState {
   // re-evaluates on a timer even when no ws ticks arrive.
   const [silentlyStalled, setSilentlyStalled] = useState(false);
 
+  // Switching coins must immediately drop the previous coin's book/price —
+  // otherwise the old ETH levels linger until the new BTC socket ticks, which
+  // reads as "the selector did nothing". Reset DURING render (React's
+  // store-previous-prop-in-state idiom) so the swap is visible before the new
+  // socket connects.
+  const [renderedCoin, setRenderedCoin] = useState(normCoin);
+  if (renderedCoin !== normCoin) {
+    setRenderedCoin(normCoin);
+    setState(emptyMarketState(normCoin));
+    setSilentlyStalled(false);
+  }
+
   useEffect(() => {
     const client = new HlWsClient({ coin: normCoin });
     const unsubscribe = client.subscribe(setState);

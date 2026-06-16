@@ -51,6 +51,17 @@ export default function LiveChart({
 
   const asset = useMemo(() => coinToAsset(coin), [coin]);
 
+  // Drop the previous coin/interval's candles the instant the selection changes
+  // so the chart visibly re-points instead of showing the stale series until the
+  // new fetch resolves. Reset DURING render (store-previous-prop-in-state idiom).
+  const selectionKey = `${coin}|${interval}`;
+  const [renderedKey, setRenderedKey] = useState(selectionKey);
+  if (renderedKey !== selectionKey) {
+    setRenderedKey(selectionKey);
+    setCandles([]);
+    setError(null);
+  }
+
   useEffect(() => {
     let active = true;
     const load = async () => {
