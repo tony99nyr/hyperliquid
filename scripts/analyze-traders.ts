@@ -11,18 +11,23 @@
  *   pnpm skill:analyze-traders --session <id> [--addresses 0x..,0x..] [--top 10]
  */
 
-import { parseArgs, requireString, optionalNumber, header, line, run } from './_skill-runtime';
+import { parseArgs, optionalNumber, header, line, run } from './_skill-runtime';
 import { loadRatedWallets, findRatedWallet, type RatedWallet } from '@/lib/hyperliquid/rated-wallets-service';
-import { fetchClearinghouseState, fetchRecentFills } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { fetchClearinghouseState, fetchAllFills } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { gradeCandidate, rankCandidates } from '@/lib/skills/analyze-traders-business-logic';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 
 run(async () => {
   const args = parseArgs(process.argv.slice(2));
-  const sessionId = requireString(args, 'session');
+  // --session is OPTIONAL: you analyze traders to DECIDE whether to open a
+  // session (chicken-and-egg). When provided, the shortlist is logged to it;
+  // when absent, the analysis still runs read-only and just isn't logged.
+  const sessionId = typeof args['session'] === 'string' && args['session'].trim() !== '' ? args['session'] : null;
   // Clamp to a sane max so `--top 100000` can't fan out a huge concurrent
   // Promise.all of HL fetches (self-inflicted rate-limit / resource hazard).
   const top = Math.max(1, Math.min(50, Math.floor(optionalNumber(args, 'top', 10))));
+  // Deep-fetch bound per wallet so a run can't fan out unbounded.
+  const maxFills = Math.max(2000, Math.floor(optionalNumber(args, 'max-fills', 12000)));
 
   // Resolve the candidate wallet list.
   let wallets: RatedWallet[];
@@ -45,14 +50,17 @@ run(async () => {
   header(`analyze-traders — grading ${wallets.length} wallet(s) on FULL fill history`);
   line('Fetching live HL state + fills per wallet (read-only)…');
 
+  const sinceMs = Date.now() - 365 * 24 * 60 * 60 * 1000;
   const candidates = await Promise.all(
     wallets.map(async (w) => {
+      // Deep-paginate the full fill history (pages are sequential within a wallet;
+      // wallets still process concurrently). The completeness gate then sees real
+      // depth + an authoritative truncation signal instead of one capped page.
       const [state, fillsRes] = await Promise.all([
         fetchClearinghouseState(w.address),
-        // Pull a deep window so the completeness gate sees the real tail.
-        fetchRecentFills(w.address, 365 * 24 * 60 * 60 * 1000, 2000),
+        fetchAllFills(w.address, { sinceMs, maxFills }),
       ]);
-      return gradeCandidate(w, state, fillsRes.fills);
+      return gradeCandidate(w, state, fillsRes.fills, fillsRes.truncated);
     }),
   );
 
@@ -61,6 +69,7 @@ run(async () => {
   header('Ranked candidates (you pick — this is advisory only)');
   ranked.forEach((c, i) => {
     line(`${i + 1}. [${c.grade}] ${c.short} ${c.displayName ? `(${c.displayName})` : ''}`);
+    line(`    fills seen: ${c.fillsSeen} (deep-fetched)`);
     line(`    completeness: ${c.completeness} — ${c.completenessReason}`);
     line(`    ${c.rationale}`);
   });
@@ -69,8 +78,13 @@ run(async () => {
   const gated = ranked.filter((c) => c.completeness === 'INSUFFICIENT_HISTORY').length;
   const summary = `analyze-traders: ${ranked.length} graded, ${cleanAs} clean A, ${gated} gated INSUFFICIENT_HISTORY. Top: ${ranked[0]?.short ?? 'none'} [${ranked[0]?.grade ?? '-'}].`;
 
-  await writeAnalysisLog({ sessionId, source: 'analyze-traders', message: summary });
-  header('Wrote analysis_log row');
+  if (sessionId) {
+    await writeAnalysisLog({ sessionId, source: 'analyze-traders', message: summary });
+    header('Wrote analysis_log row');
+  } else {
+    header('Summary');
+    line('(no --session — analysis not logged to a session)');
+  }
   line(summary);
   line('\nPick a candidate to follow, then run analyze-market-timeframes for the coin.');
 });
