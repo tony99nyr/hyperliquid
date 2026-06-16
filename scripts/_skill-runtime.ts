@@ -120,8 +120,24 @@ export async function requireConfirmation(
   }
 }
 
+/**
+ * Load `.env.local` into process.env so every `pnpm skill:*` entrypoint inherits
+ * Supabase/HL config. Node 24 provides process.loadEnvFile natively (no dotenv).
+ * Guarded: on Vercel/CI the file is absent and env comes from the real
+ * environment — loadEnvFile does NOT clobber vars already set, and a missing
+ * file must not throw. Mirrors scripts/_smoke.ts.
+ */
+function loadEnvLocal(): void {
+  try {
+    process.loadEnvFile('.env.local');
+  } catch {
+    // .env.local may be absent (CI/Vercel) — env vars may already be set.
+  }
+}
+
 /** Run an async main, printing errors and setting a non-zero exit code. */
 export function run(main: () => Promise<void>): void {
+  loadEnvLocal();
   main().catch((err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`\n[skill error] ${msg}`);
