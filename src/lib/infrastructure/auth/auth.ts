@@ -87,7 +87,7 @@ function constantTimeEquals(a: string, b: string): boolean {
  * (prevents timing attacks).
  */
 export function verifyPin(pin: string): boolean {
-  const correctPin = process.env.ADMIN_PIN ?? process.env.WORKOUT_ADMIN_PIN;
+  const correctPin = process.env.ADMIN_PIN;
   if (!correctPin) {
     logError('ADMIN_PIN environment variable is not set');
     return false;
