@@ -77,6 +77,36 @@ export interface HlFillsResult {
   error?: string;
 }
 
+/**
+ * HL's `userFillsByTime` page-caps at ~2000 rows per call. A single call that
+ * returns this many is almost certainly truncated. Deep pagination (fetchAllFills)
+ * walks past it; the completeness gate uses this constant to tell a single capped
+ * page apart from a legitimately-deep accumulated history.
+ */
+export const HL_FILLS_PAGE_CAP = 2000;
+
+/** Default hard ceiling on a deep fetch so a run can't fan out unbounded. */
+const DEFAULT_MAX_FILLS = 12_000;
+
+/** Courtesy delay between sequential pages to be polite to the public endpoint. */
+const INTER_PAGE_DELAY_MS = 120;
+
+export interface FetchAllFillsOptions {
+  /** Oldest epoch-ms to fetch from (default: 365 days ago). */
+  sinceMs?: number;
+  /** Hard cap on accumulated fills before stopping (default DEFAULT_MAX_FILLS). */
+  maxFills?: number;
+}
+
+export interface HlDeepFillsResult extends HlFillsResult {
+  /**
+   * True when the walk stopped at a bound (maxFills / page ceiling) rather than
+   * exhausting the history — i.e. the tail may still be unseen. The completeness
+   * gate treats this exactly like a single page-capped result (cannot be a clean A).
+   */
+  truncated: boolean;
+}
+
 // --- Address validation ---
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
@@ -280,15 +310,7 @@ export async function fetchRecentFills(
       startTime,
     });
     const fills: HlFill[] = (raw ?? [])
-      .map((f) => ({
-        coin: String(f.coin ?? ''),
-        side: f.side === 'B' || f.side === 'buy' ? ('buy' as const) : ('sell' as const),
-        px: num(f.px),
-        sz: num(f.sz),
-        time: num(f.time),
-        closedPnl: numOrNull(f.closedPnl),
-        dir: typeof f.dir === 'string' ? f.dir : null,
-      }))
+      .map(mapRawFill)
       .sort((a, b) => b.time - a.time)
       .slice(0, limit);
 
@@ -302,6 +324,128 @@ export async function fetchRecentFills(
     }
     return { address, fills: [], fetchedAt: Date.now(), stale: true, error: message };
   }
+}
+
+/** Map one raw HL fill row to the normalized HlFill. PURE. */
+function mapRawFill(f: Record<string, unknown>): HlFill {
+  return {
+    coin: String(f.coin ?? ''),
+    side: f.side === 'B' || f.side === 'buy' ? ('buy' as const) : ('sell' as const),
+    px: num(f.px),
+    sz: num(f.sz),
+    time: num(f.time),
+    closedPnl: numOrNull(f.closedPnl),
+    dir: typeof f.dir === 'string' ? f.dir : null,
+  };
+}
+
+/** Stable dedup key for a fill (HL may overlap rows across windows). */
+function fillKey(f: Record<string, unknown>): string {
+  // Prefer the strongest unique ids HL provides; fall back to value tuple.
+  const id = f.hash ?? f.tid ?? `${String(f.oid ?? '')}|${String(f.time ?? '')}`;
+  return `${String(id)}|${String(f.time ?? '')}|${String(f.coin ?? '')}|${String(f.px ?? '')}|${String(f.sz ?? '')}|${String(f.dir ?? '')}`;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Deep-paginate a wallet's FULL fill history (read-only). HL's `userFillsByTime`
+ * returns fills ASCENDING by time and page-caps at ~`HL_FILLS_PAGE_CAP`; this walks
+ * time windows FORWARD (cursor = last fill time + 1) accumulating + de-duplicating
+ * until a page returns < the cap (history exhausted), `maxFills` is reached, or a
+ * page-count ceiling is hit.
+ *
+ * Ported from the iamrossi wallet-rating backfill (`scripts/analysis/wallet-rating/
+ * backfill-fills.ts` `fetchFills()`): forward cursor, `< PAGE_SIZE` stop, no-progress
+ * guard, dedup, time sort. Used by the analyze-traders grader so the completeness
+ * gate evaluates real depth instead of a single capped page.
+ *
+ * Pages are inherently sequential (each depends on the previous window's last
+ * time). Fail-soft: a page error returns whatever was accumulated so far.
+ *
+ * @returns fills most-recent first, plus `truncated` = stopped at a bound (tail
+ *   may be unseen) rather than exhausting the history.
+ */
+export async function fetchAllFills(
+  rawAddress: string,
+  opts: FetchAllFillsOptions = {},
+): Promise<HlDeepFillsResult> {
+  const address = normalizeHlAddress(rawAddress);
+  if (!isValidHlAddress(address)) {
+    return {
+      address,
+      fills: [],
+      fetchedAt: Date.now(),
+      stale: false,
+      truncated: false,
+      error: 'Invalid Hyperliquid address',
+    };
+  }
+
+  const sinceMs = opts.sinceMs ?? Date.now() - 365 * 24 * 60 * 60 * 1000;
+  const maxFills = Math.max(HL_FILLS_PAGE_CAP, Math.floor(opts.maxFills ?? DEFAULT_MAX_FILLS));
+  // Ceiling on pages so a pathological account can't loop forever; enough to
+  // cover maxFills at the page cap plus a margin.
+  const maxPages = Math.ceil(maxFills / HL_FILLS_PAGE_CAP) + 2;
+
+  const seen = new Set<string>();
+  const accumulated: HlFill[] = [];
+  let cursor = sinceMs;
+  let truncated = false;
+  let lastError: string | undefined;
+
+  try {
+    for (let page = 0; page < maxPages; page++) {
+      const batch = await hlInfoPost<Array<Record<string, unknown>>>({
+        type: 'userFillsByTime',
+        user: address,
+        startTime: cursor,
+      });
+      const rows = batch ?? [];
+      if (rows.length === 0) break;
+
+      let maxTime = cursor;
+      for (const row of rows) {
+        const key = fillKey(row);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        accumulated.push(mapRawFill(row));
+        const t = num(row.time);
+        if (t > maxTime) maxTime = t;
+      }
+
+      // Exhausted: a short page means there's nothing after this window.
+      if (rows.length < HL_FILLS_PAGE_CAP) break;
+      // No forward progress (all rows at/<= cursor) — avoid an infinite loop.
+      if (maxTime <= cursor) break;
+
+      if (accumulated.length >= maxFills) {
+        truncated = true;
+        break;
+      }
+      cursor = maxTime + 1;
+      if (page === maxPages - 1) truncated = true;
+      await sleep(INTER_PAGE_DELAY_MS);
+    }
+  } catch (err) {
+    // Fail-soft: keep what we have, but flag the result as potentially truncated.
+    lastError = extractErrorMessage(err);
+    truncated = true;
+  }
+
+  accumulated.sort((a, b) => b.time - a.time);
+  const fills = accumulated.length > maxFills ? accumulated.slice(0, maxFills) : accumulated;
+
+  return {
+    address,
+    fills,
+    fetchedAt: Date.now(),
+    stale: false,
+    truncated,
+    ...(lastError ? { error: lastError } : {}),
+  };
 }
 
 // --- l2Book (order book) ---

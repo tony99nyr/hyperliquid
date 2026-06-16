@@ -63,6 +63,26 @@ describe('assessDataCompleteness (the gate input)', () => {
     const { completeness } = assessDataCompleteness(500);
     expect(completeness).toBe('COMPLETE');
   });
+
+  it('legacy single-call: a count at the page cap is assumed truncated (no signal)', () => {
+    const { completeness } = assessDataCompleteness(COMPLETENESS_THRESHOLDS.pageCapFills + 500);
+    expect(completeness).toBe('INSUFFICIENT_HISTORY');
+  });
+
+  it('deep fetch that exhausted history (truncated=false) is COMPLETE even above the cap', () => {
+    const { completeness } = assessDataCompleteness(COMPLETENESS_THRESHOLDS.pageCapFills + 3000, false);
+    expect(completeness).toBe('COMPLETE');
+  });
+
+  it('deep fetch that hit a bound (truncated=true) is INSUFFICIENT_HISTORY', () => {
+    const { completeness } = assessDataCompleteness(COMPLETENESS_THRESHOLDS.pageCapFills + 3000, true);
+    expect(completeness).toBe('INSUFFICIENT_HISTORY');
+  });
+
+  it('truncated=true still gates a small history (core rule never weakened)', () => {
+    const { completeness } = assessDataCompleteness(800, true);
+    expect(completeness).toBe('INSUFFICIENT_HISTORY');
+  });
 });
 
 describe('applyCompletenessGate (THE hard rule)', () => {
@@ -110,6 +130,30 @@ describe('gradeCandidate — the 0x418aa6 lesson', () => {
     const w = wallet({ flags: ['DISQUALIFIED', 'DEEP_MARTINGALE'] });
     const c = gradeCandidate(w, emptyState(w.address), fills(800));
     expect(c.grade).toBe('F');
+  });
+
+  it('deep fetch CLEARS the gate: >2000 clean fills with truncated=false grades A', () => {
+    // The live blocker fix: a wallet whose deep-paginated history legitimately
+    // exceeds the single-page cap must NOT be falsely flagged INSUFFICIENT_HISTORY.
+    const w = wallet({ grades: { consistency: { grade: 'A', score10: 10 } }, flags: ['CLEAN_BOOK'] });
+    const c = gradeCandidate(w, emptyState(w.address), fills(COMPLETENESS_THRESHOLDS.pageCapFills + 2500), false);
+    expect(c.completeness).toBe('COMPLETE');
+    expect(c.grade).toBe('A');
+  });
+
+  it('a single 2000-capped page (no deep signal) still flags INSUFFICIENT_HISTORY', () => {
+    // Same fill count, but no truncated signal => legacy heuristic => gated.
+    const w = wallet({ grades: { consistency: { grade: 'A', score10: 10 } }, flags: ['CLEAN_BOOK'] });
+    const c = gradeCandidate(w, emptyState(w.address), fills(COMPLETENESS_THRESHOLDS.pageCapFills));
+    expect(c.completeness).toBe('INSUFFICIENT_HISTORY');
+    expect(c.grade).not.toBe('A');
+  });
+
+  it('deep fetch that hit a bound (truncated=true) stays capped at B even with many fills', () => {
+    const w = wallet({ grades: { consistency: { grade: 'A', score10: 10 } }, flags: ['CLEAN_BOOK'] });
+    const c = gradeCandidate(w, emptyState(w.address), fills(COMPLETENESS_THRESHOLDS.pageCapFills + 5000), true);
+    expect(c.completeness).toBe('INSUFFICIENT_HISTORY');
+    expect(c.grade).toBe('B');
   });
 });
 

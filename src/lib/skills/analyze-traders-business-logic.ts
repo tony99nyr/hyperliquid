@@ -79,12 +79,23 @@ function bestRatedGrade(wallet: RatedWallet): CandidateGrade {
 /**
  * Assess data completeness from the fills actually seen. PURE.
  *
- * - Fewer than `minFills` cached fills ⇒ INSUFFICIENT_HISTORY (too little to
- *   trust the rating).
- * - At/above the page-cap ⇒ INSUFFICIENT_HISTORY (the history is truncated; the
- *   dangerous tail may be unseen — the 0x418aa6 lesson).
+ * - Fewer than `minFills` fills ⇒ INSUFFICIENT_HISTORY (too little to trust the
+ *   rating).
+ * - Truncated history ⇒ INSUFFICIENT_HISTORY (the dangerous tail may be unseen —
+ *   the 0x418aa6 lesson).
+ *
+ * Truncation detection: when the caller deep-paginates it knows authoritatively
+ * whether it hit a bound — pass that as `truncated`. A `false` means the walk
+ * exhausted the history, so a count well above the single-page cap is now a sign
+ * of DEPTH, not truncation, and must NOT be flagged. When `truncated` is omitted
+ * (legacy single-call callers) we fall back to the conservative heuristic: a
+ * count at/above the page cap is assumed truncated. The core rule is never
+ * weakened — a genuinely truncated or thin history is always capped at B.
  */
-export function assessDataCompleteness(fillsSeen: number): {
+export function assessDataCompleteness(
+  fillsSeen: number,
+  truncated?: boolean,
+): {
   completeness: DataCompleteness;
   reason: string;
 } {
@@ -94,7 +105,16 @@ export function assessDataCompleteness(fillsSeen: number): {
       reason: `Only ${fillsSeen} fills seen (< ${COMPLETENESS_THRESHOLDS.minFills}); too thin to grade confidently.`,
     };
   }
-  if (fillsSeen >= COMPLETENESS_THRESHOLDS.pageCapFills) {
+  // Authoritative deep-fetch signal: the walk hit a bound ⇒ truncated.
+  if (truncated === true) {
+    return {
+      completeness: 'INSUFFICIENT_HISTORY',
+      reason: `${fillsSeen} fills but the fetch was truncated (hit a page/maxFills bound); the tail may be unseen.`,
+    };
+  }
+  // No authoritative signal: fall back to the single-page-cap heuristic. A deep
+  // fetch that exhausted history (truncated === false) skips this and is COMPLETE.
+  if (truncated === undefined && fillsSeen >= COMPLETENESS_THRESHOLDS.pageCapFills) {
     return {
       completeness: 'INSUFFICIENT_HISTORY',
       reason: `${fillsSeen} fills hits the API page cap (~${COMPLETENESS_THRESHOLDS.pageCapFills}); history is truncated — the tail may be unseen.`,
@@ -148,14 +168,20 @@ function buildRationale(
  * (not the rating's historical `nFills`, which the caller may not have re-fetched
  * fully). The provisional grade comes from the rating dataset, then the
  * completeness gate is applied.
+ *
+ * `truncated` is the deep-fetch's authoritative truncation signal (see
+ * `assessDataCompleteness`). Omit it for legacy single-call callers, where the
+ * page-cap heuristic applies; pass `false` after a deep fetch that exhausted the
+ * history so a legitimately-deep wallet (>2000 fills) can clear the gate.
  */
 export function gradeCandidate(
   wallet: RatedWallet,
   leaderState: HlClearinghouseState,
   fills: HlFill[],
+  truncated?: boolean,
 ): TraderCandidate {
   const fillsSeen = fills.length;
-  const { completeness, reason } = assessDataCompleteness(fillsSeen);
+  const { completeness, reason } = assessDataCompleteness(fillsSeen, truncated);
   const provisional = bestRatedGrade(wallet);
   const grade = applyCompletenessGate(provisional, completeness, wallet.flags);
   const analytics = buildCopyMonitorAnalytics(wallet, leaderState, fills);
