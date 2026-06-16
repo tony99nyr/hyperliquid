@@ -27,6 +27,7 @@ import HealthPanel from './components/HealthPanel';
 import AnalysisStream from './components/AnalysisStream';
 import HypothesisBoard from './components/HypothesisBoard';
 import ContextGauge from './components/ContextGauge';
+import GettingStarted from './components/GettingStarted';
 
 export interface CockpitClientProps {
   mode: TradingMode;
@@ -94,12 +95,12 @@ export default function CockpitClient({
           <Banners mode={mode} />
           <RealtimeStatus sessionId={sessionId} />
         </div>
-        {!session && (
-          <span data-testid="no-session" className={css({ fontSize: 'xs', color: 'zone.warn' })}>
-            No active session — start one via the open-position skill to begin live tracking.
-          </span>
-        )}
       </header>
+
+      {/* Cold start: teach the Claude-driven paper flow instead of a bare line.
+          The chart + panels below stay visible (they show live market data even
+          with no session). */}
+      {!session && <GettingStarted />}
 
       <div
         className={css({
