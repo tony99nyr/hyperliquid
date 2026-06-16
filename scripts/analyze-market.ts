@@ -2,11 +2,11 @@
  * skill:analyze-market-timeframes entrypoint (thin I/O). ADVISORY ONLY.
  *
  * Multi-timeframe (1d/8h/1h/15m) regime + indicator + divergence read for a coin
- * via the candle-service + vendored pure strategy fns. Writes an analysis_log row
- * and prints the structured assessment. Never trades.
+ * via the candle-service + vendored pure strategy fns. Prints the structured
+ * assessment and, when a --session is given, logs an analysis_log row. Never trades.
  *
  * Usage:
- *   pnpm skill:analyze-market --session <id> --coin ETH
+ *   pnpm skill:analyze-market --coin ETH [--session <id>]
  */
 
 import { parseArgs, requireString, header, line, run } from './_skill-runtime';
@@ -29,7 +29,10 @@ const LOOKBACK_MS: Record<MarketTimeframe, number> = {
 
 run(async () => {
   const args = parseArgs(process.argv.slice(2));
-  const sessionId = requireString(args, 'session');
+  // --session is OPTIONAL: this is an advisory read you run BEFORE deciding to
+  // open a session (chicken-and-egg). When provided, the assessment is logged to
+  // it; when absent, the read still runs read-only and just isn't logged.
+  const sessionId = typeof args['session'] === 'string' && args['session'].trim() !== '' ? args['session'] : null;
   const coin = requireString(args, 'coin').toUpperCase();
   const now = Date.now();
 
@@ -60,12 +63,17 @@ run(async () => {
   header('Assessment');
   line(assessment.summary);
 
-  await writeAnalysisLog({
-    sessionId,
-    source: 'analyze-market-timeframes',
-    message: assessment.summary,
-    severity: assessment.biasLabel === 'bearish' ? 'warn' : 'info',
-  });
-  header('Wrote analysis_log row');
+  if (sessionId) {
+    await writeAnalysisLog({
+      sessionId,
+      source: 'analyze-market-timeframes',
+      message: assessment.summary,
+      severity: assessment.biasLabel === 'bearish' ? 'warn' : 'info',
+    });
+    header('Wrote analysis_log row');
+  } else {
+    header('Summary');
+    line('(no --session — analysis not logged to a session)');
+  }
   line('\nIf the setup looks good, run open-position (you will confirm before anything executes).');
 });
