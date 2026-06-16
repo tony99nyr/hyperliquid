@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   verifyPin,
   hashPin,
@@ -6,22 +6,27 @@ import {
   getAdminSecret,
   issueSessionToken,
   verifySessionToken,
-  _resetSessionTokens,
 } from '@/lib/infrastructure/auth/auth';
 
-describe('session tokens (opaque cookie — never the raw PIN)', () => {
-  beforeEach(() => _resetSessionTokens());
-
-  it('a freshly issued token verifies, and an unknown token does not', () => {
+describe('session tokens (stateless signed cookie — multi-instance safe, never the raw PIN)', () => {
+  it('a freshly issued token verifies, and a bogus/empty token does not', () => {
     const token = issueSessionToken(60);
     expect(verifySessionToken(token)).toBe(true);
     expect(verifySessionToken('not-a-real-token')).toBe(false);
     expect(verifySessionToken('')).toBe(false);
+    expect(verifySessionToken('a.b')).toBe(false); // wrong shape
   });
 
   it('an expired token does not verify', () => {
     const token = issueSessionToken(-1); // already expired
     expect(verifySessionToken(token)).toBe(false);
+  });
+
+  it('a token with a tampered expiry does not verify (HMAC fails)', () => {
+    const token = issueSessionToken(60);
+    const [nonce, , sig] = token.split('.');
+    const forged = `${nonce}.${Date.now() + 999_999_999}.${sig}`;
+    expect(verifySessionToken(forged)).toBe(false);
   });
 
   it('the token is opaque — it is not the PIN/secret value', () => {

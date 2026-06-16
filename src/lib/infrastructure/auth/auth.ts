@@ -24,45 +24,50 @@ export function createAuthToken(): string {
   return crypto.randomBytes(32).toString('hex');
 }
 
-/**
- * Opaque-token session store (process-local). On a successful PIN/secret login we
- * mint a random token, store its hash + expiry here, and set THAT as the cookie —
- * the raw PIN/secret never becomes the long-lived cookie value (so a cookie leak
- * does not disclose the reusable admin credential, and tokens can expire/revoke).
- * Process-local is acceptable for a single-operator cockpit (a cold start just
- * forces a re-login); swap for a Supabase-backed store if durable sessions are
- * needed (the ADR note in this file's header).
- */
-const sessionTokens = new Map<string, number>(); // sha256(token) → expiry epoch ms
-
-/** Mint a session token valid for `maxAgeSec`, returning the raw token. */
-export function issueSessionToken(maxAgeSec: number = COOKIE_MAX_AGE): string {
-  const token = createAuthToken();
-  sessionTokens.set(hashPin(token), Date.now() + maxAgeSec * 1000);
-  return token;
-}
-
-/** True when `token` is a known, unexpired session token. Expired tokens are pruned. */
-export function verifySessionToken(token: string): boolean {
-  if (!token) return false;
-  const key = hashPin(token);
-  const expiry = sessionTokens.get(key);
-  if (expiry === undefined) return false;
-  if (Date.now() >= expiry) {
-    sessionTokens.delete(key);
-    return false;
-  }
-  return true;
-}
-
-/** Test hook: wipe all session tokens. */
-export function _resetSessionTokens(): void {
-  sessionTokens.clear();
-}
-
 /** Hashes a PIN for secure comparison. */
 export function hashPin(pin: string): string {
   return crypto.createHash('sha256').update(pin).digest('hex');
+}
+
+/**
+ * STATELESS signed session token (Vercel multi-instance safe — no shared store).
+ *
+ * On a successful PIN/secret login we mint `<nonce>.<expiryMs>.<hmac>` where the
+ * HMAC is keyed on ADMIN_SECRET. Any instance can verify it (same secret) and
+ * the raw PIN/secret never becomes the cookie value — a cookie leak discloses
+ * neither the credential nor a forgeable token (an attacker can't compute the
+ * HMAC without ADMIN_SECRET). Expiry is enforced in-band. This replaces the
+ * earlier in-memory Map, which only verified on the instance that minted it.
+ */
+function sessionSigningKey(): string {
+  // Bind the signature to ADMIN_SECRET (always set in any real deploy). If it is
+  // missing, signing/verification fail closed (verifyAdminSecret already errors).
+  return process.env.ADMIN_SECRET ?? '';
+}
+
+function signSessionPayload(payload: string): string {
+  return crypto.createHmac('sha256', sessionSigningKey()).update(payload).digest('hex');
+}
+
+/** Mint a stateless session token valid for `maxAgeSec`. */
+export function issueSessionToken(maxAgeSec: number = COOKIE_MAX_AGE): string {
+  const nonce = createAuthToken();
+  const expiry = Date.now() + maxAgeSec * 1000;
+  const payload = `${nonce}.${expiry}`;
+  return `${payload}.${signSessionPayload(payload)}`;
+}
+
+/** True when `token` is a well-formed, unexpired, correctly-signed session token. */
+export function verifySessionToken(token: string): boolean {
+  if (!token || !sessionSigningKey()) return false;
+  const parts = token.split('.');
+  if (parts.length !== 3) return false;
+  const [nonce, expiryStr, sig] = parts;
+  const expiry = Number(expiryStr);
+  if (!Number.isFinite(expiry) || Date.now() >= expiry) return false;
+  // Constant-time HMAC comparison (and the comparison also rejects a tampered
+  // expiry/nonce, since either changes the signature).
+  return constantTimeEquals(sig ?? '', signSessionPayload(`${nonce}.${expiryStr}`));
 }
 
 /** Constant-time string comparison that is also length-safe. */

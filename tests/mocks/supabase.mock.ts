@@ -77,8 +77,10 @@ export function createSupabaseMock(): SupabaseMock {
       },
       order(column: string, options?: unknown) {
         (op.order ??= []).push({ column, options });
-        // `.order()` is a terminal for list reads: resolve to an array result.
-        return resolve();
+        // Chainable (a second `.order()` is a tiebreak) AND thenable via `then`
+        // below, so `await q.order(...)` and `await q.order(...).order(...)` both
+        // resolve to a list result.
+        return builder;
       },
       select(_cols?: string) {
         op.op = op.op === 'select' ? 'select' : op.op; // keep write op label

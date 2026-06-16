@@ -121,7 +121,11 @@ export async function applyFillToPositionRows(
     .select(FILL_LEDGER_COLUMNS)
     .eq('session_id', sessionId)
     .eq('coin', coin)
-    .order('filled_at', { ascending: true });
+    .order('filled_at', { ascending: true })
+    // Deterministic tiebreak: two fills can share a microsecond-equal filled_at
+    // under burst/retry; a stable secondary key keeps the fold order (and thus
+    // realized P&L on flip-then-reduce sequences) reproducible.
+    .order('id', { ascending: true });
   if (loadError) throw new Error(`applyFillToPositionRows load failed: ${loadError.message}`);
 
   // 2. Pure fold of the entire ledger — identical math regardless of source.

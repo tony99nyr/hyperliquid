@@ -112,7 +112,10 @@ describe('applyFillToPositionRows (fold WHOLE ledger → upsert positions + inse
       { column: 'session_id', value: 's1' },
       { column: 'coin', value: 'ETH' },
     ]);
-    expect(selectOp.order).toEqual([{ column: 'filled_at', options: { ascending: true } }]);
+    expect(selectOp.order).toEqual([
+      { column: 'filled_at', options: { ascending: true } },
+      { column: 'id', options: { ascending: true } },
+    ]);
 
     const upsertOp = mock.ops[1];
     expect(upsertOp.options).toEqual({ onConflict: 'session_id,coin' });
