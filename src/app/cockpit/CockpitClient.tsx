@@ -19,6 +19,7 @@ import type { Session } from '@/types/cockpit';
 import type { HlPosition } from '@/lib/hyperliquid/hyperliquid-info-service';
 import type { CandleInterval } from '@/lib/hyperliquid/candle-service';
 import Banners from './components/Banners';
+import RealtimeStatus from './components/RealtimeStatus';
 import Orderbook from './components/Orderbook';
 import LiveChart from './components/LiveChart';
 import PositionPanel from './components/PositionPanel';
@@ -61,7 +62,20 @@ export default function CockpitClient({
         margin: '0 auto',
       })}
     >
-      <header className={css({ display: 'flex', flexDirection: 'column', gap: '10px' })}>
+      <header
+        className={css({
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '10px',
+          // Keep the mode banner + feed status pinned: on a phone mid-trade the
+          // "LIVE TRADING" indicator must never scroll out of view.
+          position: 'sticky',
+          top: 0,
+          zIndex: 10,
+          bg: 'github.bg',
+          paddingY: '8px',
+        })}
+      >
         <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' })}>
           <h1 className={css({ fontSize: 'xl', fontWeight: 'bold', color: 'github.textBright' })}>
             HL Cockpit
@@ -76,7 +90,10 @@ export default function CockpitClient({
             <Selector value={interval} options={INTERVALS} onChange={(v) => setInterval(v as CandleInterval)} testid="interval-selector" />
           </div>
         </div>
-        <Banners mode={mode} />
+        <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' })}>
+          <Banners mode={mode} />
+          <RealtimeStatus sessionId={sessionId} />
+        </div>
         {!session && (
           <span data-testid="no-session" className={css({ fontSize: 'xs', color: 'zone.warn' })}>
             No active session — start one via the open-position skill to begin live tracking.

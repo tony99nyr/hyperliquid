@@ -31,9 +31,19 @@ export async function persistFill(fill: CanonicalFill): Promise<void> {
  * Execute a confirmed trade intent. The mode switch is the FIRST and ONLY
  * mode-aware line; from `persistFill` onward the path is identical regardless of
  * whether the fill came from the paper book-match or a live HL confirmation.
+ *
+ * Persist commits BEFORE the position recompute so the ledger fold
+ * (applyFillToPosition) sees the just-recorded fill (idempotent + crash-safe;
+ * see fill-persistence-service).
+ *
+ * A zero-fill (empty/limit-not-crossed book → `sz === 0`) is NOT persisted: it
+ * would burn the client_intent_id (blocking a legitimate retry once the book
+ * recovers) and write a meaningless ledger row. The (empty) fill is still
+ * returned so the caller can report "no fill".
  */
 export async function executeIntent(intent: TradeIntent): Promise<CanonicalFill> {
   const fill = getTradingMode() === 'live' ? await liveFill(intent) : await paperFill(intent);
+  if (fill.sz <= 0) return fill; // nothing filled — do not record (retry stays possible)
   await persistFill(fill);
   await applyFillToPosition(fill);
   return fill;

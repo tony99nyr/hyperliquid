@@ -67,6 +67,7 @@ run(async () => {
   const confirmed = await requireConfirmation(
     args,
     `Execute reduce-only ${intent.side.toUpperCase()} ${intent.sz} ${coin} (${proposal.kind} exit)\n(mode=${mode} — ${mode === 'live' ? 'REAL ORDER' : 'paper fill from live book'})`,
+    { mode, liveConfirmPhrase: `${intent.side} ${intent.sz} ${coin}` },
   );
   if (!confirmed) {
     header('Aborted — no order placed');

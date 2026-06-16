@@ -113,7 +113,9 @@ export default function Orderbook({ coin, stateOverride, depth = 10 }: Orderbook
             style={{ color: ZONE_COLORS.warn }}
             className={css({ fontSize: 'xs', fontWeight: 'bold' })}
           >
-            STALE (REST)
+            {/* `live` + stale = socket up but the book stopped ticking (frozen);
+                otherwise the socket itself is down/degraded. */}
+            ⚠ STALE {status === 'live' ? '(FROZEN)' : '(FEED DOWN)'}
           </span>
         ) : (
           <span

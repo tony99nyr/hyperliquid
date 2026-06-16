@@ -142,6 +142,58 @@ describe('pnl-business-logic', () => {
     });
   });
 
+  describe('reduce-only enforcement (paper must match live — HL rejects overshoot)', () => {
+    it('a reduce-only sell LARGER than the open long closes to flat, never flips', () => {
+      const long = applyFill(emptyPosition('ETH'), fill({ side: 'buy', px: 2000, sz: 2 }));
+      const after = applyFill(long, fill({ side: 'sell', px: 2200, sz: 5, reduceOnly: true }));
+      expect(after.side).toBe('flat');
+      expect(after.sz).toBe(0);
+      expect(after.realizedPnlUsd).toBe(400); // only the 2 that closed: (2200-2000)*2
+    });
+
+    it('a reduce-only buy against a SHORT only shrinks it', () => {
+      const short = applyFill(emptyPosition('ETH'), fill({ side: 'sell', px: 3000, sz: 3 }));
+      const after = applyFill(short, fill({ side: 'buy', px: 2900, sz: 1, reduceOnly: true }));
+      expect(after.side).toBe('short');
+      expect(after.sz).toBe(2);
+      expect(after.realizedPnlUsd).toBe(100); // (3000-2900)*1
+    });
+
+    it('a reduce-only fill on the SAME side closes nothing (fees only)', () => {
+      const long = applyFill(emptyPosition('ETH'), fill({ side: 'buy', px: 2000, sz: 2 }));
+      const after = applyFill(long, fill({ side: 'buy', px: 2100, sz: 1, reduceOnly: true, feeUsd: 0.3 }));
+      expect(after.side).toBe('long');
+      expect(after.sz).toBe(2);
+      expect(after.avgEntryPx).toBe(2000);
+      expect(after.feesPaidUsd).toBe(0.3);
+    });
+
+    it('a reduce-only fill against a flat position is a no-op (fees only)', () => {
+      const after = applyFill(emptyPosition('ETH'), fill({ side: 'sell', px: 2000, sz: 1, reduceOnly: true, feeUsd: 0.2 }));
+      expect(after.side).toBe('flat');
+      expect(after.feesPaidUsd).toBe(0.2);
+    });
+
+    it('a NON-reduce-only oversell still flips (regular behavior preserved)', () => {
+      const long = applyFill(emptyPosition('ETH'), fill({ side: 'buy', px: 2000, sz: 2 }));
+      const after = applyFill(long, fill({ side: 'sell', px: 2200, sz: 5 }));
+      expect(after.side).toBe('short');
+      expect(after.sz).toBe(3);
+      expect(after.avgEntryPx).toBe(2200);
+    });
+  });
+
+  describe('defensive guards', () => {
+    it('throws on a non-finite fill price', () => {
+      expect(() => applyFill(emptyPosition('ETH'), fill({ side: 'buy', px: NaN, sz: 1 }))).toThrow(/non-finite/);
+    });
+    it('marks a SHORT position correctly (unrealized + total)', () => {
+      const short = applyFill(emptyPosition('ETH'), fill({ side: 'sell', px: 3000, sz: 2, feeUsd: 1 }));
+      expect(unrealizedPnl(short, 2800)).toBe(400); // (3000-2800)*2
+      expect(totalPnl(short, 2800)).toBe(400 - 1);
+    });
+  });
+
   describe('applyFills sequence', () => {
     it('folds a sequence deterministically', () => {
       const p = applyFills('ETH', [

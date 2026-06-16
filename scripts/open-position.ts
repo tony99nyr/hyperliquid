@@ -73,6 +73,7 @@ run(async () => {
   const confirmed = await requireConfirmation(
     args,
     `Execute: ${proposal.rationale}\n(mode=${mode} — ${mode === 'live' ? 'REAL ORDER' : 'paper fill from live book'})`,
+    { mode, liveConfirmPhrase: `${side} ${proposal.intent.sz} ${coin}` },
   );
   if (!confirmed) {
     header('Aborted — no order placed');

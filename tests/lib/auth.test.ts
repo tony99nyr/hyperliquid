@@ -1,10 +1,36 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   verifyPin,
   hashPin,
   verifyAdminSecret,
   getAdminSecret,
+  issueSessionToken,
+  verifySessionToken,
+  _resetSessionTokens,
 } from '@/lib/infrastructure/auth/auth';
+
+describe('session tokens (opaque cookie — never the raw PIN)', () => {
+  beforeEach(() => _resetSessionTokens());
+
+  it('a freshly issued token verifies, and an unknown token does not', () => {
+    const token = issueSessionToken(60);
+    expect(verifySessionToken(token)).toBe(true);
+    expect(verifySessionToken('not-a-real-token')).toBe(false);
+    expect(verifySessionToken('')).toBe(false);
+  });
+
+  it('an expired token does not verify', () => {
+    const token = issueSessionToken(-1); // already expired
+    expect(verifySessionToken(token)).toBe(false);
+  });
+
+  it('the token is opaque — it is not the PIN/secret value', () => {
+    const token = issueSessionToken(60);
+    expect(token).not.toBe(process.env.ADMIN_PIN);
+    expect(token).not.toBe(process.env.ADMIN_SECRET);
+    expect(token.length).toBeGreaterThanOrEqual(32);
+  });
+});
 
 describe('Authentication', () => {
   describe('verifyPin', () => {

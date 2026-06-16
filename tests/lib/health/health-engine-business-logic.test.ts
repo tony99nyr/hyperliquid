@@ -93,6 +93,18 @@ describe('computeHealth (PURE composer)', () => {
     expect(result.alerts).toContain('regime-flip-8h');
   });
 
+  it('GUARANTEES P(cont)+P(adverse) < 1 even when config sets residualUncertainty: 0', () => {
+    const zeroResidual: HealthWeights = {
+      ...WEIGHTS,
+      probability: { ...WEIGHTS.probability, residualUncertainty: 0 },
+    };
+    const result = computeHealth(allBull(), longPos, zeroResidual);
+    // The engine floors residual at 0.01, so the sum is strictly below 1.
+    expect(result.pContinuation + result.pAdverse).toBeLessThan(1);
+    expect(result.pContinuation).toBeGreaterThanOrEqual(0);
+    expect(result.pAdverse).toBeGreaterThanOrEqual(0);
+  });
+
   it('bull score strictly exceeds bear score for the same long position', () => {
     const bull = computeHealth(allBull(), longPos, WEIGHTS).score;
     const bear = computeHealth(allBear(), longPos, WEIGHTS).score;

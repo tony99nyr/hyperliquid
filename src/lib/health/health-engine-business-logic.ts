@@ -201,8 +201,11 @@ export function computeHealth(
   const score = clamp(rawScore, 0, 100);
 
   // 7. Probabilities — derive from the normalized score, reserve residual.
+  //    A positive floor (0.01) GUARANTEES the documented invariant
+  //    P(continuation) + P(adverse) < 1 (honest residual uncertainty) even if a
+  //    weights config ships residualUncertainty: 0.
   const scoreUnit = score / 100; // 0..1
-  const residual = clamp(weights.probability.residualUncertainty, 0, 0.9);
+  const residual = clamp(weights.probability.residualUncertainty, 0.01, 0.9);
   const available = 1 - residual;
   const continuationShare = clamp(
     weights.probability.baseContinuation +

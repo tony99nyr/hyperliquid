@@ -164,7 +164,8 @@ export function buildFillRow(fill: CanonicalFill): FillInsertRow {
   return {
     session_id: fill.sessionId,
     client_intent_id: fill.clientIntentId,
-    coin: fill.coin,
+    // Normalize so the ledger key matches the positions (session, coin) key.
+    coin: fill.coin.trim().toUpperCase(),
     side: fill.side,
     px: fill.px,
     sz: fill.sz,
@@ -175,6 +176,55 @@ export function buildFillRow(fill: CanonicalFill): FillInsertRow {
     source: fill.source,
     hl_order_id: fill.hlOrderId,
     hl_raw: fill.hlRaw,
+  };
+}
+
+/** A `fills` row as read back from the DB (snake_case, for folding the ledger). */
+export interface FillSelectRow {
+  client_intent_id: string;
+  session_id: string;
+  coin: string;
+  side: CanonicalFill['side'];
+  px: number | string;
+  sz: number | string;
+  notional_usd: number | string;
+  fee_usd: number | string;
+  reduce_only: boolean;
+  partial: boolean;
+  source: TradingMode;
+  hl_order_id: string | null;
+  hl_raw: Record<string, unknown> | null;
+  filled_at: string | number;
+}
+
+/** Coerce a Postgres numeric (which PostgREST may surface as a string) to a number. */
+function toNum(v: number | string | null | undefined): number {
+  if (typeof v === 'number') return v;
+  const n = typeof v === 'string' ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Reconstruct a domain CanonicalFill from a DB `fills` row. The inverse of
+ * `buildFillRow`; used by the fill-persistence service to fold the whole ledger
+ * back into a position (the idempotent, crash-consistent recompute). PURE.
+ */
+export function fillFromRow(row: FillSelectRow): CanonicalFill {
+  return {
+    clientIntentId: row.client_intent_id,
+    sessionId: row.session_id,
+    coin: row.coin,
+    side: row.side,
+    px: toNum(row.px),
+    sz: toNum(row.sz),
+    notionalUsd: toNum(row.notional_usd),
+    feeUsd: toNum(row.fee_usd),
+    reduceOnly: row.reduce_only,
+    partial: row.partial,
+    source: row.source,
+    hlOrderId: row.hl_order_id,
+    hlRaw: row.hl_raw,
+    filledAt: typeof row.filled_at === 'number' ? row.filled_at : new Date(row.filled_at).getTime(),
   };
 }
 

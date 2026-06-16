@@ -12,6 +12,7 @@
  *   from(t).insert(row)                       (fire-and-forget insert)
  *   from(t).upsert(row, opts).select().single()
  *   from(t).select(cols).eq(c, v).maybeSingle()
+ *   from(t).select(cols).eq(c, v).eq(c, v).order(c, opts)   (array result)
  *   from(t).update(row).eq(c, v)
  *   from(t).update(row).eq(c, v).eq(c, v)
  *
@@ -31,6 +32,8 @@ export interface RecordedOp {
   options?: unknown;
   /** Equality filters applied via .eq(col, val), in call order. */
   filters: Array<{ column: string; value: unknown }>;
+  /** Order clauses applied via .order(col, opts), in call order. */
+  order?: Array<{ column: string; options: unknown }>;
 }
 
 export interface SupabaseMockResult {
@@ -71,6 +74,11 @@ export function createSupabaseMock(): SupabaseMock {
       eq(column: string, value: unknown) {
         op.filters.push({ column, value });
         return builder;
+      },
+      order(column: string, options?: unknown) {
+        (op.order ??= []).push({ column, options });
+        // `.order()` is a terminal for list reads: resolve to an array result.
+        return resolve();
       },
       select(_cols?: string) {
         op.op = op.op === 'select' ? 'select' : op.op; // keep write op label

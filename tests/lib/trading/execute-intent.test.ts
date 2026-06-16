@@ -90,13 +90,26 @@ describe('executeIntent (paper end-to-end)', () => {
     expect(appliedFill).toEqual(fill);
   });
 
-  it('is idempotent on a duplicate client_intent_id (persist returns false, still applies)', async () => {
-    // Second run: the fills row already exists → persist reports no-op.
+  it('is idempotent on a duplicate client_intent_id (persist no-op; apply re-folds ledger)', async () => {
+    // Second run: the fills row already exists → persist reports no-op (false).
     mockedPersist.mockResolvedValue(false);
     const fill = await executeIntent(intent());
     expect(fill.clientIntentId).toBe('intent-1');
-    // executeIntent does not throw on a duplicate; the unique constraint upstream
-    // guarantees the fill is recorded exactly once.
+    // executeIntent does not throw on a duplicate. The apply step recomputes the
+    // position from the WHOLE ledger (which still contains the fill exactly once),
+    // so re-running cannot double-count — this is the C1/C2 fix.
     expect(mockedPersist).toHaveBeenCalledTimes(1);
+    expect(mockedApply).toHaveBeenCalledTimes(1);
+  });
+
+  it('a fully-unfilled paper order (sz 0) is NOT persisted or applied (retry stays possible)', async () => {
+    // Empty book → matchIntentAgainstBook returns nothing filled.
+    mockedFetchL2Book.mockResolvedValue({ coin: 'ETH', asks: [], bids: [] });
+    const fill = await executeIntent(intent({ sz: 1 }));
+    expect(fill.sz).toBe(0);
+    expect(fill.px).toBe(0);
+    // Neither persist nor apply ran — the client_intent_id is not burned.
+    expect(mockedPersist).not.toHaveBeenCalled();
+    expect(mockedApply).not.toHaveBeenCalled();
   });
 });

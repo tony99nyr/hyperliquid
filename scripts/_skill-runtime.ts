@@ -62,34 +62,59 @@ export function line(msg = ''): void {
   console.log(msg);
 }
 
+export interface ConfirmOptions {
+  /** Trading mode. In 'live' the argv `--confirm yes` bypass is REFUSED — a real
+   *  order always requires the interactive, typed confirmation (extra friction). */
+  mode?: 'paper' | 'live';
+  /** In live mode the user must type this exact phrase (e.g. "ETH 1.5") rather
+   *  than just "yes", so a real order can't fire on a reflexive keystroke. */
+  liveConfirmPhrase?: string;
+}
+
 /**
  * Block until the user explicitly confirms. The HARD PRINCIPLE: action skills
- * NEVER auto-fire. Returns true ONLY when the user types `yes` (case-insensitive)
- * at the interactive prompt.
+ * NEVER auto-fire. Returns true ONLY when the user confirms explicitly.
  *
- * Two non-interactive escape hatches, both EXPLICIT and surfaced in the prompt:
- *  - `--confirm yes` on argv (so a skill can pass a confirmed decision through),
- *  - otherwise an interactive y/N prompt that defaults to NO.
+ * PAPER: `--confirm yes` on argv is accepted (lets a skill pass a confirmed
+ * decision through), else an interactive y/N prompt that defaults to NO.
+ *
+ * LIVE: the argv bypass is REFUSED. The user must interactively type the exact
+ * `liveConfirmPhrase` (defaults to "yes" if none supplied). This guarantees a
+ * real order carries more friction than a paper one.
  */
 export async function requireConfirmation(
   args: Record<string, string | boolean>,
   proposalSummary: string,
+  opts: ConfirmOptions = {},
 ): Promise<boolean> {
+  const live = opts.mode === 'live';
   header('CONFIRM ACTION (the user decides — nothing fires without an explicit yes)');
   line(proposalSummary);
 
+  const expected = (live && opts.liveConfirmPhrase ? opts.liveConfirmPhrase : 'yes')
+    .trim()
+    .toLowerCase();
+
   const flag = args['confirm'];
   if (typeof flag === 'string') {
-    const confirmed = flag.trim().toLowerCase() === 'yes';
-    line(`--confirm ${flag} → ${confirmed ? 'CONFIRMED' : 'NOT confirmed (must be exactly "yes")'}`);
-    return confirmed;
+    if (live) {
+      // No non-interactive bypass for REAL orders — fall through to the prompt.
+      line('LIVE mode: --confirm is ignored; you must type the confirmation phrase interactively.');
+    } else {
+      const confirmed = flag.trim().toLowerCase() === expected;
+      line(`--confirm ${flag} → ${confirmed ? 'CONFIRMED' : `NOT confirmed (must be exactly "${expected}")`}`);
+      return confirmed;
+    }
   }
 
   // Interactive fallback — default NO.
   const rl = createInterface({ input: stdin, output: stdout });
   try {
-    const answer = await rl.question('Type "yes" to execute, anything else to abort: ');
-    return answer.trim().toLowerCase() === 'yes';
+    const prompt = live
+      ? `LIVE ORDER — type exactly "${expected}" to execute, anything else to abort: `
+      : 'Type "yes" to execute, anything else to abort: ';
+    const answer = await rl.question(prompt);
+    return answer.trim().toLowerCase() === expected;
   } finally {
     rl.close();
   }

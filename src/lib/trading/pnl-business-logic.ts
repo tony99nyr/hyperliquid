@@ -30,15 +30,26 @@ function signedSize(pos: Position): number {
   return 0;
 }
 
-/** A buy adds +sz, a sell adds −sz to the signed position. */
-function fillSignedDelta(fill: CanonicalFill): number {
-  return fill.side === 'buy' ? fill.sz : -fill.sz;
-}
-
 function sideFromSigned(signed: number): Position['side'] {
   if (signed > 0) return 'long';
   if (signed < 0) return 'short';
   return 'flat';
+}
+
+/**
+ * Effective fill size after reduce-only enforcement. A reduce-only order may only
+ * shrink/close the open position in the opposing direction — it can never open or
+ * flip. Returns the size clamped to the open exposure (0 when the fill is on the
+ * same side as the position, or the position is flat). Non-reduce-only fills pass
+ * through unchanged. PURE.
+ */
+function clampReduceOnlySize(fill: CanonicalFill, beforeSigned: number): number {
+  if (!fill.reduceOnly) return fill.sz;
+  const fillSign = fill.side === 'buy' ? 1 : -1;
+  // A reduce-only fill must oppose the open position (buy reduces a short, sell
+  // reduces a long). Same-side or flat ⇒ it would open/grow ⇒ close nothing.
+  if (beforeSigned === 0 || Math.sign(beforeSigned) === fillSign) return 0;
+  return Math.min(fill.sz, Math.abs(beforeSigned));
 }
 
 /**
@@ -59,13 +70,28 @@ export function applyFill(pos: Position, fill: CanonicalFill): Position {
       `applyFill: fill coin "${fill.coin}" does not match position coin "${pos.coin}"`,
     );
   }
+  // Defense-in-depth: reject non-finite price/size before the money math (live
+  // fills come from external JSON; a NaN would silently poison avg entry + P&L).
+  if (!Number.isFinite(fill.px) || !Number.isFinite(fill.sz)) {
+    throw new Error(`applyFill: non-finite fill px/sz (px=${fill.px}, sz=${fill.sz})`);
+  }
   if (fill.sz <= 0) {
     // No size moved (e.g. a fully-unfilled paper order) — only fees, if any.
     return { ...pos, feesPaidUsd: pos.feesPaidUsd + fill.feeUsd };
   }
 
   const beforeSigned = signedSize(pos);
-  const delta = fillSignedDelta(fill);
+  // Enforce reduce-only in the PURE fold so paper matches live: HL rejects the
+  // overshoot of a reduce-only order server-side, so a reduce-only fill must
+  // only ever shrink/close — never open or flip. Clamp the effective size to the
+  // open exposure in the closing direction. Keeps the seam invariant (ADR-0001):
+  // paper and live fold to the same position even on a mis-sized reduce-only.
+  const effectiveSz = clampReduceOnlySize(fill, beforeSigned);
+  if (effectiveSz <= 0) {
+    // Reduce-only against a flat/aligned position closes nothing — fees only.
+    return { ...pos, feesPaidUsd: pos.feesPaidUsd + fill.feeUsd };
+  }
+  const delta = fill.side === 'buy' ? effectiveSz : -effectiveSz;
   const afterSigned = beforeSigned + delta;
 
   const feesPaidUsd = pos.feesPaidUsd + fill.feeUsd;
@@ -77,12 +103,12 @@ export function applyFill(pos: Position, fill: CanonicalFill): Position {
   if (sameDirection) {
     // Increasing exposure: volume-weighted blend of entry price.
     const beforeAbs = Math.abs(beforeSigned);
-    const addAbs = fill.sz;
+    const addAbs = effectiveSz;
     const newAbs = beforeAbs + addAbs;
     avgEntryPx = (avgEntryPx * beforeAbs + fill.px * addAbs) / newAbs;
   } else {
     // Reducing / closing / flipping.
-    const closingAbs = Math.min(Math.abs(beforeSigned), fill.sz);
+    const closingAbs = Math.min(Math.abs(beforeSigned), effectiveSz);
     // Long closed by a sell earns (exit − entry); short closed by a buy earns
     // (entry − exit). beforeSigned sign encodes the direction.
     const direction = Math.sign(beforeSigned); // +1 long, -1 short

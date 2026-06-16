@@ -4,12 +4,19 @@
  * writes the durable cockpit rows. It NEVER reads `fill.source`.
  *
  *   persistFillRow(fill)           → fills row, idempotent on client_intent_id
- *   applyFillToPositionRows(fill)  → load position → fold (pure nextPosition)
- *                                    → upsert positions row + insert pnl row
+ *   applyFillToPositionRows(fill)  → fold ALL fills for (session, coin) from the
+ *                                    ledger (pure applyFills) → upsert positions
+ *                                    row + insert pnl row
  *
- * Idempotency: the `fills.client_intent_id` unique constraint means a duplicate
- * insert raises Postgres 23505 (unique_violation); we swallow that so calling
- * executeIntent twice with the same intent records the fill exactly once.
+ * Idempotency + crash-consistency (ADR-0001): the `fills` table is the single
+ * source of truth. `fills.client_intent_id` is unique, so a duplicate insert
+ * raises Postgres 23505 (unique_violation) and is swallowed — a fill is recorded
+ * exactly once no matter how many times executeIntent runs. The position is then
+ * RECOMPUTED by folding the whole ledger rather than incrementally mutated, so:
+ *   - re-running executeIntent with the same intent converges to the same
+ *     position (no double-counting — the duplicate fill never reaches the ledger);
+ *   - a crash between the fills insert and the position upsert self-heals on the
+ *     next run (the committed fill is picked up by the re-fold).
  */
 
 import { getServiceRoleClient } from './supabase-server';
@@ -17,15 +24,31 @@ import {
   buildFillRow,
   buildPnlRow,
   buildPositionRow,
+  fillFromRow,
   positionFromRow,
+  type FillSelectRow,
 } from './cockpit-rows-business-logic';
-import { applyFill, emptyPosition } from '@/lib/trading/pnl-business-logic';
+import { applyFills } from '@/lib/trading/pnl-business-logic';
 import type { CanonicalFill } from '@/types/fill';
 import type { Position } from '@/types/position';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 /** Postgres unique_violation — a duplicate client_intent_id. */
 const PG_UNIQUE_VIOLATION = '23505';
+
+/** Columns needed to reconstruct a CanonicalFill from the ledger for folding. */
+const FILL_LEDGER_COLUMNS =
+  'client_intent_id, session_id, coin, side, px, sz, notional_usd, fee_usd, reduce_only, partial, source, hl_order_id, hl_raw, filled_at';
+
+/**
+ * Canonical coin normalization. The positions table is keyed on (session, coin)
+ * with a case-sensitive unique constraint, and the realtime UI joins on coin, so
+ * EVERY read/write path must agree on the same normalized form. Doing it in one
+ * helper keeps the select filter, the upsert payload, and loadPosition aligned.
+ */
+function normalizeCoin(coin: string): string {
+  return coin.trim().toUpperCase();
+}
 
 /** True when an error indicates a duplicate fill row (idempotent re-run). */
 function isDuplicateFill(error: { code?: string; message?: string } | null): boolean {
@@ -49,7 +72,7 @@ export async function loadPosition(
     .from('positions')
     .select('coin, side, sz, avg_entry_px, realized_pnl_usd, fees_paid_usd')
     .eq('session_id', sessionId)
-    .eq('coin', coin.trim().toUpperCase())
+    .eq('coin', normalizeCoin(coin))
     .maybeSingle();
   if (error) throw new Error(`loadPosition failed: ${error.message}`);
   if (!data) return null;
@@ -75,40 +98,45 @@ export async function persistFillRow(
 }
 
 /**
- * Load the current position for (session, coin), fold the fill in via the PURE
- * `nextPosition`, upsert the positions row, and insert a pnl snapshot row.
- * Returns the new position. Mode-agnostic — never inspects `fill.source`.
+ * Recompute the position for (session, coin) by folding the WHOLE fills ledger,
+ * then upsert the positions row + insert a pnl snapshot. Returns the new
+ * position. Mode-agnostic — never inspects `fill.source`.
+ *
+ * Idempotent + crash-consistent by construction: it derives the position purely
+ * from the immutable `fills` rows (the duplicate-guarded source of truth), so
+ * calling it twice produces the same result and a partially-applied prior run
+ * self-heals. See the file header + ADR-0001.
  */
 export async function applyFillToPositionRows(
   fill: CanonicalFill,
   client: SupabaseClient = getServiceRoleClient(),
 ): Promise<Position> {
-  // 1. Load the prior position (if any) for this session+coin.
-  const { data: priorRow, error: loadError } = await client
-    .from('positions')
-    .select('coin, side, sz, avg_entry_px, realized_pnl_usd, fees_paid_usd')
-    .eq('session_id', fill.sessionId)
-    .eq('coin', fill.coin)
-    .maybeSingle();
+  const sessionId = fill.sessionId;
+  const coin = normalizeCoin(fill.coin);
+
+  // 1. Load the full fills ledger for this session+coin, oldest first, so the
+  //    fold order matches execution order. This is the source of truth.
+  const { data: fillRows, error: loadError } = await client
+    .from('fills')
+    .select(FILL_LEDGER_COLUMNS)
+    .eq('session_id', sessionId)
+    .eq('coin', coin)
+    .order('filled_at', { ascending: true });
   if (loadError) throw new Error(`applyFillToPositionRows load failed: ${loadError.message}`);
 
-  const prior = priorRow
-    ? positionFromRow(priorRow as Parameters<typeof positionFromRow>[0])
-    : undefined;
-
-  // 2. Pure fold — identical math regardless of source. (Same fold as
-  // position-tracker.nextPosition; inlined here to keep imports one-directional.)
-  const next = applyFill(prior ?? emptyPosition(fill.coin), fill);
+  // 2. Pure fold of the entire ledger — identical math regardless of source.
+  const ledger = ((fillRows ?? []) as FillSelectRow[]).map(fillFromRow);
+  const next = applyFills(coin, ledger);
 
   // 3. Upsert the positions row (unique on session_id+coin).
-  const positionRow = buildPositionRow(fill.sessionId, next, new Date().toISOString());
+  const positionRow = buildPositionRow(sessionId, next, new Date().toISOString());
   const { error: upsertError } = await client
     .from('positions')
     .upsert(positionRow, { onConflict: 'session_id,coin' });
   if (upsertError) throw new Error(`applyFillToPositionRows upsert failed: ${upsertError.message}`);
 
   // 4. Append a pnl snapshot (realized + fees; unrealized needs a mark, left 0).
-  const pnlRow = buildPnlRow(fill.sessionId, next);
+  const pnlRow = buildPnlRow(sessionId, next);
   const { error: pnlError } = await client.from('pnl').insert(pnlRow);
   if (pnlError) throw new Error(`applyFillToPositionRows pnl insert failed: ${pnlError.message}`);
 

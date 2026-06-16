@@ -20,7 +20,9 @@ import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 run(async () => {
   const args = parseArgs(process.argv.slice(2));
   const sessionId = requireString(args, 'session');
-  const top = optionalNumber(args, 'top', 10);
+  // Clamp to a sane max so `--top 100000` can't fan out a huge concurrent
+  // Promise.all of HL fetches (self-inflicted rate-limit / resource hazard).
+  const top = Math.max(1, Math.min(50, Math.floor(optionalNumber(args, 'top', 10))));
 
   // Resolve the candidate wallet list.
   let wallets: RatedWallet[];

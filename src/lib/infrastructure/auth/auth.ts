@@ -24,6 +24,42 @@ export function createAuthToken(): string {
   return crypto.randomBytes(32).toString('hex');
 }
 
+/**
+ * Opaque-token session store (process-local). On a successful PIN/secret login we
+ * mint a random token, store its hash + expiry here, and set THAT as the cookie —
+ * the raw PIN/secret never becomes the long-lived cookie value (so a cookie leak
+ * does not disclose the reusable admin credential, and tokens can expire/revoke).
+ * Process-local is acceptable for a single-operator cockpit (a cold start just
+ * forces a re-login); swap for a Supabase-backed store if durable sessions are
+ * needed (the ADR note in this file's header).
+ */
+const sessionTokens = new Map<string, number>(); // sha256(token) → expiry epoch ms
+
+/** Mint a session token valid for `maxAgeSec`, returning the raw token. */
+export function issueSessionToken(maxAgeSec: number = COOKIE_MAX_AGE): string {
+  const token = createAuthToken();
+  sessionTokens.set(hashPin(token), Date.now() + maxAgeSec * 1000);
+  return token;
+}
+
+/** True when `token` is a known, unexpired session token. Expired tokens are pruned. */
+export function verifySessionToken(token: string): boolean {
+  if (!token) return false;
+  const key = hashPin(token);
+  const expiry = sessionTokens.get(key);
+  if (expiry === undefined) return false;
+  if (Date.now() >= expiry) {
+    sessionTokens.delete(key);
+    return false;
+  }
+  return true;
+}
+
+/** Test hook: wipe all session tokens. */
+export function _resetSessionTokens(): void {
+  sessionTokens.clear();
+}
+
 /** Hashes a PIN for secure comparison. */
 export function hashPin(pin: string): string {
   return crypto.createHash('sha256').update(pin).digest('hex');
@@ -92,7 +128,11 @@ export async function verifyAdminAuth(request: NextRequest): Promise<boolean> {
     .find((c) => c.trim().startsWith(`${ADMIN_COOKIE_NAME}=`));
   if (adminCookie) {
     const token = adminCookie.split('=')[1]?.trim();
-    if (token && (verifyAdminSecret(token) || verifyPin(token))) return true;
+    // Cookie carries an opaque session token (preferred). Fall back to direct
+    // PIN/secret match for backward-compat with any pre-existing cookie.
+    if (token && (verifySessionToken(token) || verifyAdminSecret(token) || verifyPin(token))) {
+      return true;
+    }
   }
 
   // Bearer path

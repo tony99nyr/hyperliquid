@@ -99,7 +99,10 @@ export function matchIntentAgainstBook(
     avgPx: notionalUsd / filledSz,
     filledSz,
     notionalUsd,
-    partial: remaining > 1e-12,
+    // Scale the fully-filled tolerance with the order size so float accumulation
+    // across many levels doesn't mislabel a complete fill as partial (or vice
+    // versa) on large/small orders.
+    partial: remaining > sz * 1e-9,
     consumed,
   };
 }
