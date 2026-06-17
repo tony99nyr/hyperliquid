@@ -78,6 +78,10 @@ describe('realtime-row-mappers', () => {
     expect(pos.side).toBe('long');
     expect(pos.sz).toBe(2);
     expect(pos.avgEntryPx).toBe(2900);
+    expect(pos.leverage).toBeNull(); // absent leverage column → null
+
+    const levered = mapPositionRow({ id: 'po', session_id: 's', coin: 'ETH', side: 'long', sz: 2, avg_entry_px: 2900, leverage: 5 });
+    expect(levered.leverage).toBe(5);
   });
 
   it('coerces an unknown position side to flat', () => {

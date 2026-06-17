@@ -87,20 +87,44 @@ export default function ActivePositionBar({ sessionId, leaderAddress, leaderPosi
               className={css({
                 display: 'flex',
                 alignItems: 'center',
-                gap: '18px',
-                flexWrap: 'wrap',
-                overflowX: 'auto',
+                gap: '16px',
+                // The hero is a fixed-width left anchor; the stat region flexes
+                // and scrolls on its own. Never wrap the row as a whole — a
+                // 6-figure price or narrow viewport must not shove the hero.
+                flexWrap: 'nowrap',
+                minWidth: '0',
               })}
             >
-              <PnlHero pnlUsd={s.unrealizedPnlUsd} pnlPct={s.pnlPct} roePct={null} />
-              <StatCell label="coin" value={s.coin} color={GH.textBright} />
-              <StatCell label="side" value={s.side.toUpperCase()} color={sideColor} testid="position-side" />
-              <StatCell label="size" value={s.sz.toLocaleString('en-US', { maximumFractionDigits: 4 })} />
-              <StatCell label="entry" value={fmtPx(s.entryPx)} />
-              <StatCell label="mark" value={fmtPx(s.markPx)} />
-              <StatCell label="notional" value={s.notionalUsd === null ? '—' : fmtCompactUsd(s.notionalUsd)} />
-              <StatCell label="fees" value={fmtUsd(-s.feesPaidUsd)} color={GH.textMuted} />
-              <StatCell label="in trade" value={fmtDuration(s.timeInTradeMs)} color={GH.textMuted} />
+              {/* Fixed-width left anchor — PnlHero never loses prominence. */}
+              <div className={css({ flex: 'none' })}>
+                <PnlHero pnlUsd={s.unrealizedPnlUsd} pnlPct={s.pnlPct} roePct={s.roePct} />
+              </div>
+              {/* Stat region: flexes + scrolls independently of the hero so wide
+                  values (BTC notional, 6-figure mark) clip into a scroll, not
+                  into the hero. */}
+              <div
+                data-testid="position-stat-region"
+                className={css({
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '18px',
+                  flex: '1 1 0',
+                  minWidth: '0',
+                  overflowX: 'auto',
+                })}
+              >
+                <StatCell label="coin" value={s.coin} color={GH.textBright} />
+                <StatCell label="side" value={s.side.toUpperCase()} color={sideColor} testid="position-side" />
+                {s.leverage !== null && (
+                  <StatCell label="lev" value={`${s.leverage.toLocaleString('en-US', { maximumFractionDigits: 1 })}×`} color={GH.textBright} testid="position-leverage" />
+                )}
+                <StatCell label="size" value={s.sz.toLocaleString('en-US', { maximumFractionDigits: 4 })} />
+                <StatCell label="entry" value={fmtPx(s.entryPx)} />
+                <StatCell label="mark" value={fmtPx(s.markPx)} />
+                <StatCell label="notional" value={s.notionalUsd === null ? '—' : fmtCompactUsd(s.notionalUsd)} />
+                <StatCell label="fees" value={fmtUsd(-s.feesPaidUsd)} color={GH.textMuted} />
+                <StatCell label="in trade" value={fmtDuration(s.timeInTradeMs)} color={GH.textMuted} />
+              </div>
             </div>
           );
         })

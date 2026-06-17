@@ -8,7 +8,7 @@ import type { PositionRow, PnlSnapshot } from '@/hooks/realtime-row-mappers';
 import type { HlPosition } from '@/lib/hyperliquid/hyperliquid-info-service';
 
 const pos: PositionRow = {
-  id: 'p', sessionId: 's', coin: 'ETH', side: 'long', sz: 2, avgEntryPx: 2900, realizedPnlUsd: 0, feesPaidUsd: 0, updatedAt: 0,
+  id: 'p', sessionId: 's', coin: 'ETH', side: 'long', sz: 2, avgEntryPx: 2900, realizedPnlUsd: 0, feesPaidUsd: 0, leverage: null, updatedAt: 0,
 };
 
 describe('position-panel-helpers', () => {
@@ -51,7 +51,7 @@ describe('position-panel-helpers', () => {
 
 describe('activePositionStats', () => {
   const longPos: PositionRow = {
-    id: 'p', sessionId: 's', coin: 'ETH', side: 'long', sz: 2, avgEntryPx: 2000, realizedPnlUsd: 0, feesPaidUsd: 1.5, updatedAt: 1_000,
+    id: 'p', sessionId: 's', coin: 'ETH', side: 'long', sz: 2, avgEntryPx: 2000, realizedPnlUsd: 0, feesPaidUsd: 1.5, leverage: null, updatedAt: 1_000,
   };
 
   it('computes notional, pnlPct, and time-in-trade', () => {
@@ -70,5 +70,21 @@ describe('activePositionStats', () => {
     expect(s.notionalUsd).toBe(4000); // 2 * entry 2000
     expect(s.pnlPct).toBeNull();
     expect(s.timeInTradeMs).toBe(0);
+  });
+
+  it('computes ROE = pnlPct × leverage when leverage is known', () => {
+    const levPos: PositionRow = { ...longPos, leverage: 5 };
+    const pnl: PnlSnapshot = { id: 'x', sessionId: 's', coin: 'ETH', realizedPnlUsd: 0, unrealizedPnlUsd: 200, feesPaidUsd: 1.5, markPx: 2100, createdAt: 0 };
+    const s = activePositionStats(levPos, pnl, 61_000);
+    expect(s.leverage).toBe(5);
+    // ROE = uPnl / margin, margin = entryNotional/lev = 4000/5 = 800 → 200/800 = 25%
+    expect(s.roePct).toBeCloseTo(25, 5);
+  });
+
+  it('leaves ROE null when leverage is unknown', () => {
+    const pnl: PnlSnapshot = { id: 'x', sessionId: 's', coin: 'ETH', realizedPnlUsd: 0, unrealizedPnlUsd: 200, feesPaidUsd: 1.5, markPx: 2100, createdAt: 0 };
+    const s = activePositionStats(longPos, pnl, 61_000);
+    expect(s.leverage).toBeNull();
+    expect(s.roePct).toBeNull();
   });
 });

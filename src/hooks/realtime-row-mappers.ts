@@ -131,6 +131,8 @@ export interface PositionRow {
   avgEntryPx: number;
   realizedPnlUsd: number;
   feesPaidUsd: number;
+  /** Position leverage (e.g. 5 = 5x), or null when unknown. Drives ROE. */
+  leverage: number | null;
   updatedAt: number;
 }
 
@@ -145,6 +147,7 @@ export function mapPositionRow(row: RealtimeRow): PositionRow {
     avgEntryPx: num(row.avg_entry_px),
     realizedPnlUsd: num(row.realized_pnl_usd),
     feesPaidUsd: num(row.fees_paid_usd),
+    leverage: row.leverage == null ? null : num(row.leverage),
     updatedAt: toMs(row.updated_at),
   };
 }

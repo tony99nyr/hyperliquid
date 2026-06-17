@@ -14,7 +14,7 @@ function rgb(hex: string): string {
   return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
 }
 
-function pos(side: 'long' | 'short', entry: number): PositionRow {
+function pos(side: 'long' | 'short', entry: number, leverage: number | null = null): PositionRow {
   return {
     id: 'p1',
     sessionId: 's1',
@@ -24,6 +24,7 @@ function pos(side: 'long' | 'short', entry: number): PositionRow {
     avgEntryPx: entry,
     realizedPnlUsd: 0,
     feesPaidUsd: 1.5,
+    leverage,
     updatedAt: Date.now() - 65_000,
   };
 }
@@ -61,6 +62,21 @@ describe('ActivePositionBar', () => {
     expect(screen.getByTestId('position-side').textContent).toBe('LONG');
     // pnlPct = 200 / (2 * 2000) = +5%
     expect(screen.getByTestId('pnl-hero-pct').textContent).toBe('+5.00%');
+    // No leverage → ROE hidden and no lev cell.
+    expect(screen.queryByTestId('pnl-hero-roe')).toBeNull();
+    expect(screen.queryByTestId('position-leverage')).toBeNull();
+  });
+
+  it('with leverage: shows ROE (pnlPct × leverage) and a leverage cell', () => {
+    render(
+      <ActivePositionBar
+        sessionId="s1"
+        userOverride={{ positions: [pos('long', 2000, 5)], latestPnlByCoin: { ETH: pnl(2100, 200) } }}
+      />,
+    );
+    // pnlPct +5% × 5x leverage → ROE +25%
+    expect(screen.getByTestId('pnl-hero-roe').textContent).toBe('+25.00%');
+    expect(screen.getByTestId('position-leverage').textContent).toBe('5×');
   });
 
   it('in-loss: red P&L hero + short side', () => {

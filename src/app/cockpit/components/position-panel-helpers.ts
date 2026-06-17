@@ -47,7 +47,7 @@ export function userPositionDisplay(
     markPx,
     unrealizedPnlUsd: uPnl,
     liqPx: null, // paper/live position rows don't carry a liq price
-    leverage: null,
+    leverage: pos.leverage,
   };
 }
 
@@ -63,6 +63,14 @@ export interface ActivePositionStats {
   unrealizedPnlUsd: number | null;
   /** P&L as a percent of entry notional (sign carries direction). */
   pnlPct: number | null;
+  /** Position leverage (e.g. 5 = 5x), or null when unknown. */
+  leverage: number | null;
+  /**
+   * Return on equity = unrealizedPnl / margin, where margin = entryNotional /
+   * leverage. The leverage-adjusted P&L a perp trader watches. Null when
+   * leverage or P&L is unknown.
+   */
+  roePct: number | null;
   feesPaidUsd: number;
   /** ms since the position last changed (entry/add). */
   timeInTradeMs: number | null;
@@ -86,6 +94,12 @@ export function activePositionStats(
     d.unrealizedPnlUsd !== null && entryNotional && entryNotional > 0
       ? (d.unrealizedPnlUsd / entryNotional) * 100
       : null;
+  // ROE = uPnl / margin, margin = entryNotional / leverage. Equivalent to
+  // pnlPct * leverage — the leverage-magnified return on the posted margin.
+  const roePct =
+    pnlPct !== null && d.leverage !== null && d.leverage > 0
+      ? pnlPct * d.leverage
+      : null;
   return {
     coin: d.coin,
     side: d.side,
@@ -95,6 +109,8 @@ export function activePositionStats(
     notionalUsd,
     unrealizedPnlUsd: d.unrealizedPnlUsd,
     pnlPct,
+    leverage: d.leverage,
+    roePct,
     feesPaidUsd: pos.feesPaidUsd,
     timeInTradeMs: pos.updatedAt > 0 ? Math.max(0, now - pos.updatedAt) : null,
   };

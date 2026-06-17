@@ -84,6 +84,7 @@ src/lib/strategy/                                    # VENDORED pure functions (
 src/lib/cockpit/{supabase-server,supabase-browser}.ts
 src/lib/infrastructure/{auth,logging,config}/        # vendored admin-PIN + stubs
 supabase/migrations/0001_init.sql                    # 8 tables + RLS + realtime publication
+supabase/migrations/0003_position_leverage.sql       # positions.leverage (nullable) → PnlHero ROE
 data/backups/wallet-rating/rated-wallets.json        # vendored dataset
 docs/{CONTEXT.md, CODE_ORGANIZATION.md, adr/}
 ```
