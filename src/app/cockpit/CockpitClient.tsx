@@ -8,12 +8,15 @@
  *   - HL websocket (market data + candles poll) via the chart + orderbook islands.
  *   - Supabase realtime (cockpit state) via the per-table hooks inside each island.
  *
- * Layout (desktop): LEFT rail = Top Traders · CENTER = the live candlestick chart
- * (the star) · RIGHT rail = Trade Health + orderbook + (sticky) Safe-Exit ·
- * BOTTOM bar = the dense Active-Position row. The supporting panels (Analysis /
- * Hypotheses / Context) tuck into a tabbed SecondaryStrip. On mobile everything
- * stacks with the chart staying prominent near the top. The page holds no socket;
- * the islands subscribe. NO-AUTO-FIRE: ApprovalPopup + SafeExitButton unchanged.
+ * Layout (desktop): a prominent TOP TRADE ZONE co-locates the two in-trade
+ * essentials side-by-side — the dense Active-Position row + Trade Health — so the
+ * operator reads "my trade + its health" in one glance (Item 1), with the
+ * Leader-vs-You comparison directly beside them when following. Below that, the
+ * chart-centric desk: LEFT rail = Top Traders · CENTER = the live candlestick
+ * chart (the star) + secondary tabs · RIGHT rail = orderbook + (sticky)
+ * Safe-Exit. On mobile everything stacks with the trade zone + chart prominent
+ * near the top. The page holds no socket; the islands subscribe. NO-AUTO-FIRE:
+ * ApprovalPopup + SafeExitButton unchanged.
  */
 
 import { useState } from 'react';
@@ -24,12 +27,14 @@ import type { HlPosition } from '@/lib/hyperliquid/hyperliquid-info-service';
 import type { TopTraderRow } from '@/lib/hyperliquid/top-traders-service';
 import { useActiveSession } from '@/hooks/useActiveSession';
 import { useActiveTrade } from '@/hooks/useActiveTrade';
+import { useLeaderPositions } from '@/hooks/useLeaderPositions';
 import Banners from './components/Banners';
 import RealtimeStatus from './components/RealtimeStatus';
 import ApprovalPopup from './components/ApprovalPopup';
 import SafeExitButton from './components/SafeExitButton';
 import Orderbook from './components/Orderbook';
 import HealthPanel from './components/HealthPanel';
+import LeaderVsYou from './components/LeaderVsYou';
 import GettingStarted from './components/GettingStarted';
 import SecondaryStrip from './components/SecondaryStrip';
 import CandleChartPanel from './components/chart/CandleChartPanel';
@@ -61,6 +66,9 @@ export default function CockpitClient({
   const session = useActiveSession(serverSession);
   const sessionId = session?.id ?? null;
   const trade = useActiveTrade(sessionId, coin);
+  // Keep the leader's positions LIVE (server seed → short poll) for the
+  // Leader-vs-You panel + the Match-leader leverage preset in the popup (Item 4).
+  const liveLeader = useLeaderPositions(leaderAddress, leaderPositions);
 
   return (
     <main
@@ -107,7 +115,29 @@ export default function CockpitClient({
       {/* Cold start: teach the Claude-driven paper flow; chart + context stay live. */}
       {!session && <GettingStarted />}
 
-      {/* HL-style three-column desk: traders | chart | health+book. */}
+      {/* TOP TRADE ZONE (Item 1) — the two in-trade essentials co-located,
+          prominent: the dense Position row + Trade Health side-by-side on desktop,
+          stacked-adjacent on mobile. Leader-vs-You sits directly beside them when
+          following (it only renders with a leader + an open position on the coin).
+          One glance for "my trade + its health". */}
+      <div
+        className={css({
+          display: 'grid',
+          gridTemplateColumns: { base: '1fr', md: 'minmax(0, 1fr) 320px' },
+          gap: '12px',
+          alignItems: 'start',
+        })}
+      >
+        <div className={css({ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: '0' })}>
+          <ActivePositionBar sessionId={sessionId} leaderAddress={leaderAddress} leaderPositions={liveLeader.positions} />
+          <LeaderVsYou sessionId={sessionId} coin={coin} leaderAddress={leaderAddress} leaderPositions={liveLeader.positions} />
+        </div>
+        <div className={css({ minWidth: '0' })}>
+          <HealthPanel sessionId={sessionId} coin={coin} />
+        </div>
+      </div>
+
+      {/* CHART-CENTRIC DESK: traders | chart (the star) | orderbook + Safe-Exit. */}
       <div
         className={css({
           display: 'grid',
@@ -127,20 +157,17 @@ export default function CockpitClient({
           <SecondaryStrip sessionId={sessionId} />
         </div>
 
-        {/* RIGHT — Trade Health + compact orderbook + sticky Safe-Exit. */}
+        {/* RIGHT — compact orderbook + sticky Safe-Exit. */}
         <div className={css({ order: { base: 2, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minWidth: '0' })}>
-          <HealthPanel sessionId={sessionId} coin={coin} />
           <Orderbook coin={coin} depth={8} />
           <SafeExitButton sessionId={sessionId} />
         </div>
       </div>
 
-      {/* BOTTOM — dense Active-Position row. */}
-      <ActivePositionBar sessionId={sessionId} leaderAddress={leaderAddress} leaderPositions={leaderPositions} />
-
       {/* The animated approval popup overlays everything when a pending action
-          appears. NO-AUTO-FIRE: nothing executes until the human approves here. */}
-      <ApprovalPopup sessionId={sessionId} />
+          appears. NO-AUTO-FIRE: nothing executes until the human approves here.
+          Leader data feeds the Match-leader leverage preset (Item 3). */}
+      <ApprovalPopup sessionId={sessionId} leaderAddress={leaderAddress} leaderPositions={liveLeader.positions} />
     </main>
   );
 }
