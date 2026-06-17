@@ -19,15 +19,24 @@ export interface BuildCloseInput {
   clientIntentId: string;
   sessionId: string;
   now: number;
+  /**
+   * Optional close fraction in (0, 1] — the proportion of the open size to
+   * close. Defaults to 1 (full close). A partial fraction yields a smaller
+   * reduce-only intent (the design's "Reduce" path); it can NEVER grow exposure
+   * because `reduceOnly` is always true. Out-of-range values clamp to (0, 1].
+   */
+  fraction?: number;
 }
 
 /**
- * Build a reduce-only MARKET intent that fully closes `position`.
+ * Build a reduce-only MARKET intent that closes `position` (fully by default, or
+ * a `fraction` of it for a partial "Reduce").
  *
  * A MARKET order carries no `limitPx` (the book walk fills at whatever the book
  * offers — the panic button prioritizes getting out over price). `reduceOnly` is
  * always true so the order can only shrink/close, never flip into a new
- * position. Returns null for a flat / zero-size position (nothing to exit).
+ * position. Returns null for a flat / zero-size position (nothing to exit) or a
+ * fraction that rounds to zero size.
  */
 export function buildMarketReduceOnlyClose(
   position: Position,
@@ -38,12 +47,16 @@ export function buildMarketReduceOnlyClose(
   // Opposite side closes the exposure: long → sell, short → buy.
   const side: OrderSide = position.side === 'long' ? 'sell' : 'buy';
 
+  const frac = input.fraction == null ? 1 : Math.max(0, Math.min(1, input.fraction));
+  const sz = position.sz * frac;
+  if (sz <= 0) return null;
+
   return {
     clientIntentId: input.clientIntentId,
     sessionId: input.sessionId,
     coin: position.coin,
     side,
-    sz: position.sz,
+    sz,
     // No limitPx ⇒ market order (book walk).
     reduceOnly: true,
     createdAt: input.now,

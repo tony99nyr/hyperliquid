@@ -56,6 +56,25 @@ describe('buildMarketReduceOnlyClose', () => {
   it('zero size (even if side is set) → null', () => {
     expect(buildMarketReduceOnlyClose(pos({ side: 'long', sz: 0 }), base)).toBeNull();
   });
+
+  it('partial fraction → reduce-only of that proportion (never grows exposure)', () => {
+    const intent = buildMarketReduceOnlyClose(pos({ side: 'long', sz: 4 }), { ...base, fraction: 0.25 });
+    expect(intent).not.toBeNull();
+    expect(intent!.side).toBe('sell');
+    expect(intent!.sz).toBeCloseTo(1); // 4 * 0.25
+    expect(intent!.reduceOnly).toBe(true);
+  });
+
+  it('fraction defaults to a full close when omitted', () => {
+    const intent = buildMarketReduceOnlyClose(pos({ side: 'short', sz: 3 }), base);
+    expect(intent!.sz).toBe(3);
+    expect(intent!.side).toBe('buy');
+  });
+
+  it('clamps an out-of-range fraction to (0,1]', () => {
+    expect(buildMarketReduceOnlyClose(pos({ side: 'long', sz: 2 }), { ...base, fraction: 5 })!.sz).toBe(2);
+    expect(buildMarketReduceOnlyClose(pos({ side: 'long', sz: 2 }), { ...base, fraction: 0 })).toBeNull();
+  });
 });
 
 describe('isPlanFresh', () => {

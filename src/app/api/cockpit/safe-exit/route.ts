@@ -51,11 +51,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // Optional body: an explicit coin (otherwise close the session's single open
-  // position). Tolerate an empty/invalid body — the button can POST nothing.
+  // position) and an optional close `fraction` in (0,1] for a partial "Reduce".
+  // Tolerate an empty/invalid body — the panic button can POST nothing.
   let coinOverride: string | undefined;
+  let fraction: number | undefined;
   try {
-    const body = (await request.json()) as { coin?: unknown };
+    const body = (await request.json()) as { coin?: unknown; fraction?: unknown };
     if (typeof body.coin === 'string' && body.coin.trim()) coinOverride = body.coin.trim().toUpperCase();
+    if (typeof body.fraction === 'number' && body.fraction > 0 && body.fraction < 1) {
+      fraction = body.fraction;
+    }
   } catch {
     // no body — fine.
   }
@@ -96,9 +101,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // STALE/absent → also build the market close (the Claude-offline path).
   // Either way the session id is forced onto the intent and a fresh idempotency
   // key is minted.
+  // A PARTIAL close (fraction < 1) is always a fresh mechanical reduce-only of
+  // the live position — the armed plan describes a FULL close, so a partial
+  // request must not ride it.
   let intent;
   let usedFallback: boolean;
-  if (plan && planFresh && planReducesPosition(plan.intent, position)) {
+  if (fraction === undefined && plan && planFresh && planReducesPosition(plan.intent, position)) {
     intent = {
       ...plan.intent,
       sessionId: session.id,
@@ -112,6 +120,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       clientIntentId: randomUUID(),
       sessionId: session.id,
       now,
+      fraction,
     });
     if (!fallback) {
       return NextResponse.json(
@@ -134,8 +143,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       source: 'safe-exit',
       severity: 'danger',
       message:
-        `SAFE-EXIT fired: ${intent.side} ${fill.sz} ${coin} @ $${fill.px} ` +
-        `(${usedFallback ? 'market-close fallback — Claude offline/stale plan' : 'fresh plan'}, source=${fill.source}).`,
+        `${fraction === undefined ? 'SAFE-EXIT' : 'REDUCE'} fired: ${intent.side} ${fill.sz} ${coin} @ $${fill.px} ` +
+        `(${fraction !== undefined ? `partial ${(fraction * 100).toFixed(0)}% reduce-only` : usedFallback ? 'market-close fallback — Claude offline/stale plan' : 'fresh plan'}, source=${fill.source}).`,
     });
   } catch {
     // swallow — the exit succeeded; logging is non-critical.
