@@ -49,11 +49,37 @@ const HL_REQUEST_SPACING_MS = 150;
 const HL_BACKOFF_BASE_MS = 500;
 const HL_BACKOFF_MAX_MS = 8000;
 
-/** Consecutive HL/tick failures across positions — drives the backoff sleep. */
+/**
+ * Consecutive HL/tick failures — drives the per-cycle backoff sleep.
+ *
+ * INTENTIONALLY MODULE-LEVEL (global across coins/sessions): HL rate limits are
+ * per-IP, so one shared pacing counter is correct — don't "fix" this to be
+ * per-coin/per-session, that would let N coins each hammer the IP independently.
+ */
 let consecutiveHlFailures = 0;
+
+/** Default slice for interruptible sleeps (ms) — small enough for prompt SIGINT. */
+const SLEEP_SLICE_MS = 200;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Sleep `ms`, but in short slices so a `shouldStop()` predicate (SIGINT/abort)
+ * interrupts promptly instead of blocking the full duration. Returns early the
+ * moment `shouldStop` flips true. When no predicate is given, sleeps once.
+ */
+async function interruptibleSleep(ms: number, shouldStop?: () => boolean): Promise<void> {
+  if (ms <= 0) return;
+  if (!shouldStop) {
+    await sleep(ms);
+    return;
+  }
+  const deadline = Date.now() + ms;
+  while (!shouldStop() && Date.now() < deadline) {
+    await sleep(Math.min(SLEEP_SLICE_MS, deadline - Date.now()));
+  }
 }
 
 /** Backoff delay for the current consecutive-failure streak (capped). PURE-ish. */
@@ -201,8 +227,17 @@ export async function runWatchTickForPosition(
  */
 export async function runWatchCycle(
   alertState: AlertStateStore,
-  opts: { config?: WatchConfig; now?: number } = {},
+  opts: { config?: WatchConfig; now?: number; shouldStop?: () => boolean } = {},
 ): Promise<WatchCycleResult> {
+  const { shouldStop } = opts;
+  // PER-CYCLE BACKOFF (FIX A): snapshot the delay ONCE at cycle start, based on
+  // the PRIOR cycle's failure streak, and sleep it once before processing any
+  // positions. (Previously this was re-slept before EVERY position, so a
+  // multi-position HL outage compounded the backoff within a single cycle.)
+  // Interruptible (FIX B) so SIGINT during an outage doesn't block up to ~8s.
+  const cycleBackoffMs = currentBackoffMs();
+  if (cycleBackoffMs > 0) await interruptibleSleep(cycleBackoffMs, shouldStop);
+
   const sessions = await listActiveSessions();
   const monitored: MonitoredResult[] = [];
   const failures: WatchCycleResult['failures'] = [];
@@ -210,6 +245,11 @@ export async function runWatchCycle(
   // closed (or whose session went inactive) → its stale dedup baseline is pruned
   // below so a re-open re-fires its alerts (FIX 5).
   const seenKeys = new Set<string>();
+
+  // Count HL/tick failures THIS cycle so we can reset the global streak on a
+  // clean/zero-position cycle (FIX C) rather than only when a single position
+  // ticks OK.
+  let cycleHlFailures = 0;
 
   let first = true;
   for (const session of sessions) {
@@ -222,19 +262,16 @@ export async function runWatchCycle(
     }
     for (const position of positions) {
       seenKeys.add(alertKey(session.id, position.coin));
-      // Space out HL work + back off harder after consecutive failures so an HL
-      // 429 isn't hammered at full rate (FIX 6).
-      if (!first) await sleep(HL_REQUEST_SPACING_MS);
+      // Gentle per-position spacing so HL isn't hit at full rate (the harder
+      // backoff is applied once per cycle above, FIX A). Interruptible (FIX B).
+      if (!first) await interruptibleSleep(HL_REQUEST_SPACING_MS, shouldStop);
       first = false;
-      const backoff = currentBackoffMs();
-      if (backoff > 0) await sleep(backoff);
 
       try {
         const decision = await runWatchTickForPosition(session.id, position, alertState, opts);
         monitored.push({ sessionId: session.id, coin: position.coin, decision });
-        consecutiveHlFailures = 0; // success resets the backoff streak.
       } catch (err) {
-        consecutiveHlFailures++;
+        cycleHlFailures++;
         failures.push({
           sessionId: session.id,
           coin: position.coin,
@@ -242,6 +279,17 @@ export async function runWatchCycle(
         });
       }
     }
+  }
+
+  // Backoff-streak accounting (FIX A + FIX C): the streak counts consecutive
+  // FAILING CYCLES (not positions), so the exponential backoff grows at most once
+  // per cycle. A cycle that attempted ZERO positions, or attempted some with NO
+  // HL failures, is healthy → reset the streak so a fresh re-open isn't wrongly
+  // penalized. Only a cycle that had at least one HL failure grows it by one.
+  if (cycleHlFailures === 0) {
+    consecutiveHlFailures = 0;
+  } else {
+    consecutiveHlFailures++;
   }
 
   // Prune dedup baselines for positions no longer open (FIX 5).

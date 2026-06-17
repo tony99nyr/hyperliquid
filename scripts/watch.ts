@@ -94,11 +94,18 @@ interface CycleOutcome {
   ok: boolean;
 }
 
-/** Run one cycle and log a concise summary. Never throws (cycle isolates errors). */
-async function runOneCycle(alertState: AlertStateStore): Promise<CycleOutcome> {
+/**
+ * Run one cycle and log a concise summary. Never throws (cycle isolates errors).
+ * `shouldStop` is threaded into the cycle's in-flight backoff/spacing sleeps so
+ * SIGINT interrupts them promptly (FIX B) instead of blocking up to ~8s.
+ */
+async function runOneCycle(
+  alertState: AlertStateStore,
+  shouldStop?: () => boolean,
+): Promise<CycleOutcome> {
   const ts = new Date().toISOString();
   try {
-    const result = await runWatchCycle(alertState);
+    const result = await runWatchCycle(alertState, { shouldStop });
     if (result.monitored.length === 0) {
       line(
         `[${ts}] no monitored positions ` +
@@ -187,7 +194,7 @@ run(async () => {
 
   while (!stopping) {
     const cycleStart = Date.now();
-    const outcome = await runOneCycle(alertState);
+    const outcome = await runOneCycle(alertState, () => stopping);
 
     if (outcome.ok) {
       lastSuccessfulTickAt = Date.now();

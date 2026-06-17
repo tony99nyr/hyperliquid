@@ -232,6 +232,97 @@ describe('runWatchCycle — discovery + isolation', () => {
     expect(result.failures[0].error).toContain('supabase timeout');
   });
 
+  it('reset-on-clean-cycle: a no-HL-failure cycle clears the streak so the next cycle does NOT back off (FIX C)', async () => {
+    vi.useRealTimers();
+    mActiveSessions.mockResolvedValue([session('s1')]);
+    mLoadPositions.mockResolvedValue([pos()]);
+
+    // Cycle 1: mark fetch fails → one HL failure → streak grows to 1.
+    mFetchCandles.mockRejectedValueOnce(new Error('hl 429'));
+    const r1 = await runWatchCycle(new Map(), { now: NOW });
+    expect(r1.failures).toHaveLength(1);
+
+    // Cycle 2: mark fetch succeeds → no HL failures → streak resets to 0.
+    mockMark(2100);
+    const sleepSpy = vi.spyOn(globalThis, 'setTimeout');
+    const r2 = await runWatchCycle(new Map(), { now: NOW });
+    expect(r2.monitored).toHaveLength(1);
+
+    // Cycle 3: should NOT pay a cycle-start backoff (streak was reset). Only the
+    // per-position spacing sleeps may fire; with a single position the first one
+    // is skipped, so a clean prior cycle ⇒ zero setTimeout calls here.
+    sleepSpy.mockClear();
+    await runWatchCycle(new Map(), { now: NOW });
+    expect(sleepSpy).not.toHaveBeenCalled();
+    sleepSpy.mockRestore();
+  });
+
+  it('zero-position cycle resets the streak (FIX C)', async () => {
+    vi.useRealTimers();
+    mActiveSessions.mockResolvedValue([session('s1')]);
+
+    // Cycle 1: a position fails → streak grows to 1.
+    mLoadPositions.mockResolvedValueOnce([pos()]);
+    mFetchCandles.mockRejectedValueOnce(new Error('hl down'));
+    await runWatchCycle(new Map(), { now: NOW });
+
+    // Cycle 2: ZERO open positions → healthy → streak reset.
+    mLoadPositions.mockResolvedValueOnce([]);
+    await runWatchCycle(new Map(), { now: NOW });
+
+    // Cycle 3: a fresh position opens — must NOT be penalized by a stale streak.
+    mLoadPositions.mockResolvedValueOnce([pos()]);
+    mockMark(2100);
+    const sleepSpy = vi.spyOn(globalThis, 'setTimeout');
+    await runWatchCycle(new Map(), { now: NOW });
+    expect(sleepSpy).not.toHaveBeenCalled(); // no cycle-start backoff
+    sleepSpy.mockRestore();
+  });
+
+  it('per-cycle backoff is applied ONCE, not per position (FIX A)', async () => {
+    vi.useRealTimers();
+    mActiveSessions.mockResolvedValue([session('s1')]);
+    // Three positions, all failing the mark fetch.
+    mLoadPositions.mockResolvedValue([
+      pos({ coin: 'ETH' }),
+      pos({ coin: 'BTC' }),
+      pos({ coin: 'SOL' }),
+    ]);
+    mFetchCandles.mockRejectedValue(new Error('hl outage'));
+
+    // Cycle 1: builds a streak (3 failing positions ⇒ streak grows by ONE cycle).
+    await runWatchCycle(new Map(), { now: NOW });
+
+    // Cycle 2: with streak=1, expect EXACTLY ONE cycle-start backoff sleep
+    // (HL_BACKOFF_BASE_MS=500) — NOT one per failing position. Count setTimeout
+    // calls whose delay is the backoff value.
+    const sleepSpy = vi.spyOn(globalThis, 'setTimeout');
+    await runWatchCycle(new Map(), { now: NOW });
+    const backoffCalls = sleepSpy.mock.calls.filter(([, ms]) => ms === 500);
+    expect(backoffCalls).toHaveLength(1);
+    sleepSpy.mockRestore();
+  });
+
+  it('cycle-start backoff is interruptible via shouldStop (FIX B)', async () => {
+    vi.useRealTimers();
+    mActiveSessions.mockResolvedValue([session('s1')]);
+    mLoadPositions.mockResolvedValue([pos()]);
+    mFetchCandles.mockRejectedValue(new Error('hl outage'));
+
+    // Build a large streak WITHOUT paying real backoff: shouldStop short-circuits
+    // each cycle-start sleep, but the failing positions still grow the streak.
+    for (let i = 0; i < 6; i++) {
+      await runWatchCycle(new Map(), { now: NOW, shouldStop: () => true });
+    }
+
+    // Next cycle: with a maxed streak the cycle-start backoff is ~8s. Because it
+    // is interruptible, a stop predicate makes it return fast instead of blocking
+    // the full cap.
+    const started = Date.now();
+    await runWatchCycle(new Map(), { now: NOW, shouldStop: () => true });
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
   it('prunes alert-dedup state when a position closes, so a re-open re-fires (FIX 5)', async () => {
     mActiveSessions.mockResolvedValue([session('s1')]);
     mAssessHealth.mockResolvedValue(healthResult({ alerts: ['regime-flip-8h'] }));
