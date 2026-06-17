@@ -63,6 +63,7 @@ vi.mock('@/lib/ws/hl-ws-client', () => {
 
 vi.mock('@/lib/hyperliquid/candle-service', () => ({
   fetchCandles: () => Promise.resolve({ candles: [], error: null }),
+  fetchMultiTimeframeCandles: () => Promise.resolve({}),
 }));
 
 // Now import the units under test (after mocks are registered).

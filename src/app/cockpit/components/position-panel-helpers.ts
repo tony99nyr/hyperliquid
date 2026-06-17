@@ -51,6 +51,55 @@ export function userPositionDisplay(
   };
 }
 
+/** A dense display shape for the bottom Active-Position bar. */
+export interface ActivePositionStats {
+  coin: string;
+  side: 'long' | 'short';
+  sz: number;
+  entryPx: number | null;
+  markPx: number | null;
+  /** |sz| * markPx (or entry when no mark) in USD. */
+  notionalUsd: number | null;
+  unrealizedPnlUsd: number | null;
+  /** P&L as a percent of entry notional (sign carries direction). */
+  pnlPct: number | null;
+  feesPaidUsd: number;
+  /** ms since the position last changed (entry/add). */
+  timeInTradeMs: number | null;
+}
+
+/**
+ * Build the dense bottom-bar stats for the user's open position. PURE — `now` is
+ * injected so the time-in-trade is testable. pnlPct is computed off entry
+ * notional so it reads as a clean percent move regardless of size.
+ */
+export function activePositionStats(
+  pos: PositionRow,
+  pnl: PnlSnapshot | undefined,
+  now: number,
+): ActivePositionStats {
+  const d = userPositionDisplay(pos, pnl);
+  const refPx = d.markPx ?? d.entryPx;
+  const notionalUsd = refPx !== null ? Math.abs(d.sz) * refPx : null;
+  const entryNotional = d.entryPx !== null ? Math.abs(d.sz) * d.entryPx : null;
+  const pnlPct =
+    d.unrealizedPnlUsd !== null && entryNotional && entryNotional > 0
+      ? (d.unrealizedPnlUsd / entryNotional) * 100
+      : null;
+  return {
+    coin: d.coin,
+    side: d.side,
+    sz: d.sz,
+    entryPx: d.entryPx,
+    markPx: d.markPx,
+    notionalUsd,
+    unrealizedPnlUsd: d.unrealizedPnlUsd,
+    pnlPct,
+    feesPaidUsd: pos.feesPaidUsd,
+    timeInTradeMs: pos.updatedAt > 0 ? Math.max(0, now - pos.updatedAt) : null,
+  };
+}
+
 /** Build a leader's display row from an HL clearinghouse position. */
 export function leaderPositionDisplay(p: HlPosition): PositionDisplay {
   const markPx =

@@ -2,13 +2,19 @@ import { describe, it, expect } from 'vitest';
 import {
   healthZone,
   healthColor,
+  healthGrade,
   contextZoneColor,
   severityColor,
   pnlColor,
   fmtUsd,
   fmtPx,
   fmtPct,
+  fmtPctSigned,
+  fmtCompactUsd,
+  regimeColor,
+  regimeAbbrev,
   alertLabel,
+  GH,
   ZONE_COLORS,
 } from '@/app/cockpit/components/panel-styles';
 
@@ -72,5 +78,34 @@ describe('panel-styles', () => {
   it('alertLabel humanizes codes', () => {
     expect(alertLabel('bearish-divergence-1h')).toBe('Bearish divergence 1H');
     expect(alertLabel('stop-within-1-ATR')).toBe('Stop within 1 ATR');
+  });
+
+  it('healthGrade: A best → F worst', () => {
+    expect(healthGrade(90)).toBe('A');
+    expect(healthGrade(72)).toBe('B');
+    expect(healthGrade(60)).toBe('C');
+    expect(healthGrade(45)).toBe('D');
+    expect(healthGrade(10)).toBe('F');
+  });
+
+  it('regimeColor + regimeAbbrev', () => {
+    expect(regimeColor('bullish')).toBe(ZONE_COLORS.ok);
+    expect(regimeColor('bearish')).toBe(ZONE_COLORS.danger);
+    expect(regimeColor('neutral')).toBe(GH.textMuted);
+    expect(regimeAbbrev('bullish')).toBe('BULL');
+    expect(regimeAbbrev('bearish')).toBe('BEAR');
+    expect(regimeAbbrev('neutral')).toBe('NEU');
+  });
+
+  it('fmtPctSigned signs + fixed digits', () => {
+    expect(fmtPctSigned(4.2)).toBe('+4.20%');
+    expect(fmtPctSigned(-1.5)).toBe('−1.50%');
+    expect(fmtPctSigned(0)).toBe('0.00%');
+  });
+
+  it('fmtCompactUsd abbreviates large notionals', () => {
+    expect(fmtCompactUsd(950)).toBe('$950.00');
+    expect(fmtCompactUsd(1500)).toBe('$1.5k');
+    expect(fmtCompactUsd(3_400_000)).toBe('$3.40M');
   });
 });

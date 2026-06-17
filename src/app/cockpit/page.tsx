@@ -19,6 +19,7 @@ import {
   fetchClearinghouseState,
   type HlPosition,
 } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { getTopTraders } from '@/lib/hyperliquid/top-traders-service';
 import PinGate from './components/PinGate';
 import CockpitClient from './CockpitClient';
 
@@ -40,12 +41,16 @@ export default async function CockpitPage() {
     leaderPositions = state.positions;
   }
 
+  // Slim top-traders list for the left rail (the 2.8MB dataset stays server-side).
+  const topTraders = getTopTraders(12);
+
   return (
     <CockpitClient
       mode={mode}
       session={session}
       leaderAddress={leaderAddress}
       leaderPositions={leaderPositions}
+      topTraders={topTraders}
     />
   );
 }

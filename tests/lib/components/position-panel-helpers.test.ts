@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   userPositionDisplay,
   leaderPositionDisplay,
+  activePositionStats,
 } from '@/app/cockpit/components/position-panel-helpers';
 import type { PositionRow, PnlSnapshot } from '@/hooks/realtime-row-mappers';
 import type { HlPosition } from '@/lib/hyperliquid/hyperliquid-info-service';
@@ -45,5 +46,29 @@ describe('position-panel-helpers', () => {
     expect(d.liqPx).toBe(70000);
     expect(d.leverage).toBe(5);
     expect(d.unrealizedPnlUsd).toBe(-500);
+  });
+});
+
+describe('activePositionStats', () => {
+  const longPos: PositionRow = {
+    id: 'p', sessionId: 's', coin: 'ETH', side: 'long', sz: 2, avgEntryPx: 2000, realizedPnlUsd: 0, feesPaidUsd: 1.5, updatedAt: 1_000,
+  };
+
+  it('computes notional, pnlPct, and time-in-trade', () => {
+    const pnl: PnlSnapshot = { id: 'x', sessionId: 's', coin: 'ETH', realizedPnlUsd: 0, unrealizedPnlUsd: 200, feesPaidUsd: 1.5, markPx: 2100, createdAt: 0 };
+    const s = activePositionStats(longPos, pnl, 61_000);
+    expect(s.markPx).toBe(2100);
+    expect(s.notionalUsd).toBe(4200); // 2 * 2100
+    expect(s.pnlPct).toBeCloseTo(5, 5); // 200 / (2*2000) = 5%
+    expect(s.feesPaidUsd).toBe(1.5);
+    expect(s.timeInTradeMs).toBe(60_000);
+  });
+
+  it('falls back to entry notional when no mark, and null pnlPct', () => {
+    const s = activePositionStats(longPos, undefined, 1_000);
+    expect(s.markPx).toBeNull();
+    expect(s.notionalUsd).toBe(4000); // 2 * entry 2000
+    expect(s.pnlPct).toBeNull();
+    expect(s.timeInTradeMs).toBe(0);
   });
 });

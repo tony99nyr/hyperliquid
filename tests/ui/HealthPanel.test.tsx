@@ -38,14 +38,18 @@ describe('HealthPanel', () => {
     expect(screen.getByRole('img').getAttribute('data-zone')).toBe('critical');
   });
 
-  it('renders fired alerts with the danger border styling', () => {
+  it('renders fired alerts as color-coded chips', () => {
     render(<HealthPanel sessionId={null} snapshotOverride={snap(40, ['bearish-divergence-1h', 'stop-within-1-ATR'])} />);
     const list = screen.getByTestId('health-alerts');
-    const items = list.querySelectorAll('li');
-    expect(items).toHaveLength(2);
-    expect(items[0].getAttribute('data-alert')).toBe('bearish-divergence-1h');
-    expect(items[0].style.borderLeft).toContain(rgb(ZONE_COLORS.danger));
-    expect(items[0].textContent).toBe('Bearish divergence 1H');
+    const chips = list.querySelectorAll('[data-testid="alert-chip"]');
+    expect(chips).toHaveLength(2);
+    // bearish-divergence-1h is a non-danger code → amber warn chip.
+    const divergence = list.querySelector('[data-alert="bearish-divergence-1h"]') as HTMLElement;
+    expect(divergence.textContent).toBe('Bearish divergence 1H');
+    expect(divergence.style.color).toBe(rgb(ZONE_COLORS.warn));
+    // stop-within-1-ATR is a danger code → red chip.
+    const stop = list.querySelector('[data-alert="stop-within-1-ATR"]') as HTMLElement;
+    expect(stop.style.color).toBe(rgb(ZONE_COLORS.danger));
   });
 
   it('shows a no-alerts state when none fire', () => {
