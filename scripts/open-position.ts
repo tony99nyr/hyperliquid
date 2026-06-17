@@ -21,6 +21,7 @@ import { executeIntent } from '@/lib/trading/fill-source';
 import { openSession } from '@/lib/cockpit/session-service';
 import { writeHypothesis } from '@/lib/cockpit/hypothesis-service';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
+import { ensureWatchDaemon } from '@/lib/cockpit/watch-spawn';
 import type { OrderSide } from '@/types/fill';
 
 run(async () => {
@@ -105,5 +106,22 @@ run(async () => {
   });
   header('Position opened + hypothesis recorded');
   line(`hypothesis id: ${hypothesis.id}`);
-  line('Run assess-trade-health to monitor it.');
+
+  // AUTO-START MONITORING ON FILL: bring up the non-agent watch daemon the moment
+  // the trade executes, so the user never has to run `pnpm watch` by hand. The
+  // detached spawn outlives this script; the double-spawn guard makes it a no-op
+  // when a daemon is already running. WATCH-ONLY — the daemon never trades.
+  try {
+    const watch = ensureWatchDaemon(20);
+    line(
+      watch.status === 'spawned'
+        ? `Monitoring started — watch daemon spawned${watch.pid ? ` (pid ${watch.pid})` : ''}, polling every 20s.`
+        : 'Monitoring already running — existing watch daemon will pick up this position next cycle.',
+    );
+  } catch (err) {
+    // Never fail the (already-committed) trade because monitoring couldn't start.
+    line(`WARN: could not auto-start the watch daemon (${err instanceof Error ? err.message : String(err)}).`);
+    line('Start it manually with `pnpm watch` so the position is monitored.');
+  }
+  line('Run assess-trade-health (or refresh-exit) to re-arm the Safe-Exit plan.');
 });

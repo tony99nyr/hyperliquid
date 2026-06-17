@@ -98,8 +98,32 @@ the comments at the top of each vendored stub module.
   run via `pnpm skill:*` (tsx, `tsconfig.scripts.json` stubs `server-only`).
   Validate green. The remaining gate to USE it is the live-readiness checklist
   (Supabase migration applied + env keys provisioned).
-- **Phase 3**: implement `fill-source-live.ts` + `hyperliquid-exchange-service.ts`,
-  flip `TRADING_MODE=live`. No other code changes.
+- **Phase 2 (DONE)**: the non-agent watch daemon (`pnpm watch`, `src/lib/watch/**`)
+  — WATCH-ONLY, polls active sessions' open positions, writes health/pnl/alerts,
+  survives Claude dying. No-trade guarantee pinned statically.
+- **Phase 3 — active-loop capstone (DONE)**: session orchestration so the user's
+  ONLY manual touches are PICK + APPROVE.
+  - `pnpm skill:run-session` (`scripts/run-session.ts` +
+    `src/lib/cockpit/run-session-service.ts`, dependency-injected) runs the
+    **deterministic entry chain**: openSession → analyze-market → entry proposal →
+    `requireApproval` (entry popup) → on approval `executeIntent` → start the watch
+    daemon → arm the first Safe-Exit plan. The **wake cadence + exit judgment** are
+    Claude's at runtime, documented in `.claude/skills/run-session/SKILL.md` (a
+    script can't run scheduled wake-ups — don't fake it).
+  - **Auto-monitor on fill**: `ensureWatchDaemon` (`src/lib/cockpit/watch-spawn.ts`)
+    detached-spawns `pnpm watch` the moment a trade executes (from open-position
+    AND run-session), guarded against double-spawn by a tmp lockfile pid-liveness
+    check + a `pgrep scripts/watch.ts` fallback.
+  - **Smart Safe-Exit refresh**: `buildBestExitPlan`
+    (`src/lib/trading/safe-exit-plan-business-logic.ts`, PURE) chooses MARKET
+    reduce-only when health is adverse/urgent OR the book is thin, else a LIMIT
+    reduce-only at the favorable top-of-book side (min slippage). `pnpm
+    skill:refresh-exit` arms it each cycle so the always-on panic button is backed
+    by a fresh, smart plan (not just the mechanical market-close fallback).
+  - No-auto-fire (execute only after an approved popup or the Safe-Exit click),
+    watch-only, and the paper↔live seam are all preserved + test-pinned.
+- **Phase 3b (live fill)**: implement `fill-source-live.ts` +
+  `hyperliquid-exchange-service.ts`, flip `TRADING_MODE=live`. No other code changes.
 
 ## Skills (Phase 1d)
 
