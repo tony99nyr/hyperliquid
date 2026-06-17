@@ -8,8 +8,23 @@ export default defineConfig({
   theme: {
     extend: {
       tokens: {
+        fonts: {
+          // Numerics everywhere — apply `tabular-nums` at the call site so
+          // ticking values don't reflow. Falls back to system mono pre-hydration.
+          mono: {
+            value:
+              "var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+          },
+          // Small UPPERCASE letter-spaced labels (the trading-terminal look).
+          label: {
+            value:
+              "var(--font-archivo), -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif",
+          },
+        },
         colors: {
-          // GitHub-dark palette (shared with vendored MiniChart styling)
+          // GitHub-dark palette (shared with vendored MiniChart styling). The
+          // cockpit layers near-black surfaces on top of these for the
+          // trading-desk-terminal look (see panel-styles.SURFACE).
           github: {
             bg: { value: '#0d1117' },
             bgSecondary: { value: '#161b22' },
@@ -29,6 +44,16 @@ export default defineConfig({
         },
       },
       keyframes: {
+        // P&L hero flash on value update (green/red tint pulse). Applied via an
+        // inline keyed re-mount so the flash retriggers each tick.
+        flashUp: {
+          '0%': { backgroundColor: 'rgba(63, 185, 80, 0.22)' },
+          '100%': { backgroundColor: 'rgba(63, 185, 80, 0)' },
+        },
+        flashDown: {
+          '0%': { backgroundColor: 'rgba(248, 81, 73, 0.22)' },
+          '100%': { backgroundColor: 'rgba(248, 81, 73, 0)' },
+        },
         // Approval-popup entrance: scale up from slightly small + fade in.
         popupIn: {
           '0%': { opacity: '0', transform: 'scale(0.92) translateY(8px)' },
@@ -53,7 +78,8 @@ export default defineConfig({
       overflowX: 'hidden',
       bg: '#0d1117',
       color: '#c9d1d9',
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif",
+      fontFamily:
+        "var(--font-archivo), -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif",
     },
     '*': { boxSizing: 'border-box' },
     // A11y: vestibular users opt out of motion. Remove the cockpit's entrance +
