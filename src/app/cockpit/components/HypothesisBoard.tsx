@@ -21,7 +21,7 @@ const STATUS_COLOR: Record<HypothesisStatus, string> = {
   open: GH.textMuted,
   confirmed: ZONE_COLORS.ok,
   invalidated: ZONE_COLORS.danger,
-  resolved: '#58a6ff',
+  resolved: '#5b8cff',
 };
 
 function HypothesisItem({ h }: { h: Hypothesis }) {

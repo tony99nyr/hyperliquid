@@ -96,7 +96,7 @@ export default function Orderbook({ coin, stateOverride, depth = 10 }: Orderbook
       className={css({
         bg: 'github.bgSecondary',
         border: '1px solid token(colors.github.border)',
-        borderRadius: '8px',
+        borderRadius: '12px',
         padding: '12px',
         display: 'flex',
         flexDirection: 'column',
@@ -104,7 +104,7 @@ export default function Orderbook({ coin, stateOverride, depth = 10 }: Orderbook
       })}
     >
       <header className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' })}>
-        <h2 className={css({ fontSize: 'sm', fontWeight: 'semibold', color: 'github.textBright' })}>
+        <h2 className={css({ fontFamily: 'sans', fontSize: '11px', fontWeight: 'semibold', color: '#9aa4b5', textTransform: 'uppercase', letterSpacing: '0.14em' })}>
           {coin.toUpperCase()} Order Book
         </h2>
         {stale ? (

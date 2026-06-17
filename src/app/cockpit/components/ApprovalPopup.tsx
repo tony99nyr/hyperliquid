@@ -24,6 +24,13 @@
  * BLOCKED (no one-tap shipping of a knowingly-broken risk plan) until the operator
  * reduces leverage (warning clears) or ticks the explicit acknowledge checkbox —
  * PAPER and LIVE both. The LIVE typed-phrase gate is still required on top.
+ *
+ * LOOK: re-skinned to the HL Cockpit design handoff "Confirm Order" modal —
+ * 520px centered card on a blurred scrim, a LONG/SHORT segmented READOUT (the
+ * proposal's side is fixed, NOT user-editable — flipping it would change the
+ * validated intent), a size READOUT (risk-sized, not editable), the re-styled
+ * leverage control, a summary box, and a colored risk-note callout. The wiring,
+ * a11y, safety gate, and every data-testid are preserved verbatim.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -39,9 +46,9 @@ import {
   halfLeaderLeverage,
 } from '@/lib/trading/leverage-business-logic';
 import { leaderPositionForCoin } from './leader-alignment-helpers';
-import { WarningTriangle } from './WarningTriangle';
 import { isApproveEnabled, liveConfirmPhrase, summarizeProposal } from './approval-popup-helpers';
-import { GH, ZONE_COLORS, fmtPx, fmtUsd, fmtCompactUsd, fmtPctSigned } from './panel-styles';
+import { LeverageControl, SideSegment, SummaryRow } from './approval-popup-parts';
+import { GH, ZONE_COLORS, TERM, fmtPx, fmtUsd, fmtCompactUsd } from './panel-styles';
 
 export interface ApprovalPopupProps {
   sessionId: string | null;
@@ -210,8 +217,35 @@ function PopupBody({
   }
 
   const sideLong = display.side === 'buy';
-  const sideColor = sideLong ? ZONE_COLORS.ok : ZONE_COLORS.danger;
-  const kindLabel = action.kind === 'entry' ? 'Entry' : action.kind === 'exit' ? 'Exit' : 'Action';
+  const kindTitle =
+    action.kind === 'exit' ? 'Confirm Exit' : action.kind === 'entry' ? 'Confirm Order' : 'Confirm Action';
+
+  // Summary-box derived values.
+  const notionalUsd = read.notionalUsd;
+  const liqPx = read.liqPx;
+  // Distance of the liquidation price from entry, as a percent — colors the liq
+  // row + the risk callout (red <6 · gold <14 · neutral otherwise).
+  const liqDistPct =
+    liqPx != null && entryPx != null && entryPx !== 0
+      ? (Math.abs(liqPx - entryPx) / entryPx) * 100
+      : null;
+  const liqDistColor =
+    liqDistPct == null ? GH.text : liqDistPct < 6 ? ZONE_COLORS.danger : liqDistPct < 14 ? ZONE_COLORS.warn : GH.text;
+  const takerFeeUsd = notionalUsd > 0 ? notionalUsd * 0.00035 : null;
+
+  // Risk callout color: red when liquidation is inside the stop (the plan is
+  // broken), else amber (a neutral advisory tone). No regime data is invented.
+  const riskIsDanger = liqInsideStop;
+  const riskColor = riskIsDanger ? ZONE_COLORS.danger : ZONE_COLORS.warn;
+  const riskBg = riskIsDanger ? 'rgba(242,77,94,0.08)' : 'rgba(217,164,65,0.08)';
+  const riskBorder = riskIsDanger ? 'rgba(242,77,94,0.3)' : 'rgba(217,164,65,0.3)';
+
+  const szStr = display.sz.toLocaleString('en-US', { maximumFractionDigits: 6 });
+  const approveLabel = busy
+    ? 'Submitting…'
+    : isLive
+      ? 'Approve LIVE'
+      : `Approve & ${sideLong ? 'Long' : 'Short'} ${szStr} ${display.coin}`;
 
   return (
     <div
@@ -225,11 +259,11 @@ function PopupBody({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        bg: 'rgba(1, 4, 9, 0.78)',
         padding: '16px',
-        animation: 'backdropIn 0.18s ease-out',
+        animation: 'backdropIn 0.15s ease',
         overflowY: 'auto',
       })}
+      style={{ background: 'rgba(4,6,10,.65)', backdropFilter: 'blur(3px)' }}
     >
       <section
         ref={dialogRef}
@@ -239,60 +273,67 @@ function PopupBody({
         aria-label="Trade approval"
         className={css({
           width: '100%',
-          maxWidth: '460px',
+          maxWidth: '520px',
           maxHeight: '94vh',
           overflowY: 'auto',
-          bg: 'github.bgSecondary',
-          border: '1px solid token(colors.github.border)',
-          borderRadius: '14px',
+          borderRadius: '16px',
           display: 'flex',
           flexDirection: 'column',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.7)',
-          animation: 'popupIn 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
+          animation: 'popupIn 0.2s cubic-bezier(0.2, 0.8, 0.2, 1)',
         })}
+        style={{
+          background: '#0e131c',
+          border: '1px solid rgba(255,255,255,.12)',
+          boxShadow: '0 30px 80px rgba(0,0,0,.6)',
+        }}
       >
-        {/* Header band: title · side · mode badge */}
+        {/* Header: title · caption · mode badge · close */}
         <header
           className={css({
             display: 'flex',
-            justifyContent: 'space-between',
             alignItems: 'center',
-            gap: '10px',
-            padding: '16px 18px',
+            gap: '11px',
+            padding: '18px 22px',
             borderBottom: '1px solid token(colors.github.border)',
           })}
         >
-          <div className={css({ display: 'flex', flexDirection: 'column', gap: '2px' })}>
-            <h2
-              className={css({
-                fontFamily: 'label',
-                fontSize: 'sm',
-                fontWeight: 'bold',
-                color: 'github.textBright',
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
-              })}
-            >
-              Confirm {kindLabel}
-            </h2>
-            <span data-testid="proposal-summary" className={css({ fontSize: '10px', color: 'github.textMuted', fontFamily: 'mono' })}>
-              {summarizeProposal(display, {
-                kind: action.kind,
-                mode: action.mode,
-                reduceOnly: intent.reduceOnly,
-              })}
-            </span>
-          </div>
+          <h2
+            className={css({
+              fontFamily: 'sans',
+              fontSize: '13px',
+              fontWeight: 'semibold',
+              color: 'github.textBright',
+              textTransform: 'uppercase',
+              letterSpacing: '0.1em',
+            })}
+          >
+            {kindTitle}
+          </h2>
+          <span
+            className={css({ fontFamily: 'mono', fontSize: '10px' })}
+            style={{ color: TERM.faint }}
+          >
+            you approve · you execute
+          </span>
+          {/* Hidden machine-readable summary (preserves the proposal-summary testid). */}
+          <span data-testid="proposal-summary" className={css({ srOnly: true })}>
+            {summarizeProposal(display, {
+              kind: action.kind,
+              mode: action.mode,
+              reduceOnly: intent.reduceOnly,
+            })}
+          </span>
+          <div className={css({ flex: 1 })} />
           <span
             data-testid="mode-badge"
             data-mode={action.mode}
             style={{
               color: isLive ? '#fff' : GH.textBright,
-              background: isLive ? ZONE_COLORS.danger : GH.border,
+              background: isLive ? ZONE_COLORS.danger : TERM.button,
               boxShadow: isLive ? `0 0 0 3px rgba(248,81,73,0.22)` : undefined,
             }}
             className={css({
-              fontFamily: 'label',
+              fontFamily: 'sans',
               fontSize: 'xs',
               fontWeight: 'bold',
               letterSpacing: '0.1em',
@@ -304,112 +345,211 @@ function PopupBody({
           >
             {isLive ? 'LIVE' : 'PAPER'}
           </span>
+          <button
+            type="button"
+            aria-label="Reject and close"
+            onClick={() => void decide('reject')}
+            disabled={busy}
+            className={css({
+              width: '28px',
+              height: '28px',
+              borderRadius: '7px',
+              flex: 'none',
+              fontSize: '14px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: '1px solid rgba(255,255,255,0.1)',
+              _disabled: { opacity: 0.5, cursor: 'not-allowed' },
+            })}
+            style={{ background: TERM.button, color: GH.textMuted }}
+          >
+            ✕
+          </button>
         </header>
 
-        {/* Tabular trade data */}
-        <div className={css({ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: '0' })}>
-          <DataRow label="Coin" value={display.coin} strong />
-          <DataRow
-            label="Side"
-            value={sideLong ? 'LONG (buy)' : 'SHORT (sell)'}
-            color={sideColor}
-            testid="approval-side"
-          />
-          <DataRow label="Size" value={display.sz.toLocaleString('en-US', { maximumFractionDigits: 6 })} />
-          <DataRow label={action.kind === 'exit' ? 'Est. px' : 'Entry / est. px'} value={entryPx == null ? '—' : fmtPx(entryPx)} />
-          {display.stopPx != null && <DataRow label="Stop" value={fmtPx(display.stopPx)} color={ZONE_COLORS.warn} />}
-          <DataRow label="Notional" value={read.notionalUsd > 0 ? fmtCompactUsd(read.notionalUsd) : '—'} />
+        {/* Scrollable body */}
+        <div className={css({ padding: '20px 22px', overflowY: 'auto' })}>
+          {/* Side READOUT (segmented, non-editable) + market box */}
+          <div className={css({ display: 'flex', gap: '12px', marginBottom: '18px' })}>
+            <div
+              className={css({
+                display: 'flex',
+                gap: '4px',
+                borderRadius: '9px',
+                padding: '4px',
+                flex: 1,
+              })}
+              style={{ background: TERM.inset, border: '1px solid rgba(255,255,255,.08)' }}
+            >
+              <SideSegment label="LONG" active={sideLong} activeColor={ZONE_COLORS.ok} testid={sideLong ? 'approval-side' : undefined} />
+              <SideSegment label="SHORT" active={!sideLong} activeColor={ZONE_COLORS.danger} testid={!sideLong ? 'approval-side' : undefined} />
+            </div>
+            <div
+              className={css({
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                borderRadius: '9px',
+                padding: '0 14px',
+              })}
+              style={{ background: TERM.inset, border: '1px solid rgba(255,255,255,.08)' }}
+            >
+              <span className={css({ fontFamily: 'mono', fontSize: '14px', fontWeight: 'semibold', color: 'github.textBright' })}>
+                {display.coin}
+              </span>
+            </div>
+          </div>
+
+          {/* Size READOUT (risk-sized, fixed — not editable) */}
+          <div className={css({ marginBottom: '18px' })}>
+            <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '9px' })}>
+              <span className={css({ fontFamily: 'sans', fontSize: '10.5px', fontWeight: 'semibold', textTransform: 'uppercase', letterSpacing: '0.1em' })} style={{ color: '#9aa4b5' }}>
+                Size
+              </span>
+              <span className={css({ fontFamily: 'mono', fontSize: '12px', color: 'github.textMuted' })} style={{ fontFeatureSettings: '"tnum"' }}>
+                ≈ {notionalUsd > 0 ? fmtCompactUsd(notionalUsd) : '—'} notional
+              </span>
+            </div>
+            <div
+              className={css({
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                borderRadius: '9px',
+                padding: '11px 14px',
+              })}
+              style={{ background: TERM.inset, border: '1px solid rgba(255,255,255,.08)' }}
+            >
+              <span
+                className={css({ flex: 1, fontFamily: 'mono', fontSize: '16px', fontWeight: 'semibold', color: 'github.textBright' })}
+                style={{ fontFeatureSettings: '"tnum"' }}
+              >
+                {szStr}
+              </span>
+              <span className={css({ fontFamily: 'mono', fontSize: '12px' })} style={{ color: TERM.faint }}>
+                {display.coin}
+              </span>
+            </div>
+          </div>
+
+          {/* Leverage control (OPENING orders only) */}
           {isOpening && (
-            <DataRow label="Leverage" value={`${leverage.toLocaleString('en-US', { maximumFractionDigits: 1 })}×`} color={GH.textBright} testid="approval-leverage-row" strong />
+            <LeverageControl
+              coin={display.coin}
+              coinMax={coinMax}
+              leverage={leverage}
+              setLeverage={(v) => setLeverage(clampLeverage(v, coinMax))}
+              marginUsd={read.marginUsd}
+              liqPx={read.liqPx}
+              roeAtStopPct={read.roeAtStopPct}
+              roeAtTargetPct={read.roeAtTargetPct}
+              liqInsideStop={liqInsideStop}
+              ackLiqInsideStop={ackLiqInsideStop}
+              setAckLiqInsideStop={setAckLiqInsideStop}
+              leaderLev={leaderLev}
+              halfLev={halfLev}
+            />
+          )}
+
+          {/* Summary box */}
+          <div
+            className={css({ borderRadius: '11px', padding: '6px 16px', marginBottom: '16px' })}
+            style={{ background: TERM.inset, border: '1px solid token(colors.github.border)' }}
+          >
+            <SummaryRow label={action.kind === 'exit' ? 'Exit (market)' : 'Entry (market)'} value={fmtPx(entryPx)} />
+            <SummaryRow label="Notional" value={notionalUsd > 0 ? fmtCompactUsd(notionalUsd) : '—'} color={GH.textBright} />
+            {isOpening && <SummaryRow label="Margin required" value={fmtUsd(read.marginUsd).replace('+', '')} color={GH.textBright} />}
+            <SummaryRow
+              label="Liquidation price"
+              value={liqPx == null ? '—' : `${fmtPx(liqPx)}${liqDistPct == null ? '' : ` (${liqDistPct.toFixed(1)}% away)`}`}
+              color={liqDistColor}
+            />
+            {display.stopPx != null && <SummaryRow label="Stop" value={fmtPx(display.stopPx)} color={ZONE_COLORS.warn} />}
+            {takerFeeUsd != null && <SummaryRow label="Est. taker fee" value={fmtUsd(takerFeeUsd).replace('+', '')} color={GH.textMuted} last />}
+          </div>
+
+          {/* Leader followed */}
+          {leaderAddress && (
+            <div
+              data-testid="approval-leader"
+              className={css({
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                fontFamily: 'mono',
+                fontSize: 'xs',
+                borderRadius: '9px',
+                padding: '10px 14px',
+                marginBottom: '12px',
+              })}
+              style={{ background: TERM.inset, border: '1px solid token(colors.github.border)' }}
+            >
+              <span className={css({ color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.05em' })}>
+                Following leader
+              </span>
+              <span className={css({ color: 'github.link' })}>
+                {leaderAddress.slice(0, 6)}…{leaderAddress.slice(-4)}
+                {leaderLev != null && <span className={css({ color: 'github.textMuted' })}> · {leaderLev}×</span>}
+              </span>
+            </div>
+          )}
+
+          {/* Risk note callout (colored dot + rationale) */}
+          <div
+            className={css({ display: 'flex', gap: '10px', padding: '11px 14px', borderRadius: '9px' })}
+            style={{ background: riskBg, border: `1px solid ${riskBorder}` }}
+          >
+            <span className={css({ fontSize: '14px', lineHeight: '1.4', flex: 'none' })} style={{ color: riskColor }} aria-hidden>
+              ●
+            </span>
+            <span className={css({ fontSize: '11.5px', lineHeight: '1.5', color: 'github.text' })}>
+              {display.rationale}
+            </span>
+          </div>
+
+          {/* LIVE typed-phrase gate */}
+          {isLive && (
+            <label className={css({ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '14px' })}>
+              <span className={css({ fontSize: 'xs', color: 'zone.danger', fontWeight: 'semibold' })}>
+                LIVE ORDER — type{' '}
+                <code className={css({ fontFamily: 'mono', color: 'github.textBright' })}>{liveConfirmPhrase(display)}</code>{' '}
+                to enable Approve
+              </span>
+              <input
+                ref={inputRef}
+                data-testid="live-confirm-input"
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder={liveConfirmPhrase(display)}
+                className={css({
+                  borderRadius: '9px',
+                  color: 'github.textBright',
+                  fontFamily: 'mono',
+                  fontSize: 'sm',
+                  padding: '10px 12px',
+                })}
+                style={{ background: TERM.inset, border: '1px solid rgba(255,255,255,.08)' }}
+              />
+            </label>
+          )}
+
+          {error && (
+            <p data-testid="approval-error" className={css({ fontSize: 'xs', color: 'zone.danger', marginTop: '10px' })}>
+              {error}
+            </p>
           )}
         </div>
 
-        {/* Leverage control (OPENING orders only) */}
-        {isOpening && (
-          <LeverageControl
-            coin={display.coin}
-            coinMax={coinMax}
-            leverage={leverage}
-            setLeverage={(v) => setLeverage(clampLeverage(v, coinMax))}
-            marginUsd={read.marginUsd}
-            liqPx={read.liqPx}
-            roeAtStopPct={read.roeAtStopPct}
-            roeAtTargetPct={read.roeAtTargetPct}
-            liqInsideStop={liqInsideStop}
-            ackLiqInsideStop={ackLiqInsideStop}
-            setAckLiqInsideStop={setAckLiqInsideStop}
-            leaderLev={leaderLev}
-            halfLev={halfLev}
-          />
-        )}
-
-        {/* Leader followed */}
-        {leaderAddress && (
-          <div
-            data-testid="approval-leader"
-            className={css({
-              padding: '10px 18px',
-              borderTop: '1px solid token(colors.github.borderSubtle)',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              fontFamily: 'mono',
-              fontSize: 'xs',
-            })}
-          >
-            <span className={css({ color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.05em' })}>
-              Following leader
-            </span>
-            <span className={css({ color: 'github.link' })}>
-              {leaderAddress.slice(0, 6)}…{leaderAddress.slice(-4)}
-              {leaderLev != null && <span className={css({ color: 'github.textMuted' })}> · {leaderLev}×</span>}
-            </span>
-          </div>
-        )}
-
-        {/* Rationale */}
-        <p className={css({ padding: '12px 18px', fontSize: 'sm', color: 'github.text', lineHeight: '1.5', borderTop: '1px solid token(colors.github.borderSubtle)' })}>
-          {display.rationale}
-        </p>
-
-        {/* LIVE typed-phrase gate */}
-        {isLive && (
-          <label className={css({ display: 'flex', flexDirection: 'column', gap: '6px', padding: '0 18px 12px' })}>
-            <span className={css({ fontSize: 'xs', color: 'zone.danger', fontWeight: 'semibold' })}>
-              LIVE ORDER — type{' '}
-              <code className={css({ fontFamily: 'mono', color: 'github.textBright' })}>{liveConfirmPhrase(display)}</code>{' '}
-              to enable Approve
-            </span>
-            <input
-              ref={inputRef}
-              data-testid="live-confirm-input"
-              value={typed}
-              onChange={(e) => setTyped(e.target.value)}
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
-              placeholder={liveConfirmPhrase(display)}
-              className={css({
-                bg: 'github.bg',
-                border: '1px solid token(colors.github.border)',
-                borderRadius: '6px',
-                color: 'github.textBright',
-                fontFamily: 'mono',
-                fontSize: 'sm',
-                padding: '8px 10px',
-              })}
-            />
-          </label>
-        )}
-
-        {error && (
-          <p data-testid="approval-error" className={css({ fontSize: 'xs', color: 'zone.danger', padding: '0 18px 8px' })}>
-            {error}
-          </p>
-        )}
-
-        {/* Actions — weighted: Reject quiet, Approve prominent (green / red-live). */}
-        <div className={css({ display: 'flex', gap: '10px', padding: '14px 18px 18px' })}>
+        {/* Footer: Cancel (Reject) quiet · Approve prominent (green / red-live). */}
+        <div
+          className={css({ display: 'flex', gap: '10px', padding: '16px 22px' })}
+          style={{ borderTop: '1px solid rgba(255,255,255,.07)' }}
+        >
           <button
             ref={rejectRef}
             type="button"
@@ -417,46 +557,42 @@ function PopupBody({
             disabled={busy}
             onClick={() => void decide('reject')}
             className={css({
-              flex: '0 0 38%',
-              bg: 'github.bg',
-              border: '1px solid token(colors.github.border)',
-              borderRadius: '8px',
-              color: 'github.text',
-              fontFamily: 'label',
-              fontSize: 'sm',
-              fontWeight: 'semibold',
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase',
-              paddingY: '12px',
+              fontFamily: 'sans',
+              fontSize: '13px',
+              fontWeight: 'medium',
+              borderRadius: '9px',
+              padding: '13px 22px',
               cursor: 'pointer',
-              _hover: { bg: 'github.bgSecondary', borderColor: 'github.textMuted' },
+              _hover: { borderColor: 'github.textMuted' },
               _disabled: { opacity: 0.5, cursor: 'not-allowed' },
             })}
+            style={{ background: TERM.button, color: GH.text, border: '1px solid rgba(255,255,255,.1)' }}
           >
-            Reject
+            Cancel
           </button>
           <button
             type="button"
             data-testid="approve-button"
             disabled={!approveEnabled}
             onClick={() => void decide('approve')}
-            style={{ background: approveEnabled ? (isLive ? ZONE_COLORS.danger : ZONE_COLORS.ok) : GH.border }}
+            style={{
+              background: approveEnabled ? (isLive ? ZONE_COLORS.danger : ZONE_COLORS.ok) : TERM.button,
+              color: approveEnabled ? (isLive ? '#fff' : TERM.darkText) : GH.textMuted,
+            }}
             className={css({
               flex: 1,
               border: 'none',
-              borderRadius: '8px',
-              color: isLive && approveEnabled ? '#fff' : '#010409',
-              fontFamily: 'label',
-              fontSize: 'sm',
+              borderRadius: '9px',
+              fontFamily: 'sans',
+              fontSize: '13.5px',
               fontWeight: 'bold',
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase',
-              paddingY: '12px',
+              letterSpacing: '0.03em',
+              padding: '13px',
               cursor: 'pointer',
-              _disabled: { opacity: 0.6, cursor: 'not-allowed', color: GH.textMuted },
+              _disabled: { opacity: 0.6, cursor: 'not-allowed' },
             })}
           >
-            {busy ? 'Submitting…' : isLive ? 'Approve LIVE' : 'Approve'}
+            {approveLabel}
           </button>
         </div>
       </section>
@@ -464,218 +600,3 @@ function PopupBody({
   );
 }
 
-/** One label/value row in the tabular trade body. */
-function DataRow({
-  label,
-  value,
-  color,
-  strong,
-  testid,
-}: {
-  label: string;
-  value: string;
-  color?: string;
-  strong?: boolean;
-  testid?: string;
-}) {
-  return (
-    <div
-      className={css({
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'baseline',
-        paddingY: '5px',
-        borderBottom: '1px solid token(colors.github.borderSubtle)',
-        _last: { borderBottom: 'none' },
-      })}
-    >
-      <span className={css({ fontFamily: 'label', fontSize: '10px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.06em' })}>
-        {label}
-      </span>
-      <span
-        data-testid={testid}
-        style={{ color: color ?? GH.text, fontFeatureSettings: '"tnum"' }}
-        className={css({ fontFamily: 'mono', fontSize: strong ? 'sm' : 'xs', fontWeight: strong ? 'bold' : 'normal' })}
-      >
-        {value}
-      </span>
-    </div>
-  );
-}
-
-/** The leverage slider + presets + live margin/liq/ROE read + safety guard. */
-function LeverageControl({
-  coin,
-  coinMax,
-  leverage,
-  setLeverage,
-  marginUsd,
-  liqPx,
-  roeAtStopPct,
-  roeAtTargetPct,
-  liqInsideStop,
-  ackLiqInsideStop,
-  setAckLiqInsideStop,
-  leaderLev,
-  halfLev,
-}: {
-  coin: string;
-  coinMax: number;
-  leverage: number;
-  setLeverage: (v: number) => void;
-  marginUsd: number;
-  liqPx: number | null;
-  roeAtStopPct: number | null;
-  roeAtTargetPct: number | null;
-  liqInsideStop: boolean;
-  ackLiqInsideStop: boolean;
-  setAckLiqInsideStop: (v: boolean) => void;
-  leaderLev: number | null;
-  halfLev: number | null;
-}) {
-  // A11y (Fix 5): announce the CONSEQUENCE of the slider, not just the multiplier.
-  const liqText = liqPx == null ? 'n/a' : fmtPx(liqPx);
-  const roeTargetText = roeAtTargetPct == null ? 'n/a' : fmtPctSigned(roeAtTargetPct);
-  const sliderValueText = `${leverage}×, margin ${fmtUsd(marginUsd).replace('+', '')}, est. liq ${liqText}, ROE at target ${roeTargetText}`;
-  return (
-    <div
-      data-testid="leverage-control"
-      className={css({
-        padding: '12px 18px',
-        borderTop: '1px solid token(colors.github.border)',
-        bg: 'github.bg',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '10px',
-      })}
-    >
-      <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' })}>
-        <span className={css({ fontFamily: 'label', fontSize: '10px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.07em' })}>
-          Leverage · your risk decision
-        </span>
-        <span data-testid="leverage-value" style={{ fontFeatureSettings: '"tnum"' }} className={css({ fontFamily: 'mono', fontSize: 'lg', fontWeight: 'bold', color: 'github.textBright' })}>
-          {leverage.toLocaleString('en-US', { maximumFractionDigits: 1 })}×
-        </span>
-      </div>
-
-      <input
-        type="range"
-        data-testid="leverage-slider"
-        min={1}
-        max={coinMax}
-        step={1}
-        value={leverage}
-        onChange={(e) => setLeverage(Number(e.target.value))}
-        aria-label={`Leverage, 1 to ${coinMax} times`}
-        aria-valuetext={sliderValueText}
-        className={css({ width: '100%', accentColor: '#58a6ff', cursor: 'pointer' })}
-      />
-      <div className={css({ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: 'github.textMuted', fontFamily: 'mono' })}>
-        <span>1×</span>
-        <span>{coinMax}× max ({coin})</span>
-      </div>
-
-      {/* Presets: Match leader (N×) + ½ leader. */}
-      {(leaderLev != null || halfLev != null) && (
-        <div className={css({ display: 'flex', gap: '8px' })}>
-          {leaderLev != null && (
-            <PresetButton testid="match-leader-button" label={`Match leader (${leaderLev}×)`} onClick={() => setLeverage(leaderLev)} />
-          )}
-          {halfLev != null && (
-            <PresetButton testid="half-leader-button" label={`½ leader (${halfLev}×)`} onClick={() => setLeverage(halfLev)} />
-          )}
-        </div>
-      )}
-
-      {/* Live derived read: margin / liq / ROE@stop / ROE@target. */}
-      <div className={css({ display: 'flex', gap: '10px', flexWrap: 'wrap' })}>
-        <ReadCell label="Margin" value={fmtUsd(marginUsd).replace('+', '')} testid="leverage-margin" />
-        <ReadCell label="Est. liq" value={fmtPx(liqPx)} color={liqInsideStop ? ZONE_COLORS.danger : GH.text} testid="leverage-liq" />
-        <ReadCell label="ROE @ stop" value={roeAtStopPct == null ? '—' : fmtPctSigned(roeAtStopPct)} color={roeAtStopPct != null && roeAtStopPct < 0 ? ZONE_COLORS.danger : GH.text} testid="leverage-roe-stop" />
-        {roeAtTargetPct != null && (
-          <ReadCell label="ROE @ target" value={fmtPctSigned(roeAtTargetPct)} color={ZONE_COLORS.ok} testid="leverage-roe-target" />
-        )}
-      </div>
-
-      {/* SAFETY GUARD — liquidation inside the stop. role="alert" so a screen
-          reader dragging the slider HEARS the message on state change (Fix 4). */}
-      {liqInsideStop && (
-        <div
-          data-testid="liq-inside-stop-warning"
-          role="alert"
-          className={css({
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '8px',
-            bg: 'rgba(248,81,73,0.12)',
-            border: '1px solid token(colors.zone.danger)',
-            borderRadius: '6px',
-            padding: '8px 10px',
-          })}
-        >
-          <div className={css({ display: 'flex', gap: '8px', alignItems: 'flex-start' })}>
-            {/* Font-independent SVG warning triangle (no emoji → no tofu, Fix 1). */}
-            <WarningTriangle />
-            <span className={css({ fontSize: 'xs', color: 'zone.danger', fontWeight: 'semibold', lineHeight: '1.4' })}>
-              Liquidation before stop — at {leverage}× the position liquidates before your stop can trigger. Reduce leverage.
-            </span>
-          </div>
-          {/* Approve is GATED while this warning shows (Fix 2): clear it by
-              reducing leverage, or explicitly acknowledge the broken risk plan. */}
-          <label
-            data-testid="liq-ack-label"
-            className={css({ display: 'flex', gap: '7px', alignItems: 'flex-start', cursor: 'pointer' })}
-          >
-            <input
-              type="checkbox"
-              data-testid="liq-ack-checkbox"
-              checked={ackLiqInsideStop}
-              onChange={(e) => setAckLiqInsideStop(e.target.checked)}
-              className={css({ marginTop: '2px', accentColor: '#f85149', cursor: 'pointer' })}
-            />
-            <span className={css({ fontSize: '11px', color: 'github.text', lineHeight: '1.4' })}>
-              I understand liquidation is inside my stop
-            </span>
-          </label>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PresetButton({ label, onClick, testid }: { label: string; onClick: () => void; testid: string }) {
-  return (
-    <button
-      type="button"
-      data-testid={testid}
-      onClick={onClick}
-      className={css({
-        flex: 1,
-        bg: 'github.bgSecondary',
-        border: '1px solid token(colors.github.border)',
-        borderRadius: '6px',
-        color: 'github.text',
-        fontFamily: 'mono',
-        fontSize: '11px',
-        paddingY: '7px',
-        cursor: 'pointer',
-        _hover: { borderColor: 'github.link', color: 'github.textBright' },
-      })}
-    >
-      {label}
-    </button>
-  );
-}
-
-function ReadCell({ label, value, color, testid }: { label: string; value: string; color?: string; testid: string }) {
-  return (
-    <div className={css({ display: 'flex', flexDirection: 'column', gap: '1px', minWidth: '64px' })}>
-      <span className={css({ fontFamily: 'label', fontSize: '8px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.06em' })}>
-        {label}
-      </span>
-      <span data-testid={testid} style={{ color: color ?? GH.text, fontFeatureSettings: '"tnum"' }} className={css({ fontFamily: 'mono', fontSize: 'sm', fontWeight: 'bold' })}>
-        {value}
-      </span>
-    </div>
-  );
-}

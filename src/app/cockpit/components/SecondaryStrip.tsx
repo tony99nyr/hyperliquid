@@ -43,20 +43,19 @@ export default function SecondaryStrip({ sessionId }: SecondaryStripProps) {
               data-testid={`secondary-tab-${t.id}`}
               data-active={active}
               onClick={() => setTab(t.id)}
-              style={active ? { background: '#58a6ff', color: '#010409' } : undefined}
+              style={{
+                color: active ? '#e8ebf2' : '#8b95a6',
+                borderBottom: active ? '2px solid #5b8cff' : '2px solid transparent',
+              }}
               className={css({
-                fontFamily: 'label',
-                fontSize: '10px',
-                fontWeight: 'bold',
-                textTransform: 'uppercase',
-                letterSpacing: '0.06em',
-                border: '1px solid token(colors.github.border)',
-                borderRadius: '6px',
-                paddingX: '10px',
-                paddingY: '5px',
+                fontFamily: 'sans',
+                fontSize: '12px',
+                fontWeight: 'semibold',
+                border: 'none',
+                background: 'none',
+                paddingX: '15px',
+                paddingY: '9px',
                 cursor: 'pointer',
-                color: 'github.textMuted',
-                bg: 'github.bg',
                 _hover: { color: 'github.textBright' },
               })}
             >

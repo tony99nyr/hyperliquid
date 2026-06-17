@@ -53,8 +53,9 @@ export interface CandleChartProps {
   status?: string;
 }
 
-const MA_FAST = { period: 20, color: '#58a6ff' };
-const MA_SLOW = { period: 50, color: '#d29922' };
+// Design handoff: MA20 = accent #5b8cff, MA50 = warn/gold #d9a441.
+const MA_FAST = { period: 20, color: '#5b8cff' };
+const MA_SLOW = { period: 50, color: '#d9a441' };
 
 export default function CandleChart({
   candles,

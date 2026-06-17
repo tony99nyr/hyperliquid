@@ -96,7 +96,7 @@ export default function PinGate() {
           disabled={submitting || pin.length === 0}
           className={css({
             bg: 'github.link',
-            color: '#0d1117',
+            color: '#080a0f',
             fontWeight: 'bold',
             borderRadius: '6px',
             padding: '10px',

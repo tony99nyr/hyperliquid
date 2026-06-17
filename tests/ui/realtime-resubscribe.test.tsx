@@ -170,7 +170,7 @@ describe('CockpitClient mounts every realtime island without crashing', () => {
     });
 
     // The cockpit rendered (header present) — no uncaught throw during mount.
-    expect(screen.getByText('HL Cockpit')).toBeTruthy();
+    expect(screen.getByTestId('cockpit-topbar')).toBeTruthy();
 
     // Re-bind to a NEW session id: every island's hook re-runs its subscribe
     // effect while prior channels are still being removed. This is the exact
@@ -186,7 +186,7 @@ describe('CockpitClient mounts every realtime island without crashing', () => {
       );
     });
 
-    expect(screen.getByText('HL Cockpit')).toBeTruthy();
+    expect(screen.getByTestId('cockpit-topbar')).toBeTruthy();
     // All topics requested across all islands + both bindings must be unique.
     const topics = realtime.requestedTopics;
     expect(topics.length).toBeGreaterThan(0);

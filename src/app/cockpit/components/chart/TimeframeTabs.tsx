@@ -25,10 +25,11 @@ export default function TimeframeTabs({ value, onChange }: TimeframeTabsProps) {
       aria-label="Chart timeframe"
       className={css({
         display: 'inline-flex',
-        bg: 'github.bg',
+        gap: '1px',
+        bg: 'cockpit.navIdle',
         border: '1px solid token(colors.github.border)',
-        borderRadius: '6px',
-        overflow: 'hidden',
+        borderRadius: '7px',
+        padding: '2px',
       })}
     >
       {CHART_TIMEFRAMES.map((tf) => {
@@ -44,19 +45,19 @@ export default function TimeframeTabs({ value, onChange }: TimeframeTabsProps) {
             onClick={() => onChange(tf)}
             style={
               active
-                ? { background: '#58a6ff', color: '#010409' }
-                : undefined
+                ? { background: '#1c2536', color: '#e8ebf2' }
+                : { color: '#8b95a6' }
             }
             className={css({
               fontFamily: 'mono',
               fontSize: '11px',
-              fontWeight: 'bold',
+              fontWeight: 'medium',
               fontFeatureSettings: '"tnum"',
-              paddingX: '10px',
-              paddingY: '5px',
+              paddingX: '9px',
+              paddingY: '4px',
+              borderRadius: '5px',
               border: 'none',
               cursor: 'pointer',
-              color: 'github.textMuted',
               transition: 'background 0.12s ease, color 0.12s ease',
               _hover: { color: 'github.textBright' },
             })}

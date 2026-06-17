@@ -58,7 +58,7 @@ export default function TopTradersRail({ traders, followedAddress }: TopTradersR
                 data-followed={isFollowed}
                 onClick={() => setSelected(t)}
                 aria-label={`Open detail for ${t.displayName ?? t.short}`}
-                style={isFollowed ? { borderColor: '#58a6ff' } : undefined}
+                style={isFollowed ? { borderColor: '#5b8cff' } : undefined}
                 className={css({
                   width: '100%',
                   textAlign: 'left',

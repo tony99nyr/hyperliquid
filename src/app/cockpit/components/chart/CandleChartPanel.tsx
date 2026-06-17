@@ -150,8 +150,8 @@ export default function CandleChartPanel({
 
       <footer className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>
         <span className={css({ display: 'flex', gap: '12px' })}>
-          <Legend color="#58a6ff" label="MA20" />
-          <Legend color="#d29922" label="MA50" />
+          <Legend color="#5b8cff" label="MA20" />
+          <Legend color="#d9a441" label="MA50" />
           {trade && <Legend color={TERM.accent} label="ENTRY" />}
           {trade?.stopPx != null && <Legend color={ZONE_COLORS.danger} label="STOP" />}
           {trade?.targetPx != null && <Legend color={ZONE_COLORS.ok} label="TARGET" />}
