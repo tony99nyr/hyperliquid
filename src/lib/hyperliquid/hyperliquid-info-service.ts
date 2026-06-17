@@ -491,3 +491,18 @@ export async function fetchL2Book(coin: string): Promise<L2Book> {
   const raw = await hlInfoPost<RawL2Book>({ type: 'l2Book', coin: normCoin });
   return parseL2Book(normCoin, raw);
 }
+
+/**
+ * Fetch all current mid prices keyed by coin (HL `allMids`). Used to
+ * mark-to-market open positions for the Performance view. Returns an
+ * upper-cased coin → number map; throws on failure so the caller can fail-soft.
+ */
+export async function fetchAllMids(): Promise<Record<string, number>> {
+  const raw = await hlInfoPost<Record<string, string>>({ type: 'allMids' });
+  const out: Record<string, number> = {};
+  for (const [coin, px] of Object.entries(raw ?? {})) {
+    const n = num(px);
+    if (n > 0) out[coin.trim().toUpperCase()] = n;
+  }
+  return out;
+}
