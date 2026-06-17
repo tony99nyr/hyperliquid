@@ -28,8 +28,11 @@ import { mkdir } from 'node:fs/promises';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import { openSession, closeSession } from '@/lib/cockpit/session-service';
 import { executeIntent } from '@/lib/trading/fill-source';
+import { createPendingAction } from '@/lib/cockpit/pending-actions-service';
 import { writePnlSnapshot } from '@/lib/cockpit/fill-persistence-service';
 import { fetchCandles } from '@/lib/hyperliquid/candle-service';
+import { getTopTraders } from '@/lib/hyperliquid/top-traders-service';
+import type { PendingActionProposal } from '@/types/cockpit';
 import { randomUUID } from 'node:crypto';
 
 const SHOT_DIR = 'docs/screenshots';
@@ -110,6 +113,87 @@ async function seedPositionSession(coin: string, leverage: number): Promise<stri
     feesPaidUsd: fill.feeUsd,
     markPx,
   });
+  return s.id;
+}
+
+/**
+ * Seed a session that FOLLOWS a leader AND holds an open position on the coin →
+ * the co-located Position+Health top zone (Item 1) + Leader-vs-You (Item 4)
+ * render. The position goes in via the REAL write path (executeIntent).
+ */
+async function seedLeaderPositionSession(coin: string, leaderAddress: string): Promise<string> {
+  const s = await openSession({ mode: 'paper', title: `VERIFY ${coin} + leader (co-located + L-vs-You)`, leaderAddress });
+  seededSessions.push(s.id);
+  const mark = await fetchMark(coin);
+  const sz = Math.max(0.001, Math.round((50 / mark) * 1000) / 1000);
+  const fill = await executeIntent({
+    clientIntentId: randomUUID(),
+    sessionId: s.id,
+    coin,
+    side: 'buy',
+    sz,
+    reduceOnly: false,
+    leverage: 5,
+    createdAt: Date.now(),
+  });
+  if (fill.sz <= 0) throw new Error('seed leader position: nothing filled');
+  const markPx = fill.px * 1.012;
+  await writePnlSnapshot({
+    sessionId: s.id,
+    coin,
+    realizedPnlUsd: 0,
+    unrealizedPnlUsd: (markPx - fill.px) * fill.sz,
+    feesPaidUsd: fill.feeUsd,
+    markPx,
+  });
+  return s.id;
+}
+
+/**
+ * Seed a FLAT session with a PENDING entry action so the redesigned ApprovalPopup
+ * renders (Item 2 + 3). The proposal carries the leverage / coin-max / leader
+ * fields the popup's slider + Match-leader presets read. A 5% stop @ a coin max
+ * of 20 lets the harness drag the slider to trigger the liq-inside-stop warning.
+ */
+async function seedPendingEntry(
+  coin: string,
+  mode: 'paper' | 'live',
+  leaderAddress: string,
+  leaderLeverage: number,
+): Promise<string> {
+  const s = await openSession({ mode, title: `VERIFY ${mode} approval (${coin})`, leaderAddress });
+  seededSessions.push(s.id);
+  const entry = await fetchMark(coin);
+  const sz = Math.max(0.001, Math.round((100 / entry) * 1000) / 1000);
+  // 6% stop: at the 20× coin max the liq (~5% adverse, i.e. ABOVE/closer than the
+  // 6% stop for a long) falls INSIDE the stop, so dragging the slider to max
+  // visibly trips the liquidation-inside-stop guard. At the 5× default it is safe.
+  const stopPx = Math.round(entry * 0.94 * 100) / 100;
+  const proposal: PendingActionProposal = {
+    intent: {
+      clientIntentId: randomUUID(),
+      sessionId: s.id,
+      coin,
+      side: 'buy',
+      sz,
+      reduceOnly: false,
+      leverage: 5,
+      createdAt: Date.now(),
+    },
+    display: {
+      coin,
+      side: 'buy',
+      sz,
+      estPx: entry,
+      stopPx,
+      rationale: `Long the ${coin} breakout — risk-sized entry; leverage is your call.`,
+      leverage: 5,
+      coinMaxLeverage: 20,
+      leaderLeverage,
+      leaderAddress,
+    },
+  };
+  await createPendingAction({ sessionId: s.id, kind: 'entry', mode, proposal });
   return s.id;
 }
 
@@ -220,6 +304,47 @@ async function main(): Promise<void> {
     if (await hero.count()) {
       await hero.screenshot({ path: `${SHOT_DIR}/verify-c2-pnlhero-roe.png` });
     }
+
+    // Pick a real rated leader to follow (so the leader side has live data).
+    const leaderAddress = getTopTraders(1)[0]?.address ?? '0x0000000000000000000000000000000000000001';
+
+    // (d) CO-LOCATED Position + Health top zone (Item 1) + Leader-vs-You (Item 4).
+    console.log('Seeding leader-followed OPEN-position session (co-located + Leader-vs-You)…');
+    await seedLeaderPositionSession('ETH', leaderAddress);
+    await page.goto(`${baseUrl}/cockpit`, { waitUntil: 'networkidle', timeout: 30_000 });
+    await delay(5000);
+    const lvy = await page.locator('[data-testid="leader-vs-you"]').getAttribute('data-alignment').catch(() => null);
+    console.log(`  leader-vs-you alignment = ${lvy ?? '(not shown)'}`);
+    await page.screenshot({ path: `${SHOT_DIR}/verify-d-colocated-position-health.png`, fullPage: false });
+    const lvyPanel = page.locator('[data-testid="leader-vs-you"]');
+    if (await lvyPanel.count()) await lvyPanel.screenshot({ path: `${SHOT_DIR}/verify-d2-leader-vs-you.png` });
+
+    // (e1) Redesigned ApprovalPopup — PAPER (one-tap) with the leverage slider.
+    console.log('Seeding PAPER pending entry (approval card + leverage)…');
+    await seedPendingEntry('ETH', 'paper', leaderAddress, 20);
+    await page.goto(`${baseUrl}/cockpit`, { waitUntil: 'networkidle', timeout: 30_000 });
+    await page.locator('[data-testid="approval-popup"]').waitFor({ state: 'visible', timeout: 12_000 });
+    await delay(800);
+    await page.screenshot({ path: `${SHOT_DIR}/verify-e1-approval-paper.png`, fullPage: false });
+    // Drag the slider to the coin max → trigger the liquidation-inside-stop guard.
+    const slider = page.locator('[data-testid="leverage-slider"]');
+    if (await slider.count()) {
+      await slider.fill('20');
+      await delay(400);
+      const warn = await page.locator('[data-testid="liq-inside-stop-warning"]').count();
+      console.log(`  liq-inside-stop warning visible at 20x: ${warn > 0}`);
+      await page.locator('[data-testid="approval-popup"]').screenshot({ path: `${SHOT_DIR}/verify-e2-approval-leverage-warning.png` });
+    }
+
+    // (e3) Redesigned ApprovalPopup — LIVE (typed-phrase gate) variant.
+    console.log('Seeding LIVE pending entry (typed-phrase gate)…');
+    await seedPendingEntry('ETH', 'live', leaderAddress, 20);
+    await page.goto(`${baseUrl}/cockpit`, { waitUntil: 'networkidle', timeout: 30_000 });
+    await page.locator('[data-testid="approval-popup"]').waitFor({ state: 'visible', timeout: 12_000 });
+    await delay(800);
+    const liveBadge = await page.locator('[data-testid="mode-badge"]').textContent().catch(() => null);
+    console.log(`  approval mode badge = ${liveBadge ?? '(none)'} (expect LIVE)`);
+    await page.locator('[data-testid="approval-popup"]').screenshot({ path: `${SHOT_DIR}/verify-e3-approval-live.png` });
 
     await context.close();
   } finally {
