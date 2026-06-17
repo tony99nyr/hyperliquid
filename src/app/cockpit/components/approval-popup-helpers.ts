@@ -8,8 +8,9 @@
  * "live needs the exact phrase" invariant is unit-tested independent of the DOM.
  */
 
-import type { PendingActionDisplay } from '@/types/cockpit';
+import type { PendingActionDisplay, PendingActionKind } from '@/types/cockpit';
 import type { TradingMode } from '@/types/fill';
+import { fmtPx } from './panel-styles';
 
 /** The exact phrase a LIVE approval must type: "side sz coin" (lowercased). */
 export function liveConfirmPhrase(display: Pick<PendingActionDisplay, 'side' | 'sz' | 'coin'>): string {
@@ -30,9 +31,29 @@ export function isApproveEnabled(
   return typed.trim().toLowerCase() === liveConfirmPhrase(display);
 }
 
-/** One-line human summary of a proposed action for the popup header. */
-export function summarizeProposal(display: PendingActionDisplay): string {
-  const px = display.estPx != null ? ` @≈$${display.estPx}` : '';
-  const stop = display.stopPx != null ? ` · stop $${display.stopPx}` : '';
-  return `${display.side.toUpperCase()} ${display.sz} ${display.coin}${px}${stop}`;
+/** Human label for the action kind shown in the summary. */
+function kindLabel(kind: PendingActionKind, reduceOnly: boolean): string {
+  if (reduceOnly) return 'reduce-only';
+  return kind === 'entry' ? 'entry' : kind === 'exit' ? 'exit' : 'action';
+}
+
+/**
+ * One-line human summary of a proposed action for the popup header. Prices are
+ * formatted via the shared `fmtPx` locale helper (variable precision, no raw
+ * numbers). When `kind`/`mode` are supplied, the summary also tags the action
+ * type (entry / exit / reduce-only) and the trading mode (PAPER/LIVE) so the
+ * operator sees WHAT KIND of order this is and which book it hits.
+ */
+export function summarizeProposal(
+  display: PendingActionDisplay,
+  opts?: { kind?: PendingActionKind; mode?: TradingMode; reduceOnly?: boolean },
+): string {
+  const px = display.estPx != null ? ` @≈${fmtPx(display.estPx)}` : '';
+  const stop = display.stopPx != null ? ` · stop ${fmtPx(display.stopPx)}` : '';
+  const core = `${display.side.toUpperCase()} ${display.sz} ${display.coin}${px}${stop}`;
+  if (!opts?.kind && !opts?.mode) return core;
+  const tags: string[] = [];
+  if (opts.kind) tags.push(kindLabel(opts.kind, opts.reduceOnly ?? false));
+  if (opts.mode) tags.push(opts.mode === 'live' ? 'LIVE' : 'PAPER');
+  return tags.length ? `${core} (${tags.join(' · ')})` : core;
 }

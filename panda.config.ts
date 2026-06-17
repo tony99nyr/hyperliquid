@@ -56,6 +56,16 @@ export default defineConfig({
       fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif",
     },
     '*': { boxSizing: 'border-box' },
+    // A11y: vestibular users opt out of motion. Remove the cockpit's entrance +
+    // pulse animations (popupIn, backdropIn, and the Safe-Exit dangerPulse, which
+    // otherwise loops a red glow forever). The universal selector catches all
+    // three regardless of which utility class applied them.
+    '@media (prefers-reduced-motion: reduce)': {
+      '*, *::before, *::after': {
+        animation: 'none !important',
+        transitionDuration: '0.001ms !important',
+      },
+    },
   },
   jsxFramework: 'react',
 });

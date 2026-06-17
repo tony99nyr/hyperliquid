@@ -16,7 +16,7 @@
  * on its own — it only flips a row the skill is polling. Dismisses on resolve.
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { css } from '@styled-system/css';
 import type { PendingAction } from '@/types/cockpit';
 import { usePendingActions } from '@/hooks/usePendingActions';
@@ -46,6 +46,66 @@ function PopupBody({ action }: { action: PendingAction }) {
   const isLive = action.mode === 'live';
   const approveEnabled = !busy && isApproveEnabled(action.mode, display, typed);
 
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const rejectRef = useRef<HTMLButtonElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // A11y: on open, move focus INTO the dialog (the typed-phrase input for LIVE,
+  // else the Reject button — the safe default) and INERT the rest of the page so
+  // screen readers announce only the dialog and Tab can't escape to the
+  // background. The cleanup restores the background when the popup unmounts.
+  useEffect(() => {
+    (isLive ? inputRef.current : rejectRef.current)?.focus();
+
+    const overlay = overlayRef.current;
+    const siblings: Element[] = [];
+    if (overlay?.parentElement) {
+      for (const child of Array.from(overlay.parentElement.children)) {
+        if (child !== overlay) {
+          siblings.push(child);
+          child.setAttribute('inert', '');
+          child.setAttribute('aria-hidden', 'true');
+        }
+      }
+    }
+    return () => {
+      for (const child of siblings) {
+        child.removeAttribute('inert');
+        child.removeAttribute('aria-hidden');
+      }
+    };
+  }, [isLive]);
+
+  // Trap Tab within the dialog and let Esc reject/dismiss (keyboard escape from
+  // a modal is an a11y expectation; rejecting is the safe outcome).
+  function onKeyDown(e: React.KeyboardEvent<HTMLElement>): void {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (!busy) void decide('reject');
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const focusable = Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((el) => el.offsetParent !== null || el === document.activeElement);
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement as HTMLElement | null;
+    if (e.shiftKey && active === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
   async function decide(path: 'approve' | 'reject'): Promise<void> {
     setBusy(true);
     setError(null);
@@ -71,7 +131,9 @@ function PopupBody({ action }: { action: PendingAction }) {
 
   return (
     <div
+      ref={overlayRef}
       role="presentation"
+      onKeyDown={onKeyDown}
       className={css({
         position: 'fixed',
         inset: 0,
@@ -85,6 +147,7 @@ function PopupBody({ action }: { action: PendingAction }) {
       })}
     >
       <section
+        ref={dialogRef}
         data-testid="approval-popup"
         role="dialog"
         aria-modal="true"
@@ -128,7 +191,11 @@ function PopupBody({ action }: { action: PendingAction }) {
         </header>
 
         <p data-testid="proposal-summary" className={css({ fontSize: 'lg', fontWeight: 'semibold', color: 'github.textBright', fontFamily: 'mono' })}>
-          {summarizeProposal(display)}
+          {summarizeProposal(display, {
+            kind: action.kind,
+            mode: action.mode,
+            reduceOnly: action.proposal.intent.reduceOnly,
+          })}
         </p>
 
         <p className={css({ fontSize: 'sm', color: 'github.text', lineHeight: '1.5' })}>{display.rationale}</p>
@@ -143,6 +210,7 @@ function PopupBody({ action }: { action: PendingAction }) {
               to enable Approve
             </span>
             <input
+              ref={inputRef}
               data-testid="live-confirm-input"
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
@@ -171,6 +239,7 @@ function PopupBody({ action }: { action: PendingAction }) {
 
         <div className={css({ display: 'flex', gap: '10px' })}>
           <button
+            ref={rejectRef}
             type="button"
             data-testid="reject-button"
             disabled={busy}

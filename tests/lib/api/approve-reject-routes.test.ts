@@ -9,21 +9,30 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const verifyAdminAuth = vi.fn();
 const decidePendingAction = vi.fn();
 
-vi.mock('@/lib/infrastructure/auth/auth', () => ({ verifyAdminAuth: (...a: unknown[]) => verifyAdminAuth(...a) }));
+vi.mock('@/lib/infrastructure/auth/auth', () => ({
+  verifyAdminAuth: (...a: unknown[]) => verifyAdminAuth(...a),
+  getClientIdentifier: (req: { headers: { get: (k: string) => string | null } }) =>
+    req.headers.get('x-forwarded-for') ?? 'test-client',
+}));
 vi.mock('@/lib/cockpit/pending-actions-service', () => ({
   decidePendingAction: (...a: unknown[]) => decidePendingAction(...a),
 }));
 
 import { POST as approve } from '@/app/api/cockpit/approve/route';
 import { POST as reject } from '@/app/api/cockpit/reject/route';
+import { _resetRateLimits } from '@/lib/infrastructure/rate-limiting/in-memory-rate-limit';
 import type { NextRequest } from 'next/server';
 
-function req(body: unknown): NextRequest {
-  return { json: async () => body } as unknown as NextRequest;
+function req(body: unknown, headers: Record<string, string> = {}): NextRequest {
+  return {
+    json: async () => body,
+    headers: { get: (k: string) => headers[k.toLowerCase()] ?? null },
+  } as unknown as NextRequest;
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  _resetRateLimits();
   verifyAdminAuth.mockResolvedValue(true);
 });
 
@@ -51,6 +60,22 @@ describe('POST /api/cockpit/approve', () => {
     decidePendingAction.mockResolvedValue(false);
     const res = await approve(req({ id: 'a1' }));
     expect(res.status).toBe(409);
+  });
+
+  it('403s a CROSS-ORIGIN request (CSRF defense) — after auth, before deciding', async () => {
+    const res = await approve(
+      req({ id: 'a1' }, { host: 'cockpit.example.com', origin: 'https://evil.example.com' }),
+    );
+    expect(res.status).toBe(403);
+    expect(decidePendingAction).not.toHaveBeenCalled();
+  });
+
+  it('cross-origin 403 still requires auth FIRST (401 wins for unauthenticated)', async () => {
+    verifyAdminAuth.mockResolvedValue(false);
+    const res = await approve(
+      req({ id: 'a1' }, { host: 'cockpit.example.com', origin: 'https://evil.example.com' }),
+    );
+    expect(res.status).toBe(401);
   });
 });
 

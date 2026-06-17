@@ -38,10 +38,20 @@ describe('isApproveEnabled', () => {
 });
 
 describe('summarizeProposal', () => {
-  it('renders side/size/coin + price + stop', () => {
-    expect(summarizeProposal(display)).toBe('SELL 1.5 ETH @≈$2000 · stop $1900');
+  it('renders side/size/coin + price + stop, prices via fmtPx (locale-formatted)', () => {
+    expect(summarizeProposal(display)).toBe('SELL 1.5 ETH @≈$2,000 · stop $1,900');
   });
   it('omits price/stop when absent', () => {
     expect(summarizeProposal({ coin: 'BTC', side: 'buy', sz: 0.1, rationale: 'x' })).toBe('BUY 0.1 BTC');
+  });
+  it('appends the action kind + mode when provided', () => {
+    expect(summarizeProposal(display, { kind: 'exit', mode: 'live' })).toBe(
+      'SELL 1.5 ETH @≈$2,000 · stop $1,900 (exit · LIVE)',
+    );
+  });
+  it('labels a reduce-only action regardless of kind', () => {
+    expect(summarizeProposal(display, { kind: 'entry', mode: 'paper', reduceOnly: true })).toBe(
+      'SELL 1.5 ETH @≈$2,000 · stop $1,900 (reduce-only · PAPER)',
+    );
   });
 });

@@ -14,7 +14,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAdminAuth } from '@/lib/infrastructure/auth/auth';
+import { verifyAdminAuth, getClientIdentifier } from '@/lib/infrastructure/auth/auth';
+import { isSameOrigin } from '@/lib/infrastructure/auth/same-origin';
+import { checkRateLimit } from '@/lib/infrastructure/rate-limiting/in-memory-rate-limit';
 import { getActiveSession } from '@/lib/cockpit/session-service';
 import { loadPosition } from '@/lib/cockpit/fill-persistence-service';
 import { getSafeExitPlan } from '@/lib/cockpit/safe-exit-plan-service';
@@ -22,6 +24,7 @@ import { executeIntent } from '@/lib/trading/fill-source';
 import {
   buildMarketReduceOnlyClose,
   isPlanFresh,
+  planReducesPosition,
   DEFAULT_SAFE_EXIT_STALENESS_MS,
 } from '@/lib/trading/safe-exit-business-logic';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
@@ -29,9 +32,22 @@ import { randomUUID } from 'node:crypto';
 
 export const dynamic = 'force-dynamic';
 
+/** The panic button is rare-by-design: 5/min per client is ample. */
+const SAFE_EXIT_MAX_PER_MIN = 5;
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  // 1) Auth FIRST (an unauthenticated caller always gets 401).
   if (!(await verifyAdminAuth(request))) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
+  }
+  // 2) CSRF defense-in-depth: reject cross-origin browser POSTs.
+  if (!isSameOrigin(request)) {
+    return NextResponse.json({ ok: false, error: 'Cross-origin request rejected' }, { status: 403 });
+  }
+  // 3) Rate limit BEFORE resolving any session / executing any intent.
+  const limit = checkRateLimit(`safe-exit:${getClientIdentifier(request)}`, SAFE_EXIT_MAX_PER_MIN, 60_000);
+  if (!limit.allowed) {
+    return NextResponse.json({ ok: false, error: 'Too many requests' }, { status: 429 });
   }
 
   // Optional body: an explicit coin (otherwise close the session's single open
@@ -71,13 +87,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const now = Date.now();
   const planFresh = isPlanFresh(plan?.updatedAt, now, DEFAULT_SAFE_EXIT_STALENESS_MS);
 
-  // FRESH Claude plan → trust it. STALE/absent → build the market reduce-only
-  // close from the LIVE position (the Claude-offline path). Either way the
-  // session id is forced onto the intent and a fresh idempotency key is minted.
+  // FRESH Claude plan → trust it, but HARDEN it against a position flip:
+  //   (a) force reduceOnly=true (a panic exit can NEVER open/grow exposure);
+  //   (b) the plan's coin+side must still REDUCE the live position (long→sell,
+  //       short→buy). If the position flipped since the plan was armed, the
+  //       stored intent would now ADD exposure — DISCARD it and use the
+  //       mechanical market reduce-only close instead.
+  // STALE/absent → also build the market close (the Claude-offline path).
+  // Either way the session id is forced onto the intent and a fresh idempotency
+  // key is minted.
   let intent;
   let usedFallback: boolean;
-  if (plan && planFresh) {
-    intent = { ...plan.intent, sessionId: session.id, clientIntentId: randomUUID(), createdAt: now };
+  if (plan && planFresh && planReducesPosition(plan.intent, position)) {
+    intent = {
+      ...plan.intent,
+      sessionId: session.id,
+      clientIntentId: randomUUID(),
+      createdAt: now,
+      reduceOnly: true,
+    };
     usedFallback = false;
   } else {
     const fallback = buildMarketReduceOnlyClose(position, {

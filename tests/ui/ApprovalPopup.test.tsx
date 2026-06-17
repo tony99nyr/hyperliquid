@@ -79,4 +79,27 @@ describe('ApprovalPopup', () => {
     fireEvent.click(screen.getByTestId('reject-button'));
     expect(fetch).toHaveBeenCalledWith('/api/cockpit/reject', expect.objectContaining({ method: 'POST' }));
   });
+
+  it('a11y: PAPER moves initial focus to the Reject button', () => {
+    render(<ApprovalPopup sessionId={null} actionOverride={action('paper')} />);
+    expect(document.activeElement).toBe(screen.getByTestId('reject-button'));
+  });
+
+  it('a11y: LIVE moves initial focus to the typed-confirm input', () => {
+    render(<ApprovalPopup sessionId={null} actionOverride={action('live')} />);
+    expect(document.activeElement).toBe(screen.getByTestId('live-confirm-input'));
+  });
+
+  it('a11y: Esc rejects (POSTs /api/cockpit/reject)', () => {
+    render(<ApprovalPopup sessionId={null} actionOverride={action('paper')} />);
+    fireEvent.keyDown(screen.getByTestId('approval-popup'), { key: 'Escape' });
+    expect(fetch).toHaveBeenCalledWith('/api/cockpit/reject', expect.objectContaining({ method: 'POST' }));
+  });
+
+  it('a11y: keeps role=dialog + aria-modal', () => {
+    render(<ApprovalPopup sessionId={null} actionOverride={action('paper')} />);
+    const dialog = screen.getByTestId('approval-popup');
+    expect(dialog.getAttribute('role')).toBe('dialog');
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+  });
 });

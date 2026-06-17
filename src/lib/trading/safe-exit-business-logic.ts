@@ -67,3 +67,21 @@ export function isPlanFresh(
 
 /** Default Safe-Exit plan staleness window (ms). */
 export const DEFAULT_SAFE_EXIT_STALENESS_MS = 60_000;
+
+/**
+ * True when `intent` is a valid REDUCE of `position`: same coin, and the side
+ * that shrinks the live exposure (long→sell, short→buy). The panic button uses
+ * this to decide whether a fresh Claude plan can still be trusted — if the
+ * position flipped since the plan was armed (e.g. long→short), the stored intent
+ * would now ADD exposure, so the plan must be discarded for the mechanical
+ * market-close fallback instead.
+ */
+export function planReducesPosition(
+  intent: Pick<TradeIntent, 'coin' | 'side'>,
+  position: Pick<Position, 'coin' | 'side'>,
+): boolean {
+  if (position.side === 'flat') return false;
+  if (intent.coin !== position.coin) return false;
+  const reducingSide: OrderSide = position.side === 'long' ? 'sell' : 'buy';
+  return intent.side === reducingSide;
+}

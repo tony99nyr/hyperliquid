@@ -159,8 +159,19 @@ export async function pollPendingAction(
       return outcomeToApproved(outcome);
     }
     if (isPastDeadline(startedAt, now(), timeoutMs)) {
+      // Deadline hit. The CONDITIONAL expire only flips a row that is STILL
+      // 'pending' (its `.eq('status','pending')` guard). If the user approved at
+      // the same instant, the expire is a no-op and the row stays 'approved'.
+      // RE-READ to find out which actually happened and converge DB ⇄ outcome:
+      //  - 'approved' → user beat the timer → resolve TRUE (execute).
+      //  - 'expired'/'rejected'/etc. → resolve via the normal interpretation.
       await expirePendingAction(id, client);
-      return false; // timed out — NO.
+      const finalStatus = await readPendingActionStatus(id, client);
+      const finalOutcome = interpretStatus(finalStatus);
+      if (finalOutcome.kind !== 'keep-polling') {
+        return outcomeToApproved(finalOutcome);
+      }
+      return false; // still undecided after expire (shouldn't happen) — NO.
     }
     await sleep(pollIntervalMs);
   }

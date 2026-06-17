@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildMarketReduceOnlyClose,
   isPlanFresh,
+  planReducesPosition,
   DEFAULT_SAFE_EXIT_STALENESS_MS,
 } from '@/lib/trading/safe-exit-business-logic';
 import type { Position } from '@/types/position';
@@ -76,5 +77,23 @@ describe('isPlanFresh', () => {
   it('respects a custom staleness window', () => {
     expect(isPlanFresh(now - 5_000, now, 4_000)).toBe(false);
     expect(isPlanFresh(now - 3_000, now, 4_000)).toBe(true);
+  });
+});
+
+describe('planReducesPosition', () => {
+  it('long position: a SELL on the same coin reduces it', () => {
+    expect(planReducesPosition({ coin: 'ETH', side: 'sell' }, { coin: 'ETH', side: 'long' })).toBe(true);
+  });
+  it('short position: a BUY on the same coin reduces it', () => {
+    expect(planReducesPosition({ coin: 'ETH', side: 'buy' }, { coin: 'ETH', side: 'short' })).toBe(true);
+  });
+  it('long position: a BUY would ADD exposure → false (position flipped guard)', () => {
+    expect(planReducesPosition({ coin: 'ETH', side: 'buy' }, { coin: 'ETH', side: 'long' })).toBe(false);
+  });
+  it('wrong coin → false', () => {
+    expect(planReducesPosition({ coin: 'BTC', side: 'sell' }, { coin: 'ETH', side: 'long' })).toBe(false);
+  });
+  it('flat position → false (nothing to reduce)', () => {
+    expect(planReducesPosition({ coin: 'ETH', side: 'sell' }, { coin: 'ETH', side: 'flat' })).toBe(false);
   });
 });

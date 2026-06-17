@@ -73,6 +73,27 @@ describe('pollPendingAction — NO-AUTO-FIRE default', () => {
     expect(update).toBeTruthy();
     expect((update!.payload as { status: string }).status).toBe('expired');
   });
+
+  it('APPROVE-AT-DEADLINE: expire misses (already approved) → re-read sees approved → TRUE', async () => {
+    // 1st read: still pending. Clock then jumps past the deadline. The
+    // conditional expire is a no-op (row already approved), and the post-expire
+    // RE-READ observes 'approved' — the user beat the timer, so we execute.
+    mock.queueResult({ data: { status: 'pending' }, error: null }); // initial poll read
+    mock.queueResult({ data: null, error: null }); // expire update (no-op, row not pending)
+    mock.queueResult({ data: { status: 'approved' }, error: null }); // post-expire re-read
+    let t = 0;
+    const now = () => {
+      const v = t;
+      t += 60_000;
+      return v;
+    };
+    const ok = await pollPendingAction(
+      'a1',
+      { sleep: noSleep, now, timeoutMs: 1_000, pollIntervalMs: 1 },
+      client(),
+    );
+    expect(ok).toBe(true);
+  });
 });
 
 describe('decidePendingAction — atomic pending→decided', () => {
