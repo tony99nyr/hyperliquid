@@ -100,9 +100,15 @@ export interface RunSessionDeps {
 
 export interface RunSessionResult {
   sessionId: string;
-  /** 'live' — entry filled + monitoring started; 'aborted' — not approved. */
-  outcome: 'live' | 'aborted';
-  /** The entry fill when it executed (null when aborted). */
+  /**
+   * 'live' — entry filled + monitoring started; 'aborted' — not approved /
+   * refused before execution; 'no-fill' — approved + executed but NOTHING filled
+   * (empty book or an entry limit that didn't cross → fill.sz <= 0). A no-fill is
+   * NOT a live session: no hypothesis is written, no monitor is spawned, and no
+   * Safe-Exit is armed (there is nothing to monitor or exit).
+   */
+  outcome: 'live' | 'aborted' | 'no-fill';
+  /** The entry fill when it executed (null when aborted; the empty fill on no-fill). */
   fill: CanonicalFill | null;
   /** Whether the watch daemon was spawned / already running (null when aborted). */
   watch: EnsureWatchResult | null;
@@ -128,6 +134,9 @@ export function resolveEntrySide(
 /**
  * Run the deterministic entry chain. Returns 'aborted' WITHOUT executing or
  * starting the monitor when the approval gate is not satisfied (no-auto-fire).
+ * Returns 'no-fill' when execution ran but nothing filled (fill.sz <= 0) — in
+ * that case no hypothesis, monitor, or Safe-Exit is created (there is nothing to
+ * monitor or exit).
  */
 export async function runSessionEntryChain(
   pick: RunSessionPick,
@@ -198,6 +207,17 @@ export async function runSessionEntryChain(
 
   // 6. Execute the (approved) entry — the ONE mode-branching seam.
   const fill = await deps.executeIntent(proposal.intent);
+
+  // 6a. NOTHING FILLED (empty book, or an entry limit that didn't cross — see
+  // fill-source.ts "nothing filled"). There is no position: do NOT write the
+  // hypothesis, do NOT spawn the monitor, do NOT arm a Safe-Exit. Reporting a
+  // live session here would leave the operator believing a position exists when
+  // none does. The (empty) fill is returned so the caller can explain why.
+  if (fill.sz <= 0) {
+    log('No fill — the entry did not execute (empty book or the limit price never crossed). Nothing was opened.');
+    return { sessionId, outcome: 'no-fill', fill, watch: null, safeExitArmed: false };
+  }
+
   log(`Filled: ${fill.sz} ${fill.coin} @ $${fill.px} (source=${fill.source}, fee=$${fill.feeUsd.toFixed(4)}).`);
   await deps.writeHypothesis({ sessionId, statement: pick.thesis });
 

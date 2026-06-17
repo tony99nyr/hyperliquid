@@ -168,6 +168,28 @@ describe('runSessionEntryChain — REJECTED (no-auto-fire)', () => {
     expect(deps.writeHypothesis).not.toHaveBeenCalled();
   });
 
+  it('ZERO-FILL after approval ⇒ no hypothesis, no watch, no Safe-Exit; outcome no-fill (FIX 1)', async () => {
+    // executeIntent returns an empty fill (sz 0) — empty book or a limit that
+    // never crossed. The chain must NOT report a live session.
+    const emptyFill: CanonicalFill = { ...fill, sz: 0, px: 0, notionalUsd: 0, feeUsd: 0, partial: false };
+    const deps = makeDeps({ executeIntent: vi.fn().mockResolvedValue(emptyFill) });
+    const result = await runSessionEntryChain(pick, deps);
+
+    expect(result.outcome).toBe('no-fill');
+    expect(result.fill).toEqual(emptyFill);
+    expect(result.watch).toBeNull();
+    expect(result.safeExitArmed).toBe(false);
+
+    // Execution WAS attempted (approval was granted)...
+    expect(deps.requireApproval).toHaveBeenCalledTimes(1);
+    expect(deps.executeIntent).toHaveBeenCalledTimes(1);
+    // ...but nothing downstream of a real fill happened.
+    expect(deps.writeHypothesis).not.toHaveBeenCalled();
+    expect(deps.ensureWatchDaemon).not.toHaveBeenCalled();
+    expect(deps.upsertSafeExitPlan).not.toHaveBeenCalled();
+    expect(deps.loadPosition).not.toHaveBeenCalled();
+  });
+
   it('a neutral read with no explicit side aborts BEFORE proposing or approving', async () => {
     const deps = makeDeps({
       analyzeMarket: vi.fn().mockResolvedValue({ coin: 'ETH', reads: [], bias: 0, biasLabel: 'neutral', aligned: false, summary: 'neutral' }),

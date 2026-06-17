@@ -138,6 +138,14 @@ run(async () => {
     return;
   }
 
+  if (result.outcome === 'no-fill') {
+    header('No fill — nothing was opened');
+    line('The entry was approved and submitted, but nothing filled (book empty or the limit price never crossed).');
+    line(`Session ${result.sessionId} stays open with no position. No monitor was started and no Safe-Exit was armed.`);
+    line('Re-run when the book has liquidity, or use a market entry (omit --limit) / a limit that crosses.');
+    return;
+  }
+
   header('Session LIVE — monitoring started');
   line(`session: ${result.sessionId}`);
   line('The non-agent watch daemon is now tracking this position (survives Claude dying).');
