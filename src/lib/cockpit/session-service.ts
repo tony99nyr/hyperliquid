@@ -68,6 +68,30 @@ export async function getActiveSession(
   return toSession(data as SessionRow);
 }
 
+/**
+ * List ALL active sessions (most-recent first). Used by the non-agent watch
+ * daemon, which monitors every active sitting (not just the single newest one
+ * the cockpit live-tracks). Fail-soft: returns [] when Supabase is unconfigured
+ * so the daemon can start before the DB is provisioned and simply find nothing.
+ */
+export async function listActiveSessions(
+  clientFactory: () => SupabaseClient = getServiceRoleClient,
+): Promise<Session[]> {
+  let client: SupabaseClient;
+  try {
+    client = clientFactory();
+  } catch {
+    return []; // Supabase not configured yet — fail soft.
+  }
+  const { data, error } = await client
+    .from('sessions')
+    .select('*')
+    .eq('status', 'active')
+    .order('created_at', { ascending: false });
+  if (error || !data) return [];
+  return (data as SessionRow[]).map(toSession);
+}
+
 /** Close a session (status → 'closed'). */
 export async function closeSession(
   sessionId: string,

@@ -23,7 +23,8 @@
     "skill:open-position": "tsx --tsconfig tsconfig.scripts.json scripts/open-position.ts",
     "skill:assess-health": "tsx --tsconfig tsconfig.scripts.json scripts/assess-health.ts",
     "skill:advise-exit": "tsx --tsconfig tsconfig.scripts.json scripts/advise-exit.ts",
-    "skill:report-context": "tsx --tsconfig tsconfig.scripts.json scripts/report-context.ts"
+    "skill:report-context": "tsx --tsconfig tsconfig.scripts.json scripts/report-context.ts",
+    "watch": "tsx --tsconfig tsconfig.scripts.json scripts/watch.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.47.10",

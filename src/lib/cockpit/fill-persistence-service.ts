@@ -28,6 +28,7 @@ import {
   positionFromRow,
   type FillSelectRow,
 } from './cockpit-rows-business-logic';
+import type { PnlInsertRow } from './cockpit-rows-business-logic';
 import { applyFills } from '@/lib/trading/pnl-business-logic';
 import type { CanonicalFill } from '@/types/fill';
 import type { Position } from '@/types/position';
@@ -77,6 +78,56 @@ export async function loadPosition(
   if (error) throw new Error(`loadPosition failed: ${error.message}`);
   if (!data) return null;
   return positionFromRow(data as Parameters<typeof positionFromRow>[0]);
+}
+
+/**
+ * List ALL open (non-flat) positions for a session. Read-only. Used by the
+ * non-agent watch daemon to discover which coins to monitor — a fill creates a
+ * positions row, so polling this is how the daemon auto-picks-up a position the
+ * moment one opens. Returns [] (not throwing) when none exist.
+ */
+export async function loadOpenPositions(
+  sessionId: string,
+  client: SupabaseClient = getServiceRoleClient(),
+): Promise<Position[]> {
+  const { data, error } = await client
+    .from('positions')
+    .select('coin, side, sz, avg_entry_px, realized_pnl_usd, fees_paid_usd')
+    .eq('session_id', sessionId);
+  if (error) throw new Error(`loadOpenPositions failed: ${error.message}`);
+  if (!data) return [];
+  return (data as Array<Parameters<typeof positionFromRow>[0]>)
+    .map(positionFromRow)
+    .filter((p) => p.side !== 'flat' && p.sz > 0);
+}
+
+/**
+ * Append a pnl snapshot row carrying a MARK price + unrealized P&L. Used by the
+ * non-agent watch daemon: a fill writes a pnl row with mark=null (unrealized not
+ * yet known), but the watch loop marks the open position to market each tick and
+ * persists the live unrealized P&L here, which the cockpit PositionPanel reads.
+ */
+export async function writePnlSnapshot(
+  input: {
+    sessionId: string;
+    coin: string;
+    realizedPnlUsd: number;
+    unrealizedPnlUsd: number;
+    feesPaidUsd: number;
+    markPx: number | null;
+  },
+  client: SupabaseClient = getServiceRoleClient(),
+): Promise<void> {
+  const row: PnlInsertRow = {
+    session_id: input.sessionId,
+    coin: normalizeCoin(input.coin),
+    realized_pnl_usd: input.realizedPnlUsd,
+    unrealized_pnl_usd: input.unrealizedPnlUsd,
+    fees_paid_usd: input.feesPaidUsd,
+    mark_px: input.markPx,
+  };
+  const { error } = await client.from('pnl').insert(row);
+  if (error) throw new Error(`writePnlSnapshot failed: ${error.message}`);
 }
 
 /**
