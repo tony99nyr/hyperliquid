@@ -8,7 +8,24 @@
  * flags are surfaced so the rail can color blow-up-risk wallets red.
  */
 
-import { loadRatedWallets, RISK_FLAGS, type RatedWallet } from './rated-wallets-service';
+import {
+  loadRatedWallets,
+  RISK_FLAGS,
+  type RatedWallet,
+  type RatedWalletMetrics,
+} from './rated-wallets-service';
+
+/** The metrics the trader-detail drawer renders as numbers (a slim subset). */
+export interface TopTraderMetrics {
+  sharpe: number | null;
+  winRate: number | null;
+  profitFactor: number | null;
+  maxDrawdownFrac: number | null;
+  aggregatePnlUsd: number | null;
+  medianHoldHours: number | null;
+  nFills: number | null;
+  worstLossVsMedianWin: number | null;
+}
 
 export interface TopTraderRow {
   address: string;
@@ -19,8 +36,30 @@ export interface TopTraderRow {
   hasRisk: boolean;
   /** Up to 3 flags for the chip row (risk flags first). */
   flags: string[];
+  /** ALL flags (risk first), for the trader-detail risk/health read. */
+  allFlags: string[];
   leaderboardTop: boolean;
   topCoins: string[];
+  /** Slim metrics for the trader-detail drawer (numbers-first). */
+  metrics: TopTraderMetrics;
+}
+
+function n(v: number | undefined): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+/** Project the full rated metrics down to the slim drawer subset. PURE. */
+export function slimMetrics(m: RatedWalletMetrics): TopTraderMetrics {
+  return {
+    sharpe: n(m.sharpe),
+    winRate: n(m.winRate),
+    profitFactor: n(m.profitFactor),
+    maxDrawdownFrac: n(m.maxDrawdownFrac),
+    aggregatePnlUsd: n(m.aggregatePnlUsd),
+    medianHoldHours: n(m.medianHoldHours),
+    nFills: n(m.nFills),
+    worstLossVsMedianWin: n(m.worstLossVsMedianWin),
+  };
 }
 
 function rank(a: RatedWallet, b: RatedWallet): number {
@@ -39,15 +78,18 @@ export function getTopTraders(limit = 12): TopTraderRow[] {
     .map((w) => {
       const riskFlags = w.flags.filter((f) => RISK_FLAGS.has(f));
       const cleanFlags = w.flags.filter((f) => !RISK_FLAGS.has(f));
+      const allFlags = [...riskFlags, ...cleanFlags];
       return {
         address: w.address,
         short: w.short,
         displayName: w.displayName,
         composite: w.composite,
         hasRisk: riskFlags.length > 0,
-        flags: [...riskFlags, ...cleanFlags].slice(0, 3),
+        flags: allFlags.slice(0, 3),
+        allFlags,
         leaderboardTop: w.leaderboardTop ?? false,
         topCoins: (w.topCoins ?? []).slice(0, 3),
+        metrics: slimMetrics(w.metrics),
       };
     });
 }

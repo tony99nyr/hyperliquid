@@ -9,6 +9,12 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { RISK_FLAGS } from './rated-wallet-flags';
+
+// Re-export the canonical RISK_FLAGS set (defined in a zero-import leaf so client
+// components can import it without dragging this server-only fs module into the
+// client bundle). Server callers keep importing it from here unchanged.
+export { RISK_FLAGS };
 
 export interface PhilosophyGrade {
   grade: string;
@@ -94,13 +100,6 @@ const DATA_PATH = join(
   'wallet-rating',
   'rated-wallets.json',
 );
-
-/** Risk flags the UI should color red. */
-export const RISK_FLAGS = new Set([
-  'DISQUALIFIED', 'NO_STOPS', 'DEEP_MARTINGALE', 'DEEP_DRAWDOWN', 'FAT_WORST_LOSS',
-  'LIVE_UNDERWATER', 'RIDE_OR_LIQUIDATE', 'BLOW_UP_RISK', 'LIVE_DEEP_STACK',
-  'EXTREME_WIN_RATE', 'THIN_ALT_TRADER', 'SUB_MINUTE_SCALPER', 'TRADES_OVERNIGHT_EDT',
-]);
 
 /** Load (and cache) the full dataset. */
 export function loadRatedWallets(): RatedWalletsDataset {

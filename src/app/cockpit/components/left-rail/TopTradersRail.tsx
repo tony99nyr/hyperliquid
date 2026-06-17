@@ -6,11 +6,16 @@
  * action feed (deferred — read-only intel for now, an empty styled state labels
  * it for the future). Rows come pre-sliced from the RSC page (the 2.8MB dataset
  * never reaches the client).
+ *
+ * Each row is a button that opens the TraderDetailDrawer — the "is this trader
+ * safe to follow?" read (live positions + stats + risk flags + a Mirror command).
  */
 
+import { useState } from 'react';
 import { css } from '@styled-system/css';
 import type { TopTraderRow } from '@/lib/hyperliquid/top-traders-service';
 import { GH, ZONE_COLORS, panelSurface, regimeColor } from '../panel-styles';
+import TraderDetailDrawer from './TraderDetailDrawer';
 
 export interface TopTradersRailProps {
   traders: TopTraderRow[];
@@ -27,6 +32,7 @@ function compositeColor(score: number | null): string {
 
 export default function TopTradersRail({ traders, followedAddress }: TopTradersRailProps) {
   const followed = followedAddress?.toLowerCase() ?? null;
+  const [selected, setSelected] = useState<TopTraderRow | null>(null);
   return (
     <section
       data-testid="top-traders-rail"
@@ -45,12 +51,18 @@ export default function TopTradersRail({ traders, followedAddress }: TopTradersR
           {traders.map((t, i) => {
             const isFollowed = followed !== null && t.address.toLowerCase() === followed;
             return (
-              <li
-                key={t.address}
+              <li key={t.address} className={css({ listStyle: 'none', margin: 0, padding: 0 })}>
+              <button
+                type="button"
                 data-testid="top-trader-row"
                 data-followed={isFollowed}
+                onClick={() => setSelected(t)}
+                aria-label={`Open detail for ${t.displayName ?? t.short}`}
                 style={isFollowed ? { borderColor: '#58a6ff' } : undefined}
                 className={css({
+                  width: '100%',
+                  textAlign: 'left',
+                  cursor: 'pointer',
                   bg: 'github.bg',
                   border: '1px solid token(colors.github.borderSubtle)',
                   borderRadius: '6px',
@@ -58,6 +70,8 @@ export default function TopTradersRail({ traders, followedAddress }: TopTradersR
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '4px',
+                  _hover: { borderColor: 'github.link' },
+                  _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '1px' },
                 })}
               >
                 <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px' })}>
@@ -96,6 +110,7 @@ export default function TopTradersRail({ traders, followedAddress }: TopTradersR
                     </span>
                   ))}
                 </div>
+              </button>
               </li>
             );
           })}
@@ -118,6 +133,10 @@ export default function TopTradersRail({ traders, followedAddress }: TopTradersR
           ◌ live trader fills — coming soon
         </span>
       </div>
+
+      {selected && (
+        <TraderDetailDrawer trader={selected} onClose={() => setSelected(null)} />
+      )}
     </section>
   );
 }
