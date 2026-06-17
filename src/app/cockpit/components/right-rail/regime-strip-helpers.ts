@@ -53,3 +53,53 @@ export function rsiBand(rsi: number | null): 'oversold' | 'overbought' | 'neutra
   if (rsi > 70) return 'overbought';
   return 'neutral';
 }
+
+/** A net directional entry read derived from the multi-timeframe regime strip. */
+export interface EntryBias {
+  /** Which way the timeframes lean. */
+  side: 'long' | 'short' | 'neutral';
+  /** Confidence-weighted lean strength, 0–1 (how aligned the timeframes are). */
+  strength: number;
+  /** A short, numbers-aware guidance line. */
+  guidance: string;
+}
+
+/**
+ * Derive a net directional ENTRY bias from the per-timeframe regime rows. Each
+ * timeframe votes by its regime, weighted by its confidence; the net sign decides
+ * the side. Higher timeframes carry more weight (a 1d trend dominates a 15m blip).
+ * PURE — fixture-tested, no I/O.
+ */
+export function deriveEntryBias(rows: RegimeStripRow[]): EntryBias {
+  // Higher-TF rows lead the list (1d..15m); weight them more heavily.
+  const tfWeight: Record<string, number> = { '1d': 4, '8h': 3, '1h': 2, '15m': 1 };
+  let net = 0;
+  let totalWeight = 0;
+  for (const r of rows) {
+    if (r.noData) continue;
+    const w = tfWeight[r.timeframe] ?? 1;
+    totalWeight += w;
+    const vote = r.regime === 'bullish' ? 1 : r.regime === 'bearish' ? -1 : 0;
+    net += vote * r.confidence * w;
+  }
+  if (totalWeight === 0) {
+    return { side: 'neutral', strength: 0, guidance: 'No regime data yet — wait for a read.' };
+  }
+  const norm = net / totalWeight; // -1..1
+  const strength = Math.min(1, Math.abs(norm));
+  // A small dead-band so a barely-net read reads as neutral (no false confidence).
+  if (strength < 0.15) {
+    return {
+      side: 'neutral',
+      strength,
+      guidance: 'Mixed across timeframes — no clean edge. Prefer to wait.',
+    };
+  }
+  const side = norm > 0 ? 'long' : 'short';
+  const pct = Math.round(strength * 100);
+  const guidance =
+    side === 'long'
+      ? `Timeframes lean LONG (${pct}% aligned) — bias favors a buy entry.`
+      : `Timeframes lean SHORT (${pct}% aligned) — bias favors a sell entry.`;
+  return { side, strength, guidance };
+}

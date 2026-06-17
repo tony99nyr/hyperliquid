@@ -1,19 +1,30 @@
 'use client';
 
 /**
- * HealthPanel — the right-rail Trade Health block (our enhancement where HL puts
- * order entry). A graded score /100 (gauge + letter grade), BIG P(continuation) /
- * P(adverse) percentages, the per-timeframe RegimeStrip (regime + conf% + RSI as
- * numbers), and the fired alerts as color-coded chips. Realtime via
- * useHealthSnapshots; gauge color shifts ok → warn → danger as health degrades
- * (thresholds in panel-styles.healthZone, unit-tested).
+ * HealthPanel — the right-rail block that ADAPTS to whether the session holds an
+ * OPEN position (HL puts order entry here; we put the read that matters now):
+ *
+ *   FLAT (no position) → "MARKET READ / ENTRY": the multi-timeframe regime read
+ *     (per-TF regime + conf% + RSI as numbers) plus a net directional bias framed
+ *     as ENTRY guidance ("is it a good time, which side"). No position-health for a
+ *     position that doesn't exist.
+ *
+ *   IN A POSITION → "TRADE HEALTH": the graded score /100 (gauge + grade), BIG
+ *     P(continuation) / P(adverse) percentages, and the fired alerts as chips.
+ *
+ * The flat-vs-in switch is driven by the active position (usePositionPnl filtered
+ * to the coin). When flat there may be no health_snapshot, so the market read is
+ * derived from useRegimeStrip (always available). Numbers-first throughout.
  */
 
 import { css } from '@styled-system/css';
 import type { HealthSnapshot } from '@/types/cockpit';
 import { useHealthSnapshots } from '@/hooks/useHealthSnapshots';
+import { usePositionPnl } from '@/hooks/usePositionPnl';
+import { useRegimeStrip } from '@/hooks/useRegimeStrip';
 import RegimeStrip from './right-rail/RegimeStrip';
 import AlertChip from './right-rail/AlertChip';
+import { deriveEntryBias, type RegimeStripRow } from './right-rail/regime-strip-helpers';
 import {
   GH,
   ZONE_COLORS,
@@ -22,6 +33,7 @@ import {
   healthGrade,
   healthZone,
   panelSurface,
+  regimeColor,
 } from './panel-styles';
 
 export interface HealthPanelProps {
@@ -30,6 +42,14 @@ export interface HealthPanelProps {
   coin?: string;
   /** Test/RSC seed: render a fixed snapshot instead of subscribing. */
   snapshotOverride?: HealthSnapshot | null;
+  /**
+   * Test/RSC seed: force the flat-vs-in-position mode instead of deriving it from
+   * the live position. When undefined, the mode is derived from usePositionPnl
+   * (an open, non-flat position for this coin ⇒ "in position").
+   */
+  inPositionOverride?: boolean;
+  /** Test seed: fixed regime rows for the entry read (bypasses the fetch). */
+  regimeRowsOverride?: RegimeStripRow[];
 }
 
 const GAUGE_SIZE = 104;
@@ -89,24 +109,65 @@ function ProbBlock({ label, value, color, testid }: { label: string; value: numb
   );
 }
 
-export default function HealthPanel({ sessionId, coin = 'ETH', snapshotOverride }: HealthPanelProps) {
+const sectionStyle = { ...panelSurface, padding: '14px', display: 'flex', flexDirection: 'column', gap: '14px' } as const;
+
+function PanelHeader({ title, note }: { title: string; note?: string }) {
+  return (
+    <header className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px' })}>
+      <h2 className={css({ fontFamily: 'label', fontSize: 'sm', fontWeight: 'bold', color: 'github.textBright', textTransform: 'uppercase', letterSpacing: '0.06em' })}>
+        {title}
+      </h2>
+      {note && <span className={css({ fontSize: 'xs', color: 'github.textMuted', fontFamily: 'mono' })}>{note}</span>}
+    </header>
+  );
+}
+
+export default function HealthPanel({
+  sessionId,
+  coin = 'ETH',
+  snapshotOverride,
+  inPositionOverride,
+  regimeRowsOverride,
+}: HealthPanelProps) {
+  const usingOverride = snapshotOverride !== undefined || inPositionOverride !== undefined;
+
   const live = useHealthSnapshots(snapshotOverride === undefined ? sessionId : null);
   const snapshot = snapshotOverride !== undefined ? snapshotOverride : live.latest;
-  // In override (test/RSC seed) mode, keep the regime strip inert so the panel
-  // renders without a network fetch — same convention as the other islands.
-  const regimeCoin = snapshotOverride !== undefined ? '' : coin;
 
+  // In override (test/RSC seed) mode keep the live subscriptions inert.
+  const positionState = usePositionPnl(usingOverride ? null : sessionId);
+  const norm = coin.trim().toUpperCase();
+  const derivedInPosition = positionState.positions.some(
+    (p) => p.side !== 'flat' && p.coin.toUpperCase() === norm,
+  );
+  const inPosition = inPositionOverride !== undefined ? inPositionOverride : derivedInPosition;
+
+  // The regime strip / entry read fetches for a real coin; inert under overrides.
+  const regimeCoin = usingOverride || regimeRowsOverride ? '' : coin;
+
+  if (inPosition) {
+    return (
+      <TradeHealthView snapshot={snapshot} regimeCoin={regimeCoin} rowsOverride={regimeRowsOverride} />
+    );
+  }
   return (
-    <section
-      data-testid="health-panel"
-      className={css({ ...panelSurface, padding: '14px', display: 'flex', flexDirection: 'column', gap: '14px' })}
-    >
-      <header className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' })}>
-        <h2 className={css({ fontFamily: 'label', fontSize: 'sm', fontWeight: 'bold', color: 'github.textBright', textTransform: 'uppercase', letterSpacing: '0.06em' })}>
-          Trade Health
-        </h2>
-        {!snapshot && <span className={css({ fontSize: 'xs', color: 'github.textMuted', fontFamily: 'mono' })}>awaiting assessment…</span>}
-      </header>
+    <MarketReadView coin={coin} regimeCoin={regimeCoin} rowsOverride={regimeRowsOverride} usingOverride={usingOverride} />
+  );
+}
+
+/** "TRADE HEALTH" — the held-position read (score + probabilities + alerts). */
+function TradeHealthView({
+  snapshot,
+  regimeCoin,
+  rowsOverride,
+}: {
+  snapshot: HealthSnapshot | null;
+  regimeCoin: string;
+  rowsOverride?: RegimeStripRow[];
+}) {
+  return (
+    <section data-testid="health-panel" data-mode="trade-health" className={css(sectionStyle)}>
+      <PanelHeader title="Trade Health" note={!snapshot ? 'awaiting assessment…' : undefined} />
 
       {snapshot && (
         <div className={css({ display: 'flex', gap: '14px', alignItems: 'center' })}>
@@ -118,7 +179,7 @@ export default function HealthPanel({ sessionId, coin = 'ETH', snapshotOverride 
         </div>
       )}
 
-      <RegimeStrip coin={regimeCoin} />
+      <RegimeStrip coin={regimeCoin} rowsOverride={rowsOverride} />
 
       <div className={css({ display: 'flex', flexDirection: 'column', gap: '6px' })}>
         <span className={css({ fontFamily: 'label', fontSize: '10px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.08em' })}>
@@ -136,6 +197,61 @@ export default function HealthPanel({ sessionId, coin = 'ETH', snapshotOverride 
           </span>
         )}
       </div>
+    </section>
+  );
+}
+
+/** "MARKET READ / ENTRY" — the flat-session entry guidance (regime + bias). */
+function MarketReadView({
+  coin,
+  regimeCoin,
+  rowsOverride,
+  usingOverride,
+}: {
+  coin: string;
+  regimeCoin: string;
+  rowsOverride?: RegimeStripRow[];
+  usingOverride: boolean;
+}) {
+  // Pull the same rows the strip uses so we can derive a net directional bias.
+  // Inert (empty coin) under overrides; the override rows feed the bias directly.
+  const liveStrip = useRegimeStrip(rowsOverride || usingOverride ? '' : coin);
+  const rows = rowsOverride ?? liveStrip.rows;
+  const bias = deriveEntryBias(rows);
+  const biasColor = regimeColor(bias.side === 'long' ? 'bullish' : bias.side === 'short' ? 'bearish' : 'neutral');
+  const sideLabel = bias.side === 'long' ? 'LONG' : bias.side === 'short' ? 'SHORT' : 'NEUTRAL';
+
+  return (
+    <section data-testid="health-panel" data-mode="market-read" className={css(sectionStyle)}>
+      <PanelHeader title="Market Read / Entry" note="no position" />
+
+      <div className={css({ display: 'flex', flexDirection: 'column', gap: '3px' })}>
+        <span className={css({ fontFamily: 'label', fontSize: '9px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.06em' })}>
+          Net Directional Bias
+        </span>
+        <span
+          data-testid="entry-bias-side"
+          data-side={bias.side}
+          style={{ color: biasColor }}
+          className={css({ fontFamily: 'mono', fontSize: 'xl', fontWeight: 'bold', lineHeight: '1' })}
+        >
+          {sideLabel}
+          {bias.side !== 'neutral' && (
+            <span data-testid="entry-bias-strength" style={{ color: biasColor, fontFeatureSettings: '"tnum"' }} className={css({ fontSize: 'sm', marginLeft: '8px' })}>
+              {Math.round(bias.strength * 100)}%
+            </span>
+          )}
+        </span>
+        <span data-testid="entry-bias-guidance" className={css({ fontSize: 'xs', color: 'github.text', lineHeight: '1.4' })}>
+          {bias.guidance}
+        </span>
+      </div>
+
+      <RegimeStrip coin={regimeCoin} rowsOverride={rowsOverride} />
+
+      <span className={css({ fontSize: '10px', color: 'github.textMuted', fontFamily: 'mono', lineHeight: '1.4' })}>
+        Entry guidance only — no open {coin} position. Trade Health replaces this once a position is live.
+      </span>
     </section>
   );
 }

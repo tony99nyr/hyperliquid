@@ -3,7 +3,9 @@ import {
   rowFromCandles,
   buildRegimeStrip,
   rsiBand,
+  deriveEntryBias,
   REGIME_STRIP_TIMEFRAMES,
+  type RegimeStripRow,
 } from '@/app/cockpit/components/right-rail/regime-strip-helpers';
 import type { CandleResult } from '@/lib/hyperliquid/candle-service';
 import type { PriceCandle } from '@/types/trading-core';
@@ -58,5 +60,57 @@ describe('buildRegimeStrip', () => {
     expect(rows.map((r) => r.timeframe)).toEqual([...REGIME_STRIP_TIMEFRAMES]);
     // Missing timeframes are noData.
     expect(rows.find((r) => r.timeframe === '15m')?.noData).toBe(true);
+  });
+});
+
+function row(over: Partial<RegimeStripRow> & { timeframe: RegimeStripRow['timeframe'] }): RegimeStripRow {
+  return { regime: 'neutral', confidence: 0.5, rsi: 50, noData: false, ...over };
+}
+
+describe('deriveEntryBias', () => {
+  it('returns neutral with no data', () => {
+    const b = deriveEntryBias([row({ timeframe: '1d', noData: true })]);
+    expect(b.side).toBe('neutral');
+    expect(b.strength).toBe(0);
+  });
+
+  it('leans LONG when higher timeframes are bullish', () => {
+    const b = deriveEntryBias([
+      row({ timeframe: '1d', regime: 'bullish', confidence: 0.8 }),
+      row({ timeframe: '8h', regime: 'bullish', confidence: 0.7 }),
+      row({ timeframe: '1h', regime: 'neutral', confidence: 0.2 }),
+      row({ timeframe: '15m', regime: 'bearish', confidence: 0.4 }),
+    ]);
+    expect(b.side).toBe('long');
+    expect(b.guidance).toMatch(/buy entry/i);
+    expect(b.strength).toBeGreaterThan(0);
+  });
+
+  it('leans SHORT when higher timeframes are bearish', () => {
+    const b = deriveEntryBias([
+      row({ timeframe: '1d', regime: 'bearish', confidence: 0.9 }),
+      row({ timeframe: '8h', regime: 'bearish', confidence: 0.6 }),
+    ]);
+    expect(b.side).toBe('short');
+    expect(b.guidance).toMatch(/sell entry/i);
+  });
+
+  it('reads neutral inside the dead-band (conflicting timeframes cancel)', () => {
+    const b = deriveEntryBias([
+      row({ timeframe: '1d', regime: 'bullish', confidence: 0.5 }),
+      row({ timeframe: '8h', regime: 'bearish', confidence: 0.5 }),
+      row({ timeframe: '1h', regime: 'bullish', confidence: 0.5 }),
+      row({ timeframe: '15m', regime: 'bearish', confidence: 0.5 }),
+    ]);
+    expect(b.side).toBe('neutral');
+  });
+
+  it('weights the 1d trend above a 15m blip', () => {
+    const b = deriveEntryBias([
+      row({ timeframe: '1d', regime: 'bullish', confidence: 0.9 }),
+      row({ timeframe: '15m', regime: 'bearish', confidence: 0.9 }),
+    ]);
+    // 1d weight 4 vs 15m weight 1 → net long.
+    expect(b.side).toBe('long');
   });
 });
