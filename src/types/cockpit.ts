@@ -5,7 +5,7 @@
  * ADR-0002.
  */
 
-import type { TradingMode } from './fill';
+import type { TradeIntent, TradingMode } from './fill';
 
 export type SessionStatus = 'active' | 'closed';
 
@@ -69,4 +69,64 @@ export interface ContextGauge {
   /** Approximate context used, 0–100. */
   approxPct: number;
   zone: ContextZone;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1: approval gate + Safe-Exit backstop (the trade-execution path).
+// ---------------------------------------------------------------------------
+
+export type PendingActionKind = 'entry' | 'exit' | 'generic';
+export type PendingActionStatus = 'pending' | 'approved' | 'rejected' | 'expired';
+
+/**
+ * Human-readable display fields for a proposed action, surfaced in the approval
+ * popup. Carried inside the `proposal` jsonb alongside the executable intent so
+ * the UI renders without re-deriving anything.
+ */
+export interface PendingActionDisplay {
+  coin: string;
+  side: OrderSideLabel;
+  sz: number;
+  /** Entry / estimated fill price, when known. */
+  estPx?: number | null;
+  /** Protective stop, when the proposal carries one. */
+  stopPx?: number | null;
+  rationale: string;
+}
+
+/** Buy/sell label re-export to avoid a fill.ts import in pure UI mappers. */
+export type OrderSideLabel = 'buy' | 'sell';
+
+/**
+ * The `proposal` jsonb payload: the executable TradeIntent PLUS the display
+ * fields. The intent is what executeIntent runs on approval; display is for the
+ * popup only.
+ */
+export interface PendingActionProposal {
+  intent: TradeIntent;
+  display: PendingActionDisplay;
+}
+
+/** A queued approval request — the NO-AUTO-FIRE row (`pending_actions`). */
+export interface PendingAction {
+  id: string;
+  sessionId: string;
+  kind: PendingActionKind;
+  mode: TradingMode;
+  proposal: PendingActionProposal;
+  status: PendingActionStatus;
+  createdAt: number;
+  decidedAt: number | null;
+}
+
+/** The current reduce-only exit plan for a session (`safe_exit_plan`). */
+export interface SafeExitPlan {
+  id: string;
+  sessionId: string;
+  /** The reduce-only exit TradeIntent (opposite side, full size, market). */
+  intent: TradeIntent;
+  reasoning: string | null;
+  /** True when this is the mechanical market-close fallback, not Claude-authored. */
+  isFallback: boolean;
+  updatedAt: number;
 }
