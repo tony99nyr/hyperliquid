@@ -4,47 +4,107 @@
  * ApprovalPopup — the animated web replacement for the terminal confirm gate.
  *
  * Subscribes to the session's `pending_actions` (realtime, via usePendingActions)
- * and, whenever a row is 'pending', renders an animated modal summarizing the
- * proposed trade (coin / side / size / est px / stop / rationale + a PAPER/LIVE
- * badge) with Approve / Reject. Approving POSTs /api/cockpit/approve; rejecting
- * POSTs /api/cockpit/reject; the polling skill (requireApproval) then observes
- * the decision and executes (approve) or aborts (reject).
+ * and, whenever a row is 'pending', renders a polished dark order-confirmation
+ * CARD (Item 2): the trade as tabular data rows, a prominent PAPER/LIVE badge,
+ * the leader being followed, an operator LEVERAGE control (Item 3), and properly
+ * weighted Approve / Reject controls. Approving POSTs /api/cockpit/approve WITH
+ * the chosen leverage; rejecting POSTs /api/cockpit/reject; the polling skill
+ * (requireApproval) observes the decision and executes (approve) or aborts.
  *
  * THE INVARIANT: LIVE needs a STRONGER confirm than paper. PAPER = one-tap
  * Approve. LIVE = the operator must type the exact "side sz coin" phrase before
  * Approve enables (isApproveEnabled, unit-tested). Nothing here can fire a trade
  * on its own — it only flips a row the skill is polling. Dismisses on resolve.
+ *
+ * LEVERAGE is the operator's risk decision: the slider drives a LIVE margin/liq/
+ * ROE read and a SAFETY GUARD (liquidation-inside-stop). Notional stays risk-sized
+ * — leverage governs margin/liq/ROE only. The chosen value is server-validated.
  */
 
 import { useEffect, useRef, useState } from 'react';
 import { css } from '@styled-system/css';
 import type { PendingAction } from '@/types/cockpit';
+import type { HlPosition } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { usePendingActions } from '@/hooks/usePendingActions';
+import {
+  clampLeverage,
+  deriveLeverageRead,
+  liquidationInsideStop,
+  resolveCoinMaxLeverage,
+  halfLeaderLeverage,
+} from '@/lib/trading/leverage-business-logic';
+import { leaderPositionForCoin } from './leader-alignment-helpers';
 import { isApproveEnabled, liveConfirmPhrase, summarizeProposal } from './approval-popup-helpers';
-import { GH, ZONE_COLORS } from './panel-styles';
+import { GH, ZONE_COLORS, fmtPx, fmtUsd, fmtCompactUsd, fmtPctSigned } from './panel-styles';
 
 export interface ApprovalPopupProps {
   sessionId: string | null;
+  /** Leader being followed (label + leverage source for Match-leader). */
+  leaderAddress?: string | null;
+  /** Leader's live positions (server-fetched) — used for Match-leader leverage. */
+  leaderPositions?: HlPosition[];
   /** Test/RSC seed: render this action instead of subscribing. */
   actionOverride?: PendingAction | null;
 }
 
-export default function ApprovalPopup({ sessionId, actionOverride }: ApprovalPopupProps) {
+export default function ApprovalPopup({
+  sessionId,
+  leaderAddress,
+  leaderPositions = [],
+  actionOverride,
+}: ApprovalPopupProps) {
   const live = usePendingActions(actionOverride === undefined ? sessionId : null);
   const action = actionOverride !== undefined ? actionOverride : live.pending;
 
   if (!action) return null;
-  return <PopupBody key={action.id} action={action} />;
+  return (
+    <PopupBody
+      key={action.id}
+      action={action}
+      leaderAddress={leaderAddress ?? action.proposal.display.leaderAddress ?? null}
+      leaderPositions={leaderPositions}
+    />
+  );
 }
 
-function PopupBody({ action }: { action: PendingAction }) {
+function PopupBody({
+  action,
+  leaderAddress,
+  leaderPositions,
+}: {
+  action: PendingAction;
+  leaderAddress: string | null;
+  leaderPositions: HlPosition[];
+}) {
+  const { display, intent } = action.proposal;
+  const isLive = action.mode === 'live';
+  const isOpening = intent.reduceOnly !== true && action.kind !== 'exit';
+
+  // Leverage state (Item 3) — only meaningful for OPENING orders.
+  const leaderPos = leaderPositionForCoin(leaderPositions, display.coin);
+  const leaderLev = display.leaderLeverage ?? leaderPos?.leverage ?? null;
+  const coinMax =
+    display.coinMaxLeverage ?? resolveCoinMaxLeverage(display.coin, leaderPos?.maxLeverage ?? null);
+  const defaultLev = clampLeverage(display.leverage ?? intent.leverage ?? 1, coinMax);
+  const [leverage, setLeverage] = useState<number>(defaultLev);
+
   const [typed, setTyped] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { display } = action.proposal;
-  const isLive = action.mode === 'live';
   const approveEnabled = !busy && isApproveEnabled(action.mode, display, typed);
+
+  // Derived leverage read — recomputed every render off the slider value.
+  const entryPx = display.estPx ?? null;
+  const read = deriveLeverageRead({
+    side: display.side,
+    entryPx: entryPx ?? 0,
+    sz: display.sz,
+    leverage,
+    stopPx: display.stopPx,
+  });
+  const liqInsideStop = liquidationInsideStop(display.side, read.liqPx, display.stopPx);
+  const halfLev = halfLeaderLeverage(leaderLev);
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
@@ -110,10 +170,14 @@ function PopupBody({ action }: { action: PendingAction }) {
     setBusy(true);
     setError(null);
     try {
+      // Approving an OPENING order sends the operator-chosen leverage; the server
+      // re-validates it to [1, coinMax]. Reject + reduce-only exits send only id.
+      const body: { id: string; leverage?: number } = { id: action.id };
+      if (path === 'approve' && isOpening) body.leverage = leverage;
       const res = await fetch(`/api/cockpit/${path}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id: action.id }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const json = (await res.json().catch(() => ({}))) as { error?: string };
@@ -129,6 +193,10 @@ function PopupBody({ action }: { action: PendingAction }) {
     }
   }
 
+  const sideLong = display.side === 'buy';
+  const sideColor = sideLong ? ZONE_COLORS.ok : ZONE_COLORS.danger;
+  const kindLabel = action.kind === 'entry' ? 'Entry' : action.kind === 'exit' ? 'Exit' : 'Action';
+
   return (
     <div
       ref={overlayRef}
@@ -141,9 +209,10 @@ function PopupBody({ action }: { action: PendingAction }) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        bg: 'rgba(1, 4, 9, 0.72)',
+        bg: 'rgba(1, 4, 9, 0.78)',
         padding: '16px',
         animation: 'backdropIn 0.18s ease-out',
+        overflowY: 'auto',
       })}
     >
       <section
@@ -154,59 +223,143 @@ function PopupBody({ action }: { action: PendingAction }) {
         aria-label="Trade approval"
         className={css({
           width: '100%',
-          maxWidth: '440px',
+          maxWidth: '460px',
+          maxHeight: '94vh',
+          overflowY: 'auto',
           bg: 'github.bgSecondary',
           border: '1px solid token(colors.github.border)',
-          borderRadius: '12px',
-          padding: '20px',
+          borderRadius: '14px',
           display: 'flex',
           flexDirection: 'column',
-          gap: '14px',
-          boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.7)',
           animation: 'popupIn 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
         })}
       >
-        <header className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' })}>
-          <h2 className={css({ fontSize: 'md', fontWeight: 'bold', color: 'github.textBright' })}>
-            Confirm {action.kind === 'entry' ? 'Entry' : action.kind === 'exit' ? 'Exit' : 'Action'}
-          </h2>
+        {/* Header band: title · side · mode badge */}
+        <header
+          className={css({
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '10px',
+            padding: '16px 18px',
+            borderBottom: '1px solid token(colors.github.border)',
+          })}
+        >
+          <div className={css({ display: 'flex', flexDirection: 'column', gap: '2px' })}>
+            <h2
+              className={css({
+                fontFamily: 'label',
+                fontSize: 'sm',
+                fontWeight: 'bold',
+                color: 'github.textBright',
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
+              })}
+            >
+              Confirm {kindLabel}
+            </h2>
+            <span data-testid="proposal-summary" className={css({ fontSize: '10px', color: 'github.textMuted', fontFamily: 'mono' })}>
+              {summarizeProposal(display, {
+                kind: action.kind,
+                mode: action.mode,
+                reduceOnly: intent.reduceOnly,
+              })}
+            </span>
+          </div>
           <span
             data-testid="mode-badge"
             data-mode={action.mode}
             style={{
-              color: isLive ? '#fff' : GH.text,
+              color: isLive ? '#fff' : GH.textBright,
               background: isLive ? ZONE_COLORS.danger : GH.border,
+              boxShadow: isLive ? `0 0 0 3px rgba(248,81,73,0.22)` : undefined,
             }}
             className={css({
+              fontFamily: 'label',
               fontSize: 'xs',
               fontWeight: 'bold',
-              letterSpacing: '0.06em',
+              letterSpacing: '0.1em',
               borderRadius: '6px',
-              paddingX: '8px',
-              paddingY: '3px',
+              paddingX: '10px',
+              paddingY: '5px',
+              flex: 'none',
             })}
           >
             {isLive ? 'LIVE' : 'PAPER'}
           </span>
         </header>
 
-        <p data-testid="proposal-summary" className={css({ fontSize: 'lg', fontWeight: 'semibold', color: 'github.textBright', fontFamily: 'mono' })}>
-          {summarizeProposal(display, {
-            kind: action.kind,
-            mode: action.mode,
-            reduceOnly: action.proposal.intent.reduceOnly,
-          })}
+        {/* Tabular trade data */}
+        <div className={css({ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: '0' })}>
+          <DataRow label="Coin" value={display.coin} strong />
+          <DataRow
+            label="Side"
+            value={sideLong ? 'LONG (buy)' : 'SHORT (sell)'}
+            color={sideColor}
+            testid="approval-side"
+          />
+          <DataRow label="Size" value={display.sz.toLocaleString('en-US', { maximumFractionDigits: 6 })} />
+          <DataRow label={action.kind === 'exit' ? 'Est. px' : 'Entry / est. px'} value={entryPx == null ? '—' : fmtPx(entryPx)} />
+          {display.stopPx != null && <DataRow label="Stop" value={fmtPx(display.stopPx)} color={ZONE_COLORS.warn} />}
+          <DataRow label="Notional" value={read.notionalUsd > 0 ? fmtCompactUsd(read.notionalUsd) : '—'} />
+          {isOpening && (
+            <DataRow label="Leverage" value={`${leverage.toLocaleString('en-US', { maximumFractionDigits: 1 })}×`} color={GH.textBright} testid="approval-leverage-row" strong />
+          )}
+        </div>
+
+        {/* Leverage control (OPENING orders only) */}
+        {isOpening && (
+          <LeverageControl
+            coin={display.coin}
+            coinMax={coinMax}
+            leverage={leverage}
+            setLeverage={(v) => setLeverage(clampLeverage(v, coinMax))}
+            marginUsd={read.marginUsd}
+            liqPx={read.liqPx}
+            roeAtStopPct={read.roeAtStopPct}
+            roeAtTargetPct={read.roeAtTargetPct}
+            liqInsideStop={liqInsideStop}
+            leaderLev={leaderLev}
+            halfLev={halfLev}
+          />
+        )}
+
+        {/* Leader followed */}
+        {leaderAddress && (
+          <div
+            data-testid="approval-leader"
+            className={css({
+              padding: '10px 18px',
+              borderTop: '1px solid token(colors.github.borderSubtle)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              fontFamily: 'mono',
+              fontSize: 'xs',
+            })}
+          >
+            <span className={css({ color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.05em' })}>
+              Following leader
+            </span>
+            <span className={css({ color: 'github.link' })}>
+              {leaderAddress.slice(0, 6)}…{leaderAddress.slice(-4)}
+              {leaderLev != null && <span className={css({ color: 'github.textMuted' })}> · {leaderLev}×</span>}
+            </span>
+          </div>
+        )}
+
+        {/* Rationale */}
+        <p className={css({ padding: '12px 18px', fontSize: 'sm', color: 'github.text', lineHeight: '1.5', borderTop: '1px solid token(colors.github.borderSubtle)' })}>
+          {display.rationale}
         </p>
 
-        <p className={css({ fontSize: 'sm', color: 'github.text', lineHeight: '1.5' })}>{display.rationale}</p>
-
+        {/* LIVE typed-phrase gate */}
         {isLive && (
-          <label className={css({ display: 'flex', flexDirection: 'column', gap: '6px' })}>
+          <label className={css({ display: 'flex', flexDirection: 'column', gap: '6px', padding: '0 18px 12px' })}>
             <span className={css({ fontSize: 'xs', color: 'zone.danger', fontWeight: 'semibold' })}>
               LIVE ORDER — type{' '}
-              <code className={css({ fontFamily: 'mono', color: 'github.textBright' })}>
-                {liveConfirmPhrase(display)}
-              </code>{' '}
+              <code className={css({ fontFamily: 'mono', color: 'github.textBright' })}>{liveConfirmPhrase(display)}</code>{' '}
               to enable Approve
             </span>
             <input
@@ -232,12 +385,13 @@ function PopupBody({ action }: { action: PendingAction }) {
         )}
 
         {error && (
-          <p data-testid="approval-error" className={css({ fontSize: 'xs', color: 'zone.danger' })}>
+          <p data-testid="approval-error" className={css({ fontSize: 'xs', color: 'zone.danger', padding: '0 18px 8px' })}>
             {error}
           </p>
         )}
 
-        <div className={css({ display: 'flex', gap: '10px' })}>
+        {/* Actions — weighted: Reject quiet, Approve prominent (green / red-live). */}
+        <div className={css({ display: 'flex', gap: '10px', padding: '14px 18px 18px' })}>
           <button
             ref={rejectRef}
             type="button"
@@ -245,15 +399,19 @@ function PopupBody({ action }: { action: PendingAction }) {
             disabled={busy}
             onClick={() => void decide('reject')}
             className={css({
-              flex: 1,
+              flex: '0 0 38%',
               bg: 'github.bg',
               border: '1px solid token(colors.github.border)',
               borderRadius: '8px',
               color: 'github.text',
+              fontFamily: 'label',
               fontSize: 'sm',
               fontWeight: 'semibold',
-              paddingY: '10px',
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              paddingY: '12px',
               cursor: 'pointer',
+              _hover: { bg: 'github.bgSecondary', borderColor: 'github.textMuted' },
               _disabled: { opacity: 0.5, cursor: 'not-allowed' },
             })}
           >
@@ -264,23 +422,211 @@ function PopupBody({ action }: { action: PendingAction }) {
             data-testid="approve-button"
             disabled={!approveEnabled}
             onClick={() => void decide('approve')}
-            style={{ background: approveEnabled ? ZONE_COLORS.ok : GH.border }}
+            style={{ background: approveEnabled ? (isLive ? ZONE_COLORS.danger : ZONE_COLORS.ok) : GH.border }}
             className={css({
               flex: 1,
               border: 'none',
               borderRadius: '8px',
-              color: '#010409',
+              color: isLive && approveEnabled ? '#fff' : '#010409',
+              fontFamily: 'label',
               fontSize: 'sm',
               fontWeight: 'bold',
-              paddingY: '10px',
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              paddingY: '12px',
               cursor: 'pointer',
               _disabled: { opacity: 0.6, cursor: 'not-allowed', color: GH.textMuted },
             })}
           >
-            {busy ? 'Submitting…' : 'Approve'}
+            {busy ? 'Submitting…' : isLive ? 'Approve LIVE' : 'Approve'}
           </button>
         </div>
       </section>
+    </div>
+  );
+}
+
+/** One label/value row in the tabular trade body. */
+function DataRow({
+  label,
+  value,
+  color,
+  strong,
+  testid,
+}: {
+  label: string;
+  value: string;
+  color?: string;
+  strong?: boolean;
+  testid?: string;
+}) {
+  return (
+    <div
+      className={css({
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'baseline',
+        paddingY: '5px',
+        borderBottom: '1px solid token(colors.github.borderSubtle)',
+        _last: { borderBottom: 'none' },
+      })}
+    >
+      <span className={css({ fontFamily: 'label', fontSize: '10px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.06em' })}>
+        {label}
+      </span>
+      <span
+        data-testid={testid}
+        style={{ color: color ?? GH.text, fontFeatureSettings: '"tnum"' }}
+        className={css({ fontFamily: 'mono', fontSize: strong ? 'sm' : 'xs', fontWeight: strong ? 'bold' : 'normal' })}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+/** The leverage slider + presets + live margin/liq/ROE read + safety guard. */
+function LeverageControl({
+  coin,
+  coinMax,
+  leverage,
+  setLeverage,
+  marginUsd,
+  liqPx,
+  roeAtStopPct,
+  roeAtTargetPct,
+  liqInsideStop,
+  leaderLev,
+  halfLev,
+}: {
+  coin: string;
+  coinMax: number;
+  leverage: number;
+  setLeverage: (v: number) => void;
+  marginUsd: number;
+  liqPx: number | null;
+  roeAtStopPct: number | null;
+  roeAtTargetPct: number | null;
+  liqInsideStop: boolean;
+  leaderLev: number | null;
+  halfLev: number | null;
+}) {
+  return (
+    <div
+      data-testid="leverage-control"
+      className={css({
+        padding: '12px 18px',
+        borderTop: '1px solid token(colors.github.border)',
+        bg: 'github.bg',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+      })}
+    >
+      <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' })}>
+        <span className={css({ fontFamily: 'label', fontSize: '10px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.07em' })}>
+          Leverage · your risk decision
+        </span>
+        <span data-testid="leverage-value" style={{ fontFeatureSettings: '"tnum"' }} className={css({ fontFamily: 'mono', fontSize: 'lg', fontWeight: 'bold', color: 'github.textBright' })}>
+          {leverage.toLocaleString('en-US', { maximumFractionDigits: 1 })}×
+        </span>
+      </div>
+
+      <input
+        type="range"
+        data-testid="leverage-slider"
+        min={1}
+        max={coinMax}
+        step={1}
+        value={leverage}
+        onChange={(e) => setLeverage(Number(e.target.value))}
+        aria-label={`Leverage, 1 to ${coinMax} times`}
+        className={css({ width: '100%', accentColor: '#58a6ff', cursor: 'pointer' })}
+      />
+      <div className={css({ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: 'github.textMuted', fontFamily: 'mono' })}>
+        <span>1×</span>
+        <span>{coinMax}× max ({coin})</span>
+      </div>
+
+      {/* Presets: Match leader (N×) + ½ leader. */}
+      {(leaderLev != null || halfLev != null) && (
+        <div className={css({ display: 'flex', gap: '8px' })}>
+          {leaderLev != null && (
+            <PresetButton testid="match-leader-button" label={`Match leader (${leaderLev}×)`} onClick={() => setLeverage(leaderLev)} />
+          )}
+          {halfLev != null && (
+            <PresetButton testid="half-leader-button" label={`½ leader (${halfLev}×)`} onClick={() => setLeverage(halfLev)} />
+          )}
+        </div>
+      )}
+
+      {/* Live derived read: margin / liq / ROE@stop / ROE@target. */}
+      <div className={css({ display: 'flex', gap: '10px', flexWrap: 'wrap' })}>
+        <ReadCell label="Margin" value={fmtUsd(marginUsd).replace('+', '')} testid="leverage-margin" />
+        <ReadCell label="Est. liq" value={fmtPx(liqPx)} color={liqInsideStop ? ZONE_COLORS.danger : GH.text} testid="leverage-liq" />
+        <ReadCell label="ROE @ stop" value={roeAtStopPct == null ? '—' : fmtPctSigned(roeAtStopPct)} color={roeAtStopPct != null && roeAtStopPct < 0 ? ZONE_COLORS.danger : GH.text} testid="leverage-roe-stop" />
+        {roeAtTargetPct != null && (
+          <ReadCell label="ROE @ target" value={fmtPctSigned(roeAtTargetPct)} color={ZONE_COLORS.ok} testid="leverage-roe-target" />
+        )}
+      </div>
+
+      {/* SAFETY GUARD — liquidation inside the stop. */}
+      {liqInsideStop && (
+        <div
+          data-testid="liq-inside-stop-warning"
+          className={css({
+            display: 'flex',
+            gap: '8px',
+            alignItems: 'flex-start',
+            bg: 'rgba(248,81,73,0.12)',
+            border: '1px solid token(colors.zone.danger)',
+            borderRadius: '6px',
+            padding: '8px 10px',
+          })}
+        >
+          <span aria-hidden className={css({ fontSize: 'sm' })}>⚠️</span>
+          <span className={css({ fontSize: 'xs', color: 'zone.danger', fontWeight: 'semibold', lineHeight: '1.4' })}>
+            Liquidation before stop — at {leverage}× the position liquidates before your stop can trigger. Reduce leverage.
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PresetButton({ label, onClick, testid }: { label: string; onClick: () => void; testid: string }) {
+  return (
+    <button
+      type="button"
+      data-testid={testid}
+      onClick={onClick}
+      className={css({
+        flex: 1,
+        bg: 'github.bgSecondary',
+        border: '1px solid token(colors.github.border)',
+        borderRadius: '6px',
+        color: 'github.text',
+        fontFamily: 'mono',
+        fontSize: '11px',
+        paddingY: '7px',
+        cursor: 'pointer',
+        _hover: { borderColor: 'github.link', color: 'github.textBright' },
+      })}
+    >
+      {label}
+    </button>
+  );
+}
+
+function ReadCell({ label, value, color, testid }: { label: string; value: string; color?: string; testid: string }) {
+  return (
+    <div className={css({ display: 'flex', flexDirection: 'column', gap: '1px', minWidth: '64px' })}>
+      <span className={css({ fontFamily: 'label', fontSize: '8px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.06em' })}>
+        {label}
+      </span>
+      <span data-testid={testid} style={{ color: color ?? GH.text, fontFeatureSettings: '"tnum"' }} className={css({ fontFamily: 'mono', fontSize: 'sm', fontWeight: 'bold' })}>
+        {value}
+      </span>
     </div>
   );
 }
