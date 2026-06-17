@@ -15,7 +15,13 @@ import type {
   Hypothesis,
   HypothesisStatus,
   AlertSeverity,
+  PendingAction,
+  PendingActionKind,
+  PendingActionProposal,
+  PendingActionStatus,
+  SafeExitPlan,
 } from '@/types/cockpit';
+import type { TradeIntent, TradingMode } from '@/types/fill';
 
 function toMs(v: unknown): number {
   if (typeof v === 'number') return v;
@@ -141,6 +147,41 @@ export function mapPositionRow(row: RealtimeRow): PositionRow {
     feesPaidUsd: num(row.fees_paid_usd),
     updatedAt: toMs(row.updated_at),
   };
+}
+
+/**
+ * Map a `pending_actions` row (the approval-gate queue). `proposal` is a jsonb
+ * column delivered as an already-parsed object by realtime; we trust its shape
+ * (written by the service-role gate) and coerce the scalar columns defensively.
+ */
+export function mapPendingActionRow(row: RealtimeRow): PendingAction {
+  return {
+    id: str(row.id),
+    sessionId: str(row.session_id),
+    kind: (str(row.kind) || 'generic') as PendingActionKind,
+    mode: (str(row.mode) || 'paper') as TradingMode,
+    proposal: (row.proposal ?? { intent: {} as TradeIntent, display: {} }) as PendingActionProposal,
+    status: (str(row.status) || 'pending') as PendingActionStatus,
+    createdAt: toMs(row.created_at),
+    decidedAt: toMsOrNull(row.decided_at),
+  };
+}
+
+/** Map a `safe_exit_plan` row (the dead-man's-switch backstop). */
+export function mapSafeExitPlanRow(row: RealtimeRow): SafeExitPlan {
+  return {
+    id: str(row.id),
+    sessionId: str(row.session_id),
+    intent: (row.intent ?? ({} as TradeIntent)) as TradeIntent,
+    reasoning: row.reasoning == null ? null : str(row.reasoning),
+    isFallback: row.is_fallback === true,
+    updatedAt: toMs(row.updated_at),
+  };
+}
+
+/** Newest-first comparator on an `updatedAt` field. */
+export function byUpdatedAtDesc<T extends { updatedAt: number }>(a: T, b: T): number {
+  return b.updatedAt - a.updatedAt;
 }
 
 /**

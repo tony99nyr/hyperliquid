@@ -18,8 +18,11 @@ import type { TradingMode } from '@/types/fill';
 import type { Session } from '@/types/cockpit';
 import type { HlPosition } from '@/lib/hyperliquid/hyperliquid-info-service';
 import type { CandleInterval } from '@/lib/hyperliquid/candle-service';
+import { useActiveSession } from '@/hooks/useActiveSession';
 import Banners from './components/Banners';
 import RealtimeStatus from './components/RealtimeStatus';
+import ApprovalPopup from './components/ApprovalPopup';
+import SafeExitButton from './components/SafeExitButton';
 import Orderbook from './components/Orderbook';
 import LiveChart from './components/LiveChart';
 import PositionPanel from './components/PositionPanel';
@@ -42,13 +45,17 @@ const INTERVALS: CandleInterval[] = ['1d', '8h', '1h', '15m'];
 
 export default function CockpitClient({
   mode,
-  session,
+  session: serverSession,
   leaderAddress,
   leaderPositions,
   coins = ['ETH', 'BTC'],
 }: CockpitClientProps) {
   const [coin, setCoin] = useState(coins[0] ?? 'ETH');
   const [interval, setInterval] = useState<CandleInterval>('8h');
+  // Auto-bind the latest active session (seeded from the server render, then
+  // polled) so a session opened MID-FLOW surfaces its popup + Safe-Exit without
+  // a manual refresh.
+  const session = useActiveSession(serverSession);
   const sessionId = session?.id ?? null;
 
   return (
@@ -127,6 +134,15 @@ export default function CockpitClient({
           <AnalysisStream sessionId={sessionId} />
         </div>
       </div>
+
+      {/* Always-available dead-man's switch (sticky bottom) — independent of
+          Claude. Renders only when a session is active. */}
+      <SafeExitButton sessionId={sessionId} />
+
+      {/* The animated approval popup — overlays everything when a pending action
+          for the active session appears. NO-AUTO-FIRE: nothing executes until
+          the human approves here. */}
+      <ApprovalPopup sessionId={sessionId} />
     </main>
   );
 }

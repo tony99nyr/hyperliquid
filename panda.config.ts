@@ -28,6 +28,23 @@ export default defineConfig({
           },
         },
       },
+      keyframes: {
+        // Approval-popup entrance: scale up from slightly small + fade in.
+        popupIn: {
+          '0%': { opacity: '0', transform: 'scale(0.92) translateY(8px)' },
+          '100%': { opacity: '1', transform: 'scale(1) translateY(0)' },
+        },
+        // Backdrop fade.
+        backdropIn: {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
+        // Safe-Exit "armed" subtle pulse to draw the eye to the panic button.
+        dangerPulse: {
+          '0%, 100%': { boxShadow: '0 0 0 0 rgba(248, 81, 73, 0.5)' },
+          '50%': { boxShadow: '0 0 0 6px rgba(248, 81, 73, 0)' },
+        },
+      },
     },
   },
   globalCss: {
