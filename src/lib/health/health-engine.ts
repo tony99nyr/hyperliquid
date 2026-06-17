@@ -23,13 +23,19 @@ import type {
 const HEALTH_CONFIG_DIR = join(process.cwd(), 'data', 'health-engine');
 const TIMEFRAMES: HealthTimeframe[] = ['1d', '8h', '1h', '15m'];
 
-/** How far back to fetch per timeframe (enough candles for regime + indicators). */
-const LOOKBACK_MS: Record<HealthTimeframe, number> = {
+/**
+ * How far back to fetch per timeframe (enough candles for regime + indicators).
+ * Exported so the watch daemon can fetch its 15m mark over the IDENTICAL window
+ * and share the candle-service cache entry (one HL round-trip, not two).
+ */
+export const HEALTH_LOOKBACK_MS: Record<HealthTimeframe, number> = {
   '1d': 400 * 24 * 60 * 60 * 1000, // ~400 days
   '8h': 400 * 8 * 60 * 60 * 1000, // ~133 days
   '1h': 400 * 60 * 60 * 1000, // ~16 days
   '15m': 400 * 15 * 60 * 1000, // ~4 days
 };
+
+const LOOKBACK_MS = HEALTH_LOOKBACK_MS;
 
 let cachedWeights: HealthWeights | null = null;
 

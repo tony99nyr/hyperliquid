@@ -23,6 +23,8 @@ export type { CandleInterval } from './candle-service-business-logic';
 const HL_INFO_URL = 'https://api.hyperliquid.xyz/info';
 const REQUEST_TIMEOUT_MS = 8000;
 const CANDLE_CACHE_TTL_MS = 30_000;
+/** Hard cap on distinct cache entries — a backstop bound on heap over long runs. */
+const CANDLE_CACHE_MAX_ENTRIES = 256;
 
 export interface CandleResult {
   coin: string;
@@ -42,6 +44,22 @@ interface CacheEntry {
 }
 
 const candleCache = new Map<string, CacheEntry>();
+
+/**
+ * Sweep expired entries, then enforce the size cap (evict oldest-inserted first
+ * — Map preserves insertion order). Called on every write so the cache stays
+ * bounded even under a stream of distinct-window calls. O(n) but n ≤ the cap.
+ */
+function evictCandleCache(now: number): void {
+  for (const [key, entry] of candleCache) {
+    if (entry.expiresAt <= now) candleCache.delete(key);
+  }
+  while (candleCache.size >= CANDLE_CACHE_MAX_ENTRIES) {
+    const oldest = candleCache.keys().next().value;
+    if (oldest === undefined) break;
+    candleCache.delete(oldest);
+  }
+}
 
 async function hlInfoPost<T>(body: Record<string, unknown>): Promise<T> {
   const controller = new AbortController();
@@ -95,7 +113,9 @@ export async function fetchCandles(
       fetchedAt: Date.now(),
       stale: false,
     };
-    candleCache.set(key, { value: result, expiresAt: Date.now() + CANDLE_CACHE_TTL_MS });
+    const writeAt = Date.now();
+    evictCandleCache(writeAt);
+    candleCache.set(key, { value: result, expiresAt: writeAt + CANDLE_CACHE_TTL_MS });
     return result;
   } catch (err) {
     const message = extractErrorMessage(err);
@@ -134,4 +154,9 @@ export async function fetchMultiTimeframeCandles(
 /** Clear the in-process candle cache (test hook). */
 export function _clearCandleCache(): void {
   candleCache.clear();
+}
+
+/** Current number of live cache entries (test hook for bound verification). */
+export function _candleCacheSize(): number {
+  return candleCache.size;
 }

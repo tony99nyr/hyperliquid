@@ -3,7 +3,9 @@ import {
   fetchCandles,
   fetchMultiTimeframeCandles,
   _clearCandleCache,
+  _candleCacheSize,
 } from '@/lib/hyperliquid/candle-service';
+import { INTERVAL_MS } from '@/lib/hyperliquid/candle-service-business-logic';
 
 const rawRow = (t: number, c = '2000') => ({
   t,
@@ -61,6 +63,33 @@ describe('candle-service (I/O, mocked fetch)', () => {
     await fetchCandles('ETH', '1h', 0, 1000);
     await fetchCandles('ETH', '1h', 0, 1000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('repeated ticks within one interval bucket reuse the cache (one fetch) — FIX 2', async () => {
+    const fetchMock = mockFetchOk([rawRow(100)]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    // Distinct now-derived windows ~1s apart, all inside the same 15m bucket.
+    const base = 1_700_000_000_000;
+    const lookback = 4 * 24 * 60 * 60 * 1000;
+    for (let i = 0; i < 10; i++) {
+      const now = base + i * 1000;
+      await fetchCandles('ETH', '15m', now - lookback, now);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(_candleCacheSize()).toBe(1);
+  });
+
+  it('cache stays bounded under many distinct-time windows — FIX 2', async () => {
+    vi.stubGlobal('fetch', mockFetchOk([rawRow(100)]));
+    const m15 = INTERVAL_MS['15m'];
+    // 1000 windows that each fall into a DISTINCT bucket → would be 1000 keys
+    // without eviction. The cap must hold the size well under that.
+    for (let i = 0; i < 1000; i++) {
+      const end = i * m15; // each a new bucket
+      await fetchCandles('ETH', '15m', 0, end);
+    }
+    expect(_candleCacheSize()).toBeLessThanOrEqual(256);
   });
 
   it('fails soft to an empty stale result on a non-ok response', async () => {

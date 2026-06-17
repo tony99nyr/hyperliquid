@@ -3,6 +3,8 @@ import {
   parseCandle,
   parseCandleSnapshot,
   candleCacheKey,
+  bucketTime,
+  INTERVAL_MS,
   isSupportedInterval,
   SUPPORTED_INTERVALS,
   type RawHlCandle,
@@ -90,8 +92,34 @@ describe('candle-service-business-logic', () => {
       expect(isSupportedInterval('5m')).toBe(false);
     });
 
-    it('builds a stable upper-cased cache key', () => {
-      expect(candleCacheKey('eth', '1h', 100, 200)).toBe('ETH:1h:100:200');
+    it('builds a stable upper-cased, interval-bucketed cache key', () => {
+      // 100/200 ms both floor to the 0 bucket at the 1h period.
+      expect(candleCacheKey('eth', '1h', 100, 200)).toBe('ETH:1h:0:0');
+    });
+  });
+
+  describe('bucketTime + cache-key bucketing (FIX 2)', () => {
+    it('floors a timestamp to the start of its interval bucket', () => {
+      const h = INTERVAL_MS['1h'];
+      expect(bucketTime(0, '1h')).toBe(0);
+      expect(bucketTime(h - 1, '1h')).toBe(0);
+      expect(bucketTime(h, '1h')).toBe(h);
+      expect(bucketTime(h + 123, '1h')).toBe(h);
+    });
+
+    it('two near-but-distinct now-derived windows in the same bucket → same key', () => {
+      const base = 1_700_000_000_000;
+      // Two ticks ~1s apart: distinct raw bounds, identical bucketed key.
+      const k1 = candleCacheKey('ETH', '15m', base - 1000, base);
+      const k2 = candleCacheKey('ETH', '15m', base - 1000 + 1000, base + 1000);
+      expect(k1).toBe(k2);
+    });
+
+    it('windows crossing a bucket boundary → different keys', () => {
+      const m15 = INTERVAL_MS['15m'];
+      const a = candleCacheKey('ETH', '15m', 0, m15 - 1); // end bucket 0
+      const b = candleCacheKey('ETH', '15m', 0, m15); // end bucket 1
+      expect(a).not.toBe(b);
     });
   });
 });

@@ -28,8 +28,9 @@ import {
 } from '@/lib/cockpit/fill-persistence-service';
 import { writeHealthSnapshot } from '@/lib/cockpit/health-snapshot-service';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
-import { assessHealth } from '@/lib/health/health-engine';
+import { assessHealth, HEALTH_LOOKBACK_MS } from '@/lib/health/health-engine';
 import { fetchCandles } from '@/lib/hyperliquid/candle-service';
+import { INTERVAL_MS } from '@/lib/hyperliquid/candle-service-business-logic';
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 import {
   decideTick,
@@ -41,6 +42,30 @@ import type { Position } from '@/types/position';
 
 /** Source label written into analysis_log rows for watch-emitted alerts. */
 const WATCH_SOURCE = 'watch-daemon';
+
+/** Spacing between per-position HL work (ms) — gentle pacing, not a hammer. */
+const HL_REQUEST_SPACING_MS = 150;
+/** Base + cap for exponential backoff after consecutive HL failures (ms). */
+const HL_BACKOFF_BASE_MS = 500;
+const HL_BACKOFF_MAX_MS = 8000;
+
+/** Consecutive HL/tick failures across positions — drives the backoff sleep. */
+let consecutiveHlFailures = 0;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Backoff delay for the current consecutive-failure streak (capped). PURE-ish. */
+function currentBackoffMs(): number {
+  if (consecutiveHlFailures <= 0) return 0;
+  return Math.min(HL_BACKOFF_MAX_MS, HL_BACKOFF_BASE_MS * 2 ** (consecutiveHlFailures - 1));
+}
+
+/** Reset the HL backoff streak (test hook + called on a successful tick). */
+export function _resetHlBackoff(): void {
+  consecutiveHlFailures = 0;
+}
 
 /** In-memory per-(session,coin) alert state for cross-tick dedup. */
 export type AlertStateStore = Map<string, string[]>;
@@ -67,17 +92,35 @@ export interface WatchCycleResult {
   failures: Array<{ sessionId: string; coin: string; error: string }>;
 }
 
+/** A mark is "too old" if its last candle is older than this many 15m periods. */
+const MAX_MARK_AGE_PERIODS = 2;
+
 /**
- * Fetch a fresh mark price for a coin: the most recent 15m candle close. Throws
- * on a hard failure (no candles + no cache) so the tick is treated as failed and
- * isolated by the caller rather than marking to a bogus price.
+ * Fetch a fresh mark price for a coin: the most recent 15m candle close.
+ *
+ * SINGLE SOURCE: the window is the IDENTICAL 15m window the health engine fetches
+ * (`HEALTH_LOOKBACK_MS['15m']` back from `now`), so this hits the candle-service
+ * cache the health engine just populated — one HL round-trip per tick, not two.
+ *
+ * FAIL ON STALE: throws when the candle-service returns a STALE result (HL outage
+ * → last cached/empty value) OR when the newest candle is older than ~2 periods
+ * (illiquid coin / gap). The per-position try/catch isolates the throw so P&L and
+ * alerts are NEVER computed or written against a stale mark.
  */
 async function fetchMarkPrice(coin: string, now: number): Promise<number> {
-  const lookbackMs = 6 * 60 * 60 * 1000; // 6h of 15m candles
-  const res = await fetchCandles(coin, '15m', now - lookbackMs, now);
+  const res = await fetchCandles(coin, '15m', now - HEALTH_LOOKBACK_MS['15m'], now);
+  if (res.stale) {
+    throw new Error(`stale mark for ${coin}${res.error ? ` (${res.error})` : ''}`);
+  }
   const last = res.candles[res.candles.length - 1];
   if (!last || !Number.isFinite(last.close) || last.close <= 0) {
     throw new Error(`no mark price for ${coin}${res.error ? ` (${res.error})` : ''}`);
+  }
+  const maxAgeMs = MAX_MARK_AGE_PERIODS * INTERVAL_MS['15m'];
+  if (now - last.timestamp > maxAgeMs) {
+    throw new Error(
+      `mark too old for ${coin}: last candle ${Math.round((now - last.timestamp) / 60000)}m ago`,
+    );
   }
   return last.close;
 }
@@ -98,10 +141,15 @@ export async function runWatchTickForPosition(
   const coin = position.coin;
   const key = alertKey(sessionId, coin);
 
-  const [markPx, health] = await Promise.all([
-    fetchMarkPrice(coin, now),
-    assessHealth(coin, { side: position.side, entryPx: position.avgEntryPx }, now),
-  ]);
+  // Health first: it fetches the 15m window; `fetchMarkPrice` then reuses that
+  // cached 15m close (single HL round-trip for the mark, FIX 1a). Both use the
+  // SAME `now`, so the bucketed candle-cache key matches.
+  const health = await assessHealth(
+    coin,
+    { side: position.side, entryPx: position.avgEntryPx },
+    now,
+  );
+  const markPx = await fetchMarkPrice(coin, now);
 
   const decision = decideTick({
     position,
@@ -158,7 +206,12 @@ export async function runWatchCycle(
   const sessions = await listActiveSessions();
   const monitored: MonitoredResult[] = [];
   const failures: WatchCycleResult['failures'] = [];
+  // Alert-state keys touched this cycle; anything NOT here = a position that
+  // closed (or whose session went inactive) → its stale dedup baseline is pruned
+  // below so a re-open re-fires its alerts (FIX 5).
+  const seenKeys = new Set<string>();
 
+  let first = true;
   for (const session of sessions) {
     let positions: Position[];
     try {
@@ -168,10 +221,20 @@ export async function runWatchCycle(
       continue;
     }
     for (const position of positions) {
+      seenKeys.add(alertKey(session.id, position.coin));
+      // Space out HL work + back off harder after consecutive failures so an HL
+      // 429 isn't hammered at full rate (FIX 6).
+      if (!first) await sleep(HL_REQUEST_SPACING_MS);
+      first = false;
+      const backoff = currentBackoffMs();
+      if (backoff > 0) await sleep(backoff);
+
       try {
         const decision = await runWatchTickForPosition(session.id, position, alertState, opts);
         monitored.push({ sessionId: session.id, coin: position.coin, decision });
+        consecutiveHlFailures = 0; // success resets the backoff streak.
       } catch (err) {
+        consecutiveHlFailures++;
         failures.push({
           sessionId: session.id,
           coin: position.coin,
@@ -179,6 +242,11 @@ export async function runWatchCycle(
         });
       }
     }
+  }
+
+  // Prune dedup baselines for positions no longer open (FIX 5).
+  for (const key of [...alertState.keys()]) {
+    if (!seenKeys.has(key)) alertState.delete(key);
   }
 
   return { activeSessions: sessions.length, monitored, failures };

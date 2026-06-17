@@ -83,12 +83,36 @@ export function parseCandleSnapshot(raw: unknown): PriceCandle[] {
   return [...byTs.values()].sort((a, b) => a.timestamp - b.timestamp);
 }
 
-/** Cache key for a (coin, interval, start, end) candle request. */
+/** Interval length in milliseconds, for cache-window bucketing. */
+export const INTERVAL_MS: Record<CandleInterval, number> = {
+  '1d': 24 * 60 * 60 * 1000,
+  '8h': 8 * 60 * 60 * 1000,
+  '1h': 60 * 60 * 1000,
+  '15m': 15 * 60 * 1000,
+};
+
+/** Floor `t` to the start of its `interval`-sized bucket. PURE. */
+export function bucketTime(t: number, interval: CandleInterval): number {
+  const period = INTERVAL_MS[interval];
+  return Math.floor(t / period) * period;
+}
+
+/**
+ * Cache key for a (coin, interval, start, end) candle request. The start/end
+ * bounds are BUCKETED to the interval period so repeated ticks within the same
+ * bucket (callers pass start/end derived from `Date.now()`, which drifts every
+ * call) reuse one cache entry instead of minting a unique key per call. Returns
+ * the same set of candles for any moment inside a bucket — acceptable because the
+ * most-recent candle only updates once per interval anyway, and the cache TTL is
+ * far shorter than the bucket period.
+ */
 export function candleCacheKey(
   coin: string,
   interval: CandleInterval,
   startTime: number,
   endTime: number,
 ): string {
-  return `${coin.toUpperCase()}:${interval}:${startTime}:${endTime}`;
+  const start = bucketTime(startTime, interval);
+  const end = bucketTime(endTime, interval);
+  return `${coin.toUpperCase()}:${interval}:${start}:${end}`;
 }
