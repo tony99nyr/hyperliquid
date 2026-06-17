@@ -93,7 +93,7 @@ describe('applyFillToPositionRows (fold WHOLE ledger → upsert positions + inse
     // 3rd op = pnl insert → ok.
     mock.queueResult({ error: null });
 
-    const pos = await applyFillToPositionRows(fill({ sz: 2, px: 2000, feeUsd: 1 }), client);
+    const pos = await applyFillToPositionRows(fill({ sz: 2, px: 2000, feeUsd: 1 }), undefined, client);
 
     expect(pos.side).toBe('long');
     expect(pos.sz).toBe(2);
@@ -134,10 +134,32 @@ describe('applyFillToPositionRows (fold WHOLE ledger → upsert positions + inse
     mock.queueResult({ error: null }); // upsert
     mock.queueResult({ error: null }); // pnl
 
-    const pos = await applyFillToPositionRows(fill({ clientIntentId: 'b', sz: 1, px: 2200, feeUsd: 0.5 }), client);
+    const pos = await applyFillToPositionRows(fill({ clientIntentId: 'b', sz: 1, px: 2200, feeUsd: 0.5 }), undefined, client);
     expect(pos.sz).toBe(2);
     expect(pos.avgEntryPx).toBe(2100);
     expect(pos.feesPaidUsd).toBe(1.5);
+  });
+
+  it('persists the opening leverage onto the positions row (drives ROE)', async () => {
+    mock.queueResult({ data: [ledgerRow({ sz: 2, px: 2000, feeUsd: 1 })], error: null });
+    mock.queueResult({ error: null }); // upsert
+    mock.queueResult({ error: null }); // pnl
+
+    await applyFillToPositionRows(fill({ sz: 2, px: 2000, feeUsd: 1 }), 5, client);
+
+    const upsertOp = mock.ops[1];
+    expect((upsertOp.payload as { leverage?: number }).leverage).toBe(5);
+  });
+
+  it('OMITS leverage from the upsert when undefined (does not clobber the entry leverage)', async () => {
+    mock.queueResult({ data: [ledgerRow({ sz: 2, px: 2000, feeUsd: 1 })], error: null });
+    mock.queueResult({ error: null });
+    mock.queueResult({ error: null });
+
+    await applyFillToPositionRows(fill({ sz: 2, px: 2000, feeUsd: 1 }), undefined, client);
+
+    const upsertOp = mock.ops[1];
+    expect('leverage' in (upsertOp.payload as Record<string, unknown>)).toBe(false);
   });
 
   it('a re-run with the SAME ledger yields the SAME position (no double-count)', async () => {
@@ -145,19 +167,19 @@ describe('applyFillToPositionRows (fold WHOLE ledger → upsert positions + inse
     mock.queueResult({ data, error: null });
     mock.queueResult({ error: null });
     mock.queueResult({ error: null });
-    const first = await applyFillToPositionRows(fill({ sz: 2, px: 2000, feeUsd: 1 }), client);
+    const first = await applyFillToPositionRows(fill({ sz: 2, px: 2000, feeUsd: 1 }), undefined, client);
 
     mock.reset();
     mock.queueResult({ data, error: null });
     mock.queueResult({ error: null });
     mock.queueResult({ error: null });
-    const second = await applyFillToPositionRows(fill({ sz: 2, px: 2000, feeUsd: 1 }), client);
+    const second = await applyFillToPositionRows(fill({ sz: 2, px: 2000, feeUsd: 1 }), undefined, client);
 
     expect(second).toEqual(first); // idempotent — folding the same ledger twice
   });
 
   it('throws when the ledger load fails', async () => {
     mock.queueResult({ error: { message: 'load boom' } });
-    await expect(applyFillToPositionRows(fill(), client)).rejects.toThrow(/load failed: load boom/);
+    await expect(applyFillToPositionRows(fill(), undefined, client)).rejects.toThrow(/load failed: load boom/);
   });
 });

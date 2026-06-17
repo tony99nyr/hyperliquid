@@ -237,14 +237,30 @@ export interface PositionUpsertRow {
   realized_pnl_usd: number;
   fees_paid_usd: number;
   updated_at: string;
+  /**
+   * Position leverage (e.g. 5 = 5x). METADATA set from the opening intent — the
+   * fold (applyFills) stays leverage-AGNOSTIC (ADR-0001); leverage is carried
+   * here purely so the UI can derive ROE. Omitted from the row when undefined so
+   * an upsert that doesn't know the leverage (e.g. a reduce-only fold) does NOT
+   * clobber a previously-stored value to NULL — see buildPositionRow.
+   */
+  leverage?: number | null;
 }
 
+/**
+ * Build the positions upsert row. `leverage` is OPTIONAL metadata: when provided
+ * (the opening fill carried the intent's leverage) it is written; when undefined
+ * the column is left OUT of the payload entirely so a subsequent leverage-unaware
+ * upsert (a reduce-only re-fold) preserves the leverage set at entry rather than
+ * nulling it. The position size/pnl always recompute from fills (leverage-agnostic).
+ */
 export function buildPositionRow(
   sessionId: string,
   pos: Position,
   updatedAtIso: string,
+  leverage?: number | null,
 ): PositionUpsertRow {
-  return {
+  const row: PositionUpsertRow = {
     session_id: sessionId,
     coin: pos.coin,
     side: pos.side,
@@ -254,6 +270,12 @@ export function buildPositionRow(
     fees_paid_usd: pos.feesPaidUsd,
     updated_at: updatedAtIso,
   };
+  // Only attach leverage when known — a positive, finite number. Undefined/null
+  // leaves the column untouched on upsert (don't clobber the entry leverage).
+  if (leverage !== undefined && leverage !== null && Number.isFinite(leverage) && leverage > 0) {
+    row.leverage = leverage;
+  }
+  return row;
 }
 
 export interface PnlInsertRow {

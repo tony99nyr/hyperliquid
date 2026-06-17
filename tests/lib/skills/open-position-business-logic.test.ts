@@ -48,6 +48,27 @@ describe('buildOpenProposal — risk-based sizing', () => {
     expect(p.warnings.length).toBeGreaterThan(0);
   });
 
+  it('defaults leverage to 1x when omitted (intent carries it for ROE)', () => {
+    const p = buildOpenProposal(setup());
+    expect(p.intent.leverage).toBe(1);
+    expect(p.rationale).not.toMatch(/\dx/);
+  });
+
+  it('carries an explicit leverage onto the intent WITHOUT changing sizing', () => {
+    const base = buildOpenProposal(setup());
+    const lev = buildOpenProposal(setup({ leverage: 5 }));
+    expect(lev.intent.leverage).toBe(5);
+    // Sizing is risk-based, leverage-independent: identical size + dollar risk.
+    expect(lev.intent.sz).toBeCloseTo(base.intent.sz, 6);
+    expect(lev.dollarRisk).toBeCloseTo(base.dollarRisk, 2);
+    expect(lev.rationale).toMatch(/5x/);
+  });
+
+  it('warns on a non-positive leverage (typo surfaces, not swallowed)', () => {
+    expect(buildOpenProposal(setup({ leverage: 0 })).warnings.some((w) => /leverage/i.test(w))).toBe(true);
+    expect(buildOpenProposal(setup({ leverage: -3 })).warnings.some((w) => /leverage/i.test(w))).toBe(true);
+  });
+
   it('warns when a buy limit is below the entry price', () => {
     const p = buildOpenProposal(setup({ side: 'buy', entryPx: 2000, limitPx: 1900 }));
     expect(p.warnings.some((w) => w.includes('Buy limit'))).toBe(true);

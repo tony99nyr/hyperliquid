@@ -30,7 +30,15 @@ export function nextPosition(prior: Position | undefined, fill: CanonicalFill): 
  * Supabase, compute `nextPosition` (pure), upsert the positions row + insert a
  * pnl row, and return the new position. Delegates to the cockpit persistence
  * service. Mode-agnostic — never inspects `fill.source`.
+ *
+ * `leverage` is OPTIONAL intent metadata (the opening order's leverage). It does
+ * NOT enter the fold — the position size/pnl recompute from fills, leverage-free
+ * (ADR-0001). It is persisted alongside the folded row so the UI derives ROE.
+ * Undefined leaves any previously-stored leverage untouched.
  */
-export async function applyFillToPosition(fill: CanonicalFill): Promise<Position> {
-  return applyFillToPositionRows(fill);
+export async function applyFillToPosition(
+  fill: CanonicalFill,
+  leverage?: number,
+): Promise<Position> {
+  return applyFillToPositionRows(fill, leverage);
 }

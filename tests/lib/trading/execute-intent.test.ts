@@ -102,6 +102,18 @@ describe('executeIntent (paper end-to-end)', () => {
     expect(mockedApply).toHaveBeenCalledTimes(1);
   });
 
+  it('threads the OPENING intent leverage to applyFillToPosition (drives ROE)', async () => {
+    await executeIntent(intent({ sz: 1, leverage: 5 }));
+    // 2nd positional arg = leverage metadata (fold stays leverage-agnostic).
+    expect(mockedApply.mock.calls[0][1]).toBe(5);
+  });
+
+  it('does NOT pass leverage on a reduce-only exit (preserves the entry leverage)', async () => {
+    // A reduce-only order needs an existing position to reduce; the book has bids.
+    await executeIntent(intent({ sz: 1, side: 'sell', reduceOnly: true, leverage: 5 }));
+    expect(mockedApply.mock.calls[0][1]).toBeUndefined();
+  });
+
   it('a fully-unfilled paper order (sz 0) is NOT persisted or applied (retry stays possible)', async () => {
     // Empty book → matchIntentAgainstBook returns nothing filled.
     mockedFetchL2Book.mockResolvedValue({ coin: 'ETH', asks: [], bids: [] });

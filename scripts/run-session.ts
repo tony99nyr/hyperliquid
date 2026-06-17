@@ -16,7 +16,7 @@
  *
  * Usage:
  *   pnpm skill:run-session --coin ETH [--side buy] [--leader 0x..] \
- *     --risk 100 --stop-frac 0.05 --thesis "…" [--limit 1995]
+ *     --risk 100 --stop-frac 0.05 --thesis "…" [--limit 1995] [--leverage 5]
  */
 
 import { randomUUID } from 'node:crypto';
@@ -97,6 +97,8 @@ run(async () => {
   const side = sideRaw as OrderSide | undefined;
   const leaderAddress = typeof args['leader'] === 'string' ? args['leader'] : null;
   const limitPx = typeof args['limit'] === 'string' && Number.isFinite(Number(args['limit'])) ? Number(args['limit']) : undefined;
+  // --leverage is METADATA for ROE (default 1x). It does not change sizing.
+  const leverage = typeof args['leverage'] === 'string' && Number.isFinite(Number(args['leverage'])) ? Number(args['leverage']) : undefined;
 
   if (!Number.isFinite(riskUsd) || riskUsd <= 0) throw new Error('--risk <usd> is required and must be > 0');
   if (!Number.isFinite(stopDistanceFrac) || stopDistanceFrac <= 0) {
@@ -128,7 +130,7 @@ run(async () => {
   };
 
   const result = await runSessionEntryChain(
-    { coin, side, leaderAddress, riskUsd, stopDistanceFrac, thesis, limitPx },
+    { coin, side, leaderAddress, riskUsd, stopDistanceFrac, thesis, limitPx, leverage },
     deps,
   );
 

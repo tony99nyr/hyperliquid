@@ -10,7 +10,7 @@
  *
  * Usage:
  *   pnpm skill:open-position --session <id> --coin ETH --side buy \
- *     --entry 2000 --risk 100 --stop-frac 0.05 --thesis "…" [--limit 1995] [--confirm yes]
+ *     --entry 2000 --risk 100 --stop-frac 0.05 --thesis "…" [--limit 1995] [--leverage 5] [--confirm yes]
  */
 
 import { randomUUID } from 'node:crypto';
@@ -37,6 +37,8 @@ run(async () => {
   const riskUsd = optionalNumber(args, 'risk', NaN);
   const stopDistanceFrac = optionalNumber(args, 'stop-frac', NaN);
   const limitPx = typeof args['limit'] === 'string' ? Number(args['limit']) : undefined;
+  // --leverage is METADATA for ROE (default 1x). It does not change sizing.
+  const leverage = typeof args['leverage'] === 'string' ? Number(args['leverage']) : undefined;
 
   // Session: reuse --session or create one.
   let sessionId: string;
@@ -56,6 +58,7 @@ run(async () => {
     riskUsd,
     stopDistanceFrac,
     limitPx: limitPx !== undefined && Number.isFinite(limitPx) ? limitPx : undefined,
+    leverage: leverage !== undefined && Number.isFinite(leverage) ? leverage : undefined,
     clientIntentId: randomUUID(),
     now: Date.now(),
     thesis,

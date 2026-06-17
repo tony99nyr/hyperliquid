@@ -149,6 +149,18 @@ describe('fill / position / pnl rows', () => {
       fees_paid_usd: 1.2,
       updated_at: '2026-01-01T00:00:00.000Z',
     });
+    // No leverage arg → column omitted (won't clobber a stored value on upsert).
+    expect('leverage' in row).toBe(false);
+  });
+
+  it('buildPositionRow attaches leverage only when a positive finite value is given', () => {
+    const pos: Position = { coin: 'ETH', side: 'long', sz: 1, avgEntryPx: 2000, realizedPnlUsd: 0, feesPaidUsd: 0 };
+    const iso = '2026-01-01T00:00:00.000Z';
+    expect(buildPositionRow('s1', pos, iso, 5).leverage).toBe(5);
+    // Bogus / absent values leave the column out entirely.
+    expect('leverage' in buildPositionRow('s1', pos, iso, null)).toBe(false);
+    expect('leverage' in buildPositionRow('s1', pos, iso, 0)).toBe(false);
+    expect('leverage' in buildPositionRow('s1', pos, iso, NaN)).toBe(false);
   });
 
   it('buildPnlRow defaults unrealized to 0 + mark to null', () => {

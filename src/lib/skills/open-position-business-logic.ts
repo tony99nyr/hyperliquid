@@ -24,6 +24,13 @@ export interface OpenSetupInput {
   stopDistanceFrac: number;
   /** Optional limit price; omit for a market order. */
   limitPx?: number;
+  /**
+   * Position leverage (e.g. 5 = 5x). METADATA carried onto the intent so the
+   * positions row stores it for ROE; it does NOT change the risk-based sizing
+   * (sizing is driven by riskUsd + stopDistanceFrac, leverage-independent).
+   * Defaults to 1 (unleveraged) when omitted.
+   */
+  leverage?: number;
   /** Idempotency key (caller-generated, identical across retries + modes). */
   clientIntentId: string;
   /** Epoch ms; injected so the builder stays pure. */
@@ -71,6 +78,13 @@ export function buildOpenProposal(input: OpenSetupInput): OpenProposal {
 
   const safeEntry = input.entryPx > 0 ? input.entryPx : 1;
   const safeStopFrac = input.stopDistanceFrac > 0 && input.stopDistanceFrac < 1 ? input.stopDistanceFrac : 0.04;
+  // Leverage is metadata for ROE only; default to 1 (unleveraged). Reject a
+  // non-positive value rather than silently coercing — a leverage typo should
+  // surface, not be swallowed.
+  if (input.leverage !== undefined && (!Number.isFinite(input.leverage) || input.leverage <= 0)) {
+    warnings.push('leverage must be a positive number (e.g. 5 for 5x).');
+  }
+  const leverage = input.leverage !== undefined && input.leverage > 0 ? input.leverage : 1;
 
   // A long is protected by a stop BELOW entry; a short by a stop ABOVE.
   const stopPx =
@@ -106,12 +120,14 @@ export function buildOpenProposal(input: OpenSetupInput): OpenProposal {
     sz,
     limitPx: input.limitPx,
     reduceOnly: false, // opening a position is never reduce-only
+    leverage,
     createdAt: input.now,
   };
 
   const dirWord = input.side === 'buy' ? 'LONG' : 'SHORT';
+  const levWord = leverage > 1 ? ` ${leverage}x` : '';
   const rationale =
-    `${dirWord} ${sz} ${intent.coin} @ ~$${safeEntry} ` +
+    `${dirWord}${levWord} ${sz} ${intent.coin} @ ~$${safeEntry} ` +
     `(notional $${notionalUsd}); stop $${stopPx} (${round(safeStopFrac * 100, 2)}% away), ` +
     `risking $${dollarRisk}. Thesis: ${input.thesis.trim()}`;
 

@@ -45,6 +45,9 @@ export async function executeIntent(intent: TradeIntent): Promise<CanonicalFill>
   const fill = getTradingMode() === 'live' ? await liveFill(intent) : await paperFill(intent);
   if (fill.sz <= 0) return fill; // nothing filled — do not record (retry stays possible)
   await persistFill(fill);
-  await applyFillToPosition(fill);
+  // Leverage is intent METADATA (not derived from the fill, so the fold stays
+  // leverage-agnostic — ADR-0001). Carry it through to the positions upsert so the
+  // UI can derive ROE. Reduce-only exits leave it undefined → stored value kept.
+  await applyFillToPosition(fill, intent.reduceOnly ? undefined : intent.leverage);
   return fill;
 }

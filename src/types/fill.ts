@@ -31,6 +31,15 @@ export interface TradeIntent {
   limitPx?: number;
   /** Reduce-only orders can only shrink/close an existing position. */
   reduceOnly: boolean;
+  /**
+   * Position leverage (e.g. 5 = 5x) for an OPENING order. METADATA only — it does
+   * NOT affect the fill economics or the leverage-agnostic position fold
+   * (ADR-0001); it is persisted onto the positions row so the UI can derive ROE
+   * (= uPnl / margin, margin = notional / leverage). Omit / undefined for orders
+   * that should not change the stored leverage (e.g. reduce-only exits). Defaults
+   * to 1 (unleveraged) at the proposal builder when not supplied.
+   */
+  leverage?: number;
   /** Epoch ms the intent was created. */
   createdAt: number;
 }

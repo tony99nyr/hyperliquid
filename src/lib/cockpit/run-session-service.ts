@@ -48,6 +48,11 @@ export interface RunSessionPick {
   thesis: string;
   /** Optional limit price for the entry; omit for market. */
   limitPx?: number;
+  /**
+   * Position leverage (e.g. 5 = 5x). METADATA for ROE only — persisted onto the
+   * positions row, does NOT change the risk-based sizing. Defaults to 1x.
+   */
+  leverage?: number;
 }
 
 /** Injected I/O + pure-builder dependencies (all the chain's external effects). */
@@ -68,6 +73,7 @@ export interface RunSessionDeps {
     riskUsd: number;
     stopDistanceFrac: number;
     limitPx?: number;
+    leverage?: number;
     clientIntentId: string;
     now: number;
     thesis: string;
@@ -175,6 +181,7 @@ export async function runSessionEntryChain(
     riskUsd: pick.riskUsd,
     stopDistanceFrac: pick.stopDistanceFrac,
     limitPx: pick.limitPx,
+    leverage: pick.leverage,
     clientIntentId: deps.newId(),
     now: deps.now(),
     thesis: pick.thesis,

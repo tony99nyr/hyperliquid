@@ -160,6 +160,7 @@ export async function persistFillRow(
  */
 export async function applyFillToPositionRows(
   fill: CanonicalFill,
+  leverage?: number,
   client: SupabaseClient = getServiceRoleClient(),
 ): Promise<Position> {
   const sessionId = fill.sessionId;
@@ -183,8 +184,11 @@ export async function applyFillToPositionRows(
   const ledger = ((fillRows ?? []) as FillSelectRow[]).map(fillFromRow);
   const next = applyFills(coin, ledger);
 
-  // 3. Upsert the positions row (unique on session_id+coin).
-  const positionRow = buildPositionRow(sessionId, next, new Date().toISOString());
+  // 3. Upsert the positions row (unique on session_id+coin). Leverage is METADATA
+  //    from the opening intent (not folded — ADR-0001); when known it's written so
+  //    the UI derives ROE, when undefined the column is left out so a reduce-only
+  //    re-fold preserves the entry leverage rather than nulling it.
+  const positionRow = buildPositionRow(sessionId, next, new Date().toISOString(), leverage);
   const { error: upsertError } = await client
     .from('positions')
     .upsert(positionRow, { onConflict: 'session_id,coin' });
