@@ -2,10 +2,10 @@
 
 /**
  * LeaderVsYou — the side-by-side "leader's position vs yours on this coin" panel
- * (Item 4), with an ALIGNMENT readout that is the trail-the-leader exit cue:
- *
- *   🟢 aligned · 🟡 leader trimming · 🔴 leader covered/flipped · ⚠️ leader
- *   adding into a loss (martingale caution).
+ * (Item 4), with an ALIGNMENT readout that is the trail-the-leader exit cue.
+ * States: aligned · leader trimming · leader covered/flipped · leader adding into
+ * a loss (martingale caution). The state is shown as an on-palette CSS status dot
+ * (font-independent — never a tofu box) plus a color-coded text label.
  *
  * Renders only when the session FOLLOWS a leader AND the operator holds a position
  * on the displayed coin (otherwise the comparison is meaningless — nothing to
@@ -113,7 +113,19 @@ export default function LeaderVsYou({
           bg: 'github.bg',
         })}
       >
-        <span aria-hidden className={css({ fontSize: 'md' })}>{alignment.glyph}</span>
+        {/* Font-independent status dot (no color-emoji dependency → no tofu).
+            The color + the label below carry the meaning; this is decorative. */}
+        <span
+          aria-hidden
+          data-testid="alignment-dot"
+          style={{ backgroundColor: alignColor }}
+          className={css({
+            flex: 'none',
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+          })}
+        />
         <div className={css({ display: 'flex', flexDirection: 'column', gap: '1px', minWidth: '0' })}>
           <span data-testid="alignment-label" style={{ color: alignColor }} className={css({ fontFamily: 'label', fontSize: 'xs', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.04em' })}>
             {alignment.label}

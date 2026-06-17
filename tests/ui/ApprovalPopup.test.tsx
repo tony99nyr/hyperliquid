@@ -110,12 +110,12 @@ describe('ApprovalPopup', () => {
 });
 
 /** An OPENING entry (not reduce-only) with a stop — drives the leverage control. */
-function openingAction(over: { leverage?: number; coinMax?: number; stopPx?: number; estPx?: number } = {}): PendingAction {
+function openingAction(over: { leverage?: number; coinMax?: number; stopPx?: number; estPx?: number; mode?: 'paper' | 'live' } = {}): PendingAction {
   return {
     id: 'pa-open',
     sessionId: 's1',
     kind: 'entry',
-    mode: 'paper',
+    mode: over.mode ?? 'paper',
     proposal: {
       intent: { clientIntentId: 'i', sessionId: 's1', coin: 'ETH', side: 'buy', sz: 1, reduceOnly: false, leverage: over.leverage ?? 5, createdAt: 0 },
       display: {
@@ -186,5 +186,78 @@ describe('ApprovalPopup — leverage control (Item 3)', () => {
   it('shows the followed leader (short addr)', () => {
     render(<ApprovalPopup sessionId={null} actionOverride={openingAction()} />);
     expect(screen.getByTestId('approval-leader').textContent).toContain('0xabcd');
+  });
+
+  it('a11y: the slider announces the consequence via aria-valuetext (Fix 5)', () => {
+    render(<ApprovalPopup sessionId={null} actionOverride={openingAction({ leverage: 5 })} />);
+    const slider = screen.getByTestId('leverage-slider');
+    const vt = slider.getAttribute('aria-valuetext') ?? '';
+    expect(vt).toContain('5×');
+    expect(vt.toLowerCase()).toContain('margin');
+    expect(vt.toLowerCase()).toContain('liq');
+    expect(vt.toLowerCase()).toContain('roe');
+  });
+
+  it('a11y: the liq-inside-stop warning is role="alert" with a font-independent SVG icon (Fix 1+4)', () => {
+    render(<ApprovalPopup sessionId={null} actionOverride={openingAction({ leverage: 5, coinMax: 20 })} />);
+    fireEvent.change(screen.getByTestId('leverage-slider'), { target: { value: '20' } });
+    const warning = screen.getByTestId('liq-inside-stop-warning');
+    expect(warning.getAttribute('role')).toBe('alert');
+    // No emoji glyph — an inline SVG carries the visual cue.
+    expect(screen.getByTestId('liq-warning-icon').tagName.toLowerCase()).toBe('svg');
+  });
+});
+
+describe('ApprovalPopup — liq-inside-stop GATES Approve (Fix 2)', () => {
+  it('PAPER: Approve is BLOCKED while liq-inside-stop until the ack checkbox is ticked', () => {
+    render(<ApprovalPopup sessionId={null} actionOverride={openingAction({ leverage: 5, coinMax: 20, mode: 'paper' })} />);
+    const approve = screen.getByTestId('approve-button') as HTMLButtonElement;
+    // Safe at 5× → one-tap enabled, no warning, no checkbox.
+    expect(approve.disabled).toBe(false);
+    expect(screen.queryByTestId('liq-ack-checkbox')).toBeNull();
+
+    // Crank to 20× → warning fires and Approve is now gated.
+    fireEvent.change(screen.getByTestId('leverage-slider'), { target: { value: '20' } });
+    expect(screen.getByTestId('liq-inside-stop-warning')).toBeTruthy();
+    expect(approve.disabled).toBe(true);
+
+    // Acknowledge → Approve enables.
+    fireEvent.click(screen.getByTestId('liq-ack-checkbox'));
+    expect(approve.disabled).toBe(false);
+  });
+
+  it('PAPER: reducing leverage (clearing the warning) re-enables Approve WITHOUT an ack', () => {
+    render(<ApprovalPopup sessionId={null} actionOverride={openingAction({ leverage: 5, coinMax: 20, mode: 'paper' })} />);
+    const approve = screen.getByTestId('approve-button') as HTMLButtonElement;
+    fireEvent.change(screen.getByTestId('leverage-slider'), { target: { value: '20' } });
+    expect(approve.disabled).toBe(true);
+    // Drop back to a safe leverage → warning clears → Approve enabled, no ack needed.
+    fireEvent.change(screen.getByTestId('leverage-slider'), { target: { value: '5' } });
+    expect(screen.queryByTestId('liq-inside-stop-warning')).toBeNull();
+    expect(approve.disabled).toBe(false);
+  });
+
+  it('LIVE: Approve stays DISABLED at liq-inside-stop even with the typed phrase — until reduced OR acked', () => {
+    render(<ApprovalPopup sessionId={null} actionOverride={openingAction({ leverage: 5, coinMax: 20, mode: 'live' })} />);
+    const approve = screen.getByTestId('approve-button') as HTMLButtonElement;
+    const input = screen.getByTestId('live-confirm-input') as HTMLInputElement;
+
+    // Go to 20× (liq inside stop) and type the exact phrase — still BLOCKED.
+    fireEvent.change(screen.getByTestId('leverage-slider'), { target: { value: '20' } });
+    fireEvent.change(input, { target: { value: 'buy 1 eth' } });
+    expect(approve.disabled).toBe(true);
+
+    // Ack the danger → now enabled (typed phrase + ack both satisfied).
+    fireEvent.click(screen.getByTestId('liq-ack-checkbox'));
+    expect(approve.disabled).toBe(false);
+  });
+
+  it('LIVE: acking the liq warning WITHOUT the typed phrase does NOT enable Approve (both gates required)', () => {
+    render(<ApprovalPopup sessionId={null} actionOverride={openingAction({ leverage: 5, coinMax: 20, mode: 'live' })} />);
+    const approve = screen.getByTestId('approve-button') as HTMLButtonElement;
+    fireEvent.change(screen.getByTestId('leverage-slider'), { target: { value: '20' } });
+    fireEvent.click(screen.getByTestId('liq-ack-checkbox'));
+    // Ack satisfied but the LIVE typed-phrase gate is not → still disabled.
+    expect(approve.disabled).toBe(true);
   });
 });

@@ -19,6 +19,11 @@
  * LEVERAGE is the operator's risk decision: the slider drives a LIVE margin/liq/
  * ROE read and a SAFETY GUARD (liquidation-inside-stop). Notional stays risk-sized
  * — leverage governs margin/liq/ROE only. The chosen value is server-validated.
+ *
+ * SAFETY GATE: when liquidation would trigger at/before the stop, Approve is
+ * BLOCKED (no one-tap shipping of a knowingly-broken risk plan) until the operator
+ * reduces leverage (warning clears) or ticks the explicit acknowledge checkbox —
+ * PAPER and LIVE both. The LIVE typed-phrase gate is still required on top.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -34,6 +39,7 @@ import {
   halfLeaderLeverage,
 } from '@/lib/trading/leverage-business-logic';
 import { leaderPositionForCoin } from './leader-alignment-helpers';
+import { WarningTriangle } from './WarningTriangle';
 import { isApproveEnabled, liveConfirmPhrase, summarizeProposal } from './approval-popup-helpers';
 import { GH, ZONE_COLORS, fmtPx, fmtUsd, fmtCompactUsd, fmtPctSigned } from './panel-styles';
 
@@ -91,8 +97,8 @@ function PopupBody({
   const [typed, setTyped] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const approveEnabled = !busy && isApproveEnabled(action.mode, display, typed);
+  // Explicit acknowledgement of a knowingly-broken risk plan (liq inside stop).
+  const [ackLiqInsideStop, setAckLiqInsideStop] = useState(false);
 
   // Derived leverage read — recomputed every render off the slider value.
   const entryPx = display.estPx ?? null;
@@ -105,6 +111,16 @@ function PopupBody({
   });
   const liqInsideStop = liquidationInsideStop(display.side, read.liqPx, display.stopPx);
   const halfLev = halfLeaderLeverage(leaderLev);
+
+  // SAFETY GATE (Item / Fix 2): a one-tap approve must NOT ship a plan where the
+  // position liquidates at/before the stop. While `liqInsideStop`:
+  //   LIVE  — Approve stays disabled until the operator either reduces leverage
+  //           (the warning clears) OR ticks the explicit acknowledge checkbox.
+  //           The LIVE typed-phrase gate (isApproveEnabled) is required IN ADDITION.
+  //   PAPER — the same acknowledge checkbox is required before Approve enables.
+  // When the warning is NOT showing, this gate is a no-op and prior behavior holds.
+  const liqGateCleared = !liqInsideStop || ackLiqInsideStop;
+  const approveEnabled = !busy && liqGateCleared && isApproveEnabled(action.mode, display, typed);
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
@@ -320,6 +336,8 @@ function PopupBody({
             roeAtStopPct={read.roeAtStopPct}
             roeAtTargetPct={read.roeAtTargetPct}
             liqInsideStop={liqInsideStop}
+            ackLiqInsideStop={ackLiqInsideStop}
+            setAckLiqInsideStop={setAckLiqInsideStop}
             leaderLev={leaderLev}
             halfLev={halfLev}
           />
@@ -496,6 +514,8 @@ function LeverageControl({
   roeAtStopPct,
   roeAtTargetPct,
   liqInsideStop,
+  ackLiqInsideStop,
+  setAckLiqInsideStop,
   leaderLev,
   halfLev,
 }: {
@@ -508,9 +528,15 @@ function LeverageControl({
   roeAtStopPct: number | null;
   roeAtTargetPct: number | null;
   liqInsideStop: boolean;
+  ackLiqInsideStop: boolean;
+  setAckLiqInsideStop: (v: boolean) => void;
   leaderLev: number | null;
   halfLev: number | null;
 }) {
+  // A11y (Fix 5): announce the CONSEQUENCE of the slider, not just the multiplier.
+  const liqText = liqPx == null ? 'n/a' : fmtPx(liqPx);
+  const roeTargetText = roeAtTargetPct == null ? 'n/a' : fmtPctSigned(roeAtTargetPct);
+  const sliderValueText = `${leverage}×, margin ${fmtUsd(marginUsd).replace('+', '')}, est. liq ${liqText}, ROE at target ${roeTargetText}`;
   return (
     <div
       data-testid="leverage-control"
@@ -541,6 +567,7 @@ function LeverageControl({
         value={leverage}
         onChange={(e) => setLeverage(Number(e.target.value))}
         aria-label={`Leverage, 1 to ${coinMax} times`}
+        aria-valuetext={sliderValueText}
         className={css({ width: '100%', accentColor: '#58a6ff', cursor: 'pointer' })}
       />
       <div className={css({ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: 'github.textMuted', fontFamily: 'mono' })}>
@@ -570,24 +597,46 @@ function LeverageControl({
         )}
       </div>
 
-      {/* SAFETY GUARD — liquidation inside the stop. */}
+      {/* SAFETY GUARD — liquidation inside the stop. role="alert" so a screen
+          reader dragging the slider HEARS the message on state change (Fix 4). */}
       {liqInsideStop && (
         <div
           data-testid="liq-inside-stop-warning"
+          role="alert"
           className={css({
             display: 'flex',
+            flexDirection: 'column',
             gap: '8px',
-            alignItems: 'flex-start',
             bg: 'rgba(248,81,73,0.12)',
             border: '1px solid token(colors.zone.danger)',
             borderRadius: '6px',
             padding: '8px 10px',
           })}
         >
-          <span aria-hidden className={css({ fontSize: 'sm' })}>⚠️</span>
-          <span className={css({ fontSize: 'xs', color: 'zone.danger', fontWeight: 'semibold', lineHeight: '1.4' })}>
-            Liquidation before stop — at {leverage}× the position liquidates before your stop can trigger. Reduce leverage.
-          </span>
+          <div className={css({ display: 'flex', gap: '8px', alignItems: 'flex-start' })}>
+            {/* Font-independent SVG warning triangle (no emoji → no tofu, Fix 1). */}
+            <WarningTriangle />
+            <span className={css({ fontSize: 'xs', color: 'zone.danger', fontWeight: 'semibold', lineHeight: '1.4' })}>
+              Liquidation before stop — at {leverage}× the position liquidates before your stop can trigger. Reduce leverage.
+            </span>
+          </div>
+          {/* Approve is GATED while this warning shows (Fix 2): clear it by
+              reducing leverage, or explicitly acknowledge the broken risk plan. */}
+          <label
+            data-testid="liq-ack-label"
+            className={css({ display: 'flex', gap: '7px', alignItems: 'flex-start', cursor: 'pointer' })}
+          >
+            <input
+              type="checkbox"
+              data-testid="liq-ack-checkbox"
+              checked={ackLiqInsideStop}
+              onChange={(e) => setAckLiqInsideStop(e.target.checked)}
+              className={css({ marginTop: '2px', accentColor: '#f85149', cursor: 'pointer' })}
+            />
+            <span className={css({ fontSize: '11px', color: 'github.text', lineHeight: '1.4' })}>
+              I understand liquidation is inside my stop
+            </span>
+          </label>
         </div>
       )}
     </div>
