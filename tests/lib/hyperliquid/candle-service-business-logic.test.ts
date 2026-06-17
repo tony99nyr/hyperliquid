@@ -89,7 +89,10 @@ describe('candle-service-business-logic', () => {
   describe('intervals + cache key', () => {
     it('recognizes the supported intervals', () => {
       for (const i of SUPPORTED_INTERVALS) expect(isSupportedInterval(i)).toBe(true);
-      expect(isSupportedInterval('5m')).toBe(false);
+      // 5m / 1m / 4h are now supported (the chart timeframe selector). Assert on
+      // an interval HL doesn't expose to this app.
+      expect(isSupportedInterval('30m')).toBe(false);
+      expect(isSupportedInterval('5m')).toBe(true);
     });
 
     it('builds a stable upper-cased, interval-bucketed cache key', () => {

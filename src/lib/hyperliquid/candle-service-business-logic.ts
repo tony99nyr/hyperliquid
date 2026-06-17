@@ -9,8 +9,14 @@
 
 import type { PriceCandle } from '@/types/trading-core';
 
-/** Multi-timeframe set the cockpit reads (plan: 1d / 8h / 1h / 15m). */
-export const SUPPORTED_INTERVALS = ['1d', '8h', '1h', '15m'] as const;
+/**
+ * All HL candle intervals the cockpit fetches. Two overlapping uses:
+ *   - the health/analysis multi-timeframe set is 1d / 8h / 1h / 15m (its arrays
+ *     live in the health engine + skills and reference these verbatim);
+ *   - the live CHART timeframe selector offers 1m / 5m / 15m / 1h / 4h / 1d.
+ * The union of both is supported here; each consumer picks its own subset.
+ */
+export const SUPPORTED_INTERVALS = ['1d', '4h', '8h', '1h', '15m', '5m', '1m'] as const;
 export type CandleInterval = (typeof SUPPORTED_INTERVALS)[number];
 
 export function isSupportedInterval(i: string): i is CandleInterval {
@@ -86,9 +92,12 @@ export function parseCandleSnapshot(raw: unknown): PriceCandle[] {
 /** Interval length in milliseconds, for cache-window bucketing. */
 export const INTERVAL_MS: Record<CandleInterval, number> = {
   '1d': 24 * 60 * 60 * 1000,
+  '4h': 4 * 60 * 60 * 1000,
   '8h': 8 * 60 * 60 * 1000,
   '1h': 60 * 60 * 1000,
   '15m': 15 * 60 * 1000,
+  '5m': 5 * 60 * 1000,
+  '1m': 60 * 1000,
 };
 
 /** Floor `t` to the start of its `interval`-sized bucket. PURE. */
