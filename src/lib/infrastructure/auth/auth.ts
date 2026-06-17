@@ -116,8 +116,14 @@ export function getAdminSecret(): string {
 
 /** Gets client IP address from request (for rate limiting). */
 export function getClientIdentifier(request: NextRequest): string {
+  // Prefer the platform-set `x-real-ip` (Vercel sets this to the true client IP
+  // at the edge; it is not client-appendable). Only fall back to the left-most
+  // `x-forwarded-for` hop when x-real-ip is absent — that token IS client-
+  // spoofable, so trusting the platform header first hardens the rate-limit key
+  // against an authed caller rotating XFF to evade their per-client cap.
+  const realIp = request.headers.get('x-real-ip');
   const forwarded = request.headers.get('x-forwarded-for');
-  const rawIp = forwarded ? forwarded.split(',')[0] : request.headers.get('x-real-ip');
+  const rawIp = realIp ?? (forwarded ? forwarded.split(',')[0] : null);
   return rawIp?.trim() || 'unknown';
 }
 

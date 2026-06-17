@@ -125,14 +125,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const fill = await executeIntent(intent);
 
-  await writeAnalysisLog({
-    sessionId: session.id,
-    source: 'safe-exit',
-    severity: 'danger',
-    message:
-      `SAFE-EXIT fired: ${intent.side} ${fill.sz} ${coin} @ $${fill.px} ` +
-      `(${usedFallback ? 'market-close fallback — Claude offline/stale plan' : 'fresh plan'}, source=${fill.source}).`,
-  });
+  // The trade has already executed and the fill is recorded by executeIntent.
+  // A failed analysis-log write must NOT 500 the route and make a SUCCESSFUL
+  // panic exit look like a failure to the operator — best-effort only.
+  try {
+    await writeAnalysisLog({
+      sessionId: session.id,
+      source: 'safe-exit',
+      severity: 'danger',
+      message:
+        `SAFE-EXIT fired: ${intent.side} ${fill.sz} ${coin} @ $${fill.px} ` +
+        `(${usedFallback ? 'market-close fallback — Claude offline/stale plan' : 'fresh plan'}, source=${fill.source}).`,
+    });
+  } catch {
+    // swallow — the exit succeeded; logging is non-critical.
+  }
 
   return NextResponse.json({
     ok: true,
