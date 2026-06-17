@@ -50,6 +50,33 @@ export interface RealtimeChannelState<T> {
 const DEFAULT_LIMIT = 200;
 
 /**
+ * Per-effect-run uniqueness for the realtime channel topic.
+ *
+ * THE BUG THIS GUARDS AGAINST: Supabase's `client.channel(topic)` returns an
+ * EXISTING channel object when one with that topic is still registered on the
+ * client. Our teardown does a fire-and-forget `void client.removeChannel(...)`
+ * (async). When the subscribe effect re-runs (sessionId resolves/changes, or a
+ * remount/StrictMode double-invoke) BEFORE that async removal lands,
+ * `client.channel(sameTopic)` hands back the already-SUBSCRIBED channel — and
+ * the chained `.on('postgres_changes', …)` throws
+ * `cannot add 'postgres_changes' callbacks … after subscribe()`, crashing render.
+ *
+ * Making the topic unique PER EFFECT RUN means a re-run can never collide with a
+ * not-yet-removed prior channel: the new run always gets a brand-new, unsubscribed
+ * channel. Overlap during async removal is harmless (different topics).
+ */
+let channelNonceCounter = 0;
+function uniqueTopicSuffix(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  // Fallback for environments without crypto.randomUUID (e.g. some test runners):
+  // a monotonic counter + a non-time random component is sufficient for
+  // per-run uniqueness within a single client instance.
+  channelNonceCounter += 1;
+  return `${channelNonceCounter}-${Math.random().toString(36).slice(2)}`;
+}
+
+/**
  * Subscribe to one session-scoped table. Returns accumulated rows + status.
  * Re-subscribes when `table` or `sessionId` change.
  */
@@ -104,8 +131,13 @@ export function useRealtimeChannel<T extends { id: string }>(
       });
 
     // 2) Realtime channel for INSERT + UPDATE.
+    // Topic is unique PER EFFECT RUN (see uniqueTopicSuffix) so client.channel()
+    // can NEVER return a pre-existing, already-subscribed channel from a prior
+    // run whose async removeChannel() hasn't completed yet. `.on()` stays BEFORE
+    // `.subscribe()` (required by Supabase).
+    const topic = `rt:${table}:${sessionId}:${uniqueTopicSuffix()}`;
     const channel: RealtimeChannel = client
-      .channel(`rt:${table}:${sessionId}`)
+      .channel(topic)
       .on(
         'postgres_changes',
         {

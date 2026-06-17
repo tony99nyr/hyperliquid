@@ -20,6 +20,23 @@ Supabase (Postgres + realtime) · recharts. Package manager: **pnpm**.
 - **Validate (full)**: `pnpm validate` — type-check + tests + lint + build. **Run before every commit.**
 - `pnpm type:check` · `pnpm test` · `pnpm test:lib` · `pnpm test:ui` · `pnpm lint` · `pnpm build`
 
+### Client-side smoke — REQUIRED before pushing UI changes
+
+`pnpm validate` does NOT load `/cockpit` in a real browser, so it can miss
+uncaught client-side React crashes (e.g. the realtime "cannot add
+'postgres_changes' callbacks … after subscribe()" crash that once shipped).
+Before pushing any change touching the cockpit client, hooks, or realtime:
+
+- **`pnpm smoke`** — builds + starts the app, authenticates with `ADMIN_PIN`,
+  loads `/cockpit` in headless Chrome (Playwright), and FAILS on any uncaught
+  page error or `console.error`. SKIPs (exit 0) where no browser is installed.
+- The always-on guard is `tests/ui/realtime-resubscribe.test.tsx` (runs in
+  `pnpm test`): it mounts `CockpitClient` + the realtime hook under the
+  **enforcing** Supabase realtime mock (`tests/mocks/supabase-realtime.mock.ts`),
+  which throws on `.on()`-after-`.subscribe()` and reuses same-topic channels —
+  reproducing the browser crash class in jsdom. Keep that mock strict.
+- `pnpm smoke:data` — the separate backend/data smoke (real Supabase + HL).
+
 ## The crux — seamless paper ↔ live (ADR-0001)
 
 The hard requirement: flip paper→live by changing `TRADING_MODE` and nothing
