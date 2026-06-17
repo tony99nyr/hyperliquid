@@ -178,6 +178,52 @@ describe('applyFillToPositionRows (fold WHOLE ledger → upsert positions + inse
     expect(second).toEqual(first); // idempotent — folding the same ledger twice
   });
 
+  it('LEVERAGE-PRESERVATION CONTRACT: a reduce-only re-fold does NOT null the stored leverage', async () => {
+    // This pins the end-to-end behavior the UI's real-ROE depends on: leverage is
+    // stamped ONCE at entry (the opening fold carries `leverage`); a later
+    // reduce-only re-fold is leverage-UNAWARE and MUST leave the stored value
+    // intact. The mechanism is that the reduce-only upsert OMITS the `leverage`
+    // column entirely, relying on PostgREST/Postgres not nulling omitted columns
+    // on upsert. If a future client/ORM swap starts sending leverage:null (or
+    // PostgREST changes to null-out omitted columns), this assertion fails — which
+    // is exactly the regression we want surfaced before it clobbers entry ROE.
+
+    // 1) OPENING fold — leverage known (5×) → written to the positions row.
+    mock.queueResult({ data: [ledgerRow({ clientIntentId: 'open', sz: 2, px: 2000, feeUsd: 1, filledAt: 1 })], error: null });
+    mock.queueResult({ error: null }); // upsert
+    mock.queueResult({ error: null }); // pnl
+    await applyFillToPositionRows(fill({ clientIntentId: 'open', sz: 2, px: 2000, feeUsd: 1 }), 5, client);
+    const openUpsert = mock.ops[1];
+    expect((openUpsert.payload as { leverage?: number }).leverage).toBe(5);
+
+    mock.reset();
+
+    // 2) REDUCE-ONLY re-fold — leverage UNDEFINED (no opening intent on a reduce).
+    //    The ledger now has both fills; the position recomputes, but the upsert
+    //    payload MUST NOT carry a `leverage` key at all (not even null).
+    mock.queueResult({
+      data: [
+        ledgerRow({ clientIntentId: 'open', sz: 2, px: 2000, feeUsd: 1, filledAt: 1 }),
+        ledgerRow({ clientIntentId: 'reduce', side: 'sell', sz: 1, px: 2100, feeUsd: 0.5, reduceOnly: true, filledAt: 2 }),
+      ],
+      error: null,
+    });
+    mock.queueResult({ error: null }); // upsert
+    mock.queueResult({ error: null }); // pnl
+    await applyFillToPositionRows(
+      fill({ clientIntentId: 'reduce', side: 'sell', sz: 1, px: 2100, feeUsd: 0.5, reduceOnly: true }),
+      undefined,
+      client,
+    );
+    const reduceUpsert = mock.ops[1];
+    const payload = reduceUpsert.payload as Record<string, unknown>;
+    // The position itself recomputed (size reduced 2 → 1)…
+    expect((payload as { sz: number }).sz).toBe(1);
+    // …but leverage is OMITTED, so the stored entry leverage is preserved.
+    expect('leverage' in payload).toBe(false);
+    expect(payload.leverage).toBeUndefined();
+  });
+
   it('throws when the ledger load fails', async () => {
     mock.queueResult({ error: { message: 'load boom' } });
     await expect(applyFillToPositionRows(fill(), undefined, client)).rejects.toThrow(/load failed: load boom/);
