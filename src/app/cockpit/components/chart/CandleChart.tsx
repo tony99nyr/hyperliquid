@@ -22,14 +22,12 @@ import {
   createChart,
   CandlestickSeries,
   LineSeries,
-  createSeriesMarkers,
   ColorType,
   CrosshairMode,
   LineStyle,
   type IChartApi,
   type ISeriesApi,
   type IPriceLine,
-  type ISeriesMarkersPluginApi,
   type Time,
 } from 'lightweight-charts';
 import type { PriceCandle } from '@/types/trading-core';
@@ -45,9 +43,14 @@ export interface CandleChartProps {
   candles: PriceCandle[];
   /** Live last price from the ws — drives the forming candle between polls. */
   lastPx?: number | null;
-  /** Active trade to overlay (entry/stop/target lines + entry marker). */
+  /** Active trade to overlay (entry/stop/target lines). */
   trade?: ActiveTrade | null;
   height?: number;
+  /** Coin + interval identify the dataset; a change re-fits the view ONCE. */
+  coin?: string;
+  interval?: string;
+  /** Feed status — the forming candle only streams when 'live'. */
+  status?: string;
 }
 
 const MA_FAST = { period: 20, color: '#58a6ff' };
@@ -58,6 +61,9 @@ export default function CandleChart({
   lastPx = null,
   trade = null,
   height = 460,
+  coin,
+  interval,
+  status,
 }: CandleChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -65,7 +71,9 @@ export default function CandleChart({
   const maFastRef = useRef<ISeriesApi<'Line'> | null>(null);
   const maSlowRef = useRef<ISeriesApi<'Line'> | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
-  const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  // The dataset (coin|interval) we last fitContent()'d for — we re-fit ONCE per
+  // dataset, never on subsequent polls (which would destroy user pan/zoom).
+  const fittedKeyRef = useRef<string | null>(null);
 
   // --- Create the chart once, themed to the terminal palette. ---
   useEffect(() => {
@@ -124,7 +132,6 @@ export default function CandleChart({
     candleSeriesRef.current = candleSeries;
     maFastRef.current = maFast;
     maSlowRef.current = maSlow;
-    markersRef.current = createSeriesMarkers(candleSeries, []);
 
     return () => {
       chart.remove();
@@ -132,9 +139,18 @@ export default function CandleChart({
       candleSeriesRef.current = null;
       maFastRef.current = null;
       maSlowRef.current = null;
-      markersRef.current = null;
       priceLinesRef.current = [];
+      fittedKeyRef.current = null;
     };
+    // Create ONCE. `height` is applied imperatively in the effect below so a
+    // height change never tears down + rebuilds the chart (which would wipe the
+    // user's pan/zoom and re-fit).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // --- Apply height imperatively (no teardown when it changes). ---
+  useEffect(() => {
+    chartRef.current?.applyOptions({ height });
   }, [height]);
 
   // --- Feed candle + MA data (full refresh on each candles change). ---
@@ -146,25 +162,43 @@ export default function CandleChart({
     series.setData(lwc as never);
     maFastRef.current?.setData(maLine(candles, MA_FAST.period) as never);
     maSlowRef.current?.setData(maLine(candles, MA_SLOW.period) as never);
-    if (lwc.length > 0) chart.timeScale().fitContent();
-  }, [candles]);
+    // Fit the view ONCE per dataset (coin|interval). Subsequent polls just
+    // refresh data and must preserve the user's pan/zoom — re-fitting every
+    // poll would yank them back to the full range each tick.
+    const key = `${coin ?? ''}|${interval ?? ''}`;
+    if (lwc.length > 0 && fittedKeyRef.current !== key) {
+      chart.timeScale().fitContent();
+      fittedKeyRef.current = key;
+    }
+  }, [candles, coin, interval]);
 
   // --- Stream the forming candle from the live last price between polls. ---
   useEffect(() => {
     const series = candleSeriesRef.current;
     if (!series || lastPx == null || candles.length === 0) return;
-    const last = candles[candles.length - 1];
-    const time = Math.floor(last.timestamp / 1000);
+    // Only stream when the feed is live: right after a coin switch the previous
+    // coin's lastPx can still be in flight; gating prevents it smearing the new
+    // coin's first forming bar.
+    if (status !== undefined && status !== 'live') return;
+    // Derive the forming-bar time from the SAME deduped output setData() used —
+    // reading the raw candles array can pick a same-second duplicate that
+    // toLwcCandles dropped, which would create a phantom bar via update().
+    const lwc = toLwcCandles(candles);
+    if (lwc.length === 0) return;
+    const last = lwc[lwc.length - 1];
     series.update({
-      time: time as Time,
+      time: last.time as Time,
       open: last.open,
       high: Math.max(last.high, lastPx),
       low: Math.min(last.low, lastPx),
       close: lastPx,
     } as never);
-  }, [lastPx, candles]);
+  }, [lastPx, candles, status]);
 
-  // --- Overlay the active trade: entry/stop/target price lines + entry marker. ---
+  // --- Overlay the active trade: entry/stop/target price lines. ---
+  // NOTE: no on-bar entry marker — we don't store the entry candle's time, so a
+  // marker pinned to the latest candle would float on the right edge and lie
+  // about when the trade opened. The entry price LINE conveys entry accurately.
   useEffect(() => {
     const series = candleSeriesRef.current;
     if (!series) return;
@@ -188,24 +222,7 @@ export default function CandleChart({
         }),
       );
     }
-
-    // Entry marker pinned to the most-recent candle (we don't store the entry
-    // candle time; the line carries the precise price, the marker just flags side).
-    if (trade && trade.entryPx != null && candles.length > 0) {
-      const time = Math.floor(candles[candles.length - 1].timestamp / 1000);
-      markersRef.current?.setMarkers([
-        {
-          time: time as Time,
-          position: trade.side === 'long' ? 'belowBar' : 'aboveBar',
-          color: trade.side === 'long' ? ZONE_COLORS.ok : ZONE_COLORS.danger,
-          shape: trade.side === 'long' ? 'arrowUp' : 'arrowDown',
-          text: trade.side.toUpperCase(),
-        },
-      ]);
-    } else {
-      markersRef.current?.setMarkers([]);
-    }
-  }, [trade, candles]);
+  }, [trade]);
 
   return <div ref={containerRef} data-testid="candle-chart" style={{ width: '100%', height }} />;
 }
