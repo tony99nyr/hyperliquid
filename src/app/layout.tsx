@@ -1,25 +1,28 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
-import { JetBrains_Mono, Archivo } from 'next/font/google';
+import { IBM_Plex_Mono, IBM_Plex_Sans } from 'next/font/google';
 import './globals.css';
 
 /**
- * Trading-desk typography (wired through Panda tokens — see panda.config.ts):
- *   - JetBrains Mono for ALL numerics (tabular-nums; no jitter on ticking values).
- *   - Archivo for small UPPERCASE letter-spaced labels.
+ * HL Cockpit typography (design handoff — wired through Panda tokens, see
+ * panda.config.ts):
+ *   - IBM Plex Mono for ALL data/numbers (tabular-nums; no jitter on ticking values).
+ *   - IBM Plex Sans for UI labels & buttons.
  * NOT Inter/Roboto/system. Exposed as CSS variables consumed by `fonts.mono` /
- * `fonts.label` token values.
+ * `fonts.label` / `fonts.sans` token values.
  */
-const jetbrainsMono = JetBrains_Mono({
+const plexMono = IBM_Plex_Mono({
   subsets: ['latin'],
+  weight: ['400', '500', '600'],
   display: 'swap',
-  variable: '--font-jetbrains-mono',
+  variable: '--font-plex-mono',
 });
 
-const archivo = Archivo({
+const plexSans = IBM_Plex_Sans({
   subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
   display: 'swap',
-  variable: '--font-archivo',
+  variable: '--font-plex-sans',
 });
 
 export const metadata: Metadata = {
@@ -29,7 +32,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`${jetbrainsMono.variable} ${archivo.variable}`}>
+    <html lang="en" className={`${plexMono.variable} ${plexSans.variable}`}>
       <body>{children}</body>
     </html>
   );

@@ -9,47 +9,69 @@
 
 import type { AlertSeverity, ContextZone } from '@/types/cockpit';
 
+// HL COCKPIT design-handoff palette. Raw hex (matching panda.config tokens) so
+// these can be used in both `css()` and inline SVG/style attributes without a
+// token round-trip. up/long/profit #19c98a · down/short/loss #f24d5e · warn #d9a441.
 export const ZONE_COLORS = {
-  ok: '#3fb950',
-  warn: '#d29922',
-  danger: '#f85149',
+  ok: '#19c98a',
+  warn: '#d9a441',
+  danger: '#f24d5e',
 } as const;
 
 export const GH = {
-  bg: '#0d1117',
-  bgSecondary: '#161b22',
-  border: '#30363d',
-  borderSubtle: '#21262d',
-  text: '#c9d1d9',
-  textBright: '#e6edf3',
-  // ≥4.5:1 on #0d1117 (WCAG AA) — the prior #7d8590 fell to ~4.0:1, under AA
-  // for the 9–11px uppercase micro-labels used across the dense panels.
-  textMuted: '#8b949e',
+  bg: '#080a0f', // page void
+  bgSecondary: '#10141c', // panel surface
+  border: 'rgba(255,255,255,0.07)', // card borders
+  borderSubtle: 'rgba(255,255,255,0.06)', // inner dividers
+  text: '#cdd4e0', // secondary text
+  textBright: '#e8ebf2', // primary text
+  // muted micro-label color (≥4.5:1 on the dark surfaces for 9–11px labels).
+  textMuted: '#8b95a6',
 } as const;
 
 /**
- * Trading-desk terminal palette — layered near-black surfaces below the GH
- * tokens, plus the single interactive accent (#58a6ff). Sharp color is reserved
+ * Cockpit terminal palette — the layered near-black surfaces of the design
+ * handoff plus the single interactive accent (#5b8cff). Sharp color is reserved
  * for meaning (P&L / health / alerts); chrome stays monochrome.
  */
 export const TERM = {
   /** Deepest layer (the page void behind panels). */
-  void: '#010409',
+  void: '#080a0f',
+  /** Top/bottom bars. */
+  bar: '#0b0e15',
   /** Panel surface. */
-  surface: '#0d1117',
+  surface: '#10141c',
+  /** Focal (brighter) panel surface — Open Positions, stat cards. */
+  focal: '#11161f',
+  /** Inset / field background — inputs, summary boxes. */
+  inset: '#0a0d13',
   /** Raised surface (rows, cells). */
-  raised: '#161b22',
+  raised: '#0c1017',
+  /** Idle nav / timeframe container. */
+  navIdle: '#0e131c',
+  /** Active nav / timeframe pill. */
+  navActive: '#1c2536',
+  /** Secondary button surface. */
+  button: '#161c27',
   /** Hairline between surfaces. */
-  hairline: '#21262d',
-  /** Interactive / link accent. */
-  accent: '#58a6ff',
+  hairline: 'rgba(255,255,255,0.06)',
+  /** Faint meta / axis / captions. */
+  faint: '#586273',
+  /** Interactive / link accent (= MA20). */
+  accent: '#5b8cff',
+  /** MA50 / warning. */
+  ma50: '#d9a441',
+  /** Bright exit CTA red. */
+  safeExit: '#e23a4d',
+  /** Text on bright buttons. */
+  darkText: '#0a0d13',
 } as const;
 
-/** Shared panel chrome — a near-black raised surface with a hairline border. */
+/** Shared panel chrome — a panel surface with a hairline border (12px radius). */
 export const panelSurface = {
   bg: 'github.bgSecondary',
   border: '1px solid token(colors.github.border)',
-  borderRadius: '8px',
+  borderRadius: '12px',
 } as const;
 
 /** Color for a market regime (bullish green / bearish red / neutral muted). */
