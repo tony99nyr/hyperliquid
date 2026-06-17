@@ -66,6 +66,13 @@ export default function CockpitView({
     [coin],
   );
 
+  // NO-AUTO-FIRE: the UI can't fabricate an entry intent — an entry is proposed
+  // by the open-position / run-session skill and surfaces as the ApprovalPopup.
+  // "＋ New Position" therefore reveals the skill flow (GettingStarted) rather
+  // than opening a client-built order ticket.
+  const [showNew, setShowNew] = useState(false);
+  const onNewPosition = useCallback(() => setShowNew(true), []);
+
   return (
     <div
       data-testid="cockpit-view"
@@ -86,13 +93,14 @@ export default function CockpitView({
 
       {/* CENTER — chart → open positions → leader-vs-you / health → analysis. */}
       <main className={css({ order: { base: 1, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minHeight: '0', overflowY: { base: 'visible', lg: 'auto' }, paddingRight: { lg: '2px' } })}>
-        {!hasSession && <GettingStarted />}
+        {(!hasSession || showNew) && <GettingStarted />}
         <CockpitCoinTabs coin={coin} coins={coins} onChange={onCoinChange} />
         <CandleChartPanel coin={coin} trade={trade} />
         <OpenPositionsPanel
           sessionId={sessionId}
           regimeByCoin={regimeByCoin}
           currentEquityUsd={currentEquityUsd}
+          onNewPosition={onNewPosition}
         />
         {/* Adaptive Market-Read / Trade-Health + Leader-vs-You (wave-2). */}
         <div className={css({ display: 'grid', gridTemplateColumns: { base: '1fr', md: 'minmax(0,1fr) minmax(0,1fr)' }, gap: '12px', alignItems: 'start' })}>
