@@ -332,8 +332,21 @@ async function main(): Promise<void> {
       await slider.fill('20');
       await delay(400);
       const warn = await page.locator('[data-testid="liq-inside-stop-warning"]').count();
-      console.log(`  liq-inside-stop warning visible at 20x: ${warn > 0}`);
+      const role = await page.locator('[data-testid="liq-inside-stop-warning"]').getAttribute('role').catch(() => null);
+      const svgIcon = await page.locator('[data-testid="liq-warning-icon"]').count();
+      // Fix 2: at 20× the Approve button must now be GATED (disabled) until ack.
+      const approveDisabledBefore = await page.locator('[data-testid="approve-button"]').isDisabled();
+      console.log(`  liq-inside-stop warning visible at 20x: ${warn > 0} (role=${role}, svgIcon=${svgIcon > 0})`);
+      console.log(`  Approve GATED at 20x before ack (expect true): ${approveDisabledBefore}`);
       await page.locator('[data-testid="approval-popup"]').screenshot({ path: `${SHOT_DIR}/verify-e2-approval-leverage-warning.png` });
+      // Tick the explicit acknowledge → PAPER Approve re-enables.
+      const ack = page.locator('[data-testid="liq-ack-checkbox"]');
+      if (await ack.count()) {
+        await ack.check();
+        await delay(200);
+        const approveDisabledAfter = await page.locator('[data-testid="approve-button"]').isDisabled();
+        console.log(`  Approve still gated AFTER ack (expect false): ${approveDisabledAfter}`);
+      }
     }
 
     // (e3) Redesigned ApprovalPopup — LIVE (typed-phrase gate) variant.
