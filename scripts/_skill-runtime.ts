@@ -14,6 +14,7 @@
 
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
+import type { PendingActionProposal } from '@/types/cockpit';
 
 /** Parse `--key value` / `--flag` argv into a record. */
 export function parseArgs(argv: string[]): Record<string, string | boolean> {
@@ -118,6 +119,85 @@ export async function requireConfirmation(
   } finally {
     rl.close();
   }
+}
+
+/**
+ * Is the server-side Supabase service-role client configured? Mirrors the env
+ * resolution in supabase-server.ts. When false (headless scripts with no DB) the
+ * approval gate falls back to the terminal confirmation so scripts still run.
+ */
+function isSupabaseConfigured(): boolean {
+  const url =
+    process.env.HL_SUPABASE_URL ??
+    process.env.NEXT_PUBLIC_HL_SUPABASE_URL ??
+    process.env.SUPABASE_URL ??
+    process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key =
+    process.env.HL_SUPABASE_SERVICE_ROLE_KEY ??
+    process.env.HL_SUPABASE_SECRET_KEY ??
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
+  return Boolean(url && key);
+}
+
+export interface RequireApprovalInput {
+  /** Session the action belongs to. When absent, the terminal gate is used. */
+  sessionId?: string | null;
+  kind: 'entry' | 'exit' | 'generic';
+  /** The proposal payload (executable intent + display) written to the row. */
+  proposal: PendingActionProposal;
+  mode: 'paper' | 'live';
+  /** Poll timeout in ms (default 120000). */
+  timeoutMs?: number;
+  /** Raw argv (so the terminal fallback can honor --confirm in paper). */
+  args?: Record<string, string | boolean>;
+}
+
+/**
+ * THE NO-AUTO-FIRE approval gate. Resolves TRUE only on an explicit approval.
+ *
+ * WEB path (sessionId present AND Supabase configured): write a 'pending'
+ * `pending_actions` row, then poll it until the human approves (→ true), rejects
+ * (→ false), or it times out (→ marked 'expired', false). The popup is the only
+ * thing that flips it to 'approved'. Default on timeout/reject/error is NO.
+ *
+ * TERMINAL fallback (no session / Supabase unavailable — headless scripts):
+ * delegate to the existing `requireConfirmation` so scripts still run, including
+ * the LIVE exact-phrase rigor.
+ *
+ * Decision/timeout logic is the PURE approval-gate-business-logic; this only
+ * orchestrates I/O + the terminal fallback.
+ */
+export async function requireApproval(input: RequireApprovalInput): Promise<boolean> {
+  const { sessionId, kind, proposal, mode } = input;
+  const args = input.args ?? {};
+  const d = proposal.display;
+  const summary =
+    `Execute: ${d.side.toUpperCase()} ${d.sz} ${d.coin}` +
+    (d.estPx != null ? ` @≈$${d.estPx}` : '') +
+    (d.stopPx != null ? `  stop=$${d.stopPx}` : '') +
+    `\n${d.rationale}\n(mode=${mode} — ${mode === 'live' ? 'REAL ORDER' : 'paper fill from live book'})`;
+
+  // No session OR Supabase not wired ⇒ terminal gate (headless scripts).
+  if (!sessionId || !isSupabaseConfigured()) {
+    line('No web session / Supabase not configured — using the terminal confirmation gate.');
+    return requireConfirmation(args, summary, {
+      mode,
+      liveConfirmPhrase: `${d.side} ${d.sz} ${d.coin}`,
+    });
+  }
+
+  // WEB path: write a pending row + poll. Dynamic import keeps the heavy
+  // service-role module out of the load path when running headless.
+  const { createPendingAction, pollPendingAction } = await import(
+    '@/lib/cockpit/pending-actions-service'
+  );
+  header('AWAITING WEB APPROVAL (the user approves in the cockpit popup — nothing fires otherwise)');
+  line(summary);
+  const action = await createPendingAction({ sessionId, kind, mode, proposal });
+  line(`pending_actions row ${action.id} created — open the cockpit to approve/reject.`);
+  const approved = await pollPendingAction(action.id, { timeoutMs: input.timeoutMs });
+  line(approved ? 'APPROVED in the cockpit.' : 'NOT approved (rejected/timeout) — nothing executed.');
+  return approved;
 }
 
 /**

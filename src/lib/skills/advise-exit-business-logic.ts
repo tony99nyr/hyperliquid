@@ -94,19 +94,43 @@ export function recommendExit(position: Position, health: HealthResult): ExitRec
 }
 
 /**
+ * A user-discretionary FULL exit that overrides the engine. PURE.
+ *
+ * The cockpit rule is "the user decides every action" — an engine HOLD must not
+ * trap the user in a position they have decided to leave. This forces a full
+ * close regardless of score/alerts. A flat position still yields `none` (there
+ * is nothing to close).
+ */
+export function forcedFullExit(position: Position): ExitRecommendation {
+  if (position.side === 'flat' || position.sz <= 0) {
+    return { kind: 'none', exitFraction: 0, exitSz: 0, reason: 'No open position to exit.' };
+  }
+  return {
+    kind: 'full',
+    exitFraction: 1,
+    exitSz: round(position.sz, 6),
+    reason: 'User-discretionary full exit (--force) — overrides the engine recommendation.',
+  };
+}
+
+/**
  * Build the full exit proposal: the recommendation PLUS the reduce-only
  * TradeIntent that closes `exitSz`. PURE.
  *
  * A long is reduced/closed by a SELL; a short by a BUY. The intent is always
  * `reduceOnly: true` (it can only shrink the position, never open/flip). Returns
  * `intent: null` when kind === 'none'.
+ *
+ * When `opts.force` is set the engine recommendation is overridden by a
+ * discretionary full close (`forcedFullExit`) — the user has decided to exit
+ * even though the engine may read HOLD.
  */
 export function buildExitProposal(
   position: Position,
   health: HealthResult,
-  opts: { clientIntentId: string; now: number },
+  opts: { clientIntentId: string; now: number; force?: boolean },
 ): ExitProposal {
-  const rec = recommendExit(position, health);
+  const rec = opts.force ? forcedFullExit(position) : recommendExit(position, health);
   const warnings: string[] = [];
 
   if (rec.kind === 'none') {

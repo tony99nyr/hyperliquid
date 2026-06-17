@@ -35,6 +35,12 @@ flip.
    recommendation (full / partial / none), the reduce-only order it would place,
    the health score / P(adverse) / alerts, and the live mode. If the
    recommendation is "none", it holds and stops.
+   - **Discretionary exit (`--force`)**: when the user has decided to close but
+     the engine reads HOLD/trim, add `--force` to override the engine with a
+     full reduce-only close. The cockpit rule is "the user decides every action"
+     — an engine HOLD must never trap the user in a position they want out of.
+     `--force` still REQUIRES the same explicit confirmation; it only bypasses
+     the engine's veto, never the user gate.
 4. Relay the recommendation to the user and ask for explicit confirmation.
 5. ONLY on an explicit "yes", re-run with `--confirm yes` (or answer the
    interactive prompt with `yes`). The script then executes the reduce-only
@@ -46,5 +52,8 @@ flip.
 
 - NEVER pass `--confirm yes` unless the user explicitly approved the exact exit
   you showed them.
-- The exit intent is ALWAYS reduce-only.
+- The exit intent is ALWAYS reduce-only — even a `--force` close can only shrink
+  the position, never open or flip it.
+- `--force` overrides the ENGINE veto only; it NEVER bypasses the user
+  confirmation gate.
 - A partial exit leaves the hypothesis open; only a full exit resolves it.

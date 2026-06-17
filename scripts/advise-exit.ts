@@ -8,18 +8,25 @@
  * reduce-only order, then resolves the hypothesis (confirmed when the exit booked
  * a profit, invalidated otherwise).
  *
+ * `--force` overrides the engine with a user-discretionary FULL close — the
+ * cockpit rule is "the user decides every action", so an engine HOLD must never
+ * trap the user in a position they have decided to leave. It still REQUIRES the
+ * same explicit confirmation; it only bypasses the engine's hold/trim veto.
+ *
  * Usage:
  *   pnpm skill:advise-exit --session <id> --coin ETH --entry 2000 \
- *     --hypothesis <id> [--stop 1900] [--confirm yes]
+ *     --hypothesis <id> [--stop 1900] [--force] [--confirm yes]
  */
 
 import { randomUUID } from 'node:crypto';
-import { parseArgs, requireString, optionalNumber, requireConfirmation, header, line, run } from './_skill-runtime';
+import { parseArgs, requireString, optionalNumber, requireApproval, header, line, run } from './_skill-runtime';
 import { getTradingMode } from '@/lib/env/mode';
 import { loadPosition } from '@/lib/cockpit/fill-persistence-service';
 import { assessAndPersistHealth } from '@/lib/health/health-engine';
 import { buildExitProposal } from '@/lib/skills/advise-exit-business-logic';
 import { executeIntent } from '@/lib/trading/fill-source';
+import { buildMarketReduceOnlyClose } from '@/lib/trading/safe-exit-business-logic';
+import { upsertSafeExitPlan } from '@/lib/cockpit/safe-exit-plan-service';
 import { resolveHypothesis } from '@/lib/cockpit/hypothesis-service';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 
@@ -31,6 +38,11 @@ run(async () => {
   const entryPx = optionalNumber(args, 'entry', 0);
   const stopPx = typeof args['stop'] === 'string' ? Number(args['stop']) : undefined;
   const hypothesisId = typeof args['hypothesis'] === 'string' ? args['hypothesis'] : null;
+  // --force ⇒ user-discretionary full close, overriding the engine veto. Present
+  // (bare or any value other than the literal "false") means forced.
+  const force =
+    args['force'] === true ||
+    (typeof args['force'] === 'string' && args['force'].trim().toLowerCase() !== 'false');
 
   const position = await loadPosition(sessionId, coin);
   if (!position || position.side === 'flat' || position.sz <= 0) {
@@ -47,9 +59,10 @@ run(async () => {
     stopPx: stopPx !== undefined && Number.isFinite(stopPx) ? stopPx : undefined,
   });
 
-  const proposal = buildExitProposal(position, health, { clientIntentId: randomUUID(), now: Date.now() });
+  const proposal = buildExitProposal(position, health, { clientIntentId: randomUUID(), now: Date.now(), force });
 
-  header(`Exit recommendation: ${proposal.kind.toUpperCase()}`);
+  header(`Exit recommendation: ${proposal.kind.toUpperCase()}${force ? ' (forced)' : ''}`);
+  if (force) line('--force: user-discretionary full close, overriding the engine recommendation below.');
   line(proposal.reason);
   line(`health ${Math.round(health.score)}/100  P(adverse) ${(health.pAdverse * 100).toFixed(0)}%  alerts: ${health.alerts.join(', ') || 'none'}`);
 
@@ -64,11 +77,43 @@ run(async () => {
   }
 
   const intent = { ...proposal.intent, sessionId };
-  const confirmed = await requireConfirmation(
+
+  // Keep the Safe-Exit dead-man's switch armed with a FRESH reduce-only full
+  // close of the current position, independent of which exit we advise here. The
+  // panic button uses this when Claude is offline (else builds it from the live
+  // position). reasoning carries the latest health read.
+  const fullClose = buildMarketReduceOnlyClose(position, {
+    clientIntentId: randomUUID(),
+    sessionId,
+    now: Date.now(),
+  });
+  if (fullClose) {
+    await upsertSafeExitPlan(
+      sessionId,
+      fullClose,
+      `Auto-armed by advise-exit: health ${Math.round(health.score)}/100, P(adverse) ${(health.pAdverse * 100).toFixed(0)}%.`,
+      false,
+    );
+    line('Safe-Exit plan refreshed (panic button is armed with a full reduce-only close).');
+  }
+
+  const confirmed = await requireApproval({
+    sessionId,
+    kind: 'exit',
+    mode,
     args,
-    `Execute reduce-only ${intent.side.toUpperCase()} ${intent.sz} ${coin} (${proposal.kind} exit)\n(mode=${mode} — ${mode === 'live' ? 'REAL ORDER' : 'paper fill from live book'})`,
-    { mode, liveConfirmPhrase: `${intent.side} ${intent.sz} ${coin}` },
-  );
+    proposal: {
+      intent,
+      display: {
+        coin,
+        side: intent.side,
+        sz: intent.sz,
+        estPx: entryPx || position.avgEntryPx,
+        stopPx: stopPx !== undefined && Number.isFinite(stopPx) ? stopPx : null,
+        rationale: `${proposal.kind} exit — ${proposal.reason}`,
+      },
+    },
+  });
   if (!confirmed) {
     header('Aborted — no order placed');
     line('The user did not confirm. Position unchanged.');

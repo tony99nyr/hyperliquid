@@ -14,7 +14,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { parseArgs, requireString, optionalNumber, requireConfirmation, header, line, run } from './_skill-runtime';
+import { parseArgs, requireString, optionalNumber, requireApproval, header, line, run } from './_skill-runtime';
 import { getTradingMode } from '@/lib/env/mode';
 import { buildOpenProposal } from '@/lib/skills/open-position-business-logic';
 import { executeIntent } from '@/lib/trading/fill-source';
@@ -70,11 +70,23 @@ run(async () => {
     throw new Error('Proposal has warnings; fix the inputs and retry.');
   }
 
-  const confirmed = await requireConfirmation(
+  const confirmed = await requireApproval({
+    sessionId,
+    kind: 'entry',
+    mode,
     args,
-    `Execute: ${proposal.rationale}\n(mode=${mode} — ${mode === 'live' ? 'REAL ORDER' : 'paper fill from live book'})`,
-    { mode, liveConfirmPhrase: `${side} ${proposal.intent.sz} ${coin}` },
-  );
+    proposal: {
+      intent: proposal.intent,
+      display: {
+        coin,
+        side,
+        sz: proposal.intent.sz,
+        estPx: Number.isFinite(entryPx) ? entryPx : null,
+        stopPx: proposal.stopPx,
+        rationale: proposal.rationale,
+      },
+    },
+  });
   if (!confirmed) {
     header('Aborted — no order placed');
     line('The user did not confirm. Nothing executed.');
