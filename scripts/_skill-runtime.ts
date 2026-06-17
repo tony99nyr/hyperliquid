@@ -153,6 +153,19 @@ export interface RequireApprovalInput {
 }
 
 /**
+ * The gate outcome. `approved` is the NO-AUTO-FIRE boolean (TRUE only on an
+ * explicit approval). `leverage` is the OPERATOR-CHOSEN, SERVER-VALIDATED
+ * leverage read back off the approved row (Item 3) — the value executeIntent
+ * should run with. Undefined when not approved, or when the web popup did not
+ * change it (the caller then keeps the proposal's own leverage). Terminal
+ * fallback never overrides leverage (no slider there).
+ */
+export interface ApprovalResult {
+  approved: boolean;
+  leverage?: number;
+}
+
+/**
  * THE NO-AUTO-FIRE approval gate. Resolves TRUE only on an explicit approval.
  *
  * WEB path (sessionId present AND Supabase configured): write a 'pending'
@@ -167,7 +180,7 @@ export interface RequireApprovalInput {
  * Decision/timeout logic is the PURE approval-gate-business-logic; this only
  * orchestrates I/O + the terminal fallback.
  */
-export async function requireApproval(input: RequireApprovalInput): Promise<boolean> {
+export async function requireApproval(input: RequireApprovalInput): Promise<ApprovalResult> {
   const { sessionId, kind, proposal, mode } = input;
   const args = input.args ?? {};
   const d = proposal.display;
@@ -177,18 +190,20 @@ export async function requireApproval(input: RequireApprovalInput): Promise<bool
     (d.stopPx != null ? `  stop=$${d.stopPx}` : '') +
     `\n${d.rationale}\n(mode=${mode} — ${mode === 'live' ? 'REAL ORDER' : 'paper fill from live book'})`;
 
-  // No session OR Supabase not wired ⇒ terminal gate (headless scripts).
+  // No session OR Supabase not wired ⇒ terminal gate (headless scripts). No
+  // slider in the terminal, so leverage is left to the proposal (undefined here).
   if (!sessionId || !isSupabaseConfigured()) {
     line('No web session / Supabase not configured — using the terminal confirmation gate.');
-    return requireConfirmation(args, summary, {
+    const approved = await requireConfirmation(args, summary, {
       mode,
       liveConfirmPhrase: `${d.side} ${d.sz} ${d.coin}`,
     });
+    return { approved };
   }
 
   // WEB path: write a pending row + poll. Dynamic import keeps the heavy
   // service-role module out of the load path when running headless.
-  const { createPendingAction, pollPendingAction } = await import(
+  const { createPendingAction, pollPendingAction, getPendingAction } = await import(
     '@/lib/cockpit/pending-actions-service'
   );
   header('AWAITING WEB APPROVAL (the user approves in the cockpit popup — nothing fires otherwise)');
@@ -197,7 +212,19 @@ export async function requireApproval(input: RequireApprovalInput): Promise<bool
   line(`pending_actions row ${action.id} created — open the cockpit to approve/reject.`);
   const approved = await pollPendingAction(action.id, { timeoutMs: input.timeoutMs });
   line(approved ? 'APPROVED in the cockpit.' : 'NOT approved (rejected/timeout) — nothing executed.');
-  return approved;
+  if (!approved) return { approved: false };
+
+  // Approved: read the row back so the operator's SERVER-VALIDATED leverage (the
+  // approve route stamped it onto proposal.intent.leverage) flows to executeIntent.
+  // Fail-soft: if the read fails, fall back to the proposal's own leverage.
+  let leverage: number | undefined;
+  try {
+    const decided = await getPendingAction(action.id);
+    leverage = decided?.proposal.intent.leverage ?? proposal.intent.leverage;
+  } catch {
+    leverage = proposal.intent.leverage;
+  }
+  return { approved: true, leverage };
 }
 
 /**

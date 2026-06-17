@@ -18,6 +18,7 @@ import { parseArgs, requireString, optionalNumber, requireApproval, header, line
 import { getTradingMode } from '@/lib/env/mode';
 import { buildOpenProposal } from '@/lib/skills/open-position-business-logic';
 import { executeIntent } from '@/lib/trading/fill-source';
+import { resolveCoinMaxLeverage } from '@/lib/trading/leverage-business-logic';
 import { openSession } from '@/lib/cockpit/session-service';
 import { writeHypothesis } from '@/lib/cockpit/hypothesis-service';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
@@ -74,7 +75,7 @@ run(async () => {
     throw new Error('Proposal has warnings; fix the inputs and retry.');
   }
 
-  const confirmed = await requireApproval({
+  const decision = await requireApproval({
     sessionId,
     kind: 'entry',
     mode,
@@ -88,17 +89,25 @@ run(async () => {
         estPx: Number.isFinite(entryPx) ? entryPx : null,
         stopPx: proposal.stopPx,
         rationale: proposal.rationale,
+        leverage: proposal.intent.leverage ?? 1,
+        coinMaxLeverage: resolveCoinMaxLeverage(coin, null),
       },
     },
   });
-  if (!confirmed) {
+  if (!decision.approved) {
     header('Aborted — no order placed');
     line('The user did not confirm. Nothing executed.');
     return;
   }
 
+  // Apply the operator's chosen (server-validated) leverage — notional unchanged.
+  const approvedIntent =
+    decision.leverage != null && proposal.intent.reduceOnly !== true
+      ? { ...proposal.intent, leverage: decision.leverage }
+      : proposal.intent;
+
   header('Executing intent (confirmed by user)…');
-  const fill = await executeIntent(proposal.intent);
+  const fill = await executeIntent(approvedIntent);
   line(`Filled: ${fill.sz} ${fill.coin} @ $${fill.px} (source=${fill.source}, fee=$${fill.feeUsd.toFixed(4)})`);
 
   const hypothesis = await writeHypothesis({ sessionId, statement: thesis });

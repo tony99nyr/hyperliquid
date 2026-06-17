@@ -8,6 +8,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const verifyAdminAuth = vi.fn();
 const decidePendingAction = vi.fn();
+const approveWithLeverage = vi.fn();
+const getPendingAction = vi.fn();
 
 vi.mock('@/lib/infrastructure/auth/auth', () => ({
   verifyAdminAuth: (...a: unknown[]) => verifyAdminAuth(...a),
@@ -16,6 +18,8 @@ vi.mock('@/lib/infrastructure/auth/auth', () => ({
 }));
 vi.mock('@/lib/cockpit/pending-actions-service', () => ({
   decidePendingAction: (...a: unknown[]) => decidePendingAction(...a),
+  approveWithLeverage: (...a: unknown[]) => approveWithLeverage(...a),
+  getPendingAction: (...a: unknown[]) => getPendingAction(...a),
 }));
 
 import { POST as approve } from '@/app/api/cockpit/approve/route';
@@ -76,6 +80,64 @@ describe('POST /api/cockpit/approve', () => {
       req({ id: 'a1' }, { host: 'cockpit.example.com', origin: 'https://evil.example.com' }),
     );
     expect(res.status).toBe(401);
+  });
+});
+
+describe('POST /api/cockpit/approve — leverage (Item 3, server-validated)', () => {
+  function pendingAction(over: Record<string, unknown> = {}) {
+    return {
+      id: 'a1',
+      status: 'pending',
+      proposal: {
+        intent: { coin: 'ETH', side: 'buy', sz: 1, reduceOnly: false, leverage: 5 },
+        display: { coin: 'ETH', side: 'buy', sz: 1, coinMaxLeverage: 20, leverage: 5 },
+      },
+      ...over,
+    };
+  }
+
+  it('SERVER-VALIDATES the chosen leverage to the coin max (clamps a too-high client value)', async () => {
+    getPendingAction.mockResolvedValue(pendingAction());
+    approveWithLeverage.mockResolvedValue(true);
+    // Client sends 99×; the coin max is 20 ⇒ server must clamp to 20.
+    const res = await approve(req({ id: 'a1', leverage: 99 }));
+    expect(res.status).toBe(200);
+    expect(approveWithLeverage).toHaveBeenCalledWith('a1', 20);
+    const json = (await res.json()) as { leverage: number };
+    expect(json.leverage).toBe(20);
+    // Plain decide is NOT used on the leverage path.
+    expect(decidePendingAction).not.toHaveBeenCalled();
+  });
+
+  it('passes a valid in-band leverage straight through', async () => {
+    getPendingAction.mockResolvedValue(pendingAction());
+    approveWithLeverage.mockResolvedValue(true);
+    const res = await approve(req({ id: 'a1', leverage: 8 }));
+    expect(res.status).toBe(200);
+    expect(approveWithLeverage).toHaveBeenCalledWith('a1', 8);
+  });
+
+  it('garbage leverage ⇒ falls back to the proposal leverage (clamped)', async () => {
+    getPendingAction.mockResolvedValue(pendingAction());
+    approveWithLeverage.mockResolvedValue(true);
+    const res = await approve(req({ id: 'a1', leverage: -5 }));
+    expect(res.status).toBe(200);
+    expect(approveWithLeverage).toHaveBeenCalledWith('a1', 5); // proposal fallback
+  });
+
+  it('409s when the action is not pending', async () => {
+    getPendingAction.mockResolvedValue(pendingAction({ status: 'approved' }));
+    const res = await approve(req({ id: 'a1', leverage: 8 }));
+    expect(res.status).toBe(409);
+    expect(approveWithLeverage).not.toHaveBeenCalled();
+  });
+
+  it('NO leverage in body ⇒ plain decide path (no slider; proposal leverage kept)', async () => {
+    decidePendingAction.mockResolvedValue(true);
+    const res = await approve(req({ id: 'a1' }));
+    expect(res.status).toBe(200);
+    expect(decidePendingAction).toHaveBeenCalledWith('a1', 'approved');
+    expect(approveWithLeverage).not.toHaveBeenCalled();
   });
 });
 

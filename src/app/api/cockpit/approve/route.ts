@@ -7,14 +7,23 @@
  * polling skill (requireApproval) observes 'approved' and fires the trade — this
  * route is the ONLY thing that flips a pending action to approved.
  *
- * Body: { id: string }.
+ * Body: { id: string, leverage?: number }. `leverage` is the OPERATOR's chosen
+ * value from the popup slider (Item 3). It is SERVER-VALIDATED to the coin's
+ * [1, coinMaxLeverage] band (never trusting the client) and stamped onto the
+ * proposal's intent before the row flips to approved — so executeIntent runs
+ * with exactly the leverage the operator picked, bounded server-side.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAdminAuth, getClientIdentifier } from '@/lib/infrastructure/auth/auth';
 import { isSameOrigin } from '@/lib/infrastructure/auth/same-origin';
 import { checkRateLimit } from '@/lib/infrastructure/rate-limiting/in-memory-rate-limit';
-import { decidePendingAction } from '@/lib/cockpit/pending-actions-service';
+import {
+  approveWithLeverage,
+  decidePendingAction,
+  getPendingAction,
+} from '@/lib/cockpit/pending-actions-service';
+import { serverValidateLeverage } from '@/lib/trading/leverage-business-logic';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,14 +46,42 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   let id = '';
+  let rawLeverage: unknown;
   try {
-    const body = (await request.json()) as { id?: unknown };
+    const body = (await request.json()) as { id?: unknown; leverage?: unknown };
     id = typeof body.id === 'string' ? body.id : '';
+    rawLeverage = body.leverage;
   } catch {
     return NextResponse.json({ ok: false, error: 'Invalid request body' }, { status: 400 });
   }
   if (!id) {
     return NextResponse.json({ ok: false, error: 'id required' }, { status: 400 });
+  }
+
+  // When the popup sent a leverage, SERVER-VALIDATE it against the proposal's
+  // coin max (DON'T trust the client) and approve+stamp it atomically. When no
+  // leverage was sent (or the action isn't an opening entry), fall through to the
+  // plain decide — the proposal's own leverage is kept. NO-AUTO-FIRE is unchanged:
+  // both paths only flip the row to 'approved'; nothing here fires a trade.
+  if (rawLeverage !== undefined && rawLeverage !== null) {
+    const action = await getPendingAction(id);
+    if (!action || action.status !== 'pending') {
+      return NextResponse.json(
+        { ok: false, error: 'Action is not pending (already decided or not found)' },
+        { status: 409 },
+      );
+    }
+    const coinMax = action.proposal.display.coinMaxLeverage ?? 1;
+    const fallback = action.proposal.intent.leverage ?? 1;
+    const validated = serverValidateLeverage(rawLeverage, coinMax, fallback);
+    const decided = await approveWithLeverage(id, validated);
+    if (!decided) {
+      return NextResponse.json(
+        { ok: false, error: 'Action is not pending (already decided or not found)' },
+        { status: 409 },
+      );
+    }
+    return NextResponse.json({ ok: true, status: 'approved', leverage: validated });
   }
 
   const decided = await decidePendingAction(id, 'approved');

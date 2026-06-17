@@ -97,7 +97,7 @@ run(async () => {
     line('Safe-Exit plan refreshed (panic button is armed with a full reduce-only close).');
   }
 
-  const confirmed = await requireApproval({
+  const decision = await requireApproval({
     sessionId,
     kind: 'exit',
     mode,
@@ -114,7 +114,9 @@ run(async () => {
       },
     },
   });
-  if (!confirmed) {
+  // Reduce-only exit: leverage is not a lever here (the fold leaves stored
+  // leverage alone for a reduce-only). Only the approval boolean matters.
+  if (!decision.approved) {
     header('Aborted — no order placed');
     line('The user did not confirm. Position unchanged.');
     return;

@@ -92,6 +92,24 @@ export interface PendingActionDisplay {
   /** Protective stop, when the proposal carries one. */
   stopPx?: number | null;
   rationale: string;
+  /**
+   * Proposal leverage (default for the popup slider). Mirrors
+   * `proposal.intent.leverage`; carried in display so the popup renders the
+   * default without re-deriving. The operator may change it (Item 3); the chosen
+   * value is server-validated against `coinMaxLeverage` and persisted on approve.
+   */
+  leverage?: number | null;
+  /**
+   * The coin's max leverage — the slider ceiling AND the server-side validation
+   * bound (1..coinMaxLeverage). Prefer the followed leader's reported max on this
+   * coin; else a conservative per-coin default. The SERVER re-clamps to this
+   * regardless of what the client sends.
+   */
+  coinMaxLeverage?: number | null;
+  /** The followed leader's leverage on this coin (for the "Match leader" preset). */
+  leaderLeverage?: number | null;
+  /** The followed leader's address (short-rendered in the card). */
+  leaderAddress?: string | null;
 }
 
 /** Buy/sell label re-export to avoid a fill.ts import in pure UI mappers. */

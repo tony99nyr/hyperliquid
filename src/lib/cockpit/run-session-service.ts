@@ -32,6 +32,7 @@ import type { OpenProposal } from '@/lib/skills/open-position-business-logic';
 import type { MarketAssessment } from '@/lib/skills/analyze-market-business-logic';
 import type { EnsureWatchResult } from './watch-spawn';
 import type { BestExitPlan } from '@/lib/trading/safe-exit-plan-business-logic';
+import { resolveCoinMaxLeverage } from '@/lib/trading/leverage-business-logic';
 
 /** What the human PICKED — the only manual input besides the later APPROVE. */
 export interface RunSessionPick {
@@ -50,9 +51,14 @@ export interface RunSessionPick {
   limitPx?: number;
   /**
    * Position leverage (e.g. 5 = 5x). METADATA for ROE only — persisted onto the
-   * positions row, does NOT change the risk-based sizing. Defaults to 1x.
+   * positions row, does NOT change the risk-based sizing. Defaults to 1x. Seeds
+   * the popup slider; the operator may change it within [1, coin max] (Item 3).
    */
   leverage?: number;
+  /** The followed leader's leverage on this coin (for the "Match leader" preset). */
+  leaderLeverage?: number | null;
+  /** The followed leader's reported max leverage on this coin (slider ceiling). */
+  leaderMaxLeverage?: number | null;
 }
 
 /** Injected I/O + pure-builder dependencies (all the chain's external effects). */
@@ -78,13 +84,17 @@ export interface RunSessionDeps {
     now: number;
     thesis: string;
   }) => OpenProposal;
-  /** THE no-auto-fire gate. Resolves true ONLY on explicit approval. */
+  /**
+   * THE no-auto-fire gate. Resolves `approved: true` ONLY on explicit approval.
+   * `leverage` (when present) is the operator-chosen, SERVER-VALIDATED leverage
+   * read off the approved row — executeIntent runs with it (Item 3).
+   */
   requireApproval: (args: {
     sessionId: string;
     kind: 'entry';
     mode: TradingMode;
     proposal: { intent: TradeIntent; display: PendingActionDisplay };
-  }) => Promise<boolean>;
+  }) => Promise<{ approved: boolean; leverage?: number }>;
   /** The ONE mode-branching seam. Runs ONLY after approval. */
   executeIntent: (intent: TradeIntent) => Promise<CanonicalFill>;
   writeHypothesis: (input: { sessionId: string; statement: string }) => Promise<{ id: string }>;
@@ -193,6 +203,10 @@ export async function runSessionEntryChain(
   log(proposal.rationale);
 
   // 5. THE no-auto-fire gate. Nothing below runs unless the human approves.
+  // Leverage is the OPERATOR's risk decision: the proposal's leverage seeds the
+  // popup slider; the coin max bounds it (and the server re-validates on approve).
+  const proposalLeverage = proposal.intent.leverage ?? 1;
+  const coinMaxLeverage = resolveCoinMaxLeverage(coin, pick.leaderMaxLeverage ?? null);
   const display: PendingActionDisplay = {
     coin,
     side,
@@ -200,20 +214,32 @@ export async function runSessionEntryChain(
     estPx: Number.isFinite(entryPx) ? entryPx : null,
     stopPx: proposal.stopPx,
     rationale: proposal.rationale,
+    leverage: proposalLeverage,
+    coinMaxLeverage,
+    leaderLeverage: pick.leaderLeverage ?? null,
+    leaderAddress: pick.leaderAddress ?? null,
   };
-  const approved = await deps.requireApproval({
+  const decision = await deps.requireApproval({
     sessionId,
     kind: 'entry',
     mode: deps.mode,
     proposal: { intent: proposal.intent, display },
   });
-  if (!approved) {
+  if (!decision.approved) {
     log('Entry NOT approved (rejected/timeout) — nothing executed, no monitor started.');
     return { sessionId, outcome: 'aborted', fill: null, watch: null, safeExitArmed: false };
   }
 
-  // 6. Execute the (approved) entry — the ONE mode-branching seam.
-  const fill = await deps.executeIntent(proposal.intent);
+  // 6. Execute the (approved) entry — the ONE mode-branching seam. Apply the
+  // operator's chosen (server-validated) leverage onto the intent; notional is
+  // unchanged (leverage is ROE/margin metadata only). Falls back to the
+  // proposal's leverage when the gate did not return one (terminal path).
+  const approvedIntent: TradeIntent =
+    decision.leverage != null && proposal.intent.reduceOnly !== true
+      ? { ...proposal.intent, leverage: decision.leverage }
+      : proposal.intent;
+  log(`Executing with leverage ${approvedIntent.leverage ?? 1}x (notional unchanged).`);
+  const fill = await deps.executeIntent(approvedIntent);
 
   // 6a. NOTHING FILLED (empty book, or an entry limit that didn't cross — see
   // fill-source.ts "nothing filled"). There is no position: do NOT write the

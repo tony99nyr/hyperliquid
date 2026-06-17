@@ -112,6 +112,55 @@ export async function decidePendingAction(
   return Array.isArray(data) && data.length > 0;
 }
 
+/**
+ * Approve a pending action AND persist the operator-chosen leverage into the
+ * proposal jsonb, atomically, in one update guarded on `status='pending'`.
+ *
+ * The leverage is the OPERATOR's risk decision (Item 3): the popup sends the
+ * chosen value, the route SERVER-VALIDATES it to the coin's [1, max] band (never
+ * trusting the client), and this writes it onto `proposal.intent.leverage` (the
+ * value executeIntent runs with) and `proposal.display.leverage` (what the row
+ * reflects). Flipping status + rewriting the proposal in a SINGLE update keeps it
+ * race-safe: a double-click or a concurrent reject cannot land a second write
+ * (the `.eq('status','pending')` makes exactly one call win). Notional is
+ * untouched — leverage governs margin/liq/ROE only.
+ *
+ * Returns true when THIS call decided the row (matching decidePendingAction's
+ * contract). The caller passes an ALREADY-VALIDATED leverage.
+ */
+export async function approveWithLeverage(
+  id: string,
+  validatedLeverage: number,
+  client: SupabaseClient = getServiceRoleClient(),
+): Promise<boolean> {
+  // Read the current proposal so we merge (rather than clobber) it. Reduce-only
+  // exits keep intent.leverage undefined (the fold leaves stored leverage alone);
+  // we only stamp the chosen leverage when the intent is an OPENING order.
+  const current = await getPendingAction(id, client);
+  if (!current || current.status !== 'pending') return false;
+
+  const isOpening = current.proposal.intent.reduceOnly !== true;
+  const nextProposal: PendingActionProposal = {
+    intent: {
+      ...current.proposal.intent,
+      ...(isOpening ? { leverage: validatedLeverage } : {}),
+    },
+    display: {
+      ...current.proposal.display,
+      ...(isOpening ? { leverage: validatedLeverage } : {}),
+    },
+  };
+
+  const { data, error } = await client
+    .from('pending_actions')
+    .update({ status: 'approved', decided_at: new Date().toISOString(), proposal: nextProposal })
+    .eq('id', id)
+    .eq('status', 'pending')
+    .select('id');
+  if (error) throw new Error(`approveWithLeverage failed: ${error.message}`);
+  return Array.isArray(data) && data.length > 0;
+}
+
 /** Mark a pending action 'expired' (timeout path). Idempotent-safe. */
 export async function expirePendingAction(
   id: string,

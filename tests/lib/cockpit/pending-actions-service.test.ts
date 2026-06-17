@@ -10,6 +10,7 @@ import { createSupabaseMock } from '../../mocks/supabase.mock';
 import {
   pollPendingAction,
   decidePendingAction,
+  approveWithLeverage,
   createPendingAction,
   expirePendingAction,
 } from '@/lib/cockpit/pending-actions-service';
@@ -112,6 +113,61 @@ describe('decidePendingAction — atomic pending→decided', () => {
     mock.queueResult({ data: [], error: null });
     const ok = await decidePendingAction('a1', 'rejected', client());
     expect(ok).toBe(false);
+  });
+});
+
+describe('approveWithLeverage — stamps leverage onto the proposal + approves atomically', () => {
+  function rowWith(over: Record<string, unknown> = {}) {
+    return {
+      id: 'a1',
+      session_id: 's1',
+      kind: 'entry',
+      mode: 'paper',
+      proposal: {
+        intent: { clientIntentId: 'i1', sessionId: 's1', coin: 'ETH', side: 'buy', sz: 1, reduceOnly: false, leverage: 5, createdAt: 0 },
+        display: { coin: 'ETH', side: 'buy', sz: 1, rationale: 'x', leverage: 5 },
+      },
+      status: 'pending',
+      created_at: new Date(0).toISOString(),
+      decided_at: null,
+      ...over,
+    };
+  }
+
+  it('writes the chosen leverage onto intent + display and flips to approved (guarded on pending)', async () => {
+    mock.queueResult({ data: rowWith(), error: null }); // getPendingAction read
+    mock.queueResult({ data: [{ id: 'a1' }], error: null }); // update returns the row
+    const ok = await approveWithLeverage('a1', 12, client());
+    expect(ok).toBe(true);
+
+    const update = mock.ops.find((o) => o.op === 'update' && o.table === 'pending_actions');
+    expect(update).toBeTruthy();
+    const payload = update!.payload as { status: string; proposal: { intent: { leverage: number }; display: { leverage: number } } };
+    expect(payload.status).toBe('approved');
+    expect(payload.proposal.intent.leverage).toBe(12);
+    expect(payload.proposal.display.leverage).toBe(12);
+    // Atomic transition guard.
+    expect(update!.filters).toContainEqual({ column: 'status', value: 'pending' });
+  });
+
+  it('does NOT override leverage on a reduce-only intent (the chosen 12 is ignored)', async () => {
+    // A reduce-only exit with no leverage key at all — the merge must add none.
+    const reduceOnlyIntent = { clientIntentId: 'i1', sessionId: 's1', coin: 'ETH', side: 'sell', sz: 1, reduceOnly: true, createdAt: 0 };
+    mock.queueResult({ data: rowWith({ proposal: { intent: reduceOnlyIntent, display: { coin: 'ETH', side: 'sell', sz: 1, rationale: 'exit' } } }), error: null });
+    mock.queueResult({ data: [{ id: 'a1' }], error: null });
+    const ok = await approveWithLeverage('a1', 12, client());
+    expect(ok).toBe(true);
+    const update = mock.ops.find((o) => o.op === 'update' && o.table === 'pending_actions');
+    const payload = update!.payload as { proposal: { intent: { leverage?: number } } };
+    // No leverage was stamped (reduce-only) — the chosen 12 did NOT leak in.
+    expect(payload.proposal.intent.leverage).toBeUndefined();
+  });
+
+  it('returns false (and does NOT update) when the row is already decided', async () => {
+    mock.queueResult({ data: rowWith({ status: 'approved' }), error: null });
+    const ok = await approveWithLeverage('a1', 12, client());
+    expect(ok).toBe(false);
+    expect(mock.ops.find((o) => o.op === 'update')).toBeUndefined();
   });
 });
 

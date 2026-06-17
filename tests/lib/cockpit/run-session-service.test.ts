@@ -72,7 +72,7 @@ function makeDeps(over: Partial<RunSessionDeps> = {}): RunSessionDeps {
     fetchMark: vi.fn().mockResolvedValue(2000),
     analyzeMarket: vi.fn().mockResolvedValue({ coin: 'ETH', reads: [], bias: 0.5, biasLabel: 'bullish', aligned: true, summary: 'ETH: bullish bias +0.50' }),
     buildEntryProposal: vi.fn().mockReturnValue(proposal),
-    requireApproval: vi.fn().mockResolvedValue(true),
+    requireApproval: vi.fn().mockResolvedValue({ approved: true }),
     executeIntent: vi.fn().mockResolvedValue(fill),
     writeHypothesis: vi.fn().mockResolvedValue({ id: 'hyp-1' }),
     ensureWatchDaemon: vi.fn().mockReturnValue({ status: 'spawned', pid: 4242 }),
@@ -139,7 +139,7 @@ describe('runSessionEntryChain — APPROVED', () => {
     deps = makeDeps({
       requireApproval: vi.fn().mockImplementation(async () => {
         order.push('approval');
-        return true;
+        return { approved: true };
       }),
       executeIntent: vi.fn().mockImplementation(async () => {
         order.push('execute');
@@ -153,7 +153,7 @@ describe('runSessionEntryChain — APPROVED', () => {
 
 describe('runSessionEntryChain — REJECTED (no-auto-fire)', () => {
   it('approval(false) ⇒ NO execute, NO watch spawn, NO Safe-Exit arm; outcome aborted', async () => {
-    const deps = makeDeps({ requireApproval: vi.fn().mockResolvedValue(false) });
+    const deps = makeDeps({ requireApproval: vi.fn().mockResolvedValue({ approved: false }) });
     const result = await runSessionEntryChain(pick, deps);
 
     expect(result.outcome).toBe('aborted');
