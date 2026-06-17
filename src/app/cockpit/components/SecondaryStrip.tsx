@@ -32,15 +32,14 @@ export default function SecondaryStrip({ sessionId }: SecondaryStripProps) {
       data-testid="secondary-strip"
       className={css({ ...panelSurface, padding: '10px', display: 'flex', flexDirection: 'column', gap: '10px' })}
     >
-      <div role="tablist" aria-label="Supporting panels" className={css({ display: 'flex', gap: '6px' })}>
+      <div role="group" aria-label="Supporting panels" className={css({ display: 'flex', gap: '6px' })}>
         {TABS.map((t) => {
           const active = t.id === tab;
           return (
             <button
               key={t.id}
               type="button"
-              role="tab"
-              aria-selected={active}
+              aria-pressed={active}
               data-testid={`secondary-tab-${t.id}`}
               data-active={active}
               onClick={() => setTab(t.id)}

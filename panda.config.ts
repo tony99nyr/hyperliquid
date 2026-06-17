@@ -32,7 +32,8 @@ export default defineConfig({
             borderSubtle: { value: '#21262d' },
             text: { value: '#c9d1d9' },
             textBright: { value: '#e6edf3' },
-            textMuted: { value: '#7d8590' },
+            // ≥4.5:1 on #0d1117 (WCAG AA) for the small uppercase micro-labels.
+            textMuted: { value: '#8b949e' },
             link: { value: '#58a6ff' },
           },
           // Trade health / alert zones
@@ -82,6 +83,18 @@ export default defineConfig({
         "var(--font-archivo), -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif",
     },
     '*': { boxSizing: 'border-box' },
+    // A11y: a clearly visible keyboard-focus ring on the dark chrome. Mouse
+    // clicks don't trigger :focus-visible, so this only shows for keyboard/AT
+    // users (tabs, CoinSelector, buttons, links). Token-based accent ring.
+    'a:focus-visible, button:focus-visible, select:focus-visible, [tabindex]:focus-visible, [role="button"]:focus-visible':
+      {
+        outline: '2px solid token(colors.github.link)',
+        outlineOffset: '2px',
+        borderRadius: '4px',
+      },
+    // Suppress the default (non-keyboard) outline so the focus-visible ring is
+    // the single, intentional focus affordance.
+    ':focus:not(:focus-visible)': { outline: 'none' },
     // A11y: vestibular users opt out of motion. Remove the cockpit's entrance +
     // pulse animations (popupIn, backdropIn, and the Safe-Exit dangerPulse, which
     // otherwise loops a red glow forever). The universal selector catches all

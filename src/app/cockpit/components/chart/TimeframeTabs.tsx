@@ -21,7 +21,7 @@ export default function TimeframeTabs({ value, onChange }: TimeframeTabsProps) {
   return (
     <div
       data-testid="timeframe-tabs"
-      role="tablist"
+      role="group"
       aria-label="Chart timeframe"
       className={css({
         display: 'inline-flex',
@@ -37,8 +37,8 @@ export default function TimeframeTabs({ value, onChange }: TimeframeTabsProps) {
           <button
             key={tf}
             type="button"
-            role="tab"
-            aria-selected={active}
+            aria-pressed={active}
+            aria-label={`${tf} timeframe`}
             data-testid={`tf-${tf}`}
             data-active={active}
             onClick={() => onChange(tf)}

@@ -102,21 +102,19 @@ export default function TopTradersRail({ traders, followedAddress }: TopTradersR
         </ol>
       )}
 
-      {/* Future live action feed (deferred — read-only intel for now). */}
+      {/* Future live action feed (deferred). Collapsed to a single-line footnote
+          so it labels the upcoming feed without claiming permanent rail space. */}
       <div
         data-testid="trader-feed-slot"
         className={css({
           borderTop: '1px solid token(colors.github.borderSubtle)',
-          paddingTop: '10px',
+          paddingTop: '8px',
           display: 'flex',
-          flexDirection: 'column',
-          gap: '4px',
+          alignItems: 'center',
+          gap: '6px',
         })}
       >
-        <span className={css({ fontFamily: 'label', fontSize: '10px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.08em' })}>
-          Action Feed
-        </span>
-        <span style={{ color: regimeColor('neutral') }} className={css({ fontFamily: 'mono', fontSize: '11px' })}>
+        <span style={{ color: regimeColor('neutral') }} className={css({ fontFamily: 'mono', fontSize: '10px' })}>
           ◌ live trader fills — coming soon
         </span>
       </div>

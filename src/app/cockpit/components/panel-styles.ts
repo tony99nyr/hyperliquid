@@ -22,7 +22,9 @@ export const GH = {
   borderSubtle: '#21262d',
   text: '#c9d1d9',
   textBright: '#e6edf3',
-  textMuted: '#7d8590',
+  // ≥4.5:1 on #0d1117 (WCAG AA) — the prior #7d8590 fell to ~4.0:1, under AA
+  // for the 9–11px uppercase micro-labels used across the dense panels.
+  textMuted: '#8b949e',
 } as const;
 
 /**
