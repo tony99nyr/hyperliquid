@@ -1,12 +1,13 @@
 'use client';
 
 /**
- * Cockpit banners — the always-visible posture cues:
- *   1. READ-ONLY decision-support: Claude advises; the human executes + confirms.
- *   2. Paper / live mode indicator (from TRADING_MODE, passed in from the RSC).
+ * Cockpit banners — the always-visible posture cue:
+ *   - Paper / live mode indicator (from TRADING_MODE, passed in from the RSC).
  *
- * These are deliberately loud + persistent so the operator can never mistake a
- * paper session for live (or forget that nothing here auto-executes).
+ * Deliberately loud + persistent so the operator can never mistake a paper
+ * session for live. (The old "decision-support only" disclaimer was removed —
+ * the cockpit now supports self-service execution; NO-AUTO-FIRE is still
+ * enforced everywhere, but the operator does execute in-app.)
  */
 
 import { css } from '@styled-system/css';
@@ -24,22 +25,6 @@ export default function Banners({ mode }: BannersProps) {
       data-testid="banners"
       className={css({ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' })}
     >
-      <span
-        data-testid="banner-readonly"
-        className={css({
-          fontSize: 'xs',
-          fontWeight: 'medium',
-          color: 'github.text',
-          bg: 'github.bgSecondary',
-          border: '1px solid token(colors.github.border)',
-          borderRadius: '6px',
-          paddingX: '10px',
-          paddingY: '4px',
-        })}
-      >
-        Decision-support only — Claude advises; you execute & confirm every action.
-      </span>
-
       <span
         data-testid="banner-mode"
         data-mode={mode}

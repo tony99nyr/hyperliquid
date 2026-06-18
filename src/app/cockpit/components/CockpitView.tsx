@@ -27,6 +27,7 @@ import type { RegimeDir } from './open-positions-helpers';
 import { useHlOrderbook } from '@/hooks/useHlOrderbook';
 import CandleChartPanel from './chart/CandleChartPanel';
 import TopTradersRail from './left-rail/TopTradersRail';
+import type { RatingsFreshness } from './left-rail/ratings-freshness-helpers';
 import OpenPositionsPanel from './OpenPositionsPanel';
 import MarketRegimePanel from './right-rail/MarketRegimePanel';
 import Orderbook from './Orderbook';
@@ -48,6 +49,8 @@ export interface CockpitViewProps {
   leaderAddress: string | null;
   leaderPositions: HlPosition[];
   topTraders: TopTraderRow[];
+  /** Rail ratings freshness (built server-side: generatedAt + stale). */
+  ratings?: RatingsFreshness | null;
   currentEquityUsd: number;
   /**
    * Render the left Top-Traders rail. False on mobile, where Traders is its own
@@ -67,6 +70,7 @@ export default function CockpitView({
   leaderAddress,
   leaderPositions,
   topTraders,
+  ratings = null,
   currentEquityUsd,
   showTradersRail = true,
 }: CockpitViewProps) {
@@ -102,18 +106,18 @@ export default function CockpitView({
         gap: '12px',
         padding: '12px',
         overflow: { base: 'visible', lg: 'hidden' },
-        minHeight: '0',
+        minHeight: { base: 'auto', lg: '0' },
       })}
     >
       {/* LEFT — Top Traders rail (desktop only; mobile uses the Traders tab). */}
       {showTradersRail && (
-        <aside className={css({ order: { base: 3, lg: 0 }, minHeight: '0', overflowY: { base: 'visible', lg: 'auto' } })}>
-          <TopTradersRail traders={topTraders} followedAddress={leaderAddress} />
+        <aside className={css({ order: { base: 3, lg: 0 }, minHeight: { base: 'auto', lg: '0' }, overflowY: { base: 'visible', lg: 'auto' } })}>
+          <TopTradersRail traders={topTraders} followedAddress={leaderAddress} ratings={ratings} />
         </aside>
       )}
 
       {/* CENTER — chart → open positions → leader-vs-you / health → analysis. */}
-      <main className={css({ order: { base: 1, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minHeight: '0', overflowY: { base: 'visible', lg: 'auto' }, paddingRight: { lg: '2px' } })}>
+      <main className={css({ order: { base: 1, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minHeight: { base: 'auto', lg: '0' }, overflowY: { base: 'visible', lg: 'auto' }, paddingRight: { lg: '2px' } })}>
         {!hasSession && <GettingStarted />}
         <CockpitCoinTabs coin={coin} coins={coins} onChange={onCoinChange} />
         <CandleChartPanel coin={coin} trade={trade} />
@@ -134,7 +138,7 @@ export default function CockpitView({
       {/* RIGHT — Market Regime + Order Book. On mobile the compact Market Regime
           sits directly under the focal Open-Positions stack; the dense order book
           is desktop-only (the phone surface stays scannable). */}
-      <aside className={css({ order: { base: 2, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minHeight: '0', overflowY: { base: 'visible', lg: 'auto' } })}>
+      <aside className={css({ order: { base: 2, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minHeight: { base: 'auto', lg: '0' }, overflowY: { base: 'visible', lg: 'auto' } })}>
         <MarketRegimePanel coin={coin} onNetBias={onNetBias} />
         <div className={css({ display: { base: 'none', lg: 'block' } })}>
           <Orderbook coin={coin} depth={8} />

@@ -1,8 +1,7 @@
 /**
  * Locks the paper-vs-live mode indicator — the single most safety-relevant UI
  * element. A live session MUST render the danger-colored "LIVE TRADING" badge
- * with a non-color cue (●/glyph + text), and the read-only/decision-support
- * banner must always be present. A silent regression here is dangerous.
+ * with a non-color cue (●/glyph + text). A silent regression here is dangerous.
  */
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -33,8 +32,4 @@ describe('Banners (mode indicator)', () => {
     expect(badge.style.color).toBe(rgb(ZONE_COLORS.danger));
   });
 
-  it('always shows the decision-support (read-only) banner', () => {
-    render(<Banners mode="paper" />);
-    expect(screen.getByTestId('banner-readonly').textContent).toMatch(/Claude advises/i);
-  });
 });

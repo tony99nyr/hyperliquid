@@ -76,7 +76,25 @@ export interface ContextGauge {
 // ---------------------------------------------------------------------------
 
 export type PendingActionKind = 'entry' | 'exit' | 'generic';
-export type PendingActionStatus = 'pending' | 'approved' | 'rejected' | 'expired';
+export type PendingActionStatus =
+  | 'pending' // skill-authored, awaiting decision (the polling skill executes)
+  | 'preview' // operator-authored, awaiting decision (executes route-driven)
+  | 'executing' // atomic claim held while the in-route executor runs (anti-double-fire)
+  | 'approved' // skill path terminal: decided yes → the skill fires
+  | 'rejected' // declined / discarded — never executes
+  | 'executed' // operator path terminal: executed in-route (distinct from 'approved')
+  | 'expired'; // timed out — never executes
+
+/** Who authored a pending action — drives which execute path applies. */
+export type PendingActionOrigin = 'skill' | 'operator';
+
+/** Claude's evaluation of an operator PREVIEW (advisory; never executes). */
+export interface PendingActionReview {
+  verdict: 'endorse' | 'caution' | 'avoid';
+  note: string;
+  /** epoch ms when Claude wrote the review. */
+  reviewedAt: number;
+}
 
 /**
  * Human-readable display fields for a proposed action, surfaced in the approval
@@ -133,6 +151,10 @@ export interface PendingAction {
   mode: TradingMode;
   proposal: PendingActionProposal;
   status: PendingActionStatus;
+  /** Who authored the row. Legacy/skill rows default to 'skill'. */
+  origin: PendingActionOrigin;
+  /** Claude's evaluation of an operator preview, or null when not yet reviewed. */
+  review: PendingActionReview | null;
   createdAt: number;
   decidedAt: number | null;
 }

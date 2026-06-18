@@ -43,19 +43,64 @@ export interface TraderFilterState {
   hideAtRisk: boolean;
   /** Show only wallets whose traded coins intersect the tradeable set. */
   tradeableOnly: boolean;
+  /**
+   * Show only wallets currently HOLDING a live position in a tradeable coin
+   * (per the trade-watch leader_positions table). The "find cloneable traders"
+   * filter. Needs the live held-coins set (see buildHasTradeablePositionSet).
+   */
+  hasPosition: boolean;
 }
 
 export const DEFAULT_FILTER_STATE: TraderFilterState = {
   cleanBook: false,
   hideAtRisk: false,
   tradeableOnly: true,
+  hasPosition: false,
 };
 
-/** Does a single row survive the active filters? Filters compose (AND). PURE. */
-export function rowPasses(row: TopTraderRow, f: TraderFilterState): boolean {
+/**
+ * A minimal live leader_positions row (subset of LeaderPositionRow) — kept
+ * structural so this zero-import leaf needn't depend on the realtime mappers.
+ */
+export interface LiveLeaderPosition {
+  leaderAddress: string;
+  coin: string;
+  size: number;
+}
+
+/**
+ * Build the set of leader addresses (lower-cased) that currently hold a live
+ * position (size > 0) in a TRADEABLE coin (ETH/BTC/HYPE). This is the input the
+ * "Has position" chip filters against. PURE.
+ */
+export function buildHasTradeablePositionSet(
+  positions: readonly LiveLeaderPosition[],
+): Set<string> {
+  const out = new Set<string>();
+  for (const p of positions) {
+    if (!p || !p.leaderAddress) continue;
+    if (!(p.size > 0)) continue;
+    if (!TRADEABLE_SET.has(normalizeCoin(p.coin))) continue;
+    out.add(p.leaderAddress.toLowerCase());
+  }
+  return out;
+}
+
+/**
+ * Does a single row survive the active filters? Filters compose (AND). PURE.
+ * `holdingTradeable` is the set from buildHasTradeablePositionSet; the
+ * hasPosition chip is a no-op when it's omitted (e.g. before the feed loads).
+ */
+export function rowPasses(
+  row: TopTraderRow,
+  f: TraderFilterState,
+  holdingTradeable?: ReadonlySet<string>,
+): boolean {
   if (f.cleanBook && !row.cleanBook) return false;
   if (f.hideAtRisk && row.hasRisk) return false;
   if (f.tradeableOnly && !row.tradesTradeableCoin) return false;
+  if (f.hasPosition && holdingTradeable && !holdingTradeable.has(row.address.toLowerCase()))
+    return false;
   return true;
 }
 
@@ -63,6 +108,7 @@ export function rowPasses(row: TopTraderRow, f: TraderFilterState): boolean {
 export function applyTraderFilters(
   rows: readonly TopTraderRow[],
   f: TraderFilterState,
+  holdingTradeable?: ReadonlySet<string>,
 ): TopTraderRow[] {
-  return rows.filter((r) => rowPasses(r, f));
+  return rows.filter((r) => rowPasses(r, f, holdingTradeable));
 }

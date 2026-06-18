@@ -50,6 +50,11 @@ import { isApproveEnabled, liveConfirmPhrase, summarizeProposal } from './approv
 import { LeverageControl, SideSegment, SummaryRow } from './approval-popup-parts';
 import { GH, ZONE_COLORS, TERM, fmtPx, fmtUsd, fmtCompactUsd } from './panel-styles';
 
+/** Verdict → zone color for the Claude-review block on operator previews. */
+function reviewColor(verdict: 'endorse' | 'caution' | 'avoid'): string {
+  return verdict === 'endorse' ? ZONE_COLORS.ok : verdict === 'avoid' ? ZONE_COLORS.danger : ZONE_COLORS.warn;
+}
+
 export interface ApprovalPopupProps {
   sessionId: string | null;
   /** Leader being followed (label + leverage source for Match-leader). */
@@ -67,7 +72,10 @@ export default function ApprovalPopup({
   actionOverride,
 }: ApprovalPopupProps) {
   const live = usePendingActions(actionOverride === undefined ? sessionId : null);
-  const action = actionOverride !== undefined ? actionOverride : live.pending;
+  // Skill 'pending' rows take priority over operator previews (they rarely
+  // coexist). The MODAL renders only one row at a time; PopupBody routes by the
+  // rendered row's own origin/status, so a preview never hits the skill gate.
+  const action = actionOverride !== undefined ? actionOverride : (live.pending ?? live.preview);
 
   if (!action) return null;
   return (
@@ -92,6 +100,9 @@ function PopupBody({
   const { display, intent } = action.proposal;
   const isLive = action.mode === 'live';
   const isOpening = intent.reduceOnly !== true && action.kind !== 'exit';
+  // Operator previews route to /api/cockpit/preview/decide (execute/discard), NOT
+  // the skill approve/reject gate. Derived strictly from the rendered row.
+  const isPreview = action.status === 'preview' && action.origin === 'operator';
 
   // Leverage state (Item 3) — only meaningful for OPENING orders.
   const leaderPos = leaderPositionForCoin(leaderPositions, display.coin);
@@ -193,15 +204,37 @@ function PopupBody({
     setBusy(true);
     setError(null);
     try {
-      // Approving an OPENING order sends the operator-chosen leverage; the server
-      // re-validates it to [1, coinMax]. Reject + reduce-only exits send only id.
-      const body: { id: string; leverage?: number } = { id: action.id };
-      if (path === 'approve' && isOpening) body.leverage = leverage;
-      const res = await fetch(`/api/cockpit/${path}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+      let res: Response;
+      if (isPreview) {
+        // OPERATOR PREVIEW → the route-driven execute/discard path (NOT the skill
+        // approve gate). Approve = execute (sends leverage + the LIVE typed phrase
+        // the server re-validates); Cancel = discard. NO-AUTO-FIRE: this fires only
+        // on the operator's explicit click.
+        const body: {
+          id: string;
+          decision: 'execute' | 'discard';
+          leverage?: number;
+          confirmPhrase?: string;
+        } = { id: action.id, decision: path === 'approve' ? 'execute' : 'discard' };
+        if (path === 'approve' && isOpening) body.leverage = leverage;
+        if (path === 'approve' && isLive) body.confirmPhrase = typed;
+        res = await fetch('/api/cockpit/preview/decide', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      } else {
+        // Skill 'pending' row → the hardened approve/reject gate (UNCHANGED).
+        // Approving an OPENING order sends the operator-chosen leverage; the server
+        // re-validates it to [1, coinMax]. Reject + reduce-only exits send only id.
+        const body: { id: string; leverage?: number } = { id: action.id };
+        if (path === 'approve' && isOpening) body.leverage = leverage;
+        res = await fetch(`/api/cockpit/${path}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      }
       if (!res.ok) {
         const json = (await res.json().catch(() => ({}))) as { error?: string };
         setError(json.error ?? `Request failed (${res.status})`);
@@ -270,7 +303,7 @@ function PopupBody({
         data-testid="approval-popup"
         role="dialog"
         aria-modal="true"
-        aria-label="Trade approval"
+        aria-label={isPreview ? 'Trade preview approval' : 'Trade approval'}
         className={css({
           width: '100%',
           maxWidth: { base: '100%', md: '520px' },
@@ -314,7 +347,7 @@ function PopupBody({
             className={css({ fontFamily: 'mono', fontSize: '10px' })}
             style={{ color: TERM.faint }}
           >
-            you approve · you execute
+            {isPreview ? 'PREVIEW · you approve · you execute' : 'you approve · you execute'}
           </span>
           {/* Hidden machine-readable summary (preserves the proposal-summary testid). */}
           <span data-testid="proposal-summary" className={css({ srOnly: true })}>
@@ -325,6 +358,15 @@ function PopupBody({
             })}
           </span>
           <div className={css({ flex: 1 })} />
+          {isPreview && (
+            <span
+              data-testid="preview-pill"
+              className={css({ fontFamily: 'sans', fontSize: 'xs', fontWeight: 'bold', letterSpacing: '0.1em', borderRadius: '6px', paddingX: '9px', paddingY: '5px', flex: 'none' })}
+              style={{ color: '#0b0e14', background: ZONE_COLORS.warn }}
+            >
+              PREVIEW
+            </span>
+          )}
           <span
             data-testid="mode-badge"
             data-mode={action.mode}
@@ -494,6 +536,41 @@ function PopupBody({
                 {leaderAddress.slice(0, 6)}…{leaderAddress.slice(-4)}
                 {leaderLev != null && <span className={css({ color: 'github.textMuted' })}> · {leaderLev}×</span>}
               </span>
+            </div>
+          )}
+
+          {/* Claude review (operator PREVIEW only): the verdict + note, or an
+              honest "not reviewed yet" — approving while unreviewed is the
+              operator's deliberate "force" call (NO-AUTO-FIRE: Claude can never
+              execute; only this Approve does). */}
+          {isPreview && (
+            <div
+              data-testid="preview-review"
+              className={css({ display: 'flex', flexDirection: 'column', gap: '4px', padding: '11px 14px', borderRadius: '9px', marginBottom: '12px' })}
+              style={{
+                background: TERM.inset,
+                // Reviewed → solid verdict-colored border. UNREVIEWED → a dashed
+                // amber border so "force" (approving before Claude weighs in) reads
+                // as a deliberate, distinct act, not a default.
+                border: action.review
+                  ? `1px solid ${reviewColor(action.review.verdict)}55`
+                  : `1px dashed ${ZONE_COLORS.warn}66`,
+              }}
+            >
+              {action.review ? (
+                <>
+                  <span className={css({ fontFamily: 'mono', fontSize: '10px', fontWeight: 'bold', letterSpacing: '0.06em' })} style={{ color: reviewColor(action.review.verdict) }}>
+                    CLAUDE · {action.review.verdict.toUpperCase()}
+                  </span>
+                  <span className={css({ fontSize: '11.5px', lineHeight: '1.5', color: 'github.text' })}>
+                    {action.review.note}
+                  </span>
+                </>
+              ) : (
+                <span className={css({ fontSize: '11.5px', lineHeight: '1.5', color: 'github.textMuted' })}>
+                  ⏳ Claude hasn’t reviewed this yet — approving now is your call (force).
+                </span>
+              )}
             </div>
           )}
 

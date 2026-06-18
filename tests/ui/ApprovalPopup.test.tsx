@@ -23,6 +23,8 @@ function action(mode: 'paper' | 'live'): PendingAction {
       display: { coin: 'ETH', side: 'sell', sz: 1.5, estPx: 2000, stopPx: 1900, rationale: 'Take the exit.' },
     },
     status: 'pending',
+    origin: 'skill',
+    review: null,
     createdAt: 0,
     decidedAt: null,
   };
@@ -130,6 +132,8 @@ function openingAction(over: { leverage?: number; coinMax?: number; stopPx?: num
       },
     },
     status: 'pending',
+    origin: 'skill',
+    review: null,
     createdAt: 0,
     decidedAt: null,
   };

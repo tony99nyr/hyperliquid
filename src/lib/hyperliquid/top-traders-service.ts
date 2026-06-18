@@ -124,3 +124,24 @@ export function getTopTraders(limit = 12): TopTraderRow[] {
 export function getRailTraders(limit = 50): TopTraderRow[] {
   return getTopTraders(limit);
 }
+
+/** Dataset-level freshness metadata for the rail's "ratings" indicator. */
+export interface RatedMeta {
+  /** ISO timestamp the rated-wallets dataset was generated (null if unknown). */
+  generatedAt: string | null;
+  /** Number of rated wallets. */
+  count: number;
+}
+
+/**
+ * Read the rated-wallets dataset's freshness metadata (server-only fs read). The
+ * weekly re-rank pipeline stamps `generatedAt`; the rail shows it so the operator
+ * can see when the rankings were last refreshed (and whether they're stale).
+ */
+export function getRatedMeta(): RatedMeta {
+  const ds = loadRatedWallets();
+  return {
+    generatedAt: ds.generatedAt ?? null,
+    count: typeof ds.count === 'number' ? ds.count : ds.wallets.length,
+  };
+}

@@ -19,7 +19,8 @@ import {
   fetchClearinghouseState,
   type HlPosition,
 } from '@/lib/hyperliquid/hyperliquid-info-service';
-import { getRailTraders } from '@/lib/hyperliquid/top-traders-service';
+import { getRailTraders, getRatedMeta } from '@/lib/hyperliquid/top-traders-service';
+import { buildRatingsFreshness } from './components/left-rail/ratings-freshness-helpers';
 import PinGate from './components/PinGate';
 import CockpitClient from './CockpitClient';
 
@@ -44,6 +45,9 @@ export default async function CockpitPage() {
   // Slim top-traders list for the left rail — a larger slice (50) so the rail
   // scrolls + filters client-side (the 2.8MB dataset stays server-side).
   const topTraders = getRailTraders(50);
+  // Build the rail freshness server-side (page is force-dynamic → knows "now"),
+  // so the client renders it purely (no Date.now()/effect → no hydration drift).
+  const ratings = buildRatingsFreshness(getRatedMeta().generatedAt);
 
   return (
     <CockpitClient
@@ -52,6 +56,7 @@ export default async function CockpitPage() {
       leaderAddress={leaderAddress}
       leaderPositions={leaderPositions}
       topTraders={topTraders}
+      ratings={ratings}
       coins={['ETH', 'BTC', 'HYPE']}
     />
   );

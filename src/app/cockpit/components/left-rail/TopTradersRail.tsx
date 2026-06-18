@@ -21,11 +21,14 @@ import {
   applyTraderFilters,
   type TraderFilterState,
 } from './top-traders-filter-helpers';
+import { formatRatingsDate, type RatingsFreshness } from './ratings-freshness-helpers';
 
 export interface TopTradersRailProps {
   traders: TopTraderRow[];
   /** The address currently followed this session, if any (highlighted). */
   followedAddress?: string | null;
+  /** Ratings freshness (built server-side: generatedAt + stale). */
+  ratings?: RatingsFreshness | null;
 }
 
 function compositeColor(score: number | null): string {
@@ -85,10 +88,16 @@ function FilterChip({
   );
 }
 
-export default function TopTradersRail({ traders, followedAddress }: TopTradersRailProps) {
+export default function TopTradersRail({ traders, followedAddress, ratings }: TopTradersRailProps) {
   const followed = followedAddress?.toLowerCase() ?? null;
   const [selected, setSelected] = useState<TopTraderRow | null>(null);
   const [filters, setFilters] = useState<TraderFilterState>(DEFAULT_FILTER_STATE);
+
+  // Freshness is built server-side (page is force-dynamic) → render it purely:
+  // a deterministic absolute date + a server-computed `stale` flag, no Date.now()
+  // in the client (so no SSR/hydration drift).
+  const ratingsDate = formatRatingsDate(ratings?.generatedAt);
+  const stale = ratings?.stale ?? false;
 
   const toggle = (key: keyof TraderFilterState) =>
     setFilters((f) => ({ ...f, [key]: !f[key] }));
@@ -100,9 +109,24 @@ export default function TopTradersRail({ traders, followedAddress }: TopTradersR
       data-testid="top-traders-rail"
       className={css({ ...panelSurface, padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px', minHeight: '0' })}
     >
-      <h2 className={css({ fontFamily: 'label', fontSize: 'sm', fontWeight: 'bold', color: 'github.textBright', textTransform: 'uppercase', letterSpacing: '0.06em' })}>
-        Top Traders
-      </h2>
+      <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px' })}>
+        <h2 className={css({ fontFamily: 'label', fontSize: 'sm', fontWeight: 'bold', color: 'github.textBright', textTransform: 'uppercase', letterSpacing: '0.06em' })}>
+          Top Traders
+        </h2>
+        <span
+          data-testid="ratings-freshness"
+          aria-label={
+            stale
+              ? `Ratings generated ${ratingsDate}; overdue — re-run the rating pipeline`
+              : `Ratings generated ${ratingsDate}`
+          }
+          title={stale ? `Ratings generated ${ratingsDate} — overdue (weekly cadence). Re-run the rating pipeline.` : `Ratings generated ${ratingsDate}`}
+          style={stale ? { color: ZONE_COLORS.warn } : undefined}
+          className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted', whiteSpace: 'nowrap', fontFeatureSettings: '"tnum"' })}
+        >
+          ratings · {ratingsDate}{stale ? ' · overdue' : ''}
+        </span>
+      </div>
 
       {/* Filter chips — compose (AND). Tradeable-only is ON by default. */}
       <div

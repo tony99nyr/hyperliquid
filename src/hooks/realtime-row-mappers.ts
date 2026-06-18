@@ -18,6 +18,7 @@ import type {
   PendingAction,
   PendingActionKind,
   PendingActionProposal,
+  PendingActionReview,
   PendingActionStatus,
   SafeExitPlan,
 } from '@/types/cockpit';
@@ -165,6 +166,10 @@ export function mapPendingActionRow(row: RealtimeRow): PendingAction {
     mode: (str(row.mode) || 'paper') as TradingMode,
     proposal: (row.proposal ?? { intent: {} as TradeIntent, display: {} }) as PendingActionProposal,
     status: (str(row.status) || 'pending') as PendingActionStatus,
+    // Legacy/cached rows may lack origin — default to 'skill'. review stays null
+    // until Claude annotates a preview.
+    origin: row.origin === 'operator' ? 'operator' : 'skill',
+    review: (row.review ?? null) as PendingActionReview | null,
     createdAt: toMs(row.created_at),
     decidedAt: toMsOrNull(row.decided_at),
   };
@@ -200,6 +205,121 @@ export function accumulateById<T extends { id: string }>(
   const without = prev.filter((r) => r.id !== next.id);
   without.push(next);
   return without.sort(compare);
+}
+
+/**
+ * A leader_positions row — the watcher's live, reconciled view of ONE leader's
+ * open position in ONE coin (GLOBAL: no session_id). Powers the rail's
+ * "has position" filter, Leader-vs-You, and the trader-detail drawer (replacing
+ * the on-demand HL proxy). Mirrors the HlPosition shape so it drops into the
+ * existing position panels.
+ */
+export interface LeaderPositionRow {
+  /** Synthetic id (leader_address:coin) — leader_positions has no `id` column. */
+  id: string;
+  leaderAddress: string;
+  coin: string;
+  side: 'long' | 'short';
+  /** Signed size in coin units (negative = short). */
+  szi: number;
+  /** Absolute size in coin units. */
+  size: number;
+  entryPx: number | null;
+  positionValue: number;
+  unrealizedPnl: number;
+  returnOnEquity: number | null;
+  leverage: number | null;
+  leverageType: string | null;
+  liquidationPx: number | null;
+  accountValueUsd: number | null;
+  fetchedAt: number;
+  updatedAt: number;
+}
+
+export function mapLeaderPositionRow(row: RealtimeRow): LeaderPositionRow {
+  const leaderAddress = str(row.leader_address);
+  const coin = str(row.coin);
+  const rawSide = str(row.side);
+  const side = rawSide === 'short' ? 'short' : 'long';
+  return {
+    id: `${leaderAddress.toLowerCase()}:${coin.toUpperCase()}`,
+    leaderAddress,
+    coin,
+    side,
+    szi: num(row.szi),
+    size: num(row.size),
+    entryPx: row.entry_px == null ? null : num(row.entry_px),
+    positionValue: num(row.position_value),
+    unrealizedPnl: num(row.unrealized_pnl),
+    returnOnEquity: row.return_on_equity == null ? null : num(row.return_on_equity),
+    leverage: row.leverage == null ? null : num(row.leverage),
+    leverageType: row.leverage_type == null ? null : str(row.leverage_type),
+    liquidationPx: row.liquidation_px == null ? null : num(row.liquidation_px),
+    accountValueUsd: row.account_value_usd == null ? null : num(row.account_value_usd),
+    fetchedAt: toMs(row.fetched_at),
+    updatedAt: toMs(row.updated_at),
+  };
+}
+
+/** The kinds of leader action the watcher records (append-only event log). */
+export type LeaderActionKind = 'open' | 'add' | 'reduce' | 'close' | 'flip';
+const LEADER_ACTION_KINDS = new Set<string>(['open', 'add', 'reduce', 'close', 'flip']);
+
+/**
+ * A leader_actions row — one append-only event in a leader's book (GLOBAL: no
+ * session_id). Powers the live action feed. `id` is synthesized from the natural
+ * key when the table exposes no `id` column.
+ */
+export interface LeaderActionRow {
+  id: string;
+  leaderAddress: string;
+  coin: string;
+  kind: LeaderActionKind;
+  prevSide: 'long' | 'short' | null;
+  newSide: 'long' | 'short' | null;
+  prevSize: number | null;
+  newSize: number | null;
+  sizeDelta: number;
+  entryPx: number | null;
+  notionalUsd: number | null;
+  unrealizedPnl: number | null;
+  detectedAt: number;
+}
+
+function sideOrNull(v: unknown): 'long' | 'short' | null {
+  const s = str(v);
+  return s === 'long' || s === 'short' ? s : null;
+}
+
+export function mapLeaderActionRow(row: RealtimeRow): LeaderActionRow {
+  const leaderAddress = str(row.leader_address);
+  const coin = str(row.coin);
+  const rawKind = str(row.kind);
+  const kind = (LEADER_ACTION_KINDS.has(rawKind) ? rawKind : 'add') as LeaderActionKind;
+  const detectedAt = toMs(row.detected_at);
+  // leader_actions is append-only and may lack an `id` column; synthesize a
+  // stable-enough key (a leader can't log two events for one coin at the same ms).
+  const id = row.id != null ? str(row.id) : `${leaderAddress.toLowerCase()}:${coin.toUpperCase()}:${kind}:${detectedAt}`;
+  return {
+    id,
+    leaderAddress,
+    coin,
+    kind,
+    prevSide: sideOrNull(row.prev_side),
+    newSide: sideOrNull(row.new_side),
+    prevSize: row.prev_size == null ? null : num(row.prev_size),
+    newSize: row.new_size == null ? null : num(row.new_size),
+    sizeDelta: num(row.size_delta),
+    entryPx: row.entry_px == null ? null : num(row.entry_px),
+    notionalUsd: row.notional_usd == null ? null : num(row.notional_usd),
+    unrealizedPnl: row.unrealized_pnl == null ? null : num(row.unrealized_pnl),
+    detectedAt,
+  };
+}
+
+/** Newest-first comparator on a `detectedAt` field. */
+export function byDetectedAtDesc<T extends { detectedAt: number }>(a: T, b: T): number {
+  return b.detectedAt - a.detectedAt;
 }
 
 /** Newest-first comparator on a `createdAt` field. */

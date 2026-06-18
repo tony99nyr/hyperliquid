@@ -20,7 +20,9 @@ import {
 import type {
   PendingAction,
   PendingActionKind,
+  PendingActionOrigin,
   PendingActionProposal,
+  PendingActionReview,
   PendingActionStatus,
 } from '@/types/cockpit';
 import type { TradingMode } from '@/types/fill';
@@ -33,6 +35,8 @@ interface PendingActionRow {
   mode: TradingMode;
   proposal: PendingActionProposal;
   status: PendingActionStatus;
+  origin: PendingActionOrigin | null;
+  review: PendingActionReview | null;
   created_at: string;
   decided_at: string | null;
 }
@@ -45,6 +49,10 @@ function toPendingAction(row: PendingActionRow): PendingAction {
     mode: row.mode,
     proposal: row.proposal,
     status: row.status,
+    // Legacy rows (pre-0005) have no origin — default to 'skill' (the historical
+    // author of every pending_action).
+    origin: row.origin === 'operator' ? 'operator' : 'skill',
+    review: row.review ?? null,
     createdAt: new Date(row.created_at).getTime(),
     decidedAt: row.decided_at ? new Date(row.decided_at).getTime() : null,
   };
@@ -68,11 +76,165 @@ export async function createPendingAction(
       mode: input.mode,
       proposal: input.proposal,
       status: 'pending',
+      origin: 'skill',
     })
     .select()
     .single();
   if (error) throw new Error(`createPendingAction failed: ${error.message}`);
   return toPendingAction(data as PendingActionRow);
+}
+
+// ---------------------------------------------------------------------------
+// Operator PREVIEW lifecycle (the cockpit-native, route-driven path).
+//
+// A preview is authored by the OPERATOR (origin='operator', status='preview'),
+// NOT by a polling skill — so its execution is route-driven (claim → execute →
+// finalize), never picked up by `pollPendingAction` (which scopes by its own id).
+// NO-AUTO-FIRE is preserved: a preview only ever fires on the operator's explicit
+// Approve click, which reaches `/api/cockpit/preview/decide`. Claude may write a
+// `review` annotation but CANNOT execute.
+// ---------------------------------------------------------------------------
+
+/** Insert an operator 'preview' row (awaiting the operator's decision). */
+export async function createPreview(
+  input: {
+    sessionId: string;
+    kind: PendingActionKind;
+    mode: TradingMode;
+    proposal: PendingActionProposal;
+  },
+  client: SupabaseClient = getServiceRoleClient(),
+): Promise<PendingAction> {
+  const { data, error } = await client
+    .from('pending_actions')
+    .insert({
+      session_id: input.sessionId,
+      kind: input.kind,
+      mode: input.mode,
+      proposal: input.proposal,
+      status: 'preview',
+      origin: 'operator',
+    })
+    .select()
+    .single();
+  if (error) throw new Error(`createPreview failed: ${error.message}`);
+  return toPendingAction(data as PendingActionRow);
+}
+
+/** Open previews across all sessions (for the review-previews skill). */
+export async function listOpenPreviews(
+  client: SupabaseClient = getServiceRoleClient(),
+): Promise<PendingAction[]> {
+  const { data, error } = await client
+    .from('pending_actions')
+    .select('*')
+    .eq('status', 'preview')
+    .eq('origin', 'operator')
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(`listOpenPreviews failed: ${error.message}`);
+  return (data as PendingActionRow[]).map(toPendingAction);
+}
+
+/** Attach Claude's review annotation to a preview (advisory; never executes). */
+export async function attachPreviewReview(
+  id: string,
+  review: PendingActionReview,
+  client: SupabaseClient = getServiceRoleClient(),
+): Promise<boolean> {
+  const { data, error } = await client
+    .from('pending_actions')
+    .update({ review })
+    .eq('id', id)
+    .eq('status', 'preview')
+    .eq('origin', 'operator')
+    .select('id');
+  if (error) throw new Error(`attachPreviewReview failed: ${error.message}`);
+  return Array.isArray(data) && data.length > 0;
+}
+
+/**
+ * ATOMIC CLAIM: flip an operator preview→'executing', optionally stamping the
+ * operator-chosen (already-validated) leverage onto the proposal in the SAME
+ * update. Guarded on `status='preview' AND origin='operator'` so exactly one
+ * caller wins — a double-click or a skill 'pending' row posted here returns
+ * false (no claim, no execution). Returns the CLAIMED action (with the stamped
+ * leverage) when this call won the claim, else null.
+ *
+ * This is the anti-double-fire guard: the in-route executor runs ONLY after a
+ * successful claim, and the proposal's clientIntentId (minted at preview
+ * creation) is the second backstop — a duplicate intent dedupes in persistFill.
+ */
+export async function claimPreviewForExecute(
+  id: string,
+  validatedLeverage: number | null,
+  client: SupabaseClient = getServiceRoleClient(),
+): Promise<PendingAction | null> {
+  const current = await getPendingAction(id, client);
+  if (!current || current.status !== 'preview' || current.origin !== 'operator') return null;
+
+  const isOpening = current.proposal.intent.reduceOnly !== true;
+  const stampLev = validatedLeverage !== null && isOpening;
+  const nextProposal: PendingActionProposal = {
+    intent: { ...current.proposal.intent, ...(stampLev ? { leverage: validatedLeverage } : {}) },
+    display: { ...current.proposal.display, ...(stampLev ? { leverage: validatedLeverage } : {}) },
+  };
+
+  const { data, error } = await client
+    .from('pending_actions')
+    .update({ status: 'executing', proposal: nextProposal })
+    .eq('id', id)
+    .eq('status', 'preview')
+    .eq('origin', 'operator')
+    .select('*');
+  if (error) throw new Error(`claimPreviewForExecute failed: ${error.message}`);
+  if (!Array.isArray(data) || data.length === 0) return null;
+  return toPendingAction(data[0] as PendingActionRow);
+}
+
+/** Mark a claimed ('executing') preview 'executed' — the operator-path terminal. */
+export async function finalizeExecutedPreview(
+  id: string,
+  client: SupabaseClient = getServiceRoleClient(),
+): Promise<void> {
+  const { error } = await client
+    .from('pending_actions')
+    .update({ status: 'executed', decided_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('status', 'executing');
+  if (error) throw new Error(`finalizeExecutedPreview failed: ${error.message}`);
+}
+
+/**
+ * Revert a claimed ('executing') preview back to 'preview' when the in-route
+ * execute FAILED — so the operator can retry. Safe because the proposal's stable
+ * clientIntentId makes a retry idempotent (a fill that actually landed dedupes).
+ */
+export async function revertClaimedPreview(
+  id: string,
+  client: SupabaseClient = getServiceRoleClient(),
+): Promise<void> {
+  const { error } = await client
+    .from('pending_actions')
+    .update({ status: 'preview' })
+    .eq('id', id)
+    .eq('status', 'executing');
+  if (error) throw new Error(`revertClaimedPreview failed: ${error.message}`);
+}
+
+/** Discard a preview (operator declined) — preview→'rejected'. Never executes. */
+export async function discardPreview(
+  id: string,
+  client: SupabaseClient = getServiceRoleClient(),
+): Promise<boolean> {
+  const { data, error } = await client
+    .from('pending_actions')
+    .update({ status: 'rejected', decided_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('status', 'preview')
+    .eq('origin', 'operator')
+    .select('id');
+  if (error) throw new Error(`discardPreview failed: ${error.message}`);
+  return Array.isArray(data) && data.length > 0;
 }
 
 /** Read the current status of a pending action (null when not found). */

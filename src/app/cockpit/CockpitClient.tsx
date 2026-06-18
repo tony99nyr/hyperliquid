@@ -40,6 +40,7 @@ import BottomTabBar, { type MobileTab } from './components/shell/BottomTabBar';
 import CockpitView from './components/CockpitView';
 import PerformanceView from './components/performance/PerformanceView';
 import TopTradersRail from './components/left-rail/TopTradersRail';
+import type { RatingsFreshness } from './components/left-rail/ratings-freshness-helpers';
 import ApprovalPopup from './components/ApprovalPopup';
 import Banners from './components/Banners';
 
@@ -50,6 +51,8 @@ export interface CockpitClientProps {
   leaderPositions: HlPosition[];
   /** Top rated traders, pre-sliced server-side for the left rail. */
   topTraders?: TopTraderRow[];
+  /** Rail ratings freshness (built server-side: generatedAt + stale). */
+  ratings?: RatingsFreshness | null;
   /** Coins the operator can switch between. Default ETH/BTC/HYPE. */
   coins?: string[];
 }
@@ -60,6 +63,7 @@ export default function CockpitClient({
   leaderAddress,
   leaderPositions,
   topTraders = [],
+  ratings = null,
   coins = ['ETH', 'BTC', 'HYPE'],
 }: CockpitClientProps) {
   const isMobile = useIsMobile();
@@ -140,7 +144,7 @@ export default function CockpitClient({
           data-testid="mobile-traders-view"
           className={css({ flex: 1, overflowY: 'auto', padding: '12px' })}
         >
-          <TopTradersRail traders={topTraders} followedAddress={leaderAddress} />
+          <TopTradersRail traders={topTraders} followedAddress={leaderAddress} ratings={ratings} />
         </section>
       ) : (
         <CockpitView
@@ -154,6 +158,7 @@ export default function CockpitClient({
           leaderAddress={leaderAddress}
           leaderPositions={liveLeader.positions}
           topTraders={topTraders}
+          ratings={ratings}
           currentEquityUsd={equityUsd ?? 0}
           showTradersRail={!isMobile}
         />

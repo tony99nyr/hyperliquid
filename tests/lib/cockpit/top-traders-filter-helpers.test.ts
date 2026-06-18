@@ -50,7 +50,7 @@ describe('coinsIntersectTradeable', () => {
 });
 
 describe('rowPasses / applyTraderFilters', () => {
-  const allOff: TraderFilterState = { cleanBook: false, hideAtRisk: false, tradeableOnly: false };
+  const allOff: TraderFilterState = { cleanBook: false, hideAtRisk: false, tradeableOnly: false, hasPosition: false };
 
   it('passes everything with all filters off', () => {
     expect(rowPasses(row({ hasRisk: true, tradesTradeableCoin: false }), allOff)).toBe(true);
@@ -75,7 +75,7 @@ describe('rowPasses / applyTraderFilters', () => {
   });
 
   it('filters COMPOSE with AND', () => {
-    const f: TraderFilterState = { cleanBook: true, hideAtRisk: true, tradeableOnly: true };
+    const f: TraderFilterState = { cleanBook: true, hideAtRisk: true, tradeableOnly: true, hasPosition: false };
     // clean + tradeable + no risk → passes
     expect(rowPasses(row({ cleanBook: true, hasRisk: false, tradesTradeableCoin: true }), f)).toBe(true);
     // clean book but at-risk → fails (hideAtRisk)
@@ -92,11 +92,11 @@ describe('rowPasses / applyTraderFilters', () => {
       row({ address: '0x2', cleanBook: false, tradesTradeableCoin: true }),
       row({ address: '0x3', cleanBook: true, tradesTradeableCoin: false }),
     ];
-    const out = applyTraderFilters(rows, { cleanBook: true, hideAtRisk: false, tradeableOnly: true });
+    const out = applyTraderFilters(rows, { cleanBook: true, hideAtRisk: false, tradeableOnly: true, hasPosition: false });
     expect(out.map((r) => r.address)).toEqual(['0x1']);
   });
 
   it('default state has tradeableOnly ON, the rest OFF', () => {
-    expect(DEFAULT_FILTER_STATE).toEqual({ cleanBook: false, hideAtRisk: false, tradeableOnly: true });
+    expect(DEFAULT_FILTER_STATE).toEqual({ cleanBook: false, hideAtRisk: false, tradeableOnly: true, hasPosition: false });
   });
 });

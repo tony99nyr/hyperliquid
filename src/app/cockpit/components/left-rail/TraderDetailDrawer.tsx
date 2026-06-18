@@ -30,10 +30,7 @@ import {
   fmtPx,
 } from '../panel-styles';
 import { describeFlags, followVerdict, type FlagSeverity } from './trader-flag-helpers';
-import {
-  buildMirrorCommand,
-  pickMirrorTarget,
-} from './mirror-command-helpers';
+import { pickMirrorTarget } from './mirror-command-helpers';
 
 export interface TraderDetailDrawerProps {
   trader: TopTraderRow;
@@ -281,7 +278,7 @@ export default function TraderDetailDrawer({ trader, onClose, detailOverride }: 
         <MirrorPanel
           coin={mirrorTarget?.coin ?? null}
           side={mirrorTarget?.side ?? null}
-          command={mirrorTarget ? buildMirrorCommand({ target: mirrorTarget, leaderAddress: trader.address }) : null}
+          leaderAddress={trader.address}
         />
       </section>
     </div>
@@ -374,19 +371,54 @@ function MicroStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function MirrorPanel({ coin, side, command }: { coin: string | null; side: string | null; command: string | null }) {
-  const [copied, setCopied] = useState(false);
+/**
+ * "Mirror this →" — creates an operator PREVIEW of the trader's top position
+ * (coin/side, risk-sized server-side off the live mark). The preview appears in
+ * the approval popup, where Claude can review it and the operator approves (or
+ * forces). NO-AUTO-FIRE: creating a preview executes NOTHING; only the operator's
+ * Approve in the popup fires it. The UI still never places a trade directly.
+ */
+function MirrorPanel({
+  coin,
+  side,
+  leaderAddress,
+}: {
+  coin: string | null;
+  side: 'buy' | 'sell' | null;
+  leaderAddress: string;
+}) {
+  const [status, setStatus] = useState<'idle' | 'creating' | 'created' | 'error'>('idle');
+  const [error, setError] = useState<string | null>(null);
 
-  async function copy(): Promise<void> {
-    if (!command) return;
+  async function createPreview(): Promise<void> {
+    if (!coin || !side) return;
+    setStatus('creating');
+    setError(null);
     try {
-      await navigator.clipboard.writeText(command);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
+      const res = await fetch('/api/cockpit/preview', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ coin, side, leaderAddress }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !json.ok) {
+        setError(json.error ?? `Request failed (${res.status})`);
+        setStatus('error');
+        return;
+      }
+      setStatus('created');
+      // Re-enable after a beat so the operator can create another preview (e.g.
+      // a different side) without reopening the drawer — the confirmation shows
+      // briefly, then the button returns to idle.
+      setTimeout(() => setStatus('idle'), 2500);
     } catch {
-      setCopied(false);
+      setError('Network error — try again.');
+      setStatus('error');
     }
   }
+
+  const sideLabel = side === 'buy' ? 'LONG' : 'SHORT';
+  const busy = status === 'creating' || status === 'created';
 
   return (
     <div
@@ -402,37 +434,20 @@ function MirrorPanel({ coin, side, command }: { coin: string | null; side: strin
       <span className={css({ fontFamily: 'label', fontSize: '10px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.08em' })}>
         Mirror this →
       </span>
-      {command === null ? (
+      {coin === null || side === null ? (
         <span className={css({ fontSize: 'xs', color: 'github.textMuted', fontFamily: 'mono' })}>
           No open position to mirror.
         </span>
       ) : (
         <>
           <span className={css({ fontSize: '11px', color: 'github.text', lineHeight: '1.4' })}>
-            Mirror their top position ({side?.toUpperCase()} {coin}). Run this in your Claude session — the approval popup still gates execution.
+            Mirror their top position ({sideLabel} {coin}) as a preview. Claude can review it; you approve — or force — in the popup.
           </span>
-          <code
-            data-testid="mirror-command"
-            className={css({
-              display: 'block',
-              bg: 'github.bg',
-              border: '1px solid token(colors.github.borderSubtle)',
-              borderRadius: '6px',
-              padding: '8px 10px',
-              fontFamily: 'mono',
-              fontSize: '10px',
-              color: 'github.textBright',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-all',
-              lineHeight: '1.5',
-            })}
-          >
-            {command}
-          </code>
           <button
             type="button"
-            data-testid="mirror-copy"
-            onClick={() => void copy()}
+            data-testid="mirror-preview"
+            onClick={() => void createPreview()}
+            disabled={busy}
             className={css({
               alignSelf: 'flex-start',
               bg: 'github.bg',
@@ -442,16 +457,33 @@ function MirrorPanel({ coin, side, command }: { coin: string | null; side: strin
               fontFamily: 'label',
               fontSize: 'xs',
               fontWeight: 'bold',
-              padding: '6px 12px',
+              padding: '7px 13px',
               cursor: 'pointer',
               _hover: { borderColor: 'github.link' },
+              _disabled: { opacity: 0.6, cursor: 'not-allowed' },
             })}
           >
-            {copied ? 'Copied ✓' : 'Copy command'}
+            {status === 'creating'
+              ? 'Creating…'
+              : status === 'created'
+                ? 'Preview created ✓'
+                : `Preview ${sideLabel} ${coin}`}
           </button>
-          <span className={css({ fontSize: '9px', color: 'github.textMuted', fontFamily: 'mono' })}>
-            The UI cannot place a trade — execution is Claude-proposes / you-approve.
-          </span>
+          {status === 'created' && (
+            <span data-testid="mirror-created" className={css({ fontSize: '9px', color: 'zone.ok', fontFamily: 'mono' })}>
+              Open the approval popup to review &amp; approve (or force) it.
+            </span>
+          )}
+          {status === 'error' && error && (
+            <span data-testid="mirror-error" className={css({ fontSize: '9px', color: 'zone.danger', fontFamily: 'mono' })}>
+              {error}
+            </span>
+          )}
+          {status !== 'created' && (
+            <span className={css({ fontSize: '9px', color: 'github.textMuted', fontFamily: 'mono' })}>
+              Creating a preview executes nothing — you approve in the popup.
+            </span>
+          )}
         </>
       )}
     </div>
