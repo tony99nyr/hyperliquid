@@ -13,7 +13,8 @@ reads centralize on this one NAS IP, and the cockpit reads Supabase.
 
 Each cycle (default every 30s) it:
 
-1. Picks the **top-N rated leaders** (default 30) from the vendored
+1. Picks the **top-N rated leaders** (default 50; set `TRADER_WATCH_TOP_N` or
+   `--top N` to change) from the vendored
    `data/backups/wallet-rating/rated-wallets.json` (via `getTopTraders`).
 2. Fetches each leader's `clearinghouseState` (open positions) from HL.
 3. **Diffs** this cycle's positions against the previous cycle's →
@@ -46,8 +47,8 @@ The service runs the repo's TypeScript directly via `tsx` (same model as
 ```sh
 # From the repo root, for a quick local check:
 pnpm trader-watch --once            # one cycle, then exit
-pnpm trader-watch                   # loop forever (~30s, top 30)
-pnpm trader-watch --interval 15 --top 50
+pnpm trader-watch                   # loop forever (~30s, top 50)
+pnpm trader-watch --interval 15 --top 30
 
 # Or via the NAS scaffold (from services/trader-watch/):
 ./build.sh      # pnpm install in the repo (ensures tsx + deps)
@@ -85,6 +86,8 @@ needs the Supabase service-role keys the cockpit already uses:
 
 Optional, for the watchdog dead-man's switch (set in `services/trader-watch/.env`):
 
+- `TRADER_WATCH_TOP_N` — how many top-rated leaders to watch (default 50). Set in
+  the repo `.env.local` (or pass `--top N`).
 - `HEALTHCHECKS_TRADER_WATCH_URL` — pinged on each healthy watchdog run; `/fail`
   on a restart.
 

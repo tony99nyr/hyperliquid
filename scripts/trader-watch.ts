@@ -153,7 +153,12 @@ run(async () => {
     MIN_INTERVAL_SECONDS,
     optionalNumber(args, 'interval', DEFAULT_INTERVAL_SECONDS),
   );
-  const topN = Math.max(1, optionalNumber(args, 'top', DEFAULT_TOP_N));
+  // Standing top-N: --top flag → TRADER_WATCH_TOP_N env → built-in default (50).
+  // The env override lets the NAS retune the watch breadth via .env.local without
+  // a code change/pull.
+  const envTop = Number(process.env.TRADER_WATCH_TOP_N);
+  const baseTop = Number.isFinite(envTop) && envTop > 0 ? Math.floor(envTop) : DEFAULT_TOP_N;
+  const topN = Math.max(1, optionalNumber(args, 'top', baseTop));
 
   // Previous-snapshot baseline per leader lives in-process (see file header).
   const prior: LeaderSnapshotStore = new Map();

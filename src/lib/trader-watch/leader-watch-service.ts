@@ -38,7 +38,7 @@ import {
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 /** Default number of top-rated leaders to watch. */
-export const DEFAULT_TOP_N = 30;
+export const DEFAULT_TOP_N = 50;
 /** Spacing between per-leader HL fetches (ms) — gentle pacing, not a hammer. */
 const HL_REQUEST_SPACING_MS = 150;
 /** Base + cap for exponential backoff after consecutive HL failures (ms). */
