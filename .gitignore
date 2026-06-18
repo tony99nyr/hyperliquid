@@ -52,3 +52,5 @@ scripts/analysis/wallet-rating/hl-skill-shortlist.json
 scripts/analysis/wallet-rating/hl-survivor-results.json
 scripts/analysis/wallet-rating/hl-consistency/shortlist-hl-consistency.json
 weekly-rerank.log
+data/backups/perp-follow-study/
+data/backups/funding-study/
