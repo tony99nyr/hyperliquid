@@ -1,0 +1,144 @@
+{
+  "version": "0.1.0",
+  "name": "wallet-selection-hl-consistency",
+  "philosophy": "RISK-ADJUSTED CONSISTENCY",
+  "description": "Hyperliquid wallet-selection/rating config. 'Best' = the steady risk-adjusted earner, NOT the peak-return hero. Prioritizes Sharpe/Sortino/Calmar, cross-window consistency (positive in MOST of the six 60-day windows, not one lucky burst), low max drawdown, and a controlled left tail. This operationalizes the single defensible finding of HL_PERSISTENCE_STUDY_2026-06: risk-adjusted (consistency) ranking is 'the only method with a defensible forward profile' — same pooled IC as raw-PnL ranking (+0.116 vs +0.124) but it REMOVES the catastrophic left tail (worst forward window goes from -39% mean to -6.6%). It directly attacks the 'wallet-2 two-bursts problem': a wallet whose annual PnL is really two short bursts (best-window concentration > 1.0) is penalized, not rewarded. Decision-support ONLY — surfaces a small shortlist of defensible books for MANUAL review. HONEST PRIOR: HL copy-trading was rejected five ways; this tool does not resurrect it, it just ranks the survivors least-badly.",
+  "createdAt": "2026-06-14",
+  "changelog": [
+    "0.1.0 — initial HL consistency ranker. Metrics computed from data/backups/hyperliquid-study/windows.json (per-window return, avgAccountValue, dailyVol over six 60d windows) + persistent-set.json (Sharpe/maxDD/concentration cross-check). Adapts the Solana tail-discipline schema (riskDiscipline/performance/ratingRubric/autoDisqualifiers/0-10) to HL window-series metrics. Tuned so the persistent-set 'clean book' 0x5559da (Sharpe 2.5, maxDD 28%) grades high and lottery members (Sharpe < 0.5, best5StepsShare > 1.0, one blew up -367%) grade C-F."
+  ],
+
+  "venues": ["hyperliquid-perps"],
+
+  "dataSource": {
+    "_doc": "All metrics are computable OFFLINE from the cached study artifacts. No live calls.",
+    "windows": "data/backups/hyperliquid-study/windows.json",
+    "persistentSet": "data/backups/hyperliquid-study/persistent-set.json",
+    "windowSeries": "six consecutive 60-day windows anchored 2026-06-12 (w0 2025-06-17 .. w5 2026-06-12); per-window return = d(cumPnL)/timeWeightedAvgAccountValue; dailyVol = QV-estimator within-window daily PnL vol normalized by avg account value"
+  },
+
+  "eligibility": {
+    "_doc": "Hard cutoffs to even be scored. The whole philosophy rests on having ENOUGH windows to judge consistency — a 2-window account cannot be shown to be 'steady'. We demand the FULL six, not the study's minimum-four, because consistency is the thesis.",
+    "minUsableWindows": 6,
+    "minAvgAccountValueUsd": 25000,
+    "requireStatus": "usable",
+    "lookbackWindows": 6,
+    "windowDays": 60,
+    "_note": "minUsableWindows: 6 (study allowed 4). minAvgAccountValueUsd raised from study's $10k to $25k to exclude micro-books whose 'returns' are noise."
+  },
+
+  "riskDiscipline": {
+    "_doc": "PRIMARY criteria for THIS philosophy. The danger we bound is NOT a martingale's add-depth (the Solana config's concern) — on HL with only window-resolution data we cannot see adds. The danger here is HIDDEN LEFT-TAIL VARIANCE: a book that looks great on total return because two windows printed and the rest bled. We bound it via drawdown, worst-window return, and within-window vol.",
+    "maxDrawdownFrac": {
+      "_doc": "Peak-to-trough on the cumulative-window-return path, as a fraction of avg account value. Study median for the persistent set was 1.32 (132%!) — these are violent books. We grade HARD here: A = a genuinely smooth book.",
+      "gradeA": 0.25, "gradeB": 0.50, "gradeC": 0.90, "gradeD": 1.50, "hardReject": 3.0
+    },
+    "worstWindowReturn": {
+      "_doc": "The single worst 60-day window return. The whole point of consistency is that the bad windows are SHALLOW. A wallet with a -300% window is one stop away from zero. (Negative = loss; thresholds are floors, e.g. gradeA requires worst window >= -0.15.)",
+      "gradeA": -0.15, "gradeB": -0.30, "gradeC": -0.60, "gradeD": -1.00, "hardRejectBelow": -2.00
+    },
+    "avgWithinWindowVol": {
+      "_doc": "Mean of the six per-window dailyVol values (QV daily PnL vol / avg account value). Smoothness of the equity curve INSIDE windows, not just across them. Lower = calmer book.",
+      "gradeA": 0.02, "gradeB": 0.04, "gradeC": 0.07, "gradeD": 0.12, "hardReject": 0.30
+    },
+    "everBlewUp": {
+      "_doc": "Any window return <= -1.0 (lost >100% of avg account value in 60d) OR a final cumulative path that went non-positive after being positive. The persistent set had a member (0xe4d1fa) blow up -367% AFTER qualifying — that is the exact tail this philosophy refuses to follow.",
+      "hardRejectOnTrue": true
+    }
+  },
+
+  "performance": {
+    "_doc": "SECONDARY. Risk-ADJUSTED return is the headline; raw return is bounded — extreme total return is treated with suspicion because on HL it signals lottery variance (study: P(top->bottom) = 27.7%, a barbell), not a steady earner. We want a good Sharpe with a MODERATE return, not a moonshot.",
+    "sharpeAnnual": {
+      "_doc": "Annualized Sharpe from the six window returns (mean/std, scaled to annual by sqrt(windows-per-year=6.08)). THE headline metric. Study persistent-set median 1.37; only 9 of 43 >= 2.0.",
+      "gradeA": 2.0, "gradeB": 1.3, "gradeC": 0.7, "gradeD": 0.3, "floor": 0.0
+    },
+    "sortinoAnnual": {
+      "_doc": "Like Sharpe but denominator is downside deviation (only negative window returns). Rewards books whose volatility is mostly upside. Often higher than Sharpe for a true edge.",
+      "gradeA": 3.0, "gradeB": 1.8, "gradeC": 1.0, "gradeD": 0.4, "floor": 0.0
+    },
+    "calmar": {
+      "_doc": "Total study-period return / maxDrawdownFrac. Reward per unit of worst pain. The cleanest single risk-adjusted summary for a copier who fears the drawdown.",
+      "gradeA": 4.0, "gradeB": 2.0, "gradeC": 1.0, "gradeD": 0.4, "floor": 0.0
+    },
+    "totalReturnSanity": {
+      "_doc": "Return is BOUNDED on both ends. A floor (must actually make money) and a CEILING above which we get suspicious it is lottery variance, not skill, and cap the profitability grade. Mirrors the Solana config's bounded win-rate idea.",
+      "floor": 0.10, "healthyMax": 8.0, "suspiciousAbove": 12.0
+    }
+  },
+
+  "consistency": {
+    "_doc": "THE defining category of this philosophy — weighted heaviest. Directly attacks the wallet-2 two-bursts problem.",
+    "positiveWindowFraction": {
+      "_doc": "Fraction of the six windows with a positive return. 'Positive in MOST windows' is the literal thesis. A = 5-6 of 6; the two-bursts wallet (2 of 6 positive) lands at D.",
+      "gradeA": 0.83, "gradeB": 0.66, "gradeC": 0.50, "gradeD": 0.33, "hardRejectBelow": 0.33
+    },
+    "bestWindowConcentration": {
+      "_doc": "Share of total POSITIVE profit coming from the single best window. Low = profit spread across windows (steady). High (>1.0 possible when other windows are net-negative) = the burst signature. Study best5StepsShare median ~1.22 — most persistent books fail this. (Thresholds are ceilings: gradeA requires concentration <= 0.40.)",
+      "gradeA": 0.40, "gradeB": 0.55, "gradeC": 0.75, "gradeD": 1.00, "hardRejectAbove": 1.50
+    },
+    "returnSignStability": {
+      "_doc": "1 - (number of sign flips in the window-return sequence / max possible flips). A book that alternates win/lose/win/lose is unpredictable to follow even if net positive. Higher = more stable trajectory.",
+      "gradeA": 0.80, "gradeB": 0.60, "gradeC": 0.40, "gradeD": 0.20
+    }
+  },
+
+  "ratingRubric": {
+    "_doc": "Per-category letter grades A-F (A=4..F=0). Overall = weighted average; ANY autoDisqualifier floors overall to F. Consistency + risk-adjusted performance dominate the weights, by design.",
+    "scale": "A-F",
+    "categories": {
+      "riskAdjustedPerformance": { "weight": 0.32, "inputs": ["sharpeAnnual", "sortinoAnnual", "calmar", "totalReturnSanity"] },
+      "consistency":            { "weight": 0.34, "inputs": ["positiveWindowFraction", "bestWindowConcentration", "returnSignStability"] },
+      "tailSafety":             { "weight": 0.26, "inputs": ["maxDrawdownFrac", "worstWindowReturn", "avgWithinWindowVol"] },
+      "scale":                  { "weight": 0.08, "inputs": ["avgAccountValue"] }
+    },
+    "scale": {
+      "_doc": "Tiny weight. A bigger, longer-lived book is marginally more trustworthy as a real operator (skin in the game) and more copyable; but this is NOT a return amplifier and is deliberately near-zero weight so it cannot rescue a streaky book.",
+      "gradeA_avgAccountValueUsd": 1000000,
+      "gradeB": 250000,
+      "gradeC": 100000,
+      "gradeD": 25000
+    },
+    "autoDisqualifiers": {
+      "_doc": "Any TRUE => overall grade F + 'DISQUALIFIED'. These encode the persistence-study lessons: blow-ups, deep single-window losses, and the two-bursts profile are non-starters for a 'steady earner' thesis regardless of headline return.",
+      "rules": [
+        "everBlewUp == true",
+        "maxDrawdownFrac > 3.0",
+        "worstWindowReturn < -2.00",
+        "positiveWindowFraction < 0.33",
+        "bestWindowConcentration > 1.50",
+        "sharpeAnnual < 0.0"
+      ]
+    }
+  },
+
+  "overall": {
+    "method": "weighted-average-with-disqualifiers",
+    "gradeBands": { "A": 3.5, "B": 2.5, "C": 1.5, "D": 0.5, "F": 0.0 },
+    "alsoEmit": "numeric0to10",
+    "_doc": "Emit BOTH a letter and a 0-10 score per category and overall. A disqualified wallet shows F/0 with the breached rule(s) listed. 0-10 = (weighted GPA / 4) * 10."
+  },
+
+  "uiHints": {
+    "_doc": "Columns/badges for a trader-browser UI so a human can scan and manually shortlist.",
+    "primaryColumns": ["overallGrade", "overallScore", "riskAdjustedPerformance", "consistency", "tailSafety", "sharpeAnnual", "positiveWindowFraction", "maxDrawdownFrac", "avgAccountValue"],
+    "flagBadges": ["DISQUALIFIED", "TWO_BURSTS", "DEEP_DRAWDOWN", "LOTTERY_RETURN", "BLEW_UP", "CLEAN_BOOK"],
+    "defaultSort": "overallScore desc",
+    "defaultFilter": "overallGrade < B excluded",
+    "_badgeRules": {
+      "TWO_BURSTS": "bestWindowConcentration > 1.0 OR positiveWindowFraction <= 0.5",
+      "DEEP_DRAWDOWN": "maxDrawdownFrac > 1.0",
+      "LOTTERY_RETURN": "totalReturn > suspiciousAbove",
+      "CLEAN_BOOK": "maxDrawdownFrac <= 0.5 AND positiveWindowFraction >= 0.83 AND sharpeAnnual >= 1.3"
+    },
+    "badgeThresholds": {
+      "_doc": "Machine-readable badge cutoffs the scorer evaluates (JSON is the source of truth; mirrors _badgeRules above).",
+      "twoBurstsConcentrationAbove": 1.0,
+      "twoBurstsPositiveFractionAtOrBelow": 0.5,
+      "deepDrawdownAbove": 1.0,
+      "cleanBookMaxDrawdownAtOrBelow": 0.5,
+      "cleanBookPositiveFractionAtOrAbove": 0.83,
+      "cleanBookSharpeAtOrAbove": 1.3
+    }
+  }
+}

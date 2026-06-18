@@ -1,0 +1,160 @@
+{
+  "version": "0.1.0",
+  "name": "wallet-selection-hl-survivor",
+  "description": "SURVIVOR / TAIL-SAFETY selection + rating config for Hyperliquid perp traders. 'Best' = the trader LEAST LIKELY TO BLOW UP, not the highest return. Primary screen = capital preservation: bounded drawdown, no liquidations, stop discipline (cuts losers rather than ride-or-liquidate), bounded worst-loss vs median-win, contained max adverse excursion. Win rate is treated as a RED FLAG above 95% (a no-stop vol-seller / martingale manufactures a near-perfect record by warehousing unrealized losses — the trap every June-2026 copy study hit). Adapted from wallet-selection-v0.1.0 (Jupiter) to HL-available/computable metrics: round-trip closedPnl from cached fills, portfolio accountValue/pnl history, and the persistence-study diagnostics (sharpe, maxDrawdownFrac, studyReturn). DECISION-SUPPORT for MANUAL review only — HL copy-trading was rejected 5 ways; this surfaces the rare genuinely-survivable accounts, it does not promise profit.",
+  "createdAt": "2026-06-14",
+  "changelog": [
+    "0.1.0 — initial HL survivor lens. Tuned to: (A) per-account round-trip stats computed from cached fills (closedPnl, dir, fee, coin) — roundTripWinRate, profitFactor, worstLossVsMedianWin, maxConsecLossUsd, holdTime, stopRate; (B) portfolio-derived equity drawdown (maxDrawdownFromPeakPct, longestDrawdownDays); (C) persistence diagnostics (sharpeAnnual, maxDrawdownFrac, studyPeriodReturn, best5StepsShare). Liquidations inferred from fill dir/markPx. Validation intent: an account with >95% round-trip win rate AND zero realized stops AND a single fat worst-loss should grade C-D + EXTREME_WIN_RATE/NO_STOPS flags; an account with a deep equity drawdown (>60% from peak) or an inferred liquidation should AUTO-DISQUALIFY."
+  ],
+
+  "venues": ["hyperliquid-perps"],
+  "philosophy": "survivor-tail-safety",
+
+  "eligibility": {
+    "_doc": "Hard cutoffs to even be scored. Below these = excluded (not graded F, just not enough signal). HL accounts are noisy and short-lived; require real history and enough round-trips that the tail had a chance to show.",
+    "minRoundTrips": 30,
+    "minAccountAgeDays": 60,
+    "minActiveDays": 30,
+    "lookbackDays": 365,
+    "markets": ["BTC", "ETH", "SOL", "HYPE", "ANY"],
+    "minAvgAccountValueUsd": 5000,
+    "minStudyWindowsCovered": 4,
+    "requireFillHistoryForFullGrade": true,
+    "_fallbackWhenNoFills": "Accounts with portfolio + persistence diagnostics but no cached fills can be PROVISIONALLY graded on equity-drawdown + sharpe + studyReturn only; flagged PROVISIONAL_NO_FILLS and capped at grade B (cannot earn A without round-trip tail evidence)."
+  },
+
+  "riskDiscipline": {
+    "_doc": "PRIMARY criteria. These bound the tail — the whole point of the survivor lens. A blow-up risk lives here, not in the headline return.",
+
+    "maxDrawdownFrac": {
+      "_doc": "PRIMARY survivor metric. Return-based max drawdown from the persistence study (persistent-set.json maxDrawdownFrac) — the deepest equity erosion measured on RETURNS, not raw account value, so it is NOT corrupted by deposits/withdrawals. Scale runs ~0.28 (smoothest) to ~6.0 (boom-bust) across the HL persistent set. A frac >1 means the worst stretch erased more than a full normalization base of equity = the boom-bust pattern the survivor lens rejects. Bands tuned to the observed HL distribution.",
+      "gradeA": 0.40, "gradeB": 0.55, "gradeC": 0.80, "gradeD": 1.20, "hardReject": 2.00
+    },
+    "rawEquityDrawdownFromPeakPct": {
+      "_doc": "SECONDARY / SOFT signal only. Peak-to-trough drawdown from raw portfolio accountValueHistory. KNOWN-NOISY: the cache has no deposit/withdraw flow data, so an account that grew from a near-zero starting balance shows a spurious ~1.0 drawdown. Used as a tie-breaker and a soft flag (DEEP_DRAWDOWN) only — NOT a hard disqualifier. The return-based maxDrawdownFrac is the trustworthy one.",
+      "gradeA": 0.20, "gradeB": 0.40, "gradeC": 0.60, "gradeD": 0.80, "softFlagAbove": 0.85
+    },
+
+    "worstLossVsMedianWin": {
+      "_doc": "Largest single realized round-trip LOSS as a multiple of the median round-trip WIN. THE blow-up flag for the survivor lens. A martingale/vol-seller shows many small wins and one catastrophic loss => huge ratio. Bounded worst-loss is the core ask.",
+      "gradeA": 2, "gradeB": 4, "gradeC": 8, "gradeD": 15, "hardReject": 30
+    },
+
+    "stopRate": {
+      "_doc": "Fraction of LOSING round-trips that were realized as a contained loss (cut) vs the account showing a ride-or-liquidate pattern (rare giant losses, no small ones). Proxy from fills: share of losing round-trips whose loss is <= 2x the median win (i.e. the trader takes the small loss). High = disciplined cutter; low = warehouses losses then dumps. 0 = pure ride-or-liquidate.",
+      "gradeA": 0.50, "gradeB": 0.30, "gradeC": 0.15, "gradeD": 0.05, "hardRejectBelow": 0.0
+    },
+
+    "maxAdverseExcursionPct": {
+      "_doc": "Worst within-window equity excursion below the prior peak as a fraction of that peak, from accountValueHistory between round-trip closes. How deep underwater the account sat before recovering (warehoused unrealized risk).",
+      "gradeA": 0.10, "gradeB": 0.20, "gradeC": 0.35, "gradeD": 0.55, "hardReject": 0.75
+    },
+
+    "longestDrawdownDays": {
+      "_doc": "Longest stretch (days) the account spent below a prior equity peak. A long underwater stretch = a position being ridden, the survivor anti-pattern.",
+      "gradeA": 7, "gradeB": 21, "gradeC": 45, "gradeD": 90, "hardReject": 180
+    },
+
+    "liquidations": {
+      "_doc": "Realized liquidations in the covered window, inferred from fills (dir contains 'Liquidat', or a Close at a price gapped far through the position vs prior marks). Any liquidation is a tail that ALREADY FIRED — the exact event the survivor lens exists to avoid.",
+      "maxForGradeA": 0, "hardRejectAbove": 0
+    },
+
+    "sharpeFloor": {
+      "_doc": "Annualized Sharpe from the persistence study (return per unit of volatility). A survivor wants smooth equity; negative/low Sharpe means the account is volatile relative to what it earns. Floor only — high Sharpe is good but not the goal (low DD matters more).",
+      "gradeA": 2.0, "gradeB": 1.2, "gradeC": 0.6, "gradeD": 0.0, "hardRejectBelow": -0.5
+    },
+
+    "openExposureGuard": {
+      "_doc": "Live open exposure guard (SOFT — same raw-equity noise caveat as rawEquityDrawdownFromPeakPct, so it raises a flag, it does NOT hard-reject in v0.1.0). Flags accounts whose most recent equity sits deeply below their own recent peak (a position possibly being ridden underwater right now). Upgrade to a hard reject once deposit/withdraw flow data is available to clean the signal.",
+      "softFlagCurrentDrawdownFromPeakPct": 0.40,
+      "hardRejectOnBreach": false
+    }
+  },
+
+  "performance": {
+    "_doc": "SECONDARY. Necessary but not sufficient — and win rate is BOUNDED ON BOTH ENDS, not maximized. The survivor lens explicitly PENALIZES extreme win rate.",
+    "roundTripWinRate": {
+      "_doc": "Round-trip win rate from closedPnl. floor = must clear noise to be real. healthyMax = above this is fine but no extra credit. suspiciousAbove = 0.95 => EXTREME_WIN_RATE flag + penalty: a near-perfect record on a perp book is the vol-seller/martingale signature, the single most reliable predictor of an eventual blow-up.",
+      "floor": 0.40, "healthyMax": 0.80, "suspiciousAbove": 0.95, "penaltyAboveSuspicious": true
+    },
+    "minProfitFactor": 1.2,
+    "minStudyPeriodReturn": 0.0,
+    "profitFactorBands": {
+      "_doc": "Letter→grade-points (4/3/2/0) cutoffs for profit factor inside the profitability category. gradeA/gradeB are above minProfitFactor; below minProfitFactor scores 0.",
+      "gradeA": 2.0, "gradeB": 1.5
+    },
+    "studyPeriodReturnBands": {
+      "_doc": "Grade-points cutoffs (4/3/2/1/0) for study-period return inside profitability.",
+      "gradeA": 2.0, "gradeB": 1.0, "gradeC": 0.3, "gradeD": 0.0
+    },
+    "maxBest5StepsShare": {
+      "_doc": "Share of total study P&L concentrated in the best 5 forward steps (from persistence diagnostics). >1.0 means a few windows carried everything and the rest bled — fragile, not survivable. Penalize concentration.",
+      "gradeA": 0.6, "gradeB": 0.85, "gradeC": 1.1, "gradeD": 1.4
+    }
+  },
+
+  "ratingRubric": {
+    "_doc": "Per-category letter grades A-F (A=4..F=0). Overall = weighted average, but ANY autoDisqualifier floors overall to F. Weights tilt HARD toward drawdown/tail-safety (survivor lens): capitalPreservation + tailSafety = 60% of the grade.",
+    "scale": "A-F",
+    "categories": {
+      "capitalPreservation": { "weight": 0.32, "inputs": ["maxDrawdownFrac", "rawEquityDrawdownFromPeakPct", "longestDrawdownDays"] },
+      "tailSafety":          { "weight": 0.28, "inputs": ["liquidations", "worstLossVsMedianWin", "stopRate"] },
+      "stability":           { "weight": 0.16, "inputs": ["sharpeFloor", "maxBest5StepsShare"] },
+      "profitability":       { "weight": 0.14, "inputs": ["profitFactor", "studyPeriodReturn", "roundTripWinRate"] },
+      "consistency":         { "weight": 0.10, "inputs": ["positiveWindowFraction"] }
+    },
+    "consistency": {
+      "_doc": "Fraction of the 5-6 forward study windows with positive return (windowReturns from persistence diagnostics). Survivor wants to grind across regimes, not boom-bust.",
+      "windowCount": 6,
+      "gradeA_positiveFraction": 0.8, "gradeB": 0.6, "gradeC": 0.4, "gradeD": 0.2
+    },
+    "copyabilityForSurvivor": {
+      "_doc": "Practical follower risk under THIS lens: a survivor account is copyable if a follower mirroring it would never have faced a margin event. Reserve = idle capital (as a multiple of typical position) needed to survive the worst observed adverse excursion without liquidation. Lower = safer to follow.",
+      "reserveMultipleForGradeA": 1.5,
+      "reserveMultipleForGradeB": 2.5,
+      "reserveMultipleForGradeC": 4.0,
+      "renderAsSeparateBadge": true
+    },
+    "flagThresholds": {
+      "_doc": "Soft-flag cutoffs (not disqualifiers), lifted from the scorer so they are config-driven. FAT_WORST_LOSS: worstLossVsMedianWin above worstLossFlagAbove (the tailSafety gradeC bound); RIDE_OR_LIQUIDATE: stopRate at/below rideOrLiquidateStopRateAtOrBelow; NO_STOPS: stopRate == 0 (exact).",
+      "worstLossFlagAbove": 8,
+      "rideOrLiquidateStopRateAtOrBelow": 0.05
+    },
+    "autoDisqualifiers": {
+      "_doc": "Any TRUE => overall grade F + 'DISQUALIFIED'. These encode the survivor lessons: a fired tail or a deep equity hole is disqualifying no matter how pretty the return.",
+      "rules": [
+        "liquidations > 0",
+        "maxDrawdownFrac > 2.00",
+        "worstLossVsMedianWin > 30",
+        "stopRate == 0 AND worstLossVsMedianWin > 8",
+        "roundTripWinRate > 0.95 AND stopRate == 0",
+        "sharpeAnnual < -0.5"
+      ],
+      "thresholds": {
+        "_doc": "Machine-readable disqualifier cutoffs the scorer evaluates (JSON is the source of truth). maxDrawdownFracAbove/worstLossVsMedianWinAbove/sharpeAnnualBelow mirror the riskDiscipline hardRejects; the compound stopRate==0 + winRate>0.95 rules use noStopWorstLossAbove and extremeWinRateAbove.",
+        "maxDrawdownFracAbove": 2.00,
+        "worstLossVsMedianWinAbove": 30,
+        "noStopWorstLossAbove": 8,
+        "extremeWinRateAbove": 0.95,
+        "sharpeAnnualBelow": -0.5
+      }
+    }
+  },
+
+  "overall": {
+    "method": "weighted-average-with-disqualifiers",
+    "gradeBands": { "A": 3.5, "B": 2.5, "C": 1.5, "D": 0.5, "F": 0.0 },
+    "alsoEmit": "numeric0to10",
+    "provisionalGradeCap": "B",
+    "_doc": "Emit BOTH a letter and a 0-10 score per category and overall. A disqualified wallet shows F/0 with breached rule(s). Provisional (no-fills) accounts capped at B."
+  },
+
+  "uiHints": {
+    "_doc": "For the trader-browser UI: columns/badges so a human can scan and select for MANUAL follow review.",
+    "primaryColumns": ["overallGrade", "overallScore", "capitalPreservation", "tailSafety", "maxDrawdownFromPeakPct", "worstLossVsMedianWin", "roundTripWinRate", "sharpeAnnual", "studyPeriodReturn", "copyabilityForSurvivor"],
+    "flagBadges": ["DISQUALIFIED", "LIQUIDATED", "DEEP_DRAWDOWN", "EXTREME_WIN_RATE", "NO_STOPS", "FAT_WORST_LOSS", "PROVISIONAL_NO_FILLS", "RIDE_OR_LIQUIDATE"],
+    "defaultSort": "overallScore desc",
+    "defaultFilter": "overallGrade <= C excluded"
+  }
+}

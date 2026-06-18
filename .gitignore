@@ -40,3 +40,15 @@ pnpm-debug.log*
 
 # Local verification artifacts (screenshots, recordings)
 proofshot-artifacts/
+
+# Wallet-rating pipeline scratch — regenerated from HL's public API by the weekly
+# re-rank (NEVER committed; ~5.6 GB of fills + study data). The OUTPUT
+# (data/backups/wallet-rating/rated-wallets.json) IS committed; everything below
+# is intermediate.
+data/backups/hyperliquid-study/
+scripts/analysis/**/__pycache__/
+scripts/analysis/**/*.pyc
+scripts/analysis/wallet-rating/hl-skill-shortlist.json
+scripts/analysis/wallet-rating/hl-survivor-results.json
+scripts/analysis/wallet-rating/hl-consistency/shortlist-hl-consistency.json
+weekly-rerank.log

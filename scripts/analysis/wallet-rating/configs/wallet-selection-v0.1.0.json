@@ -1,0 +1,119 @@
+{
+  "version": "0.1.0",
+  "name": "wallet-selection-baseline",
+  "description": "Adaptive selection + rating config for copy-trading wallet discovery on perp platforms. Encodes TAIL-DISCIPLINE criteria (add depth, stop usage, stack caps) as the PRIMARY filter — win rate is treated as a RED FLAG when extreme, not a goal, because a no-stop averaging-down martingale manufactures a high win rate by warehousing unrealized losses (see FRIEND_WALLETS_SOLANA_STUDY_2026-06). Tweak + iterate; bump version on every change.",
+  "createdAt": "2026-06-14",
+  "changelog": [
+    "0.1.0 — initial baseline, grounded in the Jupiter Perps two-wallet study. Wallet1 (shallow martingale, 14 adds / 61x collateral multiple / 98.7% win) should grade C-D and be flagged; Wallet2 (54-add / $71k live stack) should AUTO-DISQUALIFY."
+  ],
+
+  "venues": ["jupiter-perps"],
+
+  "eligibility": {
+    "_doc": "Hard cutoffs to even be scored. Below these = excluded (not graded F, just not enough data).",
+    "minClosedCycles": 20,
+    "minActiveDays": 14,
+    "lookbackDays": 180,
+    "markets": ["BTC", "ETH", "SOL"],
+    "minAggregateNetPnlUsd": 0,
+    "requireCompleteHistory": false,
+    "minCoveragePct": 60
+  },
+
+  "riskDiscipline": {
+    "_doc": "PRIMARY criteria. These bound the tail. A martingale's danger lives here, not in the win rate.",
+    "maxAddDepth": {
+      "_doc": "Adds per cycle. More adds = deeper averaging-down = fatter unrealized tail.",
+      "gradeA": 3, "gradeB": 5, "gradeC": 8, "gradeD": 12, "hardReject": 20
+    },
+    "maxCollateralMultiple": {
+      "_doc": "Peak collateral / first-buy collateral within a cycle. How far the stack escalates vs the starter. Wallet1 hit 61x.",
+      "gradeA": 2, "gradeB": 4, "gradeC": 6, "gradeD": 10, "hardReject": 15
+    },
+    "peakCollateralVsMedian": {
+      "_doc": "Worst-cycle peak collateral as a multiple of the wallet's median peak. Measures stack dispersion / surprise depth.",
+      "gradeA": 5, "gradeB": 10, "gradeC": 20, "gradeD": 40, "hardReject": 80
+    },
+    "stopUsage": {
+      "_doc": "Fraction of ADVERSE cycles the wallet actually cut at a loss vs rode to recovery. 0 = pure ride-or-liquidate (both study wallets = 0). This is the single most important discipline signal.",
+      "gradeA": 0.30, "gradeB": 0.15, "gradeC": 0.05, "gradeD": 0.01, "hardRejectBelow": 0.0
+    },
+    "maxAdverseExcursionPct": {
+      "_doc": "Worst observed MAE as a fraction of peak collateral on that cycle. How deep underwater positions go before recovering.",
+      "gradeA": 0.10, "gradeB": 0.20, "gradeC": 0.35, "gradeD": 0.50, "hardReject": 0.80
+    },
+    "liquidations": {
+      "_doc": "Realized liquidations in the covered window. Any liquidation is a tail that already fired.",
+      "maxForGradeA": 0, "hardRejectAbove": 1
+    },
+    "openPositionGuard": {
+      "_doc": "Live open cycles are where a martingale hides its bomb. Reject if a currently-open position is deeply underwater or deeply stacked relative to the wallet's norm. This is the Wallet2 disqualifier ($71k / -$33k live SOL short).",
+      "maxOpenMaeVsMedianWin": 5,
+      "maxOpenPeakVsMedianPeak": 5,
+      "hardRejectOnBreach": true
+    }
+  },
+
+  "performance": {
+    "_doc": "SECONDARY. Necessary but not sufficient — and win rate is BOUNDED on both ends, not maximized.",
+    "winRate": {
+      "_doc": "Floor to be real; CEILING because an extreme win rate signals a no-stop martingale, not skill. Penalize, don't reward, win rate above the suspicious line.",
+      "floor": 0.55, "healthyMax": 0.90, "suspiciousAbove": 0.95
+    },
+    "minProfitFactor": 1.3,
+    "minMedianReturnOnCollateral": 0.0,
+    "minAggregateNetPnlUsd": 100
+  },
+
+  "ratingRubric": {
+    "_doc": "Per-category letter grades A-F (A=4..F=0). Overall = weighted average, but ANY autoDisqualifier floors the overall to F regardless of category scores.",
+    "scale": "A-F",
+    "categories": {
+      "addDiscipline":   { "weight": 0.22, "inputs": ["maxAddDepth", "maxCollateralMultiple"] },
+      "stopDiscipline":  { "weight": 0.22, "inputs": ["stopUsage"] },
+      "tailSafety":      { "weight": 0.26, "inputs": ["liquidations", "maxAdverseExcursionPct", "peakCollateralVsMedian", "openPositionGuard"] },
+      "profitability":   { "weight": 0.15, "inputs": ["aggregateNetPnl", "profitFactor", "medianReturnOnCollateral"] },
+      "consistency":     { "weight": 0.15, "inputs": ["positiveSubPeriodFraction", "profitConcentration"] }
+    },
+    "consistency": {
+      "_doc": "Guards against the Wallet2 problem — +$9.5k that was really two short bursts. Reward steady profit across sub-periods, penalize concentration.",
+      "subPeriodCount": 4,
+      "gradeA_positiveSubPeriods": 4, "gradeB": 3, "gradeC": 2, "gradeD": 1,
+      "maxProfitConcentrationForA": 0.50
+    },
+    "copyabilityAtScale": {
+      "_doc": "Practical copier risk: a martingale copy must FRONT the escalating adds. Reserve = idle capital needed to survive the deep stacks at the target scale. Lower reserve requirement = more copyable.",
+      "targetScaleMultiple": 100,
+      "reserveMultipleForGradeA": 3,
+      "reserveMultipleForGradeB": 5,
+      "reserveMultipleForGradeC": 10,
+      "renderAsSeparateBadge": true
+    },
+    "autoDisqualifiers": {
+      "_doc": "Any TRUE => overall grade F + 'DISQUALIFIED' flag, regardless of category averages. These encode the lessons from the study.",
+      "rules": [
+        "liquidations > 0",
+        "maxCollateralMultiple > 15",
+        "maxAddDepth > 20",
+        "stopUsage == 0 AND maxCollateralMultiple > 8",
+        "openPositionGuard breached",
+        "winRate > 0.98 AND stopUsage == 0"
+      ]
+    }
+  },
+
+  "overall": {
+    "method": "weighted-average-with-disqualifiers",
+    "gradeBands": { "A": 3.5, "B": 2.5, "C": 1.5, "D": 0.5, "F": 0.0 },
+    "alsoEmit": "numeric0to10",
+    "_doc": "Emit BOTH a letter and a 0-10 score per category and overall, for the UI. A disqualified wallet shows F/0 overall with the breached rule(s) listed."
+  },
+
+  "uiHints": {
+    "_doc": "For the trader-browser UI: which fields to surface as columns/badges so a human can scan and select.",
+    "primaryColumns": ["overallGrade", "overallScore", "addDiscipline", "stopDiscipline", "tailSafety", "winRate", "aggregateNetPnl", "copyabilityAtScale"],
+    "flagBadges": ["DISQUALIFIED", "EXTREME_WIN_RATE", "LIVE_DEEP_STACK", "NO_STOPS", "DEEP_AVERAGING"],
+    "defaultSort": "overallScore desc",
+    "defaultFilter": "overallGrade <= C excluded"
+  }
+}

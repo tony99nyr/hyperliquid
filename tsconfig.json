@@ -44,6 +44,7 @@
     "panda.config.ts",
     "vitest.config.ts",
     "vitest.config.lib.ts",
-    "vitest.config.ui.ts"
+    "vitest.config.ui.ts",
+    "scripts/analysis"
   ]
 }

@@ -1,0 +1,197 @@
+{
+  "version": "0.1.0",
+  "name": "wallet-selection-hl-skill",
+  "philosophy": "PERSISTENT-SKILL / ANTICIPATION",
+  "description": "Hyperliquid wallet-selection + rating config tuned to surface the RARE genuinely-skilled trader for MANUAL review, NOT to autonomously copy. 'Best' = persistent rank (top-decile in many forward 60d windows), genuine ANTICIPATION (entry timing leads favorable moves rather than reacting to beta), regime-ROBUSTNESS (edge that does not fully invert at the two regime breaks the study window contained), and deflated-Sharpe survival (beats the best-of-N luck hurdle for a 1063-account search). It explicitly targets the 43-account persistent set and the 9-of-12 measurable anticipators from HL_PERSISTENCE_STUDY_2026-06, and ranks WITHIN that cohort. Inverts the usual screen: trailing PnL and leaderboard rank are DEMOTED to red flags (the study proved both buy regime-momentum at the moment it inverts); persistence + anticipation + regime-robustness are the primary axes. A blow-up flag (maxDD, negative study return) is a hard guard, because even within the persistent tail one member blew up -367%.",
+  "createdAt": "2026-06-14",
+  "changelog": [
+    "0.1.0 — initial HL persistent-skill config. Adapts the A-F / 0-10 schema of wallet-selection-v0.1.0.json to Hyperliquid metrics. Sanity targets: 0x6d6d7c (Sharpe 3.2, lowest concentration 0.48, maxDD 0.51) and 0x5559da (Sharpe 2.5, maxDD 0.28 — cleanest book) should grade A. 0xc4643e (anticipating, +6.71%/24h edge, topDecile 4/5) should grade A but carry a THIN_MARKET_IMPACT badge (meme/new-listing edge can be own market impact). 0xe4d1fa (qualified persistent then blew up -367%, maxDD 6.4) must AUTO-DISQUALIFY. Leaderboard-only / trailing-PnL-only standouts with low persistence should NOT clear C."
+  ],
+
+  "venues": ["hyperliquid"],
+
+  "dataSources": {
+    "_doc": "All cached under data/backups/hyperliquid-study/. Loaders: scripts/analysis/hyperliquid-persistence/lib.ts.",
+    "windows": "windows.json",
+    "persistenceStats": "persistence-stats.json",
+    "persistentSet": "persistent-set.json",
+    "anticipation": "anticipation.json",
+    "universe": "universe.json",
+    "studyReport": "docs/trading/HL_PERSISTENCE_STUDY_2026-06.md"
+  },
+
+  "studyConstants": {
+    "_doc": "Fixed from the pre-registered study; the regime-break transitions are the load-bearing facts for this philosophy.",
+    "nForwardWindows": 5,
+    "windowDays": 60,
+    "anchor": "2026-06-12",
+    "usableUniverse": 1063,
+    "persistentSetSize": 43,
+    "permutationNullMean": 7.9,
+    "permutationNull95Max": 13,
+    "regimeBreakTransitions": ["w0->w1 (Oct 2025 liquidation cascade)", "w3->w4 (Feb-Apr 2026 downturn)"],
+    "withinRegimeTransitions": ["w1->w2 (+0.41 IC)", "w2->w3 (+0.26 IC)", "w4->w5 (+0.25 IC)"]
+  },
+
+  "eligibility": {
+    "_doc": "Hard cutoffs to be SCORED at all. Below these = excluded (not graded F, just unmeasurable). Mirrors the study's usable-account definition.",
+    "minUsableWindows": 4,
+    "minNonNullForwardWindows": 3,
+    "minAvgAccountValueUsd": 10000,
+    "minAccountAgeDays": 260,
+    "requireStatus": "usable",
+    "excludeStatuses": ["too_young", "died_inactive", "no_history"]
+  },
+
+  "persistenceCore": {
+    "_doc": "PRIMARY AXIS #1. Does the trader hold top-decile rank window over window? topDecileCount = number of the 5 forward windows (w1..w5) in which the account is in the top decile of raw return. The persistent set is defined as >=3. We grade ABOVE that bar to separate consistent skill from threshold-grazers.",
+    "topDecileForwardCount": {
+      "_doc": "Out of 5 forward windows. 4-5 = exceptional persistence (top of the 43); 3 = persistent-set membership; 2 = proximity (worth surfacing); <2 = not persistent.",
+      "gradeA": 4, "gradeB": 3, "gradeC": 2, "gradeD": 1, "hardRejectBelow": 1
+    },
+    "forwardRankStability": {
+      "_doc": "Spearman-style consistency of the account's within-regime forward-window ranks (computed against the per-window cross-sectional decile cutoffs over the 3 within-regime transitions w1->w2, w2->w3, w4->w5). Higher = rank holds within a regime. Range 0..1 after min-max normalization of the account's mean within-regime percentile.",
+      "gradeA": 0.85, "gradeB": 0.70, "gradeC": 0.55, "gradeD": 0.40
+    },
+    "persistentSetMembership": {
+      "_doc": "Bonus signal: is the account in the pre-computed 43? Not required (we also surface proximity cases at topDecile 2), but membership is a strong prior.",
+      "inSetBonus": true,
+      "membershipBonusGradePoints": 0.25
+    },
+    "subWeights": {
+      "_doc": "Intra-category blend weights inside the persistence category (the category's overall weight is in ratingRubric.categories). topDecile carries most; rank-stability the rest. Lifted from the scorer so the blend is config-tweakable.",
+      "topDecileForwardCount": 0.65,
+      "forwardRankStability": 0.35
+    }
+  },
+
+  "anticipation": {
+    "_doc": "PRIMARY AXIS #2. Does the trader's ENTRY TIMING precede favorable moves (real skill), or merely ride beta (reacting)? Sourced from anticipation.json: the 24h/4h signed forward edge vs random-timing baselines (CI must exclude zero) and the same-day BTC+ETH regression label. Only ~12 of the 43 have adequate fills coverage; the rest are UNMEASURED and scored NEUTRAL (not penalized) so the tool still surfaces them for manual review.",
+    "label": {
+      "_doc": "Direct from study: 'anticipating' (entries lead), 'reacting/riding' (entries lag/ride beta), 'insufficient-data (anticipating)' (positive but <14d / <100 entries), 'insufficient-data (unclear)' (no usable fills).",
+      "gradeA": "anticipating",
+      "gradeB": "insufficient-data (anticipating)",
+      "gradeC": "unmeasured",
+      "gradeD": "reacting/riding",
+      "hardReject": null
+    },
+    "edge24hLowerCI": {
+      "_doc": "Lower bound of the 95% CI on the 24h entry edge. >0 means genuine timing edge survives the bootstrap. Negative-but-anticipating-at-shorter-horizon handled by edge4hLowerCI fallback.",
+      "gradeA": 0.005, "gradeB": 0.001, "gradeC": 0.0, "gradeD": -0.01
+    },
+    "edge4hLowerCIFallback": {
+      "_doc": "For short-horizon anticipators (24h edge muted but 4h edge positive, e.g. 0x84abc0 / 0xae7a0f). Used only when 24h CI does not clear.",
+      "gradeBThreshold": 0.0003
+    },
+    "thinMarketImpactFlag": {
+      "_doc": "An anticipation edge measured mostly on thin meme / new-listing coins can be the trader's OWN market impact, not foresight (study caveat on 0xc4643e: TRUMP/BERA). Flag, do not disqualify; warns the human reviewer.",
+      "memeOrNewListingShareAbove": 0.6
+    }
+  },
+
+  "regimeRobustness": {
+    "_doc": "PRIMARY AXIS #3 — the kill-shot the study identified. Rank persistence INVERTS across the two regime breaks (w0->w1, w3->w4). A genuinely skilled trader's forward return should NOT collapse at both breaks. We measure the account's forward return in the two regime-break windows (w1 contains the Oct cascade aftermath; w4 the Feb-Apr downturn) and reward NOT fully inverting. This is what separates skill from a regime-momentum bet wearing a skill costume.",
+    "regimeBreakSurvival": {
+      "_doc": "Count of the two regime-break windows (w1 and w4 returns) in which the account stayed non-catastrophic (windowReturn > -0.5, i.e. did not lose >50% of avg account value). 2 = robust through both breaks; 1 = survived one; 0 = inverted at both.",
+      "gradeA": 2, "gradeB": 1, "gradeC": 1, "gradeD": 0
+    },
+    "worstWindowReturn": {
+      "_doc": "Min of the 6 window returns. How deep the single worst 60d window went (fraction of avg account value). Bounds the downside even within the persistent set.",
+      "gradeA": -0.5, "gradeB": -1.0, "gradeC": -2.0, "gradeD": -3.5, "hardRejectBelow": -3.5
+    },
+    "crossRegimeIcSignFlag": {
+      "_doc": "Informational: the universe-level w0->w1 IC was -0.26 and w3->w4 -0.06/-0.17. We do NOT select on cross-regime persistence (it inverts); we select on robustness THROUGH it. This field documents that we are aware trailing rank is anti-predictive at breaks.",
+      "documented": true
+    }
+  },
+
+  "deflatedSharpe": {
+    "_doc": "SECONDARY. Sharpe alone over-selects in a best-of-N search (1063 candidates). We deflate: require the annualized Sharpe (QV estimator from the study) to clear a luck hurdle for the number of independent trials. Approximate deflated-Sharpe: a Sharpe of ~1.0 is roughly the best-of-1063 expected max under the null over ~5 windows, so we set the floor materially above it.",
+    "sharpeAnnual": {
+      "_doc": "Annualized Sharpe (QV estimator). Median of the 43 is 1.37; 9 accounts >=2.0; 7 <0.5 (lottery-ish even within the set). Floor screens the lottery members OUT.",
+      "gradeA": 2.0, "gradeB": 1.5, "gradeC": 1.0, "gradeD": 0.5, "hardRejectBelow": 0.5
+    },
+    "bestOfNHurdleSharpe": {
+      "_doc": "The expected max Sharpe of the best of N pure-luck books over the study horizon. With N=1063 usable accounts and ~5 windows, E[max] ~ 1.0. A passing account must clear this to claim skill rather than search luck.",
+      "value": 1.0,
+      "n": 1063,
+      "requireAbove": true
+    },
+    "pnlConcentration": {
+      "_doc": "best5StepsShare from the study: share of total PnL coming from the best 5 (~6d) steps. >1.0 means the rest of the year was net negative — a few-bursts lottery profile. Lower = steadier skill. Median of the 43 ~1.22.",
+      "gradeA": 0.85, "gradeB": 1.1, "gradeC": 1.5, "gradeD": 2.5, "hardRejectAbove": 5.0
+    }
+  },
+
+  "blowUpGuard": {
+    "_doc": "GUARD (not an axis). Even genuine persistence does not protect a copier from a book that subsequently detonates. One member of the 43 (0xe4d1fa) qualified then blew up -367%. These are tail tripwires.",
+    "maxDrawdownFrac": {
+      "_doc": "Max drawdown as a fraction of avg account value (study QV estimator). Median of the 43 ~1.32 (i.e. >100% of avg AV — these are high-variance books). We grade tightly and hard-reject the catastrophic tail.",
+      "gradeA": 0.6, "gradeB": 1.0, "gradeC": 2.0, "gradeD": 4.0, "hardRejectAbove": 5.0,
+      "cleanBookFlagAtOrBelow": 0.6
+    },
+    "studyPeriodReturnNegative": {
+      "_doc": "If the account's full-study return on avg account value is negative, it blew up over the measured year despite qualifying in >=3 windows. Auto-disqualify — this is the 0xe4d1fa case.",
+      "hardRejectIfNegative": true
+    }
+  },
+
+  "ratingRubric": {
+    "_doc": "Per-category letter grades A-F (A=4..F=0). Overall = weighted average, but ANY autoDisqualifier floors the overall to F. Weights put 70% on the three skill axes (persistence/anticipation/regime-robustness), 30% on deflated-Sharpe quality + blow-up safety.",
+    "scale": "A-F",
+    "categories": {
+      "persistence":      { "weight": 0.30, "inputs": ["topDecileForwardCount", "forwardRankStability", "persistentSetMembership"] },
+      "anticipation":     { "weight": 0.20, "inputs": ["label", "edge24hLowerCI", "edge4hLowerCIFallback"] },
+      "regimeRobustness": { "weight": 0.20, "inputs": ["regimeBreakSurvival", "worstWindowReturn"] },
+      "deflatedSharpe":   { "weight": 0.18, "inputs": ["sharpeAnnual", "bestOfNHurdleSharpe", "pnlConcentration"] },
+      "blowUpSafety":     { "weight": 0.12, "inputs": ["maxDrawdownFrac"] }
+    },
+    "neutralForUnmeasured": {
+      "_doc": "Anticipation is unmeasured for most of the 1063 (fills coverage). Score unmeasured anticipation as C (2.0), NOT F — the tool's job is to SURFACE candidates for manual fill-mirroring review, not to bury everyone the study could not label.",
+      "anticipationUnmeasuredGrade": "C"
+    },
+    "autoDisqualifiers": {
+      "_doc": "Any TRUE => overall grade F + 'DISQUALIFIED' flag. These encode the study's hard lessons: blow-ups, lottery profiles, and rank that inverts at every break.",
+      "rules": [
+        "studyPeriodReturn < 0",
+        "maxDrawdownFrac > 5.0",
+        "worstWindowReturn < -3.5",
+        "topDecileForwardCount < 1",
+        "sharpeAnnual < 0.5 AND pnlConcentration > 2.5",
+        "regimeBreakSurvival == 0 AND topDecileForwardCount < 3"
+      ],
+      "thresholds": {
+        "_doc": "Machine-readable disqualifier cutoffs the scorer evaluates (JSON is the source of truth). studyPeriodReturnBelow / maxDrawdownFracAbove / worstWindowReturnBelow / topDecileForwardCountBelow are simple; the lottery rule trips when sharpeAnnual < lotterySharpeBelow AND pnlConcentration > lotteryConcentrationAbove; the fragility rule trips when regimeBreakSurvival == 0 AND topDecileForwardCount < fragileTopDecileBelow.",
+        "studyPeriodReturnBelow": 0,
+        "maxDrawdownFracAbove": 5.0,
+        "worstWindowReturnBelow": -3.5,
+        "topDecileForwardCountBelow": 1,
+        "lotterySharpeBelow": 0.5,
+        "lotteryConcentrationAbove": 2.5,
+        "fragileTopDecileBelow": 3
+      }
+    }
+  },
+
+  "overall": {
+    "method": "weighted-average-with-disqualifiers",
+    "gradeBands": { "A": 3.5, "B": 2.5, "C": 1.5, "D": 0.5, "F": 0.0 },
+    "alsoEmit": "numeric0to10",
+    "_doc": "Emit BOTH a letter and a 0-10 score per category and overall. A disqualified wallet shows F/0 overall with the breached rule(s) listed. Default shortlist = overall grade >= B."
+  },
+
+  "uiHints": {
+    "_doc": "For the trader-browser UI: this tool surfaces RARE NEEDLES for MANUAL review (copy path is fill-mirroring, not vaults — none of the 43 run vaults). Make persistence/anticipation/regime columns primary; demote raw PnL to a context column with a caution tooltip.",
+    "primaryColumns": ["overallGrade", "overallScore", "persistence", "anticipation", "regimeRobustness", "deflatedSharpe", "topDecileForwardCount", "sharpeAnnual", "maxDrawdownFrac"],
+    "contextColumns": ["studyPeriodReturn", "studyPeriodPnlUsd", "leaderboardTop"],
+    "flagBadges": ["DISQUALIFIED", "BLEW_UP", "LOTTERY_PROFILE", "REGIME_FRAGILE", "THIN_MARKET_IMPACT", "REACTS_NOT_ANTICIPATES", "PERSISTENT_SET", "CLEAN_BOOK"],
+    "cautionBadges": {
+      "_doc": "Surface the study's honest caveats inline so a human does not over-trust the grade.",
+      "ANTICIPATION_UNMEASURED": "fills coverage insufficient; entry-timing edge not verified",
+      "NO_VAULT_PATH": "not copyable via vaults; requires fill-mirroring infra",
+      "REGIME_BREAK_RISK": "rank inverts at regime breaks; a copy made after a hot streak may catch the inversion"
+    },
+    "defaultSort": "overallScore desc",
+    "defaultFilter": "overallGrade < B excluded"
+  }
+}

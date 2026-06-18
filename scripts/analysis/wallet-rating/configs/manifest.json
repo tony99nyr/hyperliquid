@@ -1,0 +1,19 @@
+{
+  "_doc": "Active wallet-selection config pointer, mirroring the trading-config manifest pattern (versioned JSON files, manifest selects the live one). Bump 'active'/'activeByPhilosophy' to roll the rating engine onto a new version; keep old versions for reproducibility.",
+  "active": "wallet-selection-v0.1.0.json",
+  "activeByPhilosophy": {
+    "_doc": "The live config file per philosophy bake-off. The four HL scorers read the file named here; bump to roll a scorer onto a new version.",
+    "consistency": "wallet-selection-hl-consistency-v0.1.0.json",
+    "skill": "wallet-selection-hl-skill-v0.1.0.json",
+    "survivor": "wallet-selection-hl-survivor-v0.1.0.json",
+    "copyability": "wallet-selection-hl-copyability-v0.1.1.json"
+  },
+  "versions": [
+    { "version": "0.1.0", "file": "wallet-selection-v0.1.0.json", "createdAt": "2026-06-14", "note": "baseline; tail-discipline-primary, win-rate-as-flag" },
+    { "version": "0.1.0", "file": "wallet-selection-hl-consistency-v0.1.0.json", "createdAt": "2026-06-14", "note": "HL risk-adjusted consistency ranker" },
+    { "version": "0.1.0", "file": "wallet-selection-hl-skill-v0.1.0.json", "createdAt": "2026-06-14", "note": "HL persistent-skill / anticipation ranker" },
+    { "version": "0.1.0", "file": "wallet-selection-hl-survivor-v0.1.0.json", "createdAt": "2026-06-14", "note": "HL survivor / tail-safety ranker" },
+    { "version": "0.1.0", "file": "wallet-selection-hl-copyability-v0.1.0.json", "createdAt": "2026-06-14", "note": "HL copyability-at-scale ranker (initial)" },
+    { "version": "0.1.1", "file": "wallet-selection-hl-copyability-v0.1.1.json", "createdAt": "2026-06-14", "note": "copyability: minClosedRoundTrips 8->5, config-driven flag/disqualifier/band thresholds + tradingActivity (EDT watch-window) section" }
+  ]
+}

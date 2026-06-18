@@ -1,0 +1,159 @@
+{
+  "version": "0.1.0",
+  "name": "wallet-selection-hl-copyability",
+  "philosophy": "COPYABILITY_AT_SCALE",
+  "description": "Hyperliquid wallet-selection + rating config under the COPYABILITY-AT-SCALE lens: 'best' = the trader we can realistically and PROFITABLY MIRROR at our clip, not the trader with the gaudiest track record. It is a manual-review surfacing tool, NOT an autopilot copier (PERP_FOLLOW_STUDY_V2 proved exact-mirror copy of HL leaders pays -0.15%/trade and is dominated by our own regime detector at +1.93%/trade; persistence of the copyable segment is NEGATIVE, IC -0.50). So this config does not chase edge that doesn't carry forward; it screens for the operational PRECONDITIONS of profitable copy and surfaces the few names a human should review. Adapts the tail-discipline schema (wallet-selection-v0.1.0) to HL fill-derived metrics, re-weighting toward the five things that decide whether a copy is feasible: liquid-majors asset mix, mirrorable hold time, position size vs market depth, NET-of-copy-cost return (after taker fee + slippage + funding, i.e. after the documented -0.15%/trade copy tax), and a low add-depth / reserve requirement (a 54-add martingale is uncopyable without a huge idle reserve). BONUS for running an HL VAULT (zero-engineering protocol-native copy with enforced >=5% leader stake + 10% high-water profit-share; vault risk-adjusted persistence IC +0.223 was the ONLY non-inverting HL copy signal).",
+  "createdAt": "2026-06-14",
+  "venues": ["hyperliquid"],
+  "changelog": [
+    "0.1.0 — initial COPYABILITY-AT-SCALE candidate for HL. Add-depth thresholds recalibrated to the HL scale-in regime (HL traders scale positions across many fills; a Solana 20-add hardReject would reject the whole venue). Tail risk is bounded primarily by collateralMultiple, reserveMultiple, worstLossVsMedianWin, and liquidations rather than raw fill-add count. Net-of-copy-cost return (per the V2 copy-tax model: 4.5 bps taker + 3 bps/side slippage, both sides, on peak notional) is the load-bearing performance metric. Latency is intentionally NOT rewarded (V2: red herring, copy is negative at 0/5/15/30s)."
+  ],
+
+  "copyCostModel": {
+    "_doc": "The copier's friction we subtract from the leader's realized PnL to get NET-of-cost return. From PERP_FOLLOW_STUDY_V2: the copy tax is spread+fee+funding on entries with near-zero directional EV, ~-0.15%/trade even at zero latency with exact fill prices. Funding is already embedded in HL closedPnl and a same-direction copier pays the same sign, so we subtract only the copier's own entry+exit friction on mirrored peak notional.",
+    "takerFeeBps": 4.5,
+    "slippageBpsPerSide": 3.0,
+    "appliedSides": 2,
+    "appliedTo": "peakNotional",
+    "latencyRewarded": false
+  },
+
+  "eligibility": {
+    "_doc": "Hard cutoffs to be scored. Below these = excluded (insufficient data to judge copyability), not graded F. HL fills retention caps history; require enough closed round-trips and span to assess hold time and consistency.",
+    "minClosedRoundTrips": 8,
+    "minActiveDays": 21,
+    "lookbackDays": 365,
+    "minLiquidShare": 0.20,
+    "minAggregateNetPnlUsd": 0,
+    "requireFillData": true
+  },
+
+  "copyability": {
+    "_doc": "PRIMARY criteria under this philosophy. These decide whether a copy is OPERATIONALLY FEASIBLE at our clip, independent of how good the headline record looks.",
+
+    "assetMix": {
+      "_doc": "Share of traded notional in liquid majors (ETH/BTC). We can only mirror what we can fill without moving the book; thin-alt edge does not transfer to a follower's clip. majorsShare is ETH+BTC only; liquidShare adds SOL/HYPE (deep HL books).",
+      "metric": "majorsShare",
+      "gradeA": 0.80, "gradeB": 0.60, "gradeC": 0.40, "gradeD": 0.20, "hardRejectBelow": 0.10,
+      "secondaryMetric": "liquidShare",
+      "secondaryFloor": 0.50
+    },
+
+    "holdTime": {
+      "_doc": "Median hold per round-trip. Sub-minute scalps are UNCOPYABLE — by the time a follower fills, the leader is out, and the copy tax dwarfs any per-trade edge (V2: short holds are where even a correct directional call earns nothing after costs). We want holds long enough that a manual or low-frequency mirror can realistically participate. Hours, not seconds.",
+      "metric": "medianHoldHours",
+      "gradeA": 24, "gradeB": 6, "gradeC": 2, "gradeD": 0.5, "hardRejectBelow": 0.1,
+      "subMinuteFracMaxForA": 0.05,
+      "subMinuteFracHardReject": 0.50
+    },
+
+    "positionSizeVsDepth": {
+      "_doc": "Median peak position notional. Two-sided: too SMALL (< $5k) means the leader is a dust account whose 'edge' is noise and whose sizing tells us nothing; too LARGE relative to HL book depth is not a copyability problem for US (we copy at our own clip, smaller), so the upper bound is informational. The grade rewards a sizing band that is real but still implies the leader is a serious operator. We do NOT penalize large size — we copy proportionally smaller.",
+      "metric": "medianPeakNotionalUsd",
+      "gradeA": 50000, "gradeB": 20000, "gradeC": 5000, "gradeD": 1000, "hardRejectBelow": 1000,
+      "upperBandInformationalUsd": 5000000
+    },
+
+    "netOfCostReturn": {
+      "_doc": "CORE metric. Mean NET return per round-trip AFTER the copier's friction (copyCostModel) on peak notional. This is the closest single number to 'would mirroring this person have paid'. The bar is set ABOVE zero deliberately: a leader who only breaks even net-of-cost is not worth the operational risk, because the copy tax compounds and the V2 baseline (regime-alone) already returns +1.9%/trade for free. Also require a majority of trips net-positive so the edge isn't one lucky print.",
+      "metric": "meanNetRetPerTrade",
+      "gradeA": 0.05, "gradeB": 0.02, "gradeC": 0.005, "gradeD": 0.0, "hardRejectBelow": -0.01,
+      "netWinFracMetric": "netWinFrac",
+      "netWinFracFloorForC": 0.50,
+      "minAggregateNetPnlUsd": 1000
+    },
+
+    "addDepthAndReserve": {
+      "_doc": "How much idle capital a copier must FRONT to survive the leader's escalating stack. CALIBRATION LESSON (v0.1.0): on HL, traders open with a tiny probe then scale to size, so BOTH raw fill-add count AND peak/first-fill 'collateral multiple' run to the hundreds even for clean operators (a $650 probe -> $360k position is normal scale-in, not a martingale). A Solana-style 'maxAddDepth>20' or 'collMult>15' reject would reject the entire venue. The copyability-honest escalation signal is reserveMultiple = max-trip peak notional / MEDIAN-trip peak notional (position-to-position, not probe-to-position): how far the worst stack blows past a typical position = the idle reserve a copier must hold. maxAddDepth and maxCollateralMultipleInfo are REPORTED for context but are NOT grade inputs.",
+      "primaryMetric": "reserveMultiple",
+      "gradeA": 5, "gradeB": 15, "gradeC": 40, "gradeD": 150, "hardReject": 1000,
+      "addCountInformationalOnly": true,
+      "collateralMultipleInformationalOnly": true
+    },
+
+    "tailSafety": {
+      "_doc": "The blow-up signature (V2: 90% of the HL active universe blows up, median worst-loss ~34x median win). A copier inherits the leader's tail at full leverage. Bound the worst realized loss relative to the typical win, and treat realized liquidations as a tail that already fired.",
+      "worstLossVsMedianWin": {
+        "metric": "worstLossVsMedianWin",
+        "gradeA": 3, "gradeB": 8, "gradeC": 20, "gradeD": 40, "hardReject": 80
+      },
+      "liquidations": {
+        "metric": "liquidations",
+        "maxForGradeA": 0, "maxForGradeB": 1, "hardRejectAbove": 3
+      },
+      "openPositionGuard": {
+        "_doc": "Live open round-trips are where a martingale hides its bomb (the Wallet2 / -$33k live-stack lesson). FLAG-ONLY in v0.1.0, NOT a hard disqualifier: HL's fills endpoint retains only ~3.5d of recent 1m and a bounded fill window, so 'open' round-trips are detected imperfectly and the open-vs-median ratio is noisy when the live position is on a coin the wallet rarely trades (low median). We surface LIVE_DEEP_STACK as a manual-review flag and dock one grade, but let reserveMultiple + worstLossVsMedianWin + liquidations carry the hard tail screen. Tighten to a hard reject once a reliable live-position snapshot (clearinghouseState) is ingested.",
+        "metric": "openPeakVsMedianPeak",
+        "flagAbove": 10, "gradeDockAbove": 25, "hardReject": false
+      }
+    }
+  },
+
+  "vaultBonus": {
+    "_doc": "BONUS (not a requirement). Running an HL VAULT is the zero-engineering protocol-native copy path: deposit USDC, get proportional exposure, no mirror engine, no DEX aggregator. It also enforces skin-in-the-game (leader >=5% stake) + aligned fee (10% high-water profit-share) + withdrawal lockup, which self-selects operators over gamblers. The vault risk-adjusted persistence IC (+0.223) was the ONLY HL copy signal that never inverted across regime breaks. NOTE: in the cached universe NONE of the 43 persistent leaderboard accounts lead a vault (vault-overlap.json), so this bonus currently fires on no one in the shortlist — it is forward-looking for when vault-led operators are ingested.",
+    "leadsVaultBonusGradePoints": 0.5,
+    "minLeaderStakePct": 5,
+    "minVaultTvlUsd": 10000,
+    "notClosed": true,
+    "relationshipMustBe": "normal",
+    "renderAsSeparateBadge": true
+  },
+
+  "ratingRubric": {
+    "_doc": "Per-category letter grades A-F (A=4..F=0). Overall = weighted average of category 0-10 scores, +vaultBonus, then any autoDisqualifier floors overall to F. Weights re-centered on COPYABILITY: asset mix, hold time, and net-of-cost return carry the most because they decide feasibility; tail safety guards the inherited risk; size and add/reserve are the operational frictions.",
+    "scale": "A-F",
+    "categories": {
+      "assetMix":        { "weight": 0.18, "inputs": ["majorsShare", "liquidShare"] },
+      "holdTime":        { "weight": 0.18, "inputs": ["medianHoldHours", "subMinuteFrac"] },
+      "netOfCostReturn": { "weight": 0.24, "inputs": ["meanNetRetPerTrade", "netWinFrac", "aggregateNetPnlUsd"] },
+      "tailSafety":      { "weight": 0.22, "inputs": ["worstLossVsMedianWin", "liquidations", "openPeakVsMedianPeak"] },
+      "addDepthReserve": { "weight": 0.10, "inputs": ["reserveMultiple"] },
+      "positionSize":    { "weight": 0.08, "inputs": ["medianPeakNotionalUsd"] }
+    },
+    "consistencyModifier": {
+      "_doc": "Secondary guard against one-burst records (the Wallet2 problem). Applied as a small multiplier to netOfCostReturn, not its own category. Reward net profit spread across sub-periods, penalize concentration.",
+      "subPeriodCount": 4,
+      "metricPositive": "positiveSubPeriodFraction",
+      "metricConcentration": "profitConcentration",
+      "fullCreditPositiveFraction": 0.75,
+      "maxConcentrationForFullCredit": 0.60
+    },
+    "copyabilityAtScale": {
+      "_doc": "The headline practical badge: the idle reserve (x median peak notional) a copier must hold to survive the leader's deepest stack at the target scale. Lower = more copyable. Directly = reserveMultiple from the metrics.",
+      "targetScaleMultiple": 100,
+      "reserveMultipleForGradeA": 5,
+      "reserveMultipleForGradeB": 15,
+      "reserveMultipleForGradeC": 50,
+      "renderAsSeparateBadge": true
+    },
+    "autoDisqualifiers": {
+      "_doc": "Any TRUE => overall grade F + 'DISQUALIFIED' flag, regardless of category averages. Each encodes a copyability kill-switch.",
+      "rules": [
+        "majorsShare < 0.10",
+        "medianHoldHours < 0.1",
+        "subMinuteFrac >= 0.50",
+        "meanNetRetPerTrade < -0.01",
+        "reserveMultiple > 1000",
+        "liquidations > 3",
+        "worstLossVsMedianWin > 80",
+        "medianPeakNotionalUsd < 1000"
+      ]
+    }
+  },
+
+  "overall": {
+    "method": "weighted-average-with-bonus-and-disqualifiers",
+    "gradeBands": { "A": 8.5, "B": 6.5, "C": 4.5, "D": 2.5, "F": 0.0 },
+    "alsoEmit": "letterAndNumeric0to10",
+    "_doc": "Emit BOTH a letter and a 0-10 score per category and overall. A disqualified wallet shows F/0 with the breached rule(s) listed. The vaultBonus adds up to +0.5 letter-points (capped at A) BEFORE the disqualifier check."
+  },
+
+  "uiHints": {
+    "_doc": "For the HL trader-browser UI: which fields to surface so a human can scan and shortlist for MANUAL follow/no-follow. This is a decision-support tool, not an autopilot.",
+    "primaryColumns": ["overallGrade", "overallScore", "assetMix", "holdTime", "netOfCostReturn", "tailSafety", "copyabilityAtScale", "majorsShare", "medianHoldHours", "meanNetRetPerTrade", "leadsVault"],
+    "flagBadges": ["DISQUALIFIED", "VAULT_LED", "SUB_MINUTE_SCALPER", "THIN_ALT_TRADER", "DEEP_MARTINGALE", "LIVE_DEEP_STACK", "NET_NEGATIVE_AFTER_COPY_COST", "BLOW_UP_RISK"],
+    "defaultSort": "overallScore desc",
+    "defaultFilter": "overallGrade <= D excluded",
+    "disclaimer": "Surfaced wallets are MANUAL-REVIEW candidates. HL copy persistence is negative (IC -0.50); a high grade means 'copy was operationally feasible historically', NOT 'copying this will be profitable'."
+  }
+}

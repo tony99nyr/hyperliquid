@@ -13,6 +13,9 @@ const eslintConfig = defineConfig([
     '**/styled-system/**',
     '**/coverage/**',
     '**/.vercel/**',
+    // Vendored wallet-rating pipeline (study scripts + scorers): standalone batch
+    // scripts run via tsx/python3, NOT part of the app build/lint.
+    'scripts/analysis/**',
   ]),
   {
     rules: {
