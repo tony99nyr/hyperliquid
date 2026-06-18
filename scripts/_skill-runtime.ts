@@ -14,6 +14,8 @@
 
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { PendingActionProposal } from '@/types/cockpit';
 
 /** Parse `--key value` / `--flag` argv into a record. */
@@ -228,17 +230,43 @@ export async function requireApproval(input: RequireApprovalInput): Promise<Appr
 }
 
 /**
- * Load `.env.local` into process.env so every `pnpm skill:*` entrypoint inherits
- * Supabase/HL config. Node 24 provides process.loadEnvFile natively (no dotenv).
+ * Load `.env.local` into process.env so every `pnpm skill:*` / daemon entrypoint
+ * inherits Supabase/HL config. Node 24 provides process.loadEnvFile natively.
+ *
+ * CWD-INDEPENDENT (important for the NAS daemons + systemd + cron): `loadEnvFile`
+ * resolves its argument relative to process.cwd(), so a bare `.env.local` only
+ * works when the process starts in the repo root. The trade-watch service / watch
+ * daemon run under systemd / `./start.sh` / cron where the cwd may be anything,
+ * which silently left Supabase unconfigured. We instead resolve `.env.local` at
+ * the REPO ROOT (this file lives in `<root>/scripts/`, so `..` is the root) and
+ * fall back to a cwd-relative load.
+ *
  * Guarded: on Vercel/CI the file is absent and env comes from the real
- * environment — loadEnvFile does NOT clobber vars already set, and a missing
- * file must not throw. Mirrors scripts/_smoke.ts.
+ * environment — a missing file must not throw, and loadEnvFile does NOT clobber
+ * vars already set. Mirrors scripts/_smoke.ts.
  */
 function loadEnvLocal(): void {
+  const candidates: string[] = [];
+  // Repo-root-relative (deterministic, cwd-independent). `__dirname` is available
+  // under tsx's CommonJS mode (package.json has no "type":"module"); guard anyway
+  // so an ESM context simply falls through to the cwd-relative attempt.
   try {
-    process.loadEnvFile('.env.local');
+    candidates.push(resolve(__dirname, '..', '.env.local'));
   } catch {
-    // .env.local may be absent (CI/Vercel) — env vars may already be set.
+    // __dirname unavailable — skip the repo-root candidate.
+  }
+  candidates.push('.env.local'); // cwd-relative fallback (original behavior)
+
+  for (const path of candidates) {
+    try {
+      // existsSync avoids a noisy throw for the non-cwd candidate; the bare
+      // '.env.local' still goes straight to loadEnvFile (cwd may be the root).
+      if (path !== '.env.local' && !existsSync(path)) continue;
+      process.loadEnvFile(path);
+      return;
+    } catch {
+      // Try the next candidate; if none load, env comes from the real environment.
+    }
   }
 }
 
