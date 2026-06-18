@@ -30,7 +30,12 @@ HL_REPO=/volume1/home/admin/hyperliquid
 EXTRA_PATH=/usr/local/bin:/usr/bin:/bin
 # ---------------------------------------------------------------------------
 
-export RERANK_TRADER_WATCH_DIR="$HL_REPO/services/trader-watch"   # pause the watcher during the crawl
+# NOTE: we deliberately do NOT pause the trade-watch daemon here. The watchdog
+# cron (*/3) would just restart it mid-crawl anyway, and a flag-based pause risks
+# leaving the watcher stuck down if the re-rank dies. Instead they coexist — the
+# crawl backs off on HL 429s and the watcher fail-softs on stale reads. (To pause
+# anyway, set RERANK_TRADER_WATCH_DIR="$HL_REPO/services/trader-watch" AND make
+# the trade-watch watchdog honor a pause flag.)
 export RERANK_LOG="$HL_REPO/weekly-rerank.log"
 export PATH="$HL_REPO/node_modules/.bin:$EXTRA_PATH:$PATH"
 
