@@ -50,6 +50,13 @@ describe('buildEntryPreview', () => {
     // stopFrac 0 is coerced by the builder but flagged as a warning.
     expect(p!.warnings.length).toBeGreaterThan(0);
   });
+
+  it('does NOT warn on a blank thesis — it is OPTIONAL (route defaults it too)', () => {
+    const p = buildEntryPreview({ ...baseForm, thesis: '' }, 2000);
+    expect(p!.warnings).toHaveLength(0);
+    // A blank-thesis, otherwise-valid setup must be Approve-ready (paper).
+    expect(entryProposalReady(p, false, false)).toBe(true);
+  });
 });
 
 describe('entryLeverageRead', () => {

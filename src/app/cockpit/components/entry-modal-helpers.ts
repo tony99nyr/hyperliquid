@@ -68,8 +68,17 @@ export function buildEntryPreview(
     leverage: form.leverage,
     clientIntentId: 'preview',
     now: 0,
-    thesis: form.thesis,
+    // Thesis is OPTIONAL in the self-service path (the route defaults it the same
+    // way). Fall back to a generated one so the builder's "thesis required"
+    // warning never blocks Approve for an otherwise-valid setup.
+    thesis: defaultThesis(form),
   });
+}
+
+/** The thesis used when the operator leaves it blank — mirrors the route default. */
+export function defaultThesis(form: EntryFormState): string {
+  const t = form.thesis.trim();
+  return t || `Manual ${form.side === 'buy' ? 'long' : 'short'} ${form.coin.trim().toUpperCase()}`;
 }
 
 /** The derived leverage read (margin / liq / ROE) for the preview, or null. */
