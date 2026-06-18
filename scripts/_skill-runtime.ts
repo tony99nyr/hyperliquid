@@ -306,12 +306,46 @@ function applyEnvFile(path: string): void {
   }
 }
 
+/**
+ * Provide a global `WebSocket` on Node < 22 (which ships no native global one).
+ * `@supabase/supabase-js` builds a RealtimeClient when `createClient` runs, and
+ * that constructor REQUIRES a WebSocket — even though the skill daemons + the NAS
+ * trade-watch service only do REST writes and never open a realtime socket.
+ * Without this, `createClient` throws "Node.js 20 detected without native
+ * WebSocket support", which the preflight surfaces as "Supabase not configured".
+ *
+ * On Node ≥ 22 / Vercel / the browser a native WebSocket already exists, so this
+ * is a no-op. It lives in the CLI runtime (scripts/), so it never touches the
+ * deployed Next bundle. Runs BEFORE main() — and createClient is always lazy
+ * (getServiceRoleClient), so the global is set before any client is constructed.
+ */
+async function ensureWebSocket(): Promise<void> {
+  const g = globalThis as { WebSocket?: unknown };
+  if (typeof g.WebSocket !== 'undefined') return;
+  try {
+    const ws = await import('ws');
+    const impl =
+      (ws as { WebSocket?: unknown }).WebSocket ??
+      (ws as { default?: unknown }).default ??
+      ws;
+    g.WebSocket = impl;
+  } catch {
+    // `ws` unavailable (not installed) — the supabase realtime "no WebSocket"
+    // error will surface. Fix: `pnpm install` (ws is a dependency) or Node ≥ 22.
+  }
+}
+
 /** Run an async main, printing errors and setting a non-zero exit code. */
 export function run(main: () => Promise<void>): void {
   loadEnvLocal();
-  main().catch((err: unknown) => {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`\n[skill error] ${msg}`);
-    process.exitCode = 1;
-  });
+  void (async () => {
+    await ensureWebSocket();
+    try {
+      await main();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`\n[skill error] ${msg}`);
+      process.exitCode = 1;
+    }
+  })();
 }
