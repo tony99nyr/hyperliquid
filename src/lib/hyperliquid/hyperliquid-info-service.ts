@@ -17,6 +17,7 @@
 
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 import type { L2Book, BookLevel } from './orderbook-match';
+import { cachedHlRead } from './hl-cached-transport';
 
 const HL_INFO_URL = 'https://api.hyperliquid.xyz/info';
 const REQUEST_TIMEOUT_MS = 8000;
@@ -254,10 +255,12 @@ export async function fetchClearinghouseState(rawAddress: string): Promise<HlCle
   }
 
   try {
-    const raw = await hlInfoPost<RawClearinghouseState>({
-      type: 'clearinghouseState',
-      user: address,
-    });
+    // Cross-instance Data Cache (~25s) + in-flight coalescing keyed by address:
+    // leader/own position polls across all Vercel instances collapse to ~1
+    // upstream HL fetch per address per window. Per-instance Map + fail-soft wrap.
+    const raw = await cachedHlRead('clearinghouse', [address], () =>
+      hlInfoPost<RawClearinghouseState>({ type: 'clearinghouseState', user: address }),
+    );
     const state = parseClearinghouseState(address, raw);
     positionCache.set(address, { value: state, expiresAt: Date.now() + POSITION_CACHE_TTL_MS });
     return state;
@@ -498,7 +501,12 @@ export async function fetchL2Book(coin: string): Promise<L2Book> {
  * upper-cased coin → number map; throws on failure so the caller can fail-soft.
  */
 export async function fetchAllMids(): Promise<Record<string, number>> {
-  const raw = await hlInfoPost<Record<string, string>>({ type: 'allMids' });
+  // Single shared key, cross-instance Data-Cached ~10s + coalesced: every
+  // Performance-view mark-to-market across all instances rides one HL fetch per
+  // 10s window. Throws on failure so callers can fail-soft (posture unchanged).
+  const raw = await cachedHlRead('allMids', ['all'], () =>
+    hlInfoPost<Record<string, string>>({ type: 'allMids' }),
+  );
   const out: Record<string, number> = {};
   for (const [coin, px] of Object.entries(raw ?? {})) {
     const n = num(px);

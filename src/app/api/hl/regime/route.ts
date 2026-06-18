@@ -10,13 +10,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { guardHlRoute } from '../_guard';
-import { fetchMultiTimeframeCandles } from '@/lib/hyperliquid/candle-service';
-import { REGIME_STRIP_TIMEFRAMES } from '@/app/cockpit/components/right-rail/regime-strip-helpers';
+import { fetchRegimeCandleSet } from '@/lib/hyperliquid/candle-service';
 
 export const dynamic = 'force-dynamic';
 
-/** ~200d — enough for a 1d 50-period regime. Mirrors useRegimeStrip's lookback. */
-const LOOKBACK_MS = 200 * 24 * 60 * 60 * 1000;
 const WINDOW_GRID_MS = 30_000;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -26,13 +23,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const coin = request.nextUrl.searchParams.get('coin')?.trim().toUpperCase() ?? '';
   if (!coin) return NextResponse.json({ ok: false, error: 'coin required' }, { status: 400 });
 
+  // Coin-keyed regime candle set, cross-instance Data-Cached ~45s under its own
+  // tag. The window is bucketed to the 30s grid inside the service so concurrent
+  // polls share one cache key.
   const end = Math.floor(Date.now() / WINDOW_GRID_MS) * WINDOW_GRID_MS;
-  const byInterval = await fetchMultiTimeframeCandles(
-    coin,
-    [...REGIME_STRIP_TIMEFRAMES],
-    end - LOOKBACK_MS,
-    end,
-  );
+  const byInterval = await fetchRegimeCandleSet(coin, end);
 
   return NextResponse.json(
     { ok: true, byInterval },

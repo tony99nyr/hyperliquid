@@ -16,6 +16,7 @@ import {
   parseCandleSnapshot,
   type CandleInterval,
 } from './candle-service-business-logic';
+import { cachedHlRead, _bumpHlCacheGeneration, _clearInFlight } from './hl-cached-transport';
 
 export { SUPPORTED_INTERVALS, isSupportedInterval } from './candle-service-business-logic';
 export type { CandleInterval } from './candle-service-business-logic';
@@ -144,11 +145,21 @@ export async function fetchCandles(
   }
 
   try {
-    const raw = await hlInfoPost<unknown>({
-      type: 'candleSnapshot',
-      req: { coin: normCoin, interval, startTime, endTime },
-    });
-    const candles = parseCandleSnapshot(raw);
+    // Cross-instance Data Cache (layer 1) + in-flight coalescing (layer 2): on
+    // Vercel this collapses identical (coin, interval, window) reads across ALL
+    // serverless instances to ~1 upstream HL fetch per revalidate window. The
+    // per-instance Map above and the 429 backoff below wrap around it.
+    const candles = await cachedHlRead(
+      'candles',
+      [normCoin, interval, String(startTime), String(endTime)],
+      async () => {
+        const raw = await hlInfoPost<unknown>({
+          type: 'candleSnapshot',
+          req: { coin: normCoin, interval, startTime, endTime },
+        });
+        return parseCandleSnapshot(raw);
+      },
+    );
     const result: CandleResult = {
       coin: normCoin,
       interval,
@@ -194,10 +205,89 @@ export async function fetchMultiTimeframeCandles(
   return out;
 }
 
-/** Clear the in-process candle cache (test hook). */
+/**
+ * Timeframes the regime strip analyzes, highest → lowest. Kept here (server-side)
+ * so the regime proxy doesn't import a cockpit component module.
+ */
+export const REGIME_TIMEFRAMES: CandleInterval[] = ['1d', '8h', '1h', '15m'];
+
+/** ~200d — enough for a 1d 50-period regime. Mirrors useRegimeStrip's lookback. */
+const REGIME_LOOKBACK_MS = 200 * 24 * 60 * 60 * 1000;
+
+/**
+ * Fetch the multi-timeframe candle set the regime strip needs, cross-instance
+ * Data-Cached under its OWN tag keyed by COIN at the regime TTL (~45s). Bypasses
+ * the per-interval candle cache so the whole set collapses to a single shared
+ * cache key per coin (instead of four), which is what the regime proxy wants.
+ *
+ * Fail-soft per interval: a missing/empty interval yields an empty stale result
+ * rather than failing the whole set. `endBucket` should already be snapped to the
+ * 30s window grid by the caller so concurrent polls share the key.
+ */
+export async function fetchRegimeCandleSet(
+  coin: string,
+  endBucket: number = Date.now(),
+): Promise<Record<string, CandleResult>> {
+  const normCoin = coin.trim().toUpperCase();
+  const startTime = endBucket - REGIME_LOOKBACK_MS;
+
+  try {
+    return await cachedHlRead('regime', [normCoin, String(endBucket)], async () => {
+      const fetchedAt = Date.now();
+      const sets = await Promise.all(
+        REGIME_TIMEFRAMES.map(async (interval): Promise<CandleResult> => {
+          try {
+            const raw = await hlInfoPost<unknown>({
+              type: 'candleSnapshot',
+              req: { coin: normCoin, interval, startTime, endTime: endBucket },
+            });
+            return { coin: normCoin, interval, candles: parseCandleSnapshot(raw), fetchedAt, stale: false };
+          } catch (err) {
+            return {
+              coin: normCoin,
+              interval,
+              candles: [],
+              fetchedAt,
+              stale: true,
+              error: extractErrorMessage(err),
+            };
+          }
+        }),
+      );
+      const out: Record<string, CandleResult> = {};
+      for (const r of sets) out[r.interval] = r;
+      return out;
+    });
+  } catch (err) {
+    // Whole-set failure (e.g. a 429 surfaced from the first call): degrade to an
+    // empty stale set so the strip renders rather than erroring.
+    const message = extractErrorMessage(err);
+    const fetchedAt = Date.now();
+    const out: Record<string, CandleResult> = {};
+    for (const interval of REGIME_TIMEFRAMES) {
+      out[interval] = { coin: normCoin, interval, candles: [], fetchedAt, stale: true, error: message };
+    }
+    return out;
+  }
+}
+
+/** Clear the in-process candle cache (test hook). Also isolates the Data Cache. */
 export function _clearCandleCache(): void {
   candleCache.clear();
   backoffUntil = 0;
+  _clearInFlight();
+  _bumpHlCacheGeneration();
+}
+
+/**
+ * Clear ONLY the per-instance Map + in-flight (NOT the Data Cache generation) —
+ * simulates a fresh serverless instance whose module-level Map is cold but the
+ * shared cross-instance Data Cache is still warm. Test hook for the collapse proof.
+ */
+export function _clearCandleCacheMapOnly(): void {
+  candleCache.clear();
+  backoffUntil = 0;
+  _clearInFlight();
 }
 
 /** True when the service is in a global 429 backoff window (test/observability hook). */
