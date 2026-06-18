@@ -30,6 +30,8 @@ import type { TopTraderRow } from '@/lib/hyperliquid/top-traders-service';
 import { useActiveSession } from '@/hooks/useActiveSession';
 import { useActiveTrade } from '@/hooks/useActiveTrade';
 import { useLeaderPositions } from '@/hooks/useLeaderPositions';
+import { useLeaderPositionsScoped } from '@/hooks/useLeaderPositionsTable';
+import { leaderPositionRowsToHlPositions } from '@/hooks/leader-position-adapt';
 import { usePerformance } from '@/hooks/usePerformance';
 import { useRealtimeChannel } from '@/hooks/useRealtimeChannel';
 import { useIsMobile } from '@/hooks/useIsMobile';
@@ -97,8 +99,22 @@ export default function CockpitClient({
   const sessionId = session?.id ?? null;
   const trade = useActiveTrade(sessionId, coin);
 
-  // Keep the leader's positions LIVE for Leader-vs-You + Match-leader leverage.
-  const liveLeader = useLeaderPositions(leaderAddress, leaderPositions);
+  // Resolve the followed leader's positions ONCE here for every consumer
+  // (Leader-vs-You + the ApprovalPopup's Match-leader leverage). Prefer the
+  // trade-watch LIVE book (Supabase) when the watcher covers this leader, and
+  // gate the HL short-poll OFF in that case (null address → the poller is inert)
+  // — so a watched leader costs ZERO HL calls. Falls back to the HL poll (seeded
+  // by the RSC fetch) when the leader isn't watched.
+  const sbLeader = useLeaderPositionsScoped(leaderAddress);
+  const leaderWatched = sbLeader.loaded && sbLeader.rows.length > 0;
+  // Poll HL ONLY once Supabase has resolved AND the leader isn't watched — so a
+  // watched leader fires ZERO HL polls (not even an initial race poll before
+  // Supabase loads). During the brief load gap the RSC seed covers the panel.
+  const hlPollAddress = sbLeader.loaded && !leaderWatched ? leaderAddress : null;
+  const hlLeader = useLeaderPositions(hlPollAddress, leaderPositions);
+  const resolvedLeaderPositions = leaderWatched
+    ? leaderPositionRowsToHlPositions(sbLeader.rows)
+    : hlLeader.positions;
 
   // Account equity / today's realized PnL for the top bar + exit-modal math
   // (derived server-side from the fills ledger; inert without a session).
@@ -156,7 +172,7 @@ export default function CockpitClient({
           onCoinChange={setCoin}
           trade={trade}
           leaderAddress={leaderAddress}
-          leaderPositions={liveLeader.positions}
+          leaderPositions={resolvedLeaderPositions}
           topTraders={topTraders}
           ratings={ratings}
           currentEquityUsd={equityUsd ?? 0}
@@ -171,7 +187,7 @@ export default function CockpitClient({
       {/* The approval popup overlays everything when a pending action appears.
           NO-AUTO-FIRE: nothing executes until the human approves here. Leader
           data feeds the Match-leader leverage preset (wave-2). */}
-      <ApprovalPopup sessionId={sessionId} leaderAddress={leaderAddress} leaderPositions={liveLeader.positions} />
+      <ApprovalPopup sessionId={sessionId} leaderAddress={leaderAddress} leaderPositions={resolvedLeaderPositions} />
     </div>
   );
 }
