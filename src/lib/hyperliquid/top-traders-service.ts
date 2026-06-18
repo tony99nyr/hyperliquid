@@ -111,7 +111,16 @@ function toRow(w: RatedWallet): TopTraderRow {
  * backend (leader selection) and the cockpit rail. Ranked composite-desc.
  */
 export function getTopTraders(limit = 12): TopTraderRow[] {
-  const { wallets } = loadRatedWallets();
+  return rankRailTraders(loadRatedWallets().wallets, limit);
+}
+
+/**
+ * PURE: rank a wallet list (composite desc, leaderboardTop tiebreak) → slim rail
+ * rows. Shared by the file-based readers AND the async Supabase read path (the
+ * cockpit page ranks DB-loaded wallets with this), so neither pulls the other's
+ * I/O. No fs, no network.
+ */
+export function rankRailTraders(wallets: RatedWallet[], limit: number): TopTraderRow[] {
   return [...wallets].sort(rank).slice(0, limit).map(toRow);
 }
 

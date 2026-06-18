@@ -20,7 +20,8 @@ import {
   fetchClearinghouseState,
   type HlPosition,
 } from '@/lib/hyperliquid/hyperliquid-info-service';
-import { getRailTraders, getRatedMeta } from '@/lib/hyperliquid/top-traders-service';
+import { getRailTraders, getRatedMeta, rankRailTraders } from '@/lib/hyperliquid/top-traders-service';
+import { loadRatedWalletsFromDb } from '@/lib/hyperliquid/rated-wallets-db-service';
 import { buildRatingsFreshness } from './components/left-rail/ratings-freshness-helpers';
 import PinGate from './components/PinGate';
 import CockpitClient from './CockpitClient';
@@ -54,10 +55,15 @@ export default async function CockpitPage() {
 
   // Slim top-traders list for the left rail — a larger slice (50) so the rail
   // scrolls + filters client-side (the 2.8MB dataset stays server-side).
-  const topTraders = getRailTraders(50);
+  // Rankings come from Supabase (the weekly re-rank upserts them there → live,
+  // no redeploy/pull), falling back to the committed JSON when the table is
+  // empty/unconfigured. The trade-watch daemon keeps reading the local JSON.
+  const dbDataset = await loadRatedWalletsFromDb();
+  const topTraders = dbDataset ? rankRailTraders(dbDataset.wallets, 50) : getRailTraders(50);
+  const ratingsGeneratedAt = dbDataset ? dbDataset.generatedAt : getRatedMeta().generatedAt;
   // Build the rail freshness server-side (page is force-dynamic → knows "now"),
   // so the client renders it purely (no Date.now()/effect → no hydration drift).
-  const ratings = buildRatingsFreshness(getRatedMeta().generatedAt);
+  const ratings = buildRatingsFreshness(ratingsGeneratedAt);
 
   return (
     <CockpitClient

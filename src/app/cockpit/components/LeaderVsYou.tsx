@@ -14,12 +14,20 @@
  *
  * The leader baseline (size first seen) is captured on first observation so a
  * later trim/add is detectable. READ-ONLY throughout.
+ *
+ * Leader side source: prefers the trade-watch LIVE book (Supabase, via
+ * useLeaderPositionsScoped) when the watcher covers the followed leader; else
+ * falls back to the `leaderPositions` prop (the parent's HL read). The baseline
+ * latch keys off leaderAddress+coin, so the source swap never corrupts trim/add
+ * detection.
  */
 
 import { useState } from 'react';
 import { css } from '@styled-system/css';
 import type { HlPosition } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { usePositionPnl } from '@/hooks/usePositionPnl';
+import { useLeaderPositionsScoped } from '@/hooks/useLeaderPositionsTable';
+import { leaderPositionRowsToHlPositions } from '@/hooks/leader-position-adapt';
 import type { PnlSnapshot, PositionRow } from '@/hooks/realtime-row-mappers';
 import { userPositionDisplay, leaderPositionDisplay, type PositionDisplay } from './position-panel-helpers';
 import { deriveAlignment, leaderPositionForCoin, type UserSide } from './leader-alignment-helpers';
@@ -46,9 +54,20 @@ export default function LeaderVsYou({
   const positions = userOverride ? userOverride.positions : live.positions;
   const latestPnlByCoin = userOverride ? userOverride.latestPnlByCoin : live.latestPnlByCoin;
 
+  // Prefer the trade-watch LIVE leader book (Supabase, realtime) when the watcher
+  // covers the followed leader — it's fresher than the `leaderPositions` prop (a
+  // one-shot RSC snapshot from page load). Falls back to the prop when the leader
+  // isn't watched. Inert when no leader is followed (address null). The override
+  // path (tests/RSC seed) bypasses both.
+  const sbLeader = useLeaderPositionsScoped(userOverride ? null : leaderAddress);
+  const effectiveLeaderPositions =
+    !userOverride && sbLeader.loaded && sbLeader.rows.length > 0
+      ? leaderPositionRowsToHlPositions(sbLeader.rows)
+      : leaderPositions;
+
   const norm = coin.trim().toUpperCase();
   const userPos = positions.find((p) => p.side !== 'flat' && p.coin.toUpperCase() === norm);
-  const leaderPos = leaderPositionForCoin(leaderPositions, norm);
+  const leaderPos = leaderPositionForCoin(effectiveLeaderPositions, norm);
 
   // Capture the leader's baseline size (first observation this coin) so a later
   // trim/add is detectable. Tracked in state via the store-previous-value idiom

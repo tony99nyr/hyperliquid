@@ -20,6 +20,9 @@ vi.stubGlobal('fetch', vi.fn(async () => ({
 // feed shows its empty state.
 vi.mock('@/hooks/useLeaderPositionsTable', () => ({
   useLeaderPositionsTable: () => ({ rows: [], loaded: true, subscribed: true, error: null }),
+  // The drawer's useTraderPositions reads this scoped variant; empty+loaded → it
+  // falls back to the HL proxy (useTraderDetail, fetch-stubbed above).
+  useLeaderPositionsScoped: () => ({ rows: [], loaded: true, subscribed: true, error: null }),
 }));
 vi.mock('@/hooks/useLeaderActionsFeed', () => ({
   useLeaderActionsFeed: () => ({ rows: [], loaded: true, subscribed: true, error: null }),

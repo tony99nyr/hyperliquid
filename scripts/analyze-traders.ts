@@ -12,7 +12,8 @@
  */
 
 import { parseArgs, optionalNumber, header, line, run } from './_skill-runtime';
-import { loadRatedWallets, findRatedWallet, type RatedWallet } from '@/lib/hyperliquid/rated-wallets-service';
+import { loadRatedWallets, type RatedWallet } from '@/lib/hyperliquid/rated-wallets-service';
+import { loadRatedWalletsFromDb } from '@/lib/hyperliquid/rated-wallets-db-service';
 import { fetchClearinghouseState, fetchAllFills } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { gradeCandidate, rankCandidates } from '@/lib/skills/analyze-traders-business-logic';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
@@ -29,6 +30,15 @@ run(async () => {
   // Deep-fetch bound per wallet so a run can't fan out unbounded.
   const maxFills = Math.max(2000, Math.floor(optionalNumber(args, 'max-fills', 12000)));
 
+  // Resolve the rating dataset — Supabase (the live weekly re-rank) first, the
+  // committed JSON as a fallback. So Claude grades against the latest rankings
+  // without a `git pull`.
+  const ratingDataset = (await loadRatedWalletsFromDb()) ?? loadRatedWallets();
+  const findInDataset = (addr: string): RatedWallet | null => {
+    const target = addr.trim().toLowerCase();
+    return ratingDataset.wallets.find((w) => w.address === target) ?? null;
+  };
+
   // Resolve the candidate wallet list.
   let wallets: RatedWallet[];
   if (typeof args['addresses'] === 'string') {
@@ -36,12 +46,12 @@ run(async () => {
       .split(',')
       .map((a) => a.trim())
       .filter(Boolean)
-      .map((a) => findRatedWallet(a))
+      .map((a) => findInDataset(a))
       .filter((w): w is RatedWallet => w !== null);
     if (wallets.length === 0) throw new Error('None of the --addresses were found in the rated dataset.');
   } else {
     // Default: the highest-composite rated wallets (a discovery shortlist).
-    wallets = [...loadRatedWallets().wallets]
+    wallets = [...ratingDataset.wallets]
       .filter((w) => w.composite !== null)
       .sort((a, b) => (b.composite ?? 0) - (a.composite ?? 0))
       .slice(0, top);

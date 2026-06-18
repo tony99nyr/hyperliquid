@@ -3,8 +3,10 @@
 /**
  * TraderDetailDrawer — the "is this trader safe to follow?" detail panel, opened
  * by clicking a TopTradersRail row. Three reads, numbers-first:
- *   1. LIVE positions — fetched ON OPEN via useTraderDetail (HL clearinghouseState),
- *      per position side/coin/size/entry/uPnL/leverage, color-coded; loading+error.
+ *   1. LIVE positions — via useTraderPositions: read from the trade-watch feed
+ *      (Supabase leader_positions) when the watcher covers this leader (zero HL
+ *      load), else fetched on demand from HL. Per position side/coin/size/entry/
+ *      uPnL/leverage, color-coded; loading+error; a source badge marks which.
  *   2. STATS — the rated wallet's metrics (Sharpe / win% / PF / maxDD / PnL /
  *      median hold / nFills) + composite.
  *   3. RISK/HEALTH flags — color-coded chips with a one-line meaning each (the
@@ -21,7 +23,7 @@ import { useEffect, useRef, useState } from 'react';
 import { css } from '@styled-system/css';
 import type { TopTraderRow } from '@/lib/hyperliquid/top-traders-service';
 import type { HlPosition } from '@/lib/hyperliquid/hyperliquid-info-service';
-import { useTraderDetail } from '@/hooks/useTraderDetail';
+import { useTraderPositions } from '@/hooks/useTraderPositions';
 import {
   GH,
   ZONE_COLORS,
@@ -53,8 +55,11 @@ const SEVERITY_COLOR: Record<FlagSeverity, string> = {
 };
 
 export default function TraderDetailDrawer({ trader, onClose, detailOverride }: TraderDetailDrawerProps) {
-  const live = useTraderDetail(detailOverride ? null : trader.address);
+  const live = useTraderPositions(detailOverride ? null : trader.address);
   const detail = detailOverride ?? live;
+  // Where the positions came from: 'supabase' (watcher covers this leader — live,
+  // zero HL load) vs 'hl' (on-demand fallback). Null for a seeded override.
+  const source = detailOverride ? null : live.source;
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
@@ -227,6 +232,25 @@ export default function TraderDetailDrawer({ trader, onClose, detailOverride }: 
 
         {/* LIVE POSITIONS */}
         <Section title="Live Positions">
+          {source && !detail.loading && (
+            <span
+              data-testid="positions-source"
+              aria-label={source === 'supabase' ? 'Positions are live from the trade-watch feed' : 'Positions fetched on demand from Hyperliquid'}
+              title={source === 'supabase' ? 'Live from the trade-watch feed (Supabase) — no HL call' : 'Fetched on demand from Hyperliquid'}
+              style={{ color: source === 'supabase' ? ZONE_COLORS.ok : GH.textMuted }}
+              className={css({ fontFamily: 'mono', fontSize: '9px', letterSpacing: '0.03em' })}
+            >
+              {source === 'supabase' ? (
+                <>
+                  <span aria-hidden>● </span>live · trade-watch
+                </>
+              ) : detail.stale ? (
+                'cached · HL'
+              ) : (
+                'fetched · HL'
+              )}
+            </span>
+          )}
           {detail.loading ? (
             <span data-testid="trader-positions-loading" className={css({ fontSize: 'xs', color: 'github.textMuted', fontFamily: 'mono' })}>
               fetching live positions…
