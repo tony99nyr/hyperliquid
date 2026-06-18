@@ -11,11 +11,16 @@
  * safe to follow?" read (live positions + stats + risk flags + a Mirror command).
  */
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { css } from '@styled-system/css';
 import type { TopTraderRow } from '@/lib/hyperliquid/top-traders-service';
 import { GH, ZONE_COLORS, panelSurface, regimeColor } from '../panel-styles';
 import TraderDetailDrawer from './TraderDetailDrawer';
+import {
+  DEFAULT_FILTER_STATE,
+  applyTraderFilters,
+  type TraderFilterState,
+} from './top-traders-filter-helpers';
 
 export interface TopTradersRailProps {
   traders: TopTraderRow[];
@@ -30,25 +35,136 @@ function compositeColor(score: number | null): string {
   return GH.text;
 }
 
+/** A compact terminal-styled toggle chip (aria-pressed for screen readers). */
+function FilterChip({
+  label,
+  title,
+  active,
+  disabled,
+  onToggle,
+}: {
+  label: string;
+  title: string;
+  active: boolean;
+  disabled?: boolean;
+  onToggle?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid="trader-filter-chip"
+      aria-pressed={active}
+      aria-disabled={disabled || undefined}
+      disabled={disabled}
+      title={title}
+      onClick={disabled ? undefined : onToggle}
+      style={
+        active
+          ? { borderColor: '#5b8cff', color: '#e8ebf2', background: 'rgba(91,140,255,0.14)' }
+          : undefined
+      }
+      className={css({
+        fontFamily: 'mono',
+        fontSize: '10px',
+        letterSpacing: '0.02em',
+        textTransform: 'uppercase',
+        color: 'github.textMuted',
+        bg: 'github.bg',
+        border: '1px solid token(colors.github.borderSubtle)',
+        borderRadius: '5px',
+        padding: '3px 7px',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.4 : 1,
+        whiteSpace: 'nowrap',
+        _hover: disabled ? {} : { borderColor: 'github.link', color: 'github.textBright' },
+        _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '1px' },
+      })}
+    >
+      {label}
+    </button>
+  );
+}
+
 export default function TopTradersRail({ traders, followedAddress }: TopTradersRailProps) {
   const followed = followedAddress?.toLowerCase() ?? null;
   const [selected, setSelected] = useState<TopTraderRow | null>(null);
+  const [filters, setFilters] = useState<TraderFilterState>(DEFAULT_FILTER_STATE);
+
+  const toggle = (key: keyof TraderFilterState) =>
+    setFilters((f) => ({ ...f, [key]: !f[key] }));
+
+  const shown = useMemo(() => applyTraderFilters(traders, filters), [traders, filters]);
+
   return (
     <section
       data-testid="top-traders-rail"
-      className={css({ ...panelSurface, padding: '12px', display: 'flex', flexDirection: 'column', gap: '12px', minHeight: '0' })}
+      className={css({ ...panelSurface, padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px', minHeight: '0' })}
     >
       <h2 className={css({ fontFamily: 'label', fontSize: 'sm', fontWeight: 'bold', color: 'github.textBright', textTransform: 'uppercase', letterSpacing: '0.06em' })}>
         Top Traders
       </h2>
 
+      {/* Filter chips — compose (AND). Tradeable-only is ON by default. */}
+      <div
+        data-testid="trader-filter-bar"
+        role="group"
+        aria-label="Trader filters"
+        className={css({ display: 'flex', flexWrap: 'wrap', gap: '5px', alignItems: 'center' })}
+      >
+        <FilterChip
+          label="Clean book"
+          title="Show only wallets with a clean (no-risk-flag) book"
+          active={filters.cleanBook}
+          onToggle={() => toggle('cleanBook')}
+        />
+        <FilterChip
+          label="Hide at-risk"
+          title="Hide wallets carrying any blow-up / risk flag"
+          active={filters.hideAtRisk}
+          onToggle={() => toggle('hideAtRisk')}
+        />
+        <FilterChip
+          label="Tradeable only"
+          title="Show only wallets that trade one of our coins (ETH / BTC / HYPE)"
+          active={filters.tradeableOnly}
+          onToggle={() => toggle('tradeableOnly')}
+        />
+        <FilterChip
+          label="Has position"
+          title="Filter to wallets with a live open position — coming with the trade-watch feed"
+          active={false}
+          disabled
+        />
+      </div>
+
       {traders.length === 0 ? (
         <span className={css({ fontSize: 'xs', color: 'github.textMuted', fontFamily: 'mono' })}>
           No rated wallets — run the rating pipeline.
         </span>
+      ) : shown.length === 0 ? (
+        <span data-testid="trader-filter-empty" className={css({ fontSize: 'xs', color: 'github.textMuted', fontFamily: 'mono' })}>
+          No traders match the active filters.
+        </span>
       ) : (
-        <ol className={css({ display: 'flex', flexDirection: 'column', gap: '6px', listStyle: 'none', margin: 0, padding: 0 })}>
-          {traders.map((t, i) => {
+        <ol
+          data-testid="top-traders-list"
+          className={css({
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+            listStyle: 'none',
+            margin: 0,
+            padding: 0,
+            // Scrollable body: cap the height so the rail itself stays put and
+            // the operator scrolls through the (now ~50) rated wallets.
+            overflowY: 'auto',
+            flex: '1 1 auto',
+            minHeight: '0',
+            maxHeight: { base: 'none', lg: '62vh' },
+            paddingRight: '2px',
+          })}
+        >
+          {shown.map((t, i) => {
             const isFollowed = followed !== null && t.address.toLowerCase() === followed;
             return (
               <li key={t.address} className={css({ listStyle: 'none', margin: 0, padding: 0 })}>

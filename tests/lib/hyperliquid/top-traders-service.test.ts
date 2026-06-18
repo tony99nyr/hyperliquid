@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getTopTraders, slimMetrics } from '@/lib/hyperliquid/top-traders-service';
+import { getTopTraders, getRailTraders, slimMetrics } from '@/lib/hyperliquid/top-traders-service';
 
 describe('getTopTraders', () => {
   it('returns a slim ranked list capped at the limit', () => {
@@ -17,9 +17,23 @@ describe('getTopTraders', () => {
       expect(r.allFlags.length).toBeGreaterThanOrEqual(r.flags.length);
       expect(r.topCoins.length).toBeLessThanOrEqual(3);
       expect(typeof r.hasRisk).toBe('boolean');
+      // Rail filter fields are present + boolean.
+      expect(typeof r.cleanBook).toBe('boolean');
+      expect(typeof r.tradesTradeableCoin).toBe('boolean');
       // metrics is the slim numeric subset (each key number-or-null).
       expect(r.metrics).toBeDefined();
       expect('sharpe' in r.metrics).toBe(true);
+    }
+  });
+
+  it('getRailTraders returns a larger slice for the scrollable rail', () => {
+    const rail = getRailTraders(50);
+    expect(rail.length).toBeLessThanOrEqual(50);
+    if (rail.length === 0) return; // fail-soft when dataset absent
+    // Same slim shape as getTopTraders + the rail filter fields.
+    for (const r of rail) {
+      expect(typeof r.cleanBook).toBe('boolean');
+      expect(typeof r.tradesTradeableCoin).toBe('boolean');
     }
   });
 

@@ -50,7 +50,7 @@ export interface CockpitClientProps {
   leaderPositions: HlPosition[];
   /** Top rated traders, pre-sliced server-side for the left rail. */
   topTraders?: TopTraderRow[];
-  /** Coins the operator can switch between. Default ETH/BTC. */
+  /** Coins the operator can switch between. Default ETH/BTC/HYPE. */
   coins?: string[];
 }
 
@@ -60,7 +60,7 @@ export default function CockpitClient({
   leaderAddress,
   leaderPositions,
   topTraders = [],
-  coins = ['ETH', 'BTC'],
+  coins = ['ETH', 'BTC', 'HYPE'],
 }: CockpitClientProps) {
   const isMobile = useIsMobile();
   // Desktop: 2-view segmented nav (Cockpit / Performance) — Traders is the

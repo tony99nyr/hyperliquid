@@ -20,8 +20,10 @@ const emptyMetrics = {
 };
 
 const traders: TopTraderRow[] = [
-  { address: '0xaaa', short: '0xaa…aaa', displayName: 'Ace', composite: 9, hasRisk: false, flags: ['CLEAN_BOOK'], allFlags: ['CLEAN_BOOK'], leaderboardTop: true, topCoins: ['ETH', 'BTC'], metrics: { ...emptyMetrics, sharpe: 3.3, winRate: 0.62 } },
-  { address: '0xbbb', short: '0xbb…bbb', displayName: null, composite: 3, hasRisk: true, flags: ['DEEP_MARTINGALE'], allFlags: ['DEEP_MARTINGALE', 'LIVE_DEEP_STACK'], leaderboardTop: false, topCoins: ['SOL'], metrics: emptyMetrics },
+  { address: '0xaaa', short: '0xaa…aaa', displayName: 'Ace', composite: 9, hasRisk: false, cleanBook: true, tradesTradeableCoin: true, flags: ['CLEAN_BOOK'], allFlags: ['CLEAN_BOOK'], leaderboardTop: true, topCoins: ['ETH', 'BTC'], metrics: { ...emptyMetrics, sharpe: 3.3, winRate: 0.62 } },
+  // Risky wallet that DOES trade a tradeable coin (so it survives the default
+  // tradeable-only filter for the base render assertions).
+  { address: '0xbbb', short: '0xbb…bbb', displayName: null, composite: 3, hasRisk: true, cleanBook: false, tradesTradeableCoin: true, flags: ['DEEP_MARTINGALE'], allFlags: ['DEEP_MARTINGALE', 'LIVE_DEEP_STACK'], leaderboardTop: false, topCoins: ['HYPE'], metrics: emptyMetrics },
 ];
 
 describe('TopTradersRail', () => {
@@ -74,5 +76,46 @@ describe('TopTradersRail', () => {
     expect(await screen.findByTestId('trader-detail-drawer')).toBeTruthy();
     fireEvent.click(screen.getByTestId('trader-detail-close'));
     expect(screen.queryByTestId('trader-detail-drawer')).toBeNull();
+  });
+
+  it('renders the filter chips (with the deferred "Has position" disabled)', () => {
+    render(<TopTradersRail traders={traders} />);
+    expect(screen.getByRole('button', { name: /clean book/i }).getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByRole('button', { name: /hide at-risk/i }).getAttribute('aria-pressed')).toBe('false');
+    // Tradeable-only defaults ON.
+    expect(screen.getByRole('button', { name: /tradeable only/i }).getAttribute('aria-pressed')).toBe('true');
+    const soon = screen.getByRole('button', { name: /has position/i });
+    expect(soon.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('Clean book chip narrows to clean-book wallets only', () => {
+    render(<TopTradersRail traders={traders} />);
+    expect(screen.getAllByTestId('top-trader-row')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: /clean book/i }));
+    const rows = screen.getAllByTestId('top-trader-row');
+    expect(rows).toHaveLength(1);
+    expect(screen.getByText('Ace')).toBeTruthy();
+  });
+
+  it('Hide at-risk chip drops the risky wallet', () => {
+    render(<TopTradersRail traders={traders} />);
+    fireEvent.click(screen.getByRole('button', { name: /hide at-risk/i }));
+    expect(screen.getAllByTestId('top-trader-row')).toHaveLength(1);
+    expect(screen.queryAllByTestId('trader-risk')).toHaveLength(0);
+  });
+
+  it('Tradeable-only (default ON) hides wallets that trade none of our coins', () => {
+    const withUntradeable: TopTraderRow[] = [
+      ...traders,
+      { address: '0xccc', short: '0xcc…ccc', displayName: 'Alt', composite: 5, hasRisk: false, cleanBook: true, tradesTradeableCoin: false, flags: [], allFlags: [], leaderboardTop: false, topCoins: ['FARTCOIN'], metrics: emptyMetrics },
+    ];
+    render(<TopTradersRail traders={withUntradeable} />);
+    // Default ON → 0xccc hidden.
+    expect(screen.getAllByTestId('top-trader-row')).toHaveLength(2);
+    expect(screen.queryByText('Alt')).toBeNull();
+    // Toggle OFF → it appears.
+    fireEvent.click(screen.getByRole('button', { name: /tradeable only/i }));
+    expect(screen.getAllByTestId('top-trader-row')).toHaveLength(3);
+    expect(screen.getByText('Alt')).toBeTruthy();
   });
 });

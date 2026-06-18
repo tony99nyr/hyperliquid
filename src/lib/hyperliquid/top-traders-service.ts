@@ -14,6 +14,11 @@ import {
   type RatedWallet,
   type RatedWalletMetrics,
 } from './rated-wallets-service';
+// TRADEABLE_COINS + normalizeCoin live in the zero-import filter helper so a
+// CLIENT component (the rail) can import them without dragging this server-only
+// fs module into the browser bundle. The server computes tradesTradeableCoin
+// here against the FULL topCoins list (the chip subset is sliced to 3).
+import { TRADEABLE_COINS, normalizeCoin } from '@/app/cockpit/components/left-rail/top-traders-filter-helpers';
 
 /** The metrics the trader-detail drawer renders as numbers (a slim subset). */
 export interface TopTraderMetrics {
@@ -34,6 +39,14 @@ export interface TopTraderRow {
   composite: number | null;
   /** True when any flag is a risk flag the rail should color red. */
   hasRisk: boolean;
+  /** True when the wallet carries the CLEAN_BOOK positive signal. */
+  cleanBook: boolean;
+  /**
+   * True when ANY of the wallet's traded coins intersects our tradeable set
+   * (ETH/BTC/HYPE). Computed server-side from the FULL topCoins list (not the
+   * sliced chip subset) so the rail's "tradeable only" filter is accurate.
+   */
+  tradesTradeableCoin: boolean;
   /** Up to 3 flags for the chip row (risk flags first). */
   flags: string[];
   /** ALL flags (risk first), for the trader-detail risk/health read. */
@@ -43,6 +56,8 @@ export interface TopTraderRow {
   /** Slim metrics for the trader-detail drawer (numbers-first). */
   metrics: TopTraderMetrics;
 }
+
+const TRADEABLE_SET = new Set<string>(TRADEABLE_COINS);
 
 function n(v: number | undefined): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
@@ -69,27 +84,43 @@ function rank(a: RatedWallet, b: RatedWallet): number {
   return Number(b.leaderboardTop ?? false) - Number(a.leaderboardTop ?? false);
 }
 
-/** Top `limit` rated wallets as slim rows (default 12). */
+/** Project a single rated wallet to its slim rail row. PURE. */
+function toRow(w: RatedWallet): TopTraderRow {
+  const riskFlags = w.flags.filter((f) => RISK_FLAGS.has(f));
+  const cleanFlags = w.flags.filter((f) => !RISK_FLAGS.has(f));
+  const allFlags = [...riskFlags, ...cleanFlags];
+  const coins = w.topCoins ?? [];
+  return {
+    address: w.address,
+    short: w.short,
+    displayName: w.displayName,
+    composite: w.composite,
+    hasRisk: riskFlags.length > 0,
+    cleanBook: w.flags.includes('CLEAN_BOOK'),
+    tradesTradeableCoin: coins.some((c) => TRADEABLE_SET.has(normalizeCoin(c))),
+    flags: allFlags.slice(0, 3),
+    allFlags,
+    leaderboardTop: w.leaderboardTop ?? false,
+    topCoins: coins.slice(0, 3),
+    metrics: slimMetrics(w.metrics),
+  };
+}
+
+/**
+ * Top `limit` rated wallets as slim rows (default 12). Used by the trade-watch
+ * backend (leader selection) and the cockpit rail. Ranked composite-desc.
+ */
 export function getTopTraders(limit = 12): TopTraderRow[] {
   const { wallets } = loadRatedWallets();
-  return [...wallets]
-    .sort(rank)
-    .slice(0, limit)
-    .map((w) => {
-      const riskFlags = w.flags.filter((f) => RISK_FLAGS.has(f));
-      const cleanFlags = w.flags.filter((f) => !RISK_FLAGS.has(f));
-      const allFlags = [...riskFlags, ...cleanFlags];
-      return {
-        address: w.address,
-        short: w.short,
-        displayName: w.displayName,
-        composite: w.composite,
-        hasRisk: riskFlags.length > 0,
-        flags: allFlags.slice(0, 3),
-        allFlags,
-        leaderboardTop: w.leaderboardTop ?? false,
-        topCoins: (w.topCoins ?? []).slice(0, 3),
-        metrics: slimMetrics(w.metrics),
-      };
-    });
+  return [...wallets].sort(rank).slice(0, limit).map(toRow);
+}
+
+/**
+ * A LARGER ranked slice for the left rail (default 50) so the operator can
+ * scroll through many rated wallets and filter client-side. Still a slim
+ * server-projection — the 2.8MB dataset never reaches the client. Separate from
+ * getTopTraders so the backend's leader-selection default (12) is unaffected.
+ */
+export function getRailTraders(limit = 50): TopTraderRow[] {
+  return getTopTraders(limit);
 }

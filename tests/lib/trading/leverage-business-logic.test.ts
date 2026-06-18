@@ -123,6 +123,11 @@ describe('resolveCoinMaxLeverage', () => {
     expect(resolveCoinMaxLeverage('ETH', null)).toBe(25);
     expect(resolveCoinMaxLeverage('DOGE', null)).toBe(10);
   });
+  it('resolves HYPE to its conservative default (5x), leader cap still wins', () => {
+    expect(resolveCoinMaxLeverage('HYPE', null)).toBe(5);
+    expect(resolveCoinMaxLeverage('hype', null)).toBe(5); // case-insensitive
+    expect(resolveCoinMaxLeverage('HYPE', 40)).toBe(40); // leader cap overrides
+  });
 });
 
 describe('halfLeaderLeverage', () => {

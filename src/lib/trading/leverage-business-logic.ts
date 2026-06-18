@@ -151,9 +151,13 @@ export function resolveCoinMaxLeverage(
   if (leaderMaxLeverage != null && Number.isFinite(leaderMaxLeverage) && leaderMaxLeverage >= 1) {
     return Math.floor(leaderMaxLeverage);
   }
-  // Conservative HL-style per-coin defaults when no leader cap is known.
+  // Conservative HL-style per-coin defaults when no leader cap is known. These
+  // are the slider CEILING only — the leader's real reported cap (above) always
+  // wins. HYPE's exchange max is 40x, but we cap our default at 5x: it's a newer,
+  // more volatile token and this is a manual-copy cockpit, so we keep the
+  // fallback conservative until a leader cap is observed.
   const norm = coin.trim().toUpperCase();
-  const DEFAULTS: Record<string, number> = { BTC: 40, ETH: 25, SOL: 20 };
+  const DEFAULTS: Record<string, number> = { BTC: 40, ETH: 25, SOL: 20, HYPE: 5 };
   return DEFAULTS[norm] ?? 10;
 }
 
