@@ -18,7 +18,6 @@
 
 import 'server-only';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
-import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 import {
   buildRatedWalletRow,
   buildRatedMetaRow,
@@ -56,10 +55,22 @@ export async function upsertRatedWalletsToDb(
   const wallets = ds.wallets ?? [];
 
   // 1) Insert all wallet rows tagged with the NEW generation (not yet active).
-  for (let i = 0; i < wallets.length; i += INSERT_CHUNK) {
-    const rows = wallets.slice(i, i + INSERT_CHUNK).map((w) => buildRatedWalletRow(generation, w));
-    const { error } = await client.from('rated_wallets').insert(rows);
-    if (error) throw new Error(`upsertRatedWalletsToDb insert failed at row ${i}: ${error.message}`);
+  // The OLD generation stays active throughout (no partial read). On a partial
+  // failure, best-effort remove the rows we did insert so a failed run leaves NO
+  // orphans (otherwise they'd linger until the next successful run's prune).
+  try {
+    for (let i = 0; i < wallets.length; i += INSERT_CHUNK) {
+      const rows = wallets.slice(i, i + INSERT_CHUNK).map((w) => buildRatedWalletRow(generation, w));
+      const { error } = await client.from('rated_wallets').insert(rows);
+      if (error) throw new Error(`upsertRatedWalletsToDb insert failed at row ${i}: ${error.message}`);
+    }
+  } catch (err) {
+    try {
+      await client.from('rated_wallets').delete().eq('generation', generation);
+    } catch {
+      /* best-effort cleanup — the next successful run's prune sweeps any remainder */
+    }
+    throw err;
   }
 
   // 2) Flip the active generation — the single-row ATOMIC cutover.
@@ -129,17 +140,5 @@ export async function loadRatedWalletsFromDb(
   } catch {
     // Fail-soft: any read error → null so the caller uses the committed JSON.
     return null;
-  }
-}
-
-/** Variant that surfaces the error (for the re-rank verify path), else null. */
-export async function loadRatedWalletsFromDbStrict(
-  client: SupabaseClient = getServiceRoleClient(),
-): Promise<{ dataset: RatedWalletsDataset | null; error?: string }> {
-  try {
-    const dataset = await loadRatedWalletsFromDb(() => client);
-    return { dataset };
-  } catch (err) {
-    return { dataset: null, error: extractErrorMessage(err) };
   }
 }
