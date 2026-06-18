@@ -14,6 +14,7 @@ import type { PriceCandle } from '@/types/trading-core';
 import {
   candleCacheKey,
   parseCandleSnapshot,
+  snapToWindowGrid,
   type CandleInterval,
 } from './candle-service-business-logic';
 import { cachedHlRead, _bumpHlCacheGeneration, _clearInFlight } from './hl-cached-transport';
@@ -129,7 +130,18 @@ export async function fetchCandles(
   endTime: number = Date.now(),
 ): Promise<CandleResult> {
   const normCoin = coin.trim().toUpperCase();
-  const key = candleCacheKey(normCoin, interval, startTime, endTime);
+
+  // Snap the window to the 30s grid (mirrors fetchRegimeCandleSet / the regime
+  // route) so that drifting `Date.now()`-derived bounds from polling callers
+  // collapse onto a SINGLE Data-Cache key per 30s window instead of minting a
+  // new key every poll (which bypassed the cross-instance Data Cache entirely —
+  // the layer that exists to kill Vercel 429s). We snap BOTH the cache key and
+  // the actually-fetched window so the key faithfully identifies the request.
+  // Snapping `end` DOWN by <30s never drops needed history (the start lookback is
+  // unchanged-or-earlier and HL returns the whole window inclusive).
+  const snapStart = snapToWindowGrid(startTime);
+  const snapEnd = snapToWindowGrid(endTime);
+  const key = candleCacheKey(normCoin, interval, snapStart, snapEnd);
 
   const cached = candleCache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
@@ -151,11 +163,11 @@ export async function fetchCandles(
     // per-instance Map above and the 429 backoff below wrap around it.
     const candles = await cachedHlRead(
       'candles',
-      [normCoin, interval, String(startTime), String(endTime)],
+      [normCoin, interval, String(snapStart), String(snapEnd)],
       async () => {
         const raw = await hlInfoPost<unknown>({
           type: 'candleSnapshot',
-          req: { coin: normCoin, interval, startTime, endTime },
+          req: { coin: normCoin, interval, startTime: snapStart, endTime: snapEnd },
         });
         return parseCandleSnapshot(raw);
       },
@@ -256,6 +268,15 @@ export async function fetchRegimeCandleSet(
       );
       const out: Record<string, CandleResult> = {};
       for (const r of sets) out[r.interval] = r;
+      // Don't let `unstable_cache` memoize an all-failed / empty set: a transient
+      // HL blip on revalidation would otherwise pin an empty stale set across
+      // instances for the whole ~45s window. THROW so the rejection isn't cached
+      // (mirrors fetchCandles); the outer catch fail-soft handles the render.
+      // PARTIAL sets (≥1 interval with usable candles) stay cacheable.
+      const hasUsableCandles = sets.some((r) => r.candles.length > 0);
+      if (!hasUsableCandles) {
+        throw new Error('regime set empty: all intervals failed');
+      }
       return out;
     });
   } catch (err) {

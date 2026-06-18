@@ -37,11 +37,17 @@ describe('candle-service (I/O, mocked fetch)', () => {
     vi.restoreAllMocks();
   });
 
-  it('POSTs candleSnapshot with the right body and parses the result', async () => {
+  it('POSTs candleSnapshot with the right (30s-snapped) body and parses the result', async () => {
     const fetchMock = mockFetchOk([rawRow(100), rawRow(200, '2100')]);
     vi.stubGlobal('fetch', fetchMock);
 
-    const res = await fetchCandles('eth', '1h', 50, 300);
+    // Realistic polling bounds: a recent end + a multi-day lookback. The window is
+    // snapped to the 30s grid for BOTH the cache key and the fetched window
+    // (FIX 1) so concurrent polls share one Data-Cache key.
+    const grid = 30_000;
+    const endTime = 1_700_000_000_000 + 17_345; // not on a grid boundary
+    const startTime = endTime - 24 * 60 * 60 * 1000;
+    const res = await fetchCandles('eth', '1h', startTime, endTime);
 
     expect(res.coin).toBe('ETH');
     expect(res.interval).toBe('1h');
@@ -53,7 +59,12 @@ describe('candle-service (I/O, mocked fetch)', () => {
     const sent = JSON.parse((init as RequestInit).body as string);
     expect(sent).toEqual({
       type: 'candleSnapshot',
-      req: { coin: 'ETH', interval: '1h', startTime: 50, endTime: 300 },
+      req: {
+        coin: 'ETH',
+        interval: '1h',
+        startTime: Math.floor(startTime / grid) * grid,
+        endTime: Math.floor(endTime / grid) * grid,
+      },
     });
   });
 
@@ -76,6 +87,25 @@ describe('candle-service (I/O, mocked fetch)', () => {
     for (let i = 0; i < 10; i++) {
       const now = base + i * 1000;
       await fetchCandles('ETH', '15m', now - lookback, now);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(_candleCacheSize()).toBe(1);
+  });
+
+  it('DRIFTING now-derived windows within one 30s grid → ONE upstream fetch (FIX 1)', async () => {
+    const fetchMock = mockFetchOk([rawRow(100)]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    // Real polling: each poll passes start/end derived from Date.now(), a few
+    // seconds apart — but all within ONE 30s window grid. Pre-FIX these minted a
+    // distinct Data-Cache key every call (raw start/end), bypassing the
+    // cross-instance cache. Post-FIX they snap to the same grid → one key/fetch.
+    const grid = 30_000;
+    const base = Math.floor(1_700_000_000_000 / grid) * grid + 1_000; // 1s into a grid
+    const lookback = 4 * 24 * 60 * 60 * 1000;
+    for (let i = 0; i < 10; i++) {
+      const now = base + i * 2_500; // 0,2.5,5,...22.5s — all inside the SAME 30s grid
+      await fetchCandles('ETH', '1h', now - lookback, now);
     }
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(_candleCacheSize()).toBe(1);

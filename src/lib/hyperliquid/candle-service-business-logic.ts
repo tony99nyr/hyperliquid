@@ -107,6 +107,21 @@ export function bucketTime(t: number, interval: CandleInterval): number {
 }
 
 /**
+ * The 30s grid the candle window snaps to so that all polls within one window
+ * share a SINGLE cross-instance Data-Cache key. Matches `HL_REVALIDATE_S.candles`
+ * (30s) and the grid the regime path already uses. Snapping to 30s (not the
+ * interval period) keeps the most-recent forming candle fresh — at worst the
+ * fetched `end` lags real time by <30s — while collapsing drifting `Date.now()`
+ * windows onto one key.
+ */
+export const WINDOW_GRID_MS = 30_000;
+
+/** Floor `t` to the start of its 30s window grid. PURE. */
+export function snapToWindowGrid(t: number): number {
+  return Math.floor(t / WINDOW_GRID_MS) * WINDOW_GRID_MS;
+}
+
+/**
  * Cache key for a (coin, interval, start, end) candle request. The start/end
  * bounds are BUCKETED to the interval period so repeated ticks within the same
  * bucket (callers pass start/end derived from `Date.now()`, which drifts every
