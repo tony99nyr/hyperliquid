@@ -258,9 +258,22 @@ export async function fetchClearinghouseState(rawAddress: string): Promise<HlCle
     // Cross-instance Data Cache (~25s) + in-flight coalescing keyed by address:
     // leader/own position polls across all Vercel instances collapse to ~1
     // upstream HL fetch per address per window. Per-instance Map + fail-soft wrap.
-    const raw = await cachedHlRead('clearinghouse', [address], () =>
-      hlInfoPost<RawClearinghouseState>({ type: 'clearinghouseState', user: address }),
-    );
+    const raw = await cachedHlRead('clearinghouse', [address], async () => {
+      const body = await hlInfoPost<RawClearinghouseState>({
+        type: 'clearinghouseState',
+        user: address,
+      });
+      // Soft-fail guard: HL can return `{}` / a garbage body with HTTP 200 on a
+      // hiccup. A REAL account ALWAYS carries a `marginSummary` (with at least an
+      // `accountValue`), even when totally flat (no positions, zero value). So we
+      // key "soft-failed" on the ABSENCE of that sentinel — NOT on zero
+      // value/positions — to avoid rejecting a legitimately-empty account. THROW
+      // on absence so `unstable_cache` doesn't pin emptiness for the ~25s window.
+      if (!body || typeof body !== 'object' || body.marginSummary?.accountValue === undefined) {
+        throw new Error('clearinghouseState empty: soft failure (no marginSummary)');
+      }
+      return body;
+    });
     const state = parseClearinghouseState(address, raw);
     positionCache.set(address, { value: state, expiresAt: Date.now() + POSITION_CACHE_TTL_MS });
     return state;
@@ -504,13 +517,21 @@ export async function fetchAllMids(): Promise<Record<string, number>> {
   // Single shared key, cross-instance Data-Cached ~10s + coalesced: every
   // Performance-view mark-to-market across all instances rides one HL fetch per
   // 10s window. Throws on failure so callers can fail-soft (posture unchanged).
-  const raw = await cachedHlRead('allMids', ['all'], () =>
-    hlInfoPost<Record<string, string>>({ type: 'allMids' }),
-  );
-  const out: Record<string, number> = {};
-  for (const [coin, px] of Object.entries(raw ?? {})) {
-    const n = num(px);
-    if (n > 0) out[coin.trim().toUpperCase()] = n;
-  }
+  const out = await cachedHlRead('allMids', ['all'], async () => {
+    const raw = await hlInfoPost<Record<string, string>>({ type: 'allMids' });
+    const mids: Record<string, number> = {};
+    for (const [coin, px] of Object.entries(raw ?? {})) {
+      const n = num(px);
+      if (n > 0) mids[coin.trim().toUpperCase()] = n;
+    }
+    // Soft-fail guard: HL can return `{}` / a garbage body with HTTP 200 on a
+    // hiccup. `allMids` for a live exchange is NEVER legitimately empty, so an
+    // empty parse means a soft failure — THROW so `unstable_cache` doesn't pin
+    // emptiness for the ~10s window. The caller fail-soft handles the rejection.
+    if (Object.keys(mids).length === 0) {
+      throw new Error('allMids empty: soft failure (no mids returned)');
+    }
+    return mids;
+  });
   return out;
 }
