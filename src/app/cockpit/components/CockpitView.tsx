@@ -21,8 +21,10 @@ import { useState, useCallback } from 'react';
 import { css } from '@styled-system/css';
 import type { HlPosition } from '@/lib/hyperliquid/hyperliquid-info-service';
 import type { TopTraderRow } from '@/lib/hyperliquid/top-traders-service';
+import type { TradingMode } from '@/types/fill';
 import type { ActiveTrade } from './chart/candle-chart-helpers';
 import type { RegimeDir } from './open-positions-helpers';
+import { useHlOrderbook } from '@/hooks/useHlOrderbook';
 import CandleChartPanel from './chart/CandleChartPanel';
 import TopTradersRail from './left-rail/TopTradersRail';
 import OpenPositionsPanel from './OpenPositionsPanel';
@@ -32,10 +34,13 @@ import SecondaryStrip from './SecondaryStrip';
 import HealthPanel from './HealthPanel';
 import LeaderVsYou from './LeaderVsYou';
 import GettingStarted from './GettingStarted';
+import EntryModal from './EntryModal';
 
 export interface CockpitViewProps {
   sessionId: string | null;
   hasSession: boolean;
+  /** Trading mode (paper/live) — drives the entry modal's LIVE confirm gate. */
+  mode: TradingMode;
   coin: string;
   coins: string[];
   onCoinChange: (c: string) => void;
@@ -54,6 +59,7 @@ export interface CockpitViewProps {
 export default function CockpitView({
   sessionId,
   hasSession,
+  mode,
   coin,
   coins,
   onCoinChange,
@@ -72,12 +78,17 @@ export default function CockpitView({
     [coin],
   );
 
-  // NO-AUTO-FIRE: the UI can't fabricate an entry intent — an entry is proposed
-  // by the open-position / run-session skill and surfaces as the ApprovalPopup.
-  // "＋ New Position" therefore reveals the skill flow (GettingStarted) rather
-  // than opening a client-built order ticket.
-  const [showNew, setShowNew] = useState(false);
-  const onNewPosition = useCallback(() => setShowNew(true), []);
+  // SELF-SERVICE entry (parallel to the Claude-skill → ApprovalPopup path, which
+  // still works). "＋ New Position" opens the EntryModal — the operator hand-builds
+  // an opening order and explicitly Approves it. NO-AUTO-FIRE is preserved: the
+  // modal only POSTs /api/cockpit/open-position on that explicit Approve click;
+  // nothing fires on its own.
+  const [showEntry, setShowEntry] = useState(false);
+  const onNewPosition = useCallback(() => setShowEntry(true), []);
+
+  // Live mark for the selected coin (the entry modal's sizing needs a price).
+  const book = useHlOrderbook(coin);
+  const entryPx = book.lastPx ?? book.book.mid ?? null;
 
   return (
     <div
@@ -103,7 +114,7 @@ export default function CockpitView({
 
       {/* CENTER — chart → open positions → leader-vs-you / health → analysis. */}
       <main className={css({ order: { base: 1, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minHeight: '0', overflowY: { base: 'visible', lg: 'auto' }, paddingRight: { lg: '2px' } })}>
-        {(!hasSession || showNew) && <GettingStarted />}
+        {!hasSession && <GettingStarted />}
         <CockpitCoinTabs coin={coin} coins={coins} onChange={onCoinChange} />
         <CandleChartPanel coin={coin} trade={trade} />
         <OpenPositionsPanel
@@ -129,6 +140,22 @@ export default function CockpitView({
           <Orderbook coin={coin} depth={8} />
         </div>
       </aside>
+
+      {/* SELF-SERVICE entry modal — floats above everything. NO-AUTO-FIRE: it only
+          executes on the operator's explicit Approve. The Claude-skill → approval
+          popup path (mounted in CockpitClient) still works in parallel. */}
+      {showEntry && (
+        <EntryModal
+          mode={mode}
+          coin={coin}
+          coins={coins}
+          entryPx={entryPx}
+          regimeByCoin={regimeByCoin}
+          leaderPositions={leaderPositions}
+          onCoinChange={onCoinChange}
+          onClose={() => setShowEntry(false)}
+        />
+      )}
     </div>
   );
 }

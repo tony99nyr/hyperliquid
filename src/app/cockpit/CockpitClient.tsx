@@ -146,6 +146,7 @@ export default function CockpitClient({
         <CockpitView
           sessionId={sessionId}
           hasSession={session !== null}
+          mode={mode}
           coin={coin}
           coins={coins}
           onCoinChange={setCoin}
