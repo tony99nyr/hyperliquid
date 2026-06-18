@@ -36,6 +36,7 @@ export const HL_CACHE_TAGS = {
   regime: 'hl:regime',
   allMids: 'hl:all-mids',
   clearinghouse: 'hl:clearinghouse',
+  perpMeta: 'hl:perp-meta',
 } as const;
 
 /** Revalidate windows (seconds). Tuned to keep the UI live while cutting HL hard. */
@@ -48,6 +49,8 @@ export const HL_REVALIDATE_S = {
   allMids: 10,
   /** Positions change less often than marks but should stay fresh. */
   clearinghouse: 25,
+  /** The perp universe (asset indices + szDecimals) changes very rarely. */
+  perpMeta: 300,
 } as const;
 
 // --- Layer 2: in-flight coalescing (per-instance) ---

@@ -47,6 +47,14 @@ const envSchema = z.object({
   // Admin gate (vendored auth).
   ADMIN_SECRET: z.string().min(1).optional(),
   ADMIN_PIN: z.string().min(1).optional(),
+
+  // HL live execution (Phase 3 — SERVER ONLY, used only when TRADING_MODE=live).
+  // The AGENT/API wallet key: trade-only, cannot withdraw, revocable on HL.
+  // NEVER the main account key; never exposed to the browser.
+  HL_AGENT_PRIVATE_KEY: z.string().min(1).optional(),
+  // Which HL network to sign + submit against. Default mainnet; set 'testnet' to
+  // rehearse live execution safely first.
+  HL_NETWORK: z.enum(['mainnet', 'testnet']).default('mainnet'),
 });
 
 export type CockpitEnv = z.infer<typeof envSchema>;
@@ -71,5 +79,7 @@ export function validateEnv(source: NodeJS.ProcessEnv = process.env): CockpitEnv
     SUPABASE_SERVICE_ROLE_KEY: source.SUPABASE_SERVICE_ROLE_KEY,
     ADMIN_SECRET: source.ADMIN_SECRET,
     ADMIN_PIN: source.ADMIN_PIN,
+    HL_AGENT_PRIVATE_KEY: source.HL_AGENT_PRIVATE_KEY,
+    HL_NETWORK: source.HL_NETWORK,
   });
 }

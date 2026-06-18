@@ -20,6 +20,12 @@ import type { L2Book, BookLevel } from './orderbook-match';
 import { cachedHlRead } from './hl-cached-transport';
 
 const HL_INFO_URL = 'https://api.hyperliquid.xyz/info';
+const HL_INFO_URL_TESTNET = 'https://api.hyperliquid-testnet.xyz/info';
+/** Network → info URL. The cockpit's market reads stay mainnet; only the live
+ *  exchange path resolves its asset index + mid from the network it submits to. */
+export function hlInfoUrlFor(network: 'mainnet' | 'testnet'): string {
+  return network === 'testnet' ? HL_INFO_URL_TESTNET : HL_INFO_URL;
+}
 const REQUEST_TIMEOUT_MS = 8000;
 const POSITION_CACHE_TTL_MS = 15_000;
 const FILLS_CACHE_TTL_MS = 60_000;
@@ -132,11 +138,11 @@ const fillsCache = new Map<string, CacheEntry<HlFillsResult>>();
 
 // --- Low-level POST with timeout ---
 
-async function hlInfoPost<T>(body: Record<string, unknown>): Promise<T> {
+async function hlInfoPost<T>(body: Record<string, unknown>, infoUrl: string = HL_INFO_URL): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const res = await fetch(HL_INFO_URL, {
+    const res = await fetch(infoUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -513,12 +519,12 @@ export async function fetchL2Book(coin: string): Promise<L2Book> {
  * mark-to-market open positions for the Performance view. Returns an
  * upper-cased coin → number map; throws on failure so the caller can fail-soft.
  */
-export async function fetchAllMids(): Promise<Record<string, number>> {
+export async function fetchAllMids(network: 'mainnet' | 'testnet' = 'mainnet'): Promise<Record<string, number>> {
   // Single shared key, cross-instance Data-Cached ~10s + coalesced: every
   // Performance-view mark-to-market across all instances rides one HL fetch per
   // 10s window. Throws on failure so callers can fail-soft (posture unchanged).
-  const out = await cachedHlRead('allMids', ['all'], async () => {
-    const raw = await hlInfoPost<Record<string, string>>({ type: 'allMids' });
+  const load = async () => {
+    const raw = await hlInfoPost<Record<string, string>>({ type: 'allMids' }, hlInfoUrlFor(network));
     const mids: Record<string, number> = {};
     for (const [coin, px] of Object.entries(raw ?? {})) {
       const n = num(px);
@@ -532,6 +538,33 @@ export async function fetchAllMids(): Promise<Record<string, number>> {
       throw new Error('allMids empty: soft failure (no mids returned)');
     }
     return mids;
-  });
-  return out;
+  };
+  // Mainnet = the hot shared path (cached); testnet = rare rehearsal (direct).
+  return network === 'testnet' ? load() : cachedHlRead('allMids', ['all'], load);
+}
+
+/** One perp asset from HL `meta.universe`. The array INDEX is the order action's
+ *  `a` field; `szDecimals` drives price/size formatting. */
+export interface HlPerpAsset {
+  name: string;
+  szDecimals: number;
+  maxLeverage?: number;
+}
+
+/**
+ * Fetch the perp universe (HL `meta`) — the ordered asset list whose index is the
+ * `a` field in an order action, plus each coin's `szDecimals`. The universe
+ * changes very rarely, so it's Data-Cached long (~5min) + coalesced. Throws on an
+ * empty/garbage body (soft failure) so the cache never pins emptiness.
+ */
+export async function fetchPerpMeta(network: 'mainnet' | 'testnet' = 'mainnet'): Promise<HlPerpAsset[]> {
+  const load = async () => {
+    const raw = await hlInfoPost<{ universe?: HlPerpAsset[] }>({ type: 'meta' }, hlInfoUrlFor(network));
+    const universe = raw?.universe ?? [];
+    if (universe.length === 0) throw new Error('meta empty: soft failure (no universe)');
+    return universe;
+  };
+  // Mainnet is the hot, shared path → Data-Cached. Testnet is a rare rehearsal
+  // path → direct (uncached) so it never collides with the mainnet cache key.
+  return network === 'testnet' ? load() : cachedHlRead('perpMeta', ['all'], load);
 }
