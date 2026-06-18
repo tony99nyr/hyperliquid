@@ -11,14 +11,13 @@
  */
 
 import { useEffect, useState } from 'react';
-import { fetchMultiTimeframeCandles } from '@/lib/hyperliquid/candle-service';
+import { fetchRegimeCandlesViaProxy } from '@/lib/hyperliquid/candle-client';
 import {
   buildRegimeStrip,
   REGIME_STRIP_TIMEFRAMES,
   type RegimeStripRow,
 } from '@/app/cockpit/components/right-rail/regime-strip-helpers';
 
-const LOOKBACK_MS = 200 * 24 * 60 * 60 * 1000; // ~200d, enough for 1d 50-period regime
 const REFRESH_MS = 60_000;
 
 export interface RegimeStripState {
@@ -48,8 +47,7 @@ export function useRegimeStrip(coin: string): RegimeStripState {
     if (!coin) return;
     let active = true;
     const load = async () => {
-      const start = Date.now() - LOOKBACK_MS;
-      const byInterval = await fetchMultiTimeframeCandles(coin, [...REGIME_STRIP_TIMEFRAMES], start);
+      const byInterval = await fetchRegimeCandlesViaProxy(coin);
       if (!active) return;
       setRows(buildRegimeStrip(byInterval));
       const anyError = REGIME_STRIP_TIMEFRAMES.map((i) => byInterval[i]?.error).find(Boolean);

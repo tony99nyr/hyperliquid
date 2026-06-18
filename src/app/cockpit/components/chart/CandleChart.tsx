@@ -17,7 +17,7 @@
  * imperative bridge to the charts lib.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   createChart,
   CandlestickSeries,
@@ -72,6 +72,17 @@ export default function CandleChart({
   const maFastRef = useRef<ISeriesApi<'Line'> | null>(null);
   const maSlowRef = useRef<ISeriesApi<'Line'> | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
+  // Effective render height, decided ONCE at mount (this is a client-only
+  // ssr:false island, so `window` is safe and there is no SSR/first-paint flip
+  // that would re-trigger autoSize → the canvas can't overflow its card). On a
+  // phone-width viewport we render a compact chart so the focal Open-Positions
+  // panel sits in view directly beneath it (design 11-mobile-cockpit).
+  const [effectiveHeight] = useState(() => {
+    if (typeof window !== 'undefined' && window.innerWidth <= 1023) {
+      return Math.min(height, 250);
+    }
+    return height;
+  });
   // The dataset (coin|interval) we last fitContent()'d for — we re-fit ONCE per
   // dataset, never on subsequent polls (which would destroy user pan/zoom).
   const fittedKeyRef = useRef<string | null>(null);
@@ -102,7 +113,7 @@ export default function CandleChart({
       rightPriceScale: { borderColor: GH.border },
       timeScale: { borderColor: GH.border, timeVisible: true, secondsVisible: false },
       autoSize: true,
-      height,
+      height: effectiveHeight,
     });
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
@@ -151,8 +162,8 @@ export default function CandleChart({
 
   // --- Apply height imperatively (no teardown when it changes). ---
   useEffect(() => {
-    chartRef.current?.applyOptions({ height });
-  }, [height]);
+    chartRef.current?.applyOptions({ height: effectiveHeight });
+  }, [effectiveHeight]);
 
   // --- Feed candle + MA data (full refresh on each candles change). ---
   useEffect(() => {
@@ -225,5 +236,14 @@ export default function CandleChart({
     }
   }, [trade]);
 
-  return <div ref={containerRef} data-testid="candle-chart" style={{ width: '100%', height }} />;
+  // `flexShrink: 0` + `minHeight` keep the canvas from collapsing to a sliver
+  // when the panel is a flex column on mobile (autoSize's ResizeObserver would
+  // otherwise follow a shrunk container down to a few px — the cut-off chart bug).
+  return (
+    <div
+      ref={containerRef}
+      data-testid="candle-chart"
+      style={{ width: '100%', height: effectiveHeight, minHeight: effectiveHeight, flexShrink: 0 }}
+    />
+  );
 }

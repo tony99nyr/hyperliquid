@@ -44,6 +44,11 @@ export interface CockpitViewProps {
   leaderPositions: HlPosition[];
   topTraders: TopTraderRow[];
   currentEquityUsd: number;
+  /**
+   * Render the left Top-Traders rail. False on mobile, where Traders is its own
+   * bottom-tab surface (the design buries nothing behind the chart).
+   */
+  showTradersRail?: boolean;
 }
 
 export default function CockpitView({
@@ -57,6 +62,7 @@ export default function CockpitView({
   leaderPositions,
   topTraders,
   currentEquityUsd,
+  showTradersRail = true,
 }: CockpitViewProps) {
   // Net regime bias per coin (from the right-rail Market Regime panel) drives the
   // Open Positions alignment badge — fetched ONCE per coin, lifted up here.
@@ -79,17 +85,21 @@ export default function CockpitView({
       className={css({
         flex: 1,
         display: 'grid',
-        gridTemplateColumns: { base: '1fr', lg: '262px minmax(0, 1fr) 332px' },
+        gridTemplateColumns: showTradersRail
+          ? { base: '1fr', lg: '262px minmax(0, 1fr) 332px' }
+          : { base: '1fr', lg: 'minmax(0, 1fr) 332px' },
         gap: '12px',
         padding: '12px',
         overflow: { base: 'visible', lg: 'hidden' },
         minHeight: '0',
       })}
     >
-      {/* LEFT — Top Traders rail. */}
-      <aside className={css({ order: { base: 3, lg: 0 }, minHeight: '0', overflowY: { base: 'visible', lg: 'auto' } })}>
-        <TopTradersRail traders={topTraders} followedAddress={leaderAddress} />
-      </aside>
+      {/* LEFT — Top Traders rail (desktop only; mobile uses the Traders tab). */}
+      {showTradersRail && (
+        <aside className={css({ order: { base: 3, lg: 0 }, minHeight: '0', overflowY: { base: 'visible', lg: 'auto' } })}>
+          <TopTradersRail traders={topTraders} followedAddress={leaderAddress} />
+        </aside>
+      )}
 
       {/* CENTER — chart → open positions → leader-vs-you / health → analysis. */}
       <main className={css({ order: { base: 1, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minHeight: '0', overflowY: { base: 'visible', lg: 'auto' }, paddingRight: { lg: '2px' } })}>
@@ -110,10 +120,14 @@ export default function CockpitView({
         <SecondaryStrip sessionId={sessionId} />
       </main>
 
-      {/* RIGHT — Market Regime + Order Book. */}
+      {/* RIGHT — Market Regime + Order Book. On mobile the compact Market Regime
+          sits directly under the focal Open-Positions stack; the dense order book
+          is desktop-only (the phone surface stays scannable). */}
       <aside className={css({ order: { base: 2, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minHeight: '0', overflowY: { base: 'visible', lg: 'auto' } })}>
         <MarketRegimePanel coin={coin} onNetBias={onNetBias} />
-        <Orderbook coin={coin} depth={8} />
+        <div className={css({ display: { base: 'none', lg: 'block' } })}>
+          <Orderbook coin={coin} depth={8} />
+        </div>
       </aside>
     </div>
   );

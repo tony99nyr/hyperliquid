@@ -4,6 +4,7 @@ import {
   computeKpis,
   maxDrawdown,
   buildEquitySeries,
+  localDayStart,
   type EquityPoint,
 } from '@/lib/cockpit/performance-business-logic';
 import type { CanonicalFill } from '@/types/fill';
@@ -113,13 +114,18 @@ describe('performance-business-logic', () => {
       expect(kpis.avgTradeUsd).toBeCloseTo(5);
     });
 
-    it('profit factor falls back to gross win when there are no losses', () => {
+    it('profit factor is Infinity (sentinel) when there are wins but no losses', () => {
       const fills = [
         fill({ side: 'buy', px: 100, sz: 1, filledAt: 1 }),
         fill({ side: 'sell', px: 110, sz: 1, filledAt: 2 }),
       ];
       const kpis = computeKpis(buildLedger(fills, {}, DAY), {}, []);
-      expect(kpis.profitFactor).toBeCloseTo(10);
+      expect(kpis.profitFactor).toBe(Infinity);
+    });
+
+    it('profit factor is null when there are no closed trades', () => {
+      const kpis = computeKpis([], {}, []);
+      expect(kpis.profitFactor).toBeNull();
     });
 
     it('counts open exposure from marks', () => {
@@ -159,6 +165,101 @@ describe('performance-business-logic', () => {
 
     it('is zero for a monotonically rising series', () => {
       expect(maxDrawdown([{ t: 0, equity: 100 }, { t: 1, equity: 110 }])).toBe(0);
+    });
+  });
+
+  describe('direct flip (no flat boundary)', () => {
+    it('captures the closed leg of a long→short flip as a realized LedgerTrade', () => {
+      // Open long 1 @100, then SELL 3 @110 → closes the +10 long AND opens a
+      // short 2 @110 (overshoot). The realized +10 must NOT be silently dropped.
+      const fills = [
+        fill({ side: 'buy', px: 100, sz: 1, filledAt: 1 * DAY }),
+        fill({ side: 'sell', px: 110, sz: 3, filledAt: 2 * DAY }),
+      ];
+      const ledger = buildLedger(fills, { ETH: 108 }, 3 * DAY);
+      const closed = ledger.filter((t) => t.status !== 'open');
+      const open = ledger.filter((t) => t.status === 'open');
+      expect(closed).toHaveLength(1);
+      expect(closed[0].side).toBe('long');
+      expect(closed[0].pnlUsd).toBeCloseTo(10); // (110-100)*1 — captured, not dropped
+      expect(closed[0].closedAt).toBe(2 * DAY);
+      // The overshoot opened a short 2 @110, marked at 108 → +4 unrealized.
+      expect(open).toHaveLength(1);
+      expect(open[0].side).toBe('short');
+      expect(open[0].sz).toBeCloseTo(2);
+      expect(open[0].entryPx).toBeCloseTo(110);
+      expect(open[0].pnlUsd).toBeCloseTo((110 - 108) * 2);
+    });
+
+    it('counts the flipped realized leg in Net PnL / win / profit factor', () => {
+      const fills = [
+        fill({ side: 'buy', px: 100, sz: 1, filledAt: 1 }),
+        fill({ side: 'sell', px: 120, sz: 2, filledAt: 2 }), // close +20, open short 1
+        fill({ side: 'buy', px: 110, sz: 1, filledAt: 3, reduceOnly: true }), // close short +10
+      ];
+      const kpis = computeKpis(buildLedger(fills, {}, DAY), {}, []);
+      expect(kpis.closedCount).toBe(2);
+      expect(kpis.winCount).toBe(2);
+      expect(kpis.netPnlUsd).toBeCloseTo(30); // 20 + 10 — neither dropped
+      expect(kpis.profitFactor).toBe(Infinity); // wins, no losses
+    });
+  });
+
+  describe('close-time bucketing (equity curve shape)', () => {
+    it('buckets realized PnL on the CLOSE day, not the open day', () => {
+      // Opened day 1, closed day 20. The realized step must land on day 20.
+      const fills = [
+        fill({ side: 'buy', px: 100, sz: 1, filledAt: 1 * DAY }),
+        fill({ side: 'sell', px: 150, sz: 1, filledAt: 20 * DAY }),
+      ];
+      const ledger = buildLedger(fills, {}, 20 * DAY);
+      expect(ledger[0].closedAt).toBe(20 * DAY);
+      const series = buildEquitySeries(ledger, 50_050, 20 * DAY, 30);
+      // The equity should be flat (pre-realization) right up until day 19, then
+      // step up on day 20 — i.e. day 19's point is BELOW the final equity.
+      const day19 = series.find((p) => p.t === 19 * DAY);
+      const day20 = series.find((p) => p.t === 20 * DAY);
+      expect(day19).toBeDefined();
+      expect(day20).toBeDefined();
+      expect(day19!.equity).toBeLessThan(day20!.equity);
+      expect(day20!.equity).toBeCloseTo(50_050);
+      // And an EARLY day (day 5) is also still at the pre-realization level.
+      const day5 = series.find((p) => p.t === 5 * DAY);
+      expect(day5!.equity).toBeCloseTo(day19!.equity);
+    });
+  });
+
+  describe('localDayStart (operator-local Today boundary)', () => {
+    it('UTC tz floors to UTC midnight', () => {
+      const ms = Date.UTC(2026, 0, 15, 18, 30); // 18:30 UTC
+      expect(localDayStart(ms, 'UTC')).toBe(Date.UTC(2026, 0, 15));
+    });
+
+    it('America/New_York floors to local midnight, not UTC midnight', () => {
+      // 2026-01-15 02:00 UTC = 2026-01-14 21:00 EST. Local day = Jan 14.
+      const ms = Date.UTC(2026, 0, 15, 2, 0);
+      const localMidnight = localDayStart(ms, 'America/New_York');
+      // EST is UTC-5 → local midnight Jan 14 = 2026-01-14 05:00 UTC.
+      expect(localMidnight).toBe(Date.UTC(2026, 0, 14, 5, 0));
+      // The same instant under UTC would (wrongly) bucket into Jan 15.
+      expect(localDayStart(ms, 'UTC')).toBe(Date.UTC(2026, 0, 15));
+    });
+
+    it('drives the Today window through buildLedger (tz arg)', () => {
+      // An instant that is "yesterday" in NY but "today" in UTC.
+      const now = Date.UTC(2026, 0, 15, 2, 0); // Jan 14 21:00 EST
+      // A trade closed at Jan 15 00:30 UTC = Jan 14 19:30 EST → SAME NY day as now.
+      const closeUtc = Date.UTC(2026, 0, 15, 0, 30);
+      const fills = [
+        fill({ side: 'buy', px: 100, sz: 1, filledAt: closeUtc - 600_000 }),
+        fill({ side: 'sell', px: 110, sz: 1, filledAt: closeUtc }),
+      ];
+      const nyLedger = buildLedger(fills, {}, now, {}, 'America/New_York');
+      expect(nyLedger[0].today).toBe(true); // same NY day
+      const utcLedger = buildLedger(fills, {}, now, {}, 'UTC');
+      // Under UTC, the close (Jan 15) is "today" too here — assert the NY path
+      // does not regress the obviously-same-day case.
+      expect(utcLedger[0].today).toBe(true);
     });
   });
 

@@ -35,7 +35,7 @@ const CandleChart = dynamic(() => import('./CandleChart'), {
   loading: () => (
     <div
       data-testid="candle-chart-loading"
-      className={css({ height: '460px', display: 'grid', placeItems: 'center', color: 'github.textMuted', fontFamily: 'mono', fontSize: 'xs' })}
+      className={css({ height: { base: '250px', lg: '460px' }, display: 'grid', placeItems: 'center', color: 'github.textMuted', fontFamily: 'mono', fontSize: 'xs' })}
     >
       loading chart…
     </div>
@@ -83,6 +83,15 @@ export default function CandleChartPanel({
         gap: '10px',
         padding: '12px',
         minHeight: '0',
+        // The parent <main> is a flex column that scrolls (overflowY:auto); its
+        // children must size to content, not shrink. Without this the panel + its
+        // 250px (mobile) / 460px (desktop) canvas get compressed to a sliver and
+        // the chart/row content is clipped by overflow:hidden (cut-off-chart bug).
+        flexShrink: 0,
+        // Clip the lightweight-charts canvas to the card so it can never bleed
+        // over the panels below (mobile: the chart sits above the focal
+        // Open-Positions stack — design 11-mobile-cockpit).
+        overflow: 'hidden',
       })}
     >
       <header className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' })}>
@@ -134,13 +143,13 @@ export default function CandleChartPanel({
       {error && candles.length === 0 ? (
         <div
           data-testid="chart-error"
-          className={css({ height: '460px', display: 'grid', placeItems: 'center', color: 'zone.warn', fontFamily: 'mono', fontSize: 'xs' })}
+          className={css({ height: { base: '250px', lg: '460px' }, display: 'grid', placeItems: 'center', color: 'zone.warn', fontFamily: 'mono', fontSize: 'xs' })}
         >
           chart unavailable: {error}
         </div>
       ) : loading && candles.length === 0 ? (
         <div
-          className={css({ height: '460px', display: 'grid', placeItems: 'center', color: 'github.textMuted', fontFamily: 'mono', fontSize: 'xs' })}
+          className={css({ height: { base: '250px', lg: '460px' }, display: 'grid', placeItems: 'center', color: 'github.textMuted', fontFamily: 'mono', fontSize: 'xs' })}
         >
           loading {coin.toUpperCase()} {timeframe}…
         </div>

@@ -33,6 +33,12 @@ export interface LedgerTrade {
   id: string;
   /** Epoch ms of the opening fill (sort key). */
   openedAt: number;
+  /**
+   * Epoch ms of the closing fill (the flat/flip boundary). Null for still-open
+   * rows. Realized PnL is *earned* at this instant, so the equity curve buckets
+   * on `closedAt` (a trade opened day 1 / closed day 20 lands on day 20).
+   */
+  closedAt: number | null;
   coin: string;
   /** Position direction over the trade's life. */
   side: 'long' | 'short';
@@ -62,8 +68,12 @@ export interface PerformanceKpis {
   winRatePct: number;
   winCount: number;
   lossCount: number;
-  /** grossWin / grossLoss (∞-guarded → grossWin when no losses). */
-  profitFactor: number;
+  /**
+   * grossWin / grossLoss. `Infinity` when there are wins but no losses
+   * (rendered "∞"), `null` when there are no closed trades at all. A finite
+   * ratio otherwise. NEVER a dollar figure masquerading as a ratio.
+   */
+  profitFactor: number | null;
   /** Σ realized PnL over closed trades opened today. */
   todayPnlUsd: number;
   /** netPnl / closedCount (0 when none). */
@@ -93,6 +103,40 @@ function dayStart(ms: number): number {
 }
 
 /**
+ * Resolve the start-of-day epoch ms for `ms` in a given IANA timezone (default
+ * UTC). The "Today" KPI must reset at the OPERATOR's local midnight, not UTC
+ * midnight — the operator is US/Eastern, where UTC midnight falls mid-afternoon,
+ * so a naive UTC floor resets "Today" at ~19:00–20:00 local. We compute the
+ * timezone's UTC offset at the instant via `Intl` (DST-correct) and floor in
+ * local space. Deterministic: depends only on `ms` + `tz`, no ambient clock.
+ */
+export function localDayStart(ms: number, tz = 'UTC'): number {
+  if (tz === 'UTC') return dayStart(ms);
+  const offsetMs = tzOffsetMs(ms, tz);
+  // Shift into local wall-clock space, floor to local midnight, shift back.
+  return Math.floor((ms + offsetMs) / 86_400_000) * 86_400_000 - offsetMs;
+}
+
+/** UTC offset (ms, +east) of `tz` at instant `ms`, via Intl (DST-correct). */
+function tzOffsetMs(ms: number, tz: string): number {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+  const parts = dtf.formatToParts(new Date(ms));
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? '0');
+  // The wall-clock components in `tz`, interpreted as if they were UTC.
+  const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'));
+  return asUtc - Math.floor(ms / 1000) * 1000;
+}
+
+/**
  * Fold the fill ledger for ONE coin into a per-coin realized + open summary.
  * We reconstruct round-trips by walking fills in chronological order: whenever
  * the running position returns to flat (or flips), the realized PnL accumulated
@@ -119,48 +163,73 @@ function tradesForCoin(
   let entryNotional = 0;
   let entrySize = 0;
 
+  // Begin a fresh round-trip from the side the position now holds. The opening
+  // fill's px/sz seed the entry VWAP basis (for a flip, this is the OVERSHOOT
+  // size that survived past flat, priced at the fill px — matching applyFill).
+  function openRoundTrip(fill: CanonicalFill, side: 'long' | 'short', basisSz: number, realizedNow: number, feesBaseNow: number): void {
+    openSide = side;
+    openedAt = fill.filledAt;
+    openIntentId = fill.clientIntentId;
+    realizedBase = realizedNow;
+    feesBase = feesBaseNow;
+    entryNotional = fill.px * basisSz;
+    entrySize = basisSz;
+  }
+
+  // Close the running round-trip at `fill` and push the realized LedgerTrade.
+  function closeRoundTrip(fill: CanonicalFill, realizedNow: number, feesNow: number): void {
+    if (!openSide) return;
+    const realized = realizedNow - realizedBase;
+    const fees = feesNow - feesBase;
+    const entryPx = entrySize > 0 ? entryNotional / entrySize : fill.px;
+    trades.push({
+      id: openIntentId || `${coin}-${openedAt}`,
+      openedAt,
+      closedAt: fill.filledAt,
+      coin,
+      side: openSide,
+      sz: entrySize,
+      entryPx,
+      exitPx: fill.px,
+      leverage: null,
+      pnlUsd: realized,
+      feesUsd: fees,
+      status: realized >= 0 ? 'win' : 'loss',
+      today: fill.filledAt >= todayStartMs,
+    });
+    openSide = null;
+  }
+
   let pos: Position = emptyPosition(coin);
   for (const fill of chrono) {
     const prevSide = pos.side;
+    const feesBeforeFill = pos.feesPaidUsd;
     pos = applyFill(pos, fill);
     const nowSide = pos.side;
 
     if (prevSide === 'flat' && nowSide !== 'flat') {
-      // Opening a fresh exposure from flat.
-      openSide = nowSide;
-      openedAt = fill.filledAt;
-      openIntentId = fill.clientIntentId;
-      realizedBase = pos.realizedPnlUsd; // accumulators already include this fill's realized (0 on open)
-      feesBase = pos.feesPaidUsd - fill.feeUsd;
-      entryNotional = fill.px * fill.sz;
-      entrySize = fill.sz;
+      // Opening a fresh exposure from flat. Fee base excludes this opening fee.
+      openRoundTrip(fill, nowSide, fill.sz, pos.realizedPnlUsd, feesBeforeFill);
     } else if (nowSide !== 'flat' && nowSide === prevSide) {
-      // Adding to the same side — extend the entry VWAP basis.
+      // Adding to / reducing the same side. Extend the entry VWAP basis only on
+      // a same-direction add (a partial reduce keeps the basis intact).
       if (fill.side === (nowSide === 'long' ? 'buy' : 'sell')) {
         entryNotional += fill.px * fill.sz;
         entrySize += fill.sz;
       }
-    }
-
-    if (prevSide !== 'flat' && nowSide === 'flat' && openSide) {
-      const realized = pos.realizedPnlUsd - realizedBase;
-      const fees = pos.feesPaidUsd - feesBase;
-      const entryPx = entrySize > 0 ? entryNotional / entrySize : fill.px;
-      trades.push({
-        id: openIntentId || `${coin}-${openedAt}`,
-        openedAt,
-        coin,
-        side: openSide,
-        sz: entrySize,
-        entryPx,
-        exitPx: fill.px,
-        leverage: null,
-        pnlUsd: realized,
-        feesUsd: fees,
-        status: realized >= 0 ? 'win' : 'loss',
-        today: openedAt >= todayStartMs,
-      });
-      openSide = null;
+    } else if (prevSide !== 'flat' && nowSide === 'flat') {
+      // Returned to flat — close the round-trip at this fill.
+      closeRoundTrip(fill, pos.realizedPnlUsd, pos.feesPaidUsd);
+    } else if (prevSide !== 'flat' && nowSide !== 'flat' && nowSide !== prevSide) {
+      // DIRECT FLIP (long↔short without passing through flat). applyFill already
+      // realized the close of the OLD side and reopened the overshoot at fill px.
+      // Treat it as close-old-then-open-new so the realized PnL is captured in a
+      // closed LedgerTrade (otherwise it is silently dropped → undercounts).
+      // The flip fee belongs to the close (it's the fee that flattened the old
+      // side); the new side opens with zero attributed fee until its own fills.
+      closeRoundTrip(fill, pos.realizedPnlUsd, pos.feesPaidUsd);
+      // Overshoot size that survived past flat seeds the new side's basis.
+      openRoundTrip(fill, nowSide, pos.sz, pos.realizedPnlUsd, pos.feesPaidUsd);
     }
   }
 
@@ -172,6 +241,7 @@ function tradesForCoin(
     trades.push({
       id: `${coin}-open`,
       openedAt,
+      closedAt: null,
       coin,
       side: pos.side,
       sz: pos.sz,
@@ -198,8 +268,10 @@ export function buildLedger(
   marks: MarkMap,
   nowMs: number,
   leverageByCoin: Record<string, number | null> = {},
+  /** IANA tz for the "today" window (operator-local). Default UTC. */
+  tz = 'UTC',
 ): LedgerTrade[] {
-  const todayStartMs = dayStart(nowMs);
+  const todayStartMs = localDayStart(nowMs, tz);
   const byCoin = new Map<string, CanonicalFill[]>();
   for (const f of fills) {
     const arr = byCoin.get(f.coin) ?? [];
@@ -230,7 +302,12 @@ export function computeKpis(
   const netPnlUsd = closed.reduce((s, t) => s + t.pnlUsd, 0);
   const grossWin = wins.reduce((s, t) => s + t.pnlUsd, 0);
   const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnlUsd, 0));
-  const profitFactor = grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? grossWin : 0;
+  // Profit factor = grossWin / grossLoss. NEVER a dollar figure as a ratio:
+  //   - no closed trades      → null (nothing to rate)
+  //   - wins but no losses    → Infinity (rendered "∞")
+  //   - otherwise             → the finite ratio.
+  const profitFactor =
+    closed.length === 0 ? null : grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0;
   const todayPnlUsd = closed.filter((t) => t.today).reduce((s, t) => s + t.pnlUsd, 0);
   const feesUsd = closed.reduce((s, t) => s + t.feesUsd, 0);
   const openExposureUsd = open.reduce((s, t) => {
@@ -273,9 +350,11 @@ export function maxDrawdown(equity: EquityPoint[]): number {
  *
  * We reconstruct cash backwards from the current realized balance by removing
  * each closed trade's realized PnL (net of fee) as we step back in time. The
- * series spans the last `days` UTC days, one point per day, anchored to the
- * day each closed trade landed. Open positions' unrealized PnL is added to the
- * final point only (it isn't realized yet).
+ * series spans the last `days` UTC days, one point per day, anchored to the day
+ * each closed trade *closed* (realized PnL is earned at the flat/flip boundary —
+ * a trade opened day 1 / closed day 20 lands on day 20, so the curve and the
+ * max-drawdown KPI take the correct shape). Open positions' unrealized PnL is
+ * added to the final point only (it isn't realized yet).
  */
 export function buildEquitySeries(
   ledger: LedgerTrade[],
@@ -285,16 +364,16 @@ export function buildEquitySeries(
 ): EquityPoint[] {
   const closed = ledger
     .filter((t) => t.status !== 'open')
-    .sort((a, b) => a.openedAt - b.openedAt);
+    .sort((a, b) => (a.closedAt ?? a.openedAt) - (b.closedAt ?? b.openedAt));
   const todayBucket = dayStart(nowMs);
   const start = todayBucket - (days - 1) * 86_400_000;
 
-  // Realized cash at each closed trade's open time, cumulative.
+  // Realized cash at each closed trade's CLOSE time, cumulative.
   const realizedCumByBucket = new Map<number, number>();
   let cum = 0;
   for (const t of closed) {
     cum += t.pnlUsd - t.feesUsd;
-    realizedCumByBucket.set(dayStart(t.openedAt), cum);
+    realizedCumByBucket.set(dayStart(t.closedAt ?? t.openedAt), cum);
   }
   const totalRealized = cum;
 

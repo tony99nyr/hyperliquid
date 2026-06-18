@@ -10,7 +10,7 @@
  */
 
 import { css } from '@styled-system/css';
-import { ResponsiveContainer, AreaChart, Area, YAxis, Tooltip } from 'recharts';
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts';
 import { usePerformance } from '@/hooks/usePerformance';
 import type { PerformanceSummary } from '@/lib/cockpit/performance-service';
 import type { LedgerTrade } from '@/lib/cockpit/performance-business-logic';
@@ -50,6 +50,42 @@ function fmtMoney(n: number): string {
   return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
 }
 
+/** IBM Plex Mono CSS var (with fallbacks) for chart axis text — NOT generic monospace. */
+const AXIS_FONT =
+  "var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace";
+
+/**
+ * Choose a $-axis tick formatter from the equity series' value span. When the
+ * span is tiny (a flat / single-session curve) `$N.toFixed(0)` collapses every
+ * tick to the same "$50000"; we add cents (or more) so adjacent ticks differ.
+ * Large spans stay clean ($k abbreviations).
+ */
+function equityTickFormatter(values: number[]): (v: number) => string {
+  if (values.length === 0) return (v) => `$${v.toFixed(0)}`;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min;
+  if (span >= 2000) return (v) => `$${(v / 1000).toFixed(1)}k`;
+  if (span >= 50) return (v) => `$${Math.round(v).toLocaleString('en-US')}`;
+  // Small span: cents resolve adjacent ticks (and 3dp for sub-dollar spans).
+  const digits = span >= 5 ? 2 : 3;
+  return (v) => `$${v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+}
+
+/**
+ * Pad an ['auto','auto'] domain so a near-flat curve isn't a hairline on the
+ * floor and the ticks have room to differ. Returns a [min,max] domain padded by
+ * ~6% of the span (or a small absolute floor when the span is ~0).
+ */
+function paddedDomain(values: number[]): [number, number] | ['auto', 'auto'] {
+  if (values.length === 0) return ['auto', 'auto'];
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min;
+  const pad = span > 0 ? span * 0.06 : Math.max(1, Math.abs(max) * 0.001);
+  return [min - pad, max + pad];
+}
+
 interface KpiSpec {
   slug: string;
   label: string;
@@ -58,10 +94,18 @@ interface KpiSpec {
   sub: string;
 }
 
-function profitFactorColor(pf: number): string {
+function profitFactorColor(pf: number | null): string {
+  if (pf === null) return GH.textMuted;
   if (pf >= 1.5) return ZONE_COLORS.ok;
   if (pf >= 1) return ZONE_COLORS.warn;
   return ZONE_COLORS.danger;
+}
+
+/** Render profit factor: "∞" when no losses, "—" when no trades, else 2dp. */
+function fmtProfitFactor(pf: number | null): string {
+  if (pf === null) return '—';
+  if (!Number.isFinite(pf)) return '∞';
+  return pf.toFixed(2);
 }
 
 function buildKpis(summary: PerformanceSummary): KpiSpec[] {
@@ -84,7 +128,7 @@ function buildKpis(summary: PerformanceSummary): KpiSpec[] {
     {
       slug: 'profit-factor',
       label: 'Profit factor',
-      value: k.profitFactor.toFixed(2),
+      value: fmtProfitFactor(k.profitFactor),
       color: profitFactorColor(k.profitFactor),
       sub: 'gross win / loss',
     },
@@ -175,7 +219,14 @@ function KpiCard({ spec }: { spec: KpiSpec }) {
 }
 
 function EquityCard({ summary }: { summary: PerformanceSummary }) {
-  const up = summary.equity30dPct >= 0;
+  // No real account balance → the curve is a cumulative P&L line (real), and the
+  // absolute equity + % are honestly "—" rather than a fabricated dollar level.
+  const hasRealEquity = summary.equityUsd !== null;
+  const pct = summary.equity30dPct;
+  const up = pct !== null && pct >= 0;
+  const values = summary.equity.map((p) => p.equity);
+  const tickFmt = equityTickFormatter(values);
+  const yDomain = paddedDomain(values);
   return (
     <div
       data-testid="equity-card"
@@ -198,21 +249,27 @@ function EquityCard({ summary }: { summary: PerformanceSummary }) {
           className={css({ fontFamily: 'sans', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '.14em', fontWeight: 'semibold' })}
           style={{ color: '#9aa4b5' }}
         >
-          Account Equity
+          {hasRealEquity ? 'Account Equity' : 'Cumulative P&L'}
         </span>
         <span className={css({ fontFamily: 'mono', fontSize: '11px' })} style={{ color: '#586273' }}>
           30 days
         </span>
         <span className={css({ flex: 1 })} />
-        <span className={css({ fontFamily: 'mono', fontSize: '18px', fontWeight: 'semibold' })} style={{ color: GH.textBright, ...TNUM }}>
-          ${fmtMoney(summary.equityUsd)}
-        </span>
         <span
-          className={css({ fontFamily: 'mono', fontSize: '12px' })}
-          style={{ color: up ? ZONE_COLORS.ok : ZONE_COLORS.danger, ...TNUM }}
+          data-testid="equity-value"
+          className={css({ fontFamily: 'mono', fontSize: '18px', fontWeight: 'semibold' })}
+          style={{ color: GH.textBright, ...TNUM }}
         >
-          {`${up ? '+' : ''}${summary.equity30dPct.toFixed(1)}% · 30d`}
+          {hasRealEquity ? `$${fmtMoney(summary.equityUsd as number)}` : fmtUsd(summary.netPnlUsd)}
         </span>
+        {pct !== null && (
+          <span
+            className={css({ fontFamily: 'mono', fontSize: '12px' })}
+            style={{ color: up ? ZONE_COLORS.ok : ZONE_COLORS.danger, ...TNUM }}
+          >
+            {`${up ? '+' : ''}${pct.toFixed(1)}% · 30d`}
+          </span>
+        )}
       </div>
       <div style={{ height: 280, padding: '8px 4px' }}>
         {summary.equity.length === 0 ? (
@@ -231,19 +288,30 @@ function EquityCard({ summary }: { summary: PerformanceSummary }) {
                   <stop offset="100%" stopColor="rgba(25,201,138,0)" />
                 </linearGradient>
               </defs>
+              {/* Time X-axis (hidden) — anchors each point to its real day so a
+                  sparse session spreads across the span instead of cliffing at
+                  the right edge. */}
+              <XAxis
+                dataKey="t"
+                type="number"
+                scale="time"
+                domain={['dataMin', 'dataMax']}
+                hide
+              />
               <YAxis
                 orientation="right"
-                domain={['auto', 'auto']}
-                width={56}
+                domain={yDomain}
+                width={62}
                 axisLine={false}
                 tickLine={false}
-                tick={{ fill: '#586273', fontSize: 10, fontFamily: 'monospace' }}
-                tickFormatter={(v: number) => `$${v.toFixed(0)}`}
+                tick={{ fill: '#586273', fontSize: 10, fontFamily: AXIS_FONT }}
+                tickFormatter={tickFmt}
               />
               <Tooltip
-                contentStyle={{ background: '#0a0d13', border: '1px solid #21262d' }}
+                contentStyle={{ background: '#0a0d13', border: '1px solid #21262d', fontFamily: AXIS_FONT }}
                 labelStyle={{ color: '#e8ebf2' }}
                 itemStyle={{ color: '#e8ebf2' }}
+                labelFormatter={(t) => fmtTime(Number(t))}
                 formatter={(v) => `$${Number(v).toFixed(2)}`}
               />
               <Area
@@ -252,6 +320,8 @@ function EquityCard({ summary }: { summary: PerformanceSummary }) {
                 stroke="#19c98a"
                 strokeWidth={1.8}
                 fill="url(#perf-equity-fill)"
+                isAnimationActive={false}
+                dot={summary.equity.length <= 2 ? { r: 2.5, fill: '#19c98a', strokeWidth: 0 } : false}
               />
             </AreaChart>
           </ResponsiveContainer>
@@ -324,6 +394,65 @@ function LedgerRow({ trade }: { trade: LedgerTrade }) {
   );
 }
 
+/** Mobile ledger entry — a stacked CARD (no horizontal scroll). */
+function LedgerCard({ trade }: { trade: LedgerTrade }) {
+  const chip = STATUS_CHIP[trade.status];
+  const exitText = trade.exitPx == null ? 'live' : fmtPxFor(trade.coin, trade.exitPx);
+  return (
+    <div
+      data-testid="ledger-card"
+      className={css({
+        bg: 'cockpit.row',
+        border: '1px solid token(colors.github.borderSubtle)',
+        borderRadius: '10px',
+        padding: '12px 14px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px',
+      })}
+    >
+      <div className={css({ display: 'flex', alignItems: 'center', gap: '8px' })}>
+        <span className={css({ fontFamily: 'mono', fontSize: '13px', fontWeight: 600 })} style={{ color: '#e8ebf2' }}>
+          {trade.coin}-PERP
+        </span>
+        <span
+          className={css({ fontFamily: 'mono', fontSize: '10px', fontWeight: 600, letterSpacing: '.06em' })}
+          style={{ color: trade.side === 'long' ? ZONE_COLORS.ok : ZONE_COLORS.danger }}
+        >
+          {trade.side.toUpperCase()}
+        </span>
+        {trade.leverage != null && (
+          <span className={css({ fontFamily: 'mono', fontSize: '10px' })} style={{ color: '#8b95a6' }}>
+            {trade.leverage}x
+          </span>
+        )}
+        <span className={css({ flex: 1 })} />
+        <span
+          className={css({ fontFamily: 'mono', fontSize: '14px', fontWeight: 600 })}
+          style={{ color: trade.pnlUsd >= 0 ? ZONE_COLORS.ok : ZONE_COLORS.danger, ...TNUM }}
+        >
+          {fmtUsd(trade.pnlUsd)}
+        </span>
+      </div>
+      <div className={css({ display: 'flex', alignItems: 'center', gap: '10px', fontFamily: 'mono', fontSize: '11px' })}>
+        <span style={{ color: '#8b95a6', ...TNUM }}>{fmtTime(trade.openedAt)}</span>
+        <span style={{ color: '#586273' }}>·</span>
+        <span style={{ color: '#cdd4e0', ...TNUM }}>
+          {fmtPxFor(trade.coin, trade.entryPx)} → {exitText}
+        </span>
+        <span className={css({ flex: 1 })} />
+        <span
+          data-testid="ledger-status"
+          className={css({ fontFamily: 'mono', display: 'inline-block' })}
+          style={{ fontSize: '10px', letterSpacing: '.05em', padding: '2px 8px', borderRadius: '5px', color: chip.color, background: chip.bg }}
+        >
+          {chip.label}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function TradeLedger({ summary }: { summary: PerformanceSummary }) {
   return (
     <div
@@ -346,42 +475,58 @@ function TradeLedger({ summary }: { summary: PerformanceSummary }) {
           {summary.ledger.length} entries
         </span>
       </div>
-      <div className={css({ overflowX: 'auto' })}>
-        <div style={{ minWidth: '860px' }}>
-          <div
-            className={css({
-              display: 'grid',
-              gap: '12px',
-              padding: '10px 18px',
-              fontFamily: 'sans',
-              fontSize: '10px',
-              textTransform: 'uppercase',
-              letterSpacing: '.1em',
-              fontWeight: 'semibold',
-            })}
-            style={{ gridTemplateColumns: LEDGER_GRID, color: '#586273' }}
-          >
-            <span>Time</span>
-            <span>Market</span>
-            <span>Side</span>
-            <span>Entry</span>
-            <span>Exit</span>
-            <span>Lev</span>
-            <span style={{ textAlign: 'right' }}>Realized PnL</span>
-            <span style={{ textAlign: 'right' }}>Status</span>
-          </div>
-          {summary.ledger.length === 0 ? (
-            <div
-              className={css({ padding: '11px 18px', fontFamily: 'mono', fontSize: '11.5px' })}
-              style={{ color: '#586273', minWidth: '860px' }}
-            >
-              No trades yet — the ledger fills as fills land.
-            </div>
-          ) : (
-            summary.ledger.map((t) => <LedgerRow key={t.id} trade={t} />)
-          )}
+
+      {summary.ledger.length === 0 ? (
+        <div
+          className={css({ padding: '11px 18px', fontFamily: 'mono', fontSize: '11.5px' })}
+          style={{ color: '#586273' }}
+        >
+          No trades yet — the ledger fills as fills land.
         </div>
-      </div>
+      ) : (
+        <>
+          {/* Mobile: stacked cards (no horizontal scroll). */}
+          <div
+            data-testid="ledger-cards"
+            className={css({ display: { base: 'flex', md: 'none' }, flexDirection: 'column', gap: '8px', padding: '0 12px 12px' })}
+          >
+            {summary.ledger.map((t) => (
+              <LedgerCard key={t.id} trade={t} />
+            ))}
+          </div>
+
+          {/* Desktop: the dense table. */}
+          <div className={css({ display: { base: 'none', md: 'block' }, overflowX: 'auto' })}>
+            <div style={{ minWidth: '860px' }}>
+              <div
+                className={css({
+                  display: 'grid',
+                  gap: '12px',
+                  padding: '10px 18px',
+                  fontFamily: 'sans',
+                  fontSize: '10px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '.1em',
+                  fontWeight: 'semibold',
+                })}
+                style={{ gridTemplateColumns: LEDGER_GRID, color: '#586273' }}
+              >
+                <span>Time</span>
+                <span>Market</span>
+                <span>Side</span>
+                <span>Entry</span>
+                <span>Exit</span>
+                <span>Lev</span>
+                <span style={{ textAlign: 'right' }}>Realized PnL</span>
+                <span style={{ textAlign: 'right' }}>Status</span>
+              </div>
+              {summary.ledger.map((t) => (
+                <LedgerRow key={t.id} trade={t} />
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -69,7 +69,7 @@ export default function OpenPositionsPanel({
   return (
     <section
       data-testid="open-positions-panel"
-      className={css({ bg: 'cockpit.focal', border: '1px solid', borderColor: 'rgba(91,140,255,0.22)', borderRadius: '12px', overflow: 'hidden', position: 'relative' })}
+      className={css({ bg: 'cockpit.focal', border: '1px solid', borderColor: 'rgba(91,140,255,0.22)', borderRadius: '12px', overflow: 'hidden', position: 'relative', flexShrink: 0 })}
       style={{ boxShadow: '0 0 0 1px rgba(91,140,255,0.04), 0 8px 30px rgba(0,0,0,0.25)' }}
     >
       {/* Top accent gradient strip. */}

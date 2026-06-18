@@ -40,8 +40,9 @@ export default function TopBar({ view, onViewChange, mode, equityUsd, todayUsd, 
       className={css({
         display: 'flex',
         alignItems: 'center',
-        gap: { base: '12px', md: '20px' },
-        paddingX: '18px',
+        flexWrap: 'nowrap',
+        gap: { base: '10px', md: '20px' },
+        paddingX: { base: '12px', md: '18px' },
         height: '52px',
         flex: 'none',
         borderBottom: '1px solid token(colors.github.border)',
@@ -53,15 +54,17 @@ export default function TopBar({ view, onViewChange, mode, equityUsd, todayUsd, 
         <span className={css({ fontFamily: 'mono', fontWeight: 'semibold', fontSize: '15px', letterSpacing: '0.04em', color: 'github.textBright' })}>
           HL COCKPIT
         </span>
-        <span className={css({ fontFamily: 'mono', fontSize: '10.5px', letterSpacing: '0.14em', color: 'cockpit.faint', textTransform: 'uppercase', display: { base: 'none', sm: 'inline' } })}>
+        <span className={css({ fontFamily: 'mono', fontSize: '10.5px', letterSpacing: '0.14em', textTransform: 'uppercase', display: { base: 'none', sm: 'inline' } })} style={{ color: '#9aa4b5' }}>
           decision terminal
         </span>
       </div>
 
-      {/* Segmented nav */}
+      {/* Segmented nav — desktop only; the mobile shell navigates via the bottom
+          tab bar, so hiding this here is what stops the 52px bar from wrapping on
+          a phone (brand + nav + 4 right-cluster readouts overflow 390px). */}
       <nav
         className={css({
-          display: 'flex',
+          display: { base: 'none', lg: 'flex' },
           gap: '2px',
           bg: 'cockpit.navIdle',
           border: '1px solid token(colors.github.border)',
@@ -77,8 +80,9 @@ export default function TopBar({ view, onViewChange, mode, equityUsd, todayUsd, 
               type="button"
               data-testid={`nav-${n.key}`}
               data-active={active}
+              aria-current={active ? 'page' : undefined}
               onClick={() => onViewChange(n.key)}
-              style={{ background: active ? TERM.navActive : 'transparent', color: active ? '#e8ebf2' : '#8b95a6' }}
+              style={{ background: active ? TERM.navActive : 'transparent', color: active ? '#e8ebf2' : '#9aa4b5' }}
               className={css({
                 fontFamily: 'sans',
                 fontSize: '12px',

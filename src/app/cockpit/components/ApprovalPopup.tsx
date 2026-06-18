@@ -257,9 +257,9 @@ function PopupBody({
         inset: 0,
         zIndex: 1000,
         display: 'flex',
-        alignItems: 'center',
+        alignItems: { base: 'flex-end', md: 'center' },
         justifyContent: 'center',
-        padding: '16px',
+        padding: { base: '0', md: '16px' },
         animation: 'backdropIn 0.15s ease',
         overflowY: 'auto',
       })}
@@ -273,10 +273,11 @@ function PopupBody({
         aria-label="Trade approval"
         className={css({
           width: '100%',
-          maxWidth: '520px',
+          maxWidth: { base: '100%', md: '520px' },
           maxHeight: '94vh',
           overflowY: 'auto',
-          borderRadius: '16px',
+          borderRadius: { base: '16px 16px 0 0', md: '16px' },
+          paddingBottom: { base: 'env(safe-area-inset-bottom)', md: '0' },
           display: 'flex',
           flexDirection: 'column',
           animation: 'popupIn 0.2s cubic-bezier(0.2, 0.8, 0.2, 1)',

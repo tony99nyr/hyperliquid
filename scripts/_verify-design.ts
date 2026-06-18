@@ -103,26 +103,66 @@ async function seedPositionSession(coin: string, leverage: number, leaderAddress
   return s.id;
 }
 
-/** Seed a closed-trade history so the Performance ledger + KPIs + equity render. */
-async function seedHistorySession(coin: string): Promise<string> {
-  const s = await openSession({ mode: 'paper', title: `DESIGN ${coin} history`, leaderAddress: null });
+/**
+ * Seed a MULTI-DAY history by inserting BACKDATED fills directly (paperFill
+ * stamps Date.now(), so it can't backdate). Each round-trip closes on a distinct
+ * day so the equity curve has a real rising shape spanning days + a readable axis
+ * (Fix 1: close-time bucketing). Leaves one open position for an OPEN row.
+ */
+async function seedMultiDayHistory(coin: string): Promise<string> {
+  const s = await openSession({ mode: 'paper', title: `DESIGN ${coin} multiday`, leaderAddress: null });
   seededSessions.push(s.id);
+  const c = getServiceRoleClient();
   const mark = await fetchMark(coin);
   const sz = Math.max(0.001, Math.round((150 / mark) * 1000) / 1000);
-  // Round-trip 1: a winning long (buy then sell higher via a synthetic mark).
-  const buy = await executeIntent({ clientIntentId: randomUUID(), sessionId: s.id, coin, side: 'buy', sz, reduceOnly: false, leverage: 5, createdAt: Date.now() - 3600_000 });
-  if (buy.sz > 0) {
-    await executeIntent({ clientIntentId: randomUUID(), sessionId: s.id, coin, side: 'sell', sz: buy.sz, reduceOnly: true, leverage: 5, createdAt: Date.now() - 1800_000 });
+  const DAY = 86_400_000;
+  const now = Date.now();
+
+  // Insert BACKDATED fills directly so `filled_at` is explicit (buildFillRow
+  // omits it → DB defaults to now(); paperFill also stamps Date.now()). The
+  // performance summary reads the fills ledger, so this gives a real multi-day
+  // close-time-bucketed equity curve (Fix 1).
+  async function insertFill(side: 'buy' | 'sell', px: number, daysAgo: number, reduceOnly = false): Promise<void> {
+    const { error } = await c.from('fills').insert({
+      session_id: s.id,
+      client_intent_id: randomUUID(),
+      coin: coin.toUpperCase(),
+      side,
+      px,
+      sz,
+      notional_usd: px * sz,
+      fee_usd: px * sz * 0.0004,
+      reduce_only: reduceOnly,
+      partial: false,
+      source: 'paper',
+      hl_order_id: null,
+      hl_raw: null,
+      filled_at: new Date(now - daysAgo * DAY).toISOString(),
+    });
+    if (error) throw new Error(`seed insertFill failed: ${error.message}`);
   }
-  // Round-trip 2: a small loss (sell then buy back) — best-effort via the book.
-  const sell = await executeIntent({ clientIntentId: randomUUID(), sessionId: s.id, coin, side: 'sell', sz, reduceOnly: false, leverage: 5, createdAt: Date.now() - 1200_000 });
-  if (sell.sz > 0) {
-    await executeIntent({ clientIntentId: randomUUID(), sessionId: s.id, coin, side: 'buy', sz: sell.sz, reduceOnly: true, leverage: 5, createdAt: Date.now() - 600_000 });
+
+  // A run of round-trips, each opened+closed on its own day, stepping the
+  // realized equity up over ~3 weeks (so the curve clearly rises across days).
+  const legs: { open: number; close: number; openDays: number; closeDays: number }[] = [
+    { open: mark * 0.94, close: mark * 0.96, openDays: 24, closeDays: 22 },
+    { open: mark * 0.95, close: mark * 0.98, openDays: 20, closeDays: 18 },
+    { open: mark * 0.97, close: mark * 0.995, openDays: 16, closeDays: 14 },
+    { open: mark * 0.99, close: mark * 0.985, openDays: 12, closeDays: 10 }, // one small loss
+    { open: mark * 0.985, close: mark * 1.01, openDays: 8, closeDays: 6 },
+    { open: mark * 1.0, close: mark * 1.03, openDays: 4, closeDays: 2 },
+  ];
+  for (const leg of legs) {
+    await insertFill('buy', leg.open, leg.openDays);
+    await insertFill('sell', leg.close, leg.closeDays, true);
   }
-  // Leave one open position so OPEN exposure + an OPEN ledger row show.
-  const open = await executeIntent({ clientIntentId: randomUUID(), sessionId: s.id, coin, side: 'buy', sz, reduceOnly: false, leverage: 8, createdAt: Date.now() });
-  if (open.sz > 0) {
-    await writePnlSnapshot({ sessionId: s.id, coin, realizedPnlUsd: 0, unrealizedPnlUsd: open.px * 0.004 * open.sz, feesPaidUsd: open.feeUsd, markPx: open.px * 1.004 });
+  // Leave one open position TODAY so OPEN exposure + an OPEN ledger row show, AND
+  // upsert the positions/pnl rows so the cockpit Open-Positions panel renders it
+  // (that panel reads the positions table, not the fills ledger).
+  const openPx = mark * 1.0;
+  const openFill = await executeIntent({ clientIntentId: randomUUID(), sessionId: s.id, coin, side: 'buy', sz, reduceOnly: false, leverage: 5, createdAt: now });
+  if (openFill.sz > 0) {
+    await writePnlSnapshot({ sessionId: s.id, coin, realizedPnlUsd: 0, unrealizedPnlUsd: openPx * 0.004 * sz, feesPaidUsd: openFill.feeUsd, markPx: openFill.px * 1.004 });
   }
   return s.id;
 }
@@ -266,9 +306,10 @@ async function main(): Promise<void> {
       await page.locator('[data-testid="trader-detail-close"]').dispatchEvent('click').catch(() => {});
     }
 
-    // 22 — Performance view.
-    console.log('Seeding history session (performance)…');
-    await seedHistorySession('ETH');
+    // 22 — Performance view, with a MULTI-DAY equity curve (Fix 1: rising shape +
+    // readable axis from close-time bucketing).
+    console.log('Seeding multi-day history session (performance + equity curve)…');
+    await seedMultiDayHistory('ETH');
     await page.goto(`${baseUrl}/cockpit`, { waitUntil: 'networkidle', timeout: 30_000 });
     await delay(4000);
     await page.locator('[data-testid="nav-performance"]').dispatchEvent('click');
@@ -276,7 +317,8 @@ async function main(): Promise<void> {
     await delay(2500);
     const kpis = await page.locator('[data-testid="kpi-card"]').count();
     const ledgerRows = await page.locator('[data-testid="ledger-row"]').count();
-    console.log(`  performance kpis=${kpis} ledgerRows=${ledgerRows}`);
+    const pfText = await page.locator('[data-kpi="profit-factor"]').textContent().catch(() => null);
+    console.log(`  performance kpis=${kpis} ledgerRows=${ledgerRows} profitFactor=${pfText}`);
     await page.screenshot({ path: `${SHOT_DIR}/design-22-performance.png`, fullPage: false });
 
     // 03 — Approval modal (re-skinned).
@@ -287,15 +329,52 @@ async function main(): Promise<void> {
     await delay(800);
     await page.screenshot({ path: `${SHOT_DIR}/design-03-approval.png`, fullPage: false });
 
-    // 11 — Mobile Cockpit (402px).
-    console.log('Capturing mobile cockpit…');
+    // 11/12/13 — Mobile surfaces (402px): Cockpit (focal Open-Positions cards) +
+    // the bottom tab bar, then the Traders and Performance tabs (Fix 2).
+    console.log('Capturing mobile cockpit + tab bar…');
     const mobile = await browser.newContext({ viewport: { width: 402, height: 874 }, deviceScaleFactor: 2 });
     await mobile.addCookies([{ name: cookieName, value: cookieValue, domain: '127.0.0.1', path: '/' }]);
     const mpage = await mobile.newPage();
-    await seedPositionSession('ETH', 5, leaderAddress);
+    // Seed a session that has BOTH an open position (mobile cockpit focal panel)
+    // AND closed multi-day history (mobile Performance tab cards + equity curve).
+    // It must be the most-recent active session so getActiveSession resolves it,
+    // so we seed a leader-followed open position first, THEN backfill its history.
+    await seedMultiDayHistory('ETH');
     await mpage.goto(`${baseUrl}/cockpit`, { waitUntil: 'networkidle', timeout: 30_000 });
     await delay(5000);
+    const tabBar = await mpage.locator('[data-testid="mobile-tab-bar"]').isVisible().catch(() => false);
+    const mobileOpenCount = await mpage.locator('[data-testid="open-count"]').textContent().catch(() => null);
+    // Where does the focal Open-Positions panel sit relative to the chart? (Fix 2
+    // promotes it directly under the chart.)
+    const chartBox = await mpage.locator('[data-testid="candle-chart-panel"]').boundingBox().catch(() => null);
+    const opBox = await mpage.locator('[data-testid="open-positions-panel"]').boundingBox().catch(() => null);
+    const healthBox = await mpage.locator('[data-testid="health-panel"]').boundingBox().catch(() => null);
+    console.log(`  mobile tab-bar visible=${tabBar} open-count=${mobileOpenCount}`);
+    console.log(`  mobile y-order chart=${chartBox?.y?.toFixed(0)} openPositions=${opBox?.y?.toFixed(0)} health=${healthBox?.y?.toFixed(0)}`);
     await mpage.screenshot({ path: `${SHOT_DIR}/design-11-mobile-cockpit.png`, fullPage: false });
+    // Focal panel close-up (scrolled into view) so we can SEE the position cards.
+    const opPanel = mpage.locator('[data-testid="open-positions-panel"]');
+    if (await opPanel.count()) {
+      await opPanel.scrollIntoViewIfNeeded();
+      await delay(800);
+      await mpage.screenshot({ path: `${SHOT_DIR}/design-11b-mobile-open-positions.png`, fullPage: false });
+    }
+
+    // Traders tab.
+    await mpage.locator('[data-testid="mobile-tab-traders"]').dispatchEvent('click');
+    await mpage.locator('[data-testid="mobile-traders-view"]').waitFor({ state: 'visible', timeout: 8000 });
+    await delay(1500);
+    const traderRows = await mpage.locator('[data-testid="top-trader-row"]').count();
+    console.log(`  mobile Traders tab rows=${traderRows}`);
+    await mpage.screenshot({ path: `${SHOT_DIR}/design-12-mobile-traders.png`, fullPage: false });
+
+    // Performance tab.
+    await mpage.locator('[data-testid="mobile-tab-performance"]').dispatchEvent('click');
+    await mpage.locator('[data-testid="performance-view"]').waitFor({ state: 'visible', timeout: 8000 });
+    await delay(2000);
+    const mobileCards = await mpage.locator('[data-testid="ledger-card"]').count();
+    console.log(`  mobile Performance tab ledger-cards=${mobileCards}`);
+    await mpage.screenshot({ path: `${SHOT_DIR}/design-13-mobile-performance.png`, fullPage: false });
     await mobile.close();
 
     await context.close();

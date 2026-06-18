@@ -125,6 +125,26 @@ export default defineConfig({
     },
     '::selection': { background: 'rgba(91,140,255,0.3)' },
     '*': { boxSizing: 'border-box' },
+    // Dark terminal scrollbars (replace the bright OS default that clashes with
+    // the void palette). Firefox uses `scrollbar-*`; WebKit/Blink use the
+    // pseudo-elements. Thin track, muted thumb that brightens on hover.
+    'html, body, *': {
+      scrollbarWidth: 'thin',
+      scrollbarColor: 'rgba(91,103,128,0.5) transparent',
+    },
+    '*::-webkit-scrollbar': { width: '10px', height: '10px' },
+    '*::-webkit-scrollbar-track': { background: 'transparent' },
+    '*::-webkit-scrollbar-thumb': {
+      background: 'rgba(91,103,128,0.45)',
+      borderRadius: '6px',
+      border: '2px solid transparent',
+      backgroundClip: 'content-box',
+    },
+    '*::-webkit-scrollbar-thumb:hover': {
+      background: 'rgba(123,137,166,0.7)',
+      backgroundClip: 'content-box',
+    },
+    '*::-webkit-scrollbar-corner': { background: 'transparent' },
     // A11y: a clearly visible keyboard-focus ring on the dark chrome. Mouse
     // clicks don't trigger :focus-visible, so this only shows for keyboard/AT
     // users (tabs, CoinSelector, buttons, links). Token-based accent ring.

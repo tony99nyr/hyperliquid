@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyAdminAuth, getClientIdentifier } from '@/lib/infrastructure/auth/auth';
 import { isSameOrigin } from '@/lib/infrastructure/auth/same-origin';
 import { checkRateLimit } from '@/lib/infrastructure/rate-limiting/in-memory-rate-limit';
-import { getPerformanceSummary } from '@/lib/cockpit/performance-service';
+import { getActivePerformanceSummary } from '@/lib/cockpit/performance-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,10 +34,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'Too many requests' }, { status: 429 });
   }
 
-  const sessionId = request.nextUrl.searchParams.get('sessionId')?.trim() ?? '';
-  if (!sessionId) {
-    return NextResponse.json({ ok: false, error: 'Missing sessionId' }, { status: 400 });
+  // SECURITY: the session is resolved SERVER-SIDE (getActiveSession). The caller
+  // may pass `sessionId` only as an assertion of which session it expects — it is
+  // validated against the active session, NEVER folded blindly. A mismatch (a
+  // caller pointing at someone else's / a stale session) is rejected, so a leaked
+  // or guessed id can't read another session's fill ledger.
+  const requested = request.nextUrl.searchParams.get('sessionId')?.trim() || null;
+  const result = await getActivePerformanceSummary(requested);
+  if (result.status === 'forbidden') {
+    return NextResponse.json({ ok: false, error: 'Session not active for this operator' }, { status: 403 });
   }
-  const summary = await getPerformanceSummary(sessionId);
-  return NextResponse.json({ ok: true, summary });
+  if (result.status === 'none') {
+    return NextResponse.json({ ok: false, error: 'No active session' }, { status: 404 });
+  }
+  return NextResponse.json({ ok: true, summary: result.summary });
 }

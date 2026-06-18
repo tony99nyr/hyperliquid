@@ -174,7 +174,7 @@ export default function ExitModal({
       ref={overlayRef}
       role="presentation"
       onKeyDown={onKeyDown}
-      className={css({ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', overflowY: 'auto', animation: 'backdropIn 0.15s ease' })}
+      className={css({ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: { base: 'flex-end', md: 'center' }, justifyContent: 'center', padding: { base: '0', md: '16px' }, overflowY: 'auto', animation: 'backdropIn 0.15s ease' })}
       style={{ background: 'rgba(4,6,10,0.65)', backdropFilter: 'blur(3px)' }}
     >
       <section
@@ -184,7 +184,7 @@ export default function ExitModal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={css({ width: '100%', maxWidth: '480px', maxHeight: '92vh', overflowY: 'auto', bg: 'cockpit.inset', border: '1px solid', borderColor: 'rgba(242,77,94,0.3)', borderRadius: '16px', display: 'flex', flexDirection: 'column', animation: 'popupIn 0.2s cubic-bezier(0.2,0.8,0.2,1)' })}
+        className={css({ width: '100%', maxWidth: { base: '100%', md: '480px' }, maxHeight: '92vh', overflowY: 'auto', bg: 'cockpit.inset', border: '1px solid', borderColor: 'rgba(242,77,94,0.3)', borderRadius: { base: '16px 16px 0 0', md: '16px' }, paddingBottom: { base: 'env(safe-area-inset-bottom)', md: '0' }, display: 'flex', flexDirection: 'column', animation: 'popupIn 0.2s cubic-bezier(0.2,0.8,0.2,1)' })}
         style={{ boxShadow: '0 30px 80px rgba(0,0,0,0.6)' }}
       >
         <header className={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 22px', borderBottom: '1px solid token(colors.github.borderSubtle)' })}>

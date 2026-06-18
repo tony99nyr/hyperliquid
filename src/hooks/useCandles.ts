@@ -15,10 +15,8 @@
  */
 
 import { useEffect, useState } from 'react';
-import {
-  fetchCandles,
-  type CandleInterval,
-} from '@/lib/hyperliquid/candle-service';
+import { fetchCandlesViaProxy } from '@/lib/hyperliquid/candle-client';
+import type { CandleInterval } from '@/lib/hyperliquid/candle-service-business-logic';
 import type { PriceCandle } from '@/types/trading-core';
 
 /** How far back to fetch per interval, tuned so each timeframe shows useful history. */
@@ -74,7 +72,7 @@ export function useCandles(coin: string, interval: CandleInterval): UseCandlesSt
     let active = true;
     const lookback = LOOKBACK_MS[interval];
     const load = async () => {
-      const res = await fetchCandles(coin, interval, Date.now() - lookback);
+      const res = await fetchCandlesViaProxy(coin, interval, lookback);
       if (!active) return;
       setCandles(res.candles);
       setStale(res.stale);

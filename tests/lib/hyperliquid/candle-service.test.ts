@@ -4,6 +4,7 @@ import {
   fetchMultiTimeframeCandles,
   _clearCandleCache,
   _candleCacheSize,
+  _isBackingOff,
 } from '@/lib/hyperliquid/candle-service';
 import { INTERVAL_MS } from '@/lib/hyperliquid/candle-service-business-logic';
 
@@ -117,6 +118,47 @@ describe('candle-service (I/O, mocked fetch)', () => {
     // same key, cache still warm → returns cached, not stale yet (within TTL)
     const warm = await fetchCandles('ETH', '8h', 0, 1000);
     expect(warm.stale).toBe(false);
+  });
+
+  it('a 429 trips a global backoff: subsequent calls do NOT re-hit upstream (anti-hammer)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: { get: (h: string) => (h.toLowerCase() === 'retry-after' ? '5' : null) },
+      json: async () => ({}),
+    } as unknown as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const first = await fetchCandles('ETH', '1h', 0, 1000);
+    expect(first.stale).toBe(true);
+    expect(_isBackingOff()).toBe(true);
+
+    // A DIFFERENT window (would normally be a cache miss → a real fetch) must be
+    // suppressed while backing off — only the original 429 call hit the network.
+    const second = await fetchCandles('ETH', '1h', 0, 2000);
+    expect(second.error).toMatch(/rate-limited/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('serves the last cached set (stale) while backing off rather than empty', async () => {
+    // Warm the cache for a window, then 429 on a fresh window to trip backoff.
+    vi.stubGlobal('fetch', mockFetchOk([rawRow(100)]));
+    await fetchCandles('ETH', '1h', 0, 1000);
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        headers: { get: () => null },
+        json: async () => ({}),
+      } as unknown as Response),
+    );
+    await fetchCandles('ETH', '1h', 5000, 6000); // trips backoff
+
+    // The originally-warmed window is still within TTL → cached value served.
+    const warm = await fetchCandles('ETH', '1h', 0, 1000);
+    expect(warm.candles).toHaveLength(1);
   });
 
   it('fetchMultiTimeframeCandles fetches all intervals and keys by interval', async () => {

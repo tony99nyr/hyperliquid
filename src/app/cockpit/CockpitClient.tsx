@@ -32,11 +32,14 @@ import { useActiveTrade } from '@/hooks/useActiveTrade';
 import { useLeaderPositions } from '@/hooks/useLeaderPositions';
 import { usePerformance } from '@/hooks/usePerformance';
 import { useRealtimeChannel } from '@/hooks/useRealtimeChannel';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import { mapAnalysisLogRow, byCreatedAtDesc } from '@/hooks/realtime-row-mappers';
 import TopBar, { type CockpitView as ViewKey } from './components/shell/TopBar';
 import BottomStatusBar from './components/shell/BottomStatusBar';
+import BottomTabBar, { type MobileTab } from './components/shell/BottomTabBar';
 import CockpitView from './components/CockpitView';
 import PerformanceView from './components/performance/PerformanceView';
+import TopTradersRail from './components/left-rail/TopTradersRail';
 import ApprovalPopup from './components/ApprovalPopup';
 import Banners from './components/Banners';
 
@@ -59,8 +62,30 @@ export default function CockpitClient({
   topTraders = [],
   coins = ['ETH', 'BTC'],
 }: CockpitClientProps) {
+  const isMobile = useIsMobile();
+  // Desktop: 2-view segmented nav (Cockpit / Performance) — Traders is the
+  // cockpit grid's left rail. Mobile: 3-tab bottom bar (Cockpit / Traders /
+  // Performance) — Traders is its own surface. The two switches stay in sync so
+  // rotating the device preserves intent (e.g. Performance stays Performance).
   const [view, setView] = useState<ViewKey>('cockpit');
+  const [mobileTab, setMobileTab] = useState<MobileTab>('cockpit');
   const [coin, setCoin] = useState(coins[0] ?? 'ETH');
+
+  // Desktop nav → keep the mobile tab aligned (Traders has no desktop nav slot).
+  const onViewChange = (v: ViewKey) => {
+    setView(v);
+    setMobileTab(v);
+  };
+  // Mobile tab → keep the desktop view aligned (Traders maps to the cockpit grid).
+  const onMobileTabChange = (t: MobileTab) => {
+    setMobileTab(t);
+    setView(t === 'performance' ? 'performance' : 'cockpit');
+  };
+
+  // The single surface to render: on mobile the bottom tab wins; on desktop the
+  // segmented nav wins. Computed so each island stack mounts EXACTLY once (no
+  // double realtime subscriptions from a hidden-but-mounted duplicate).
+  const surface: MobileTab = isMobile ? mobileTab : view;
 
   // Auto-bind the latest active session (server seed → poll) so a session opened
   // MID-FLOW surfaces its popup + Safe-Exit without a refresh.
@@ -95,7 +120,7 @@ export default function CockpitClient({
     >
       <TopBar
         view={view}
-        onViewChange={setView}
+        onViewChange={onViewChange}
         mode={mode}
         equityUsd={equityUsd}
         todayUsd={todayUsd}
@@ -107,7 +132,17 @@ export default function CockpitClient({
         <Banners mode={mode} />
       </div>
 
-      {view === 'cockpit' ? (
+      {surface === 'performance' ? (
+        <PerformanceView sessionId={sessionId} />
+      ) : surface === 'traders' ? (
+        // Mobile-only Traders surface (the Top Traders rail as a full screen).
+        <section
+          data-testid="mobile-traders-view"
+          className={css({ flex: 1, overflowY: 'auto', padding: '12px' })}
+        >
+          <TopTradersRail traders={topTraders} followedAddress={leaderAddress} />
+        </section>
+      ) : (
         <CockpitView
           sessionId={sessionId}
           hasSession={session !== null}
@@ -119,10 +154,11 @@ export default function CockpitClient({
           leaderPositions={liveLeader.positions}
           topTraders={topTraders}
           currentEquityUsd={equityUsd ?? 0}
+          showTradersRail={!isMobile}
         />
-      ) : (
-        <PerformanceView sessionId={sessionId} />
       )}
+
+      <BottomTabBar tab={mobileTab} onTabChange={onMobileTabChange} />
 
       <BottomStatusBar connected={feedLive} leaderAddress={leaderAddress} mode={mode} latencyMs={null} />
 

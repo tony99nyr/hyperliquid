@@ -26,6 +26,36 @@ const CANDLE_CACHE_TTL_MS = 30_000;
 /** Hard cap on distinct cache entries — a backstop bound on heap over long runs. */
 const CANDLE_CACHE_MAX_ENTRIES = 256;
 
+/**
+ * Global 429 backoff. When HL returns 429 (Too Many Requests) we record a
+ * "do-not-call-before" timestamp (honoring `Retry-After` when present, else a
+ * default cool-down) and serve cached/stale candles until it passes — instead of
+ * piling more requests onto a rate-limited upstream. Process-wide so EVERY
+ * in-flight caller backs off together. Set HIGH when the proxy route fronts all
+ * browser candle reads (one server, shared cache) so a single 429 quiets the
+ * whole fleet rather than each tab retrying independently.
+ */
+const DEFAULT_BACKOFF_MS = 10_000;
+const MAX_BACKOFF_MS = 60_000;
+let backoffUntil = 0;
+
+class RateLimitedError extends Error {
+  constructor(public readonly retryAfterMs: number) {
+    super(`Hyperliquid info API returned 429`);
+    this.name = 'RateLimitedError';
+  }
+}
+
+/** Parse a `Retry-After` header (seconds, or an HTTP-date) into ms from now. */
+function parseRetryAfterMs(header: string | null): number {
+  if (!header) return DEFAULT_BACKOFF_MS;
+  const secs = Number(header);
+  if (Number.isFinite(secs) && secs >= 0) return Math.min(secs * 1000, MAX_BACKOFF_MS);
+  const when = Date.parse(header);
+  if (Number.isFinite(when)) return Math.min(Math.max(when - Date.now(), 0), MAX_BACKOFF_MS);
+  return DEFAULT_BACKOFF_MS;
+}
+
 export interface CandleResult {
   coin: string;
   interval: CandleInterval;
@@ -72,6 +102,11 @@ async function hlInfoPost<T>(body: Record<string, unknown>): Promise<T> {
       signal: controller.signal,
       cache: 'no-store',
     });
+    if (res.status === 429) {
+      const wait = parseRetryAfterMs(res.headers.get('retry-after'));
+      backoffUntil = Date.now() + wait;
+      throw new RateLimitedError(wait);
+    }
     if (!res.ok) {
       throw new Error(`Hyperliquid info API returned ${res.status}`);
     }
@@ -98,6 +133,14 @@ export async function fetchCandles(
   const cached = candleCache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.value;
+  }
+
+  // Global 429 backoff: while rate-limited, DON'T add another request — serve the
+  // last cached set (stale) or an empty error result. The window clears itself.
+  if (Date.now() < backoffUntil) {
+    const message = `rate-limited (backing off ${Math.ceil((backoffUntil - Date.now()) / 1000)}s)`;
+    if (cached) return { ...cached.value, stale: true, error: message };
+    return { coin: normCoin, interval, candles: [], fetchedAt: Date.now(), stale: true, error: message };
   }
 
   try {
@@ -154,6 +197,12 @@ export async function fetchMultiTimeframeCandles(
 /** Clear the in-process candle cache (test hook). */
 export function _clearCandleCache(): void {
   candleCache.clear();
+  backoffUntil = 0;
+}
+
+/** True when the service is in a global 429 backoff window (test/observability hook). */
+export function _isBackingOff(): boolean {
+  return Date.now() < backoffUntil;
 }
 
 /** Current number of live cache entries (test hook for bound verification). */
