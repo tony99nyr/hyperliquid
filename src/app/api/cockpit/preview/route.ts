@@ -23,7 +23,7 @@ import { isSameOrigin } from '@/lib/infrastructure/auth/same-origin';
 import { checkRateLimit } from '@/lib/infrastructure/rate-limiting/in-memory-rate-limit';
 import { getActiveSession, openSession } from '@/lib/cockpit/session-service';
 import { fetchAllMids } from '@/lib/hyperliquid/hyperliquid-info-service';
-import { createPreview } from '@/lib/cockpit/pending-actions-service';
+import { createPreview, reapStaleExecutingPreviews } from '@/lib/cockpit/pending-actions-service';
 import { buildOpenProposal } from '@/lib/skills/open-position-business-logic';
 import { resolveCoinMaxLeverage, serverValidateLeverage } from '@/lib/trading/leverage-business-logic';
 import { getTradingMode } from '@/lib/env/mode';
@@ -63,6 +63,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const limit = checkRateLimit(`preview:${getClientIdentifier(request)}`, PREVIEW_MAX_PER_MIN, 60_000);
   if (!limit.allowed) {
     return NextResponse.json({ ok: false, error: 'Too many requests' }, { status: 429 });
+  }
+
+  // Opportunistic recovery of any preview stuck 'executing' (rare serverless
+  // death). Fail-soft — never block creating a new preview on a maintenance sweep.
+  try {
+    await reapStaleExecutingPreviews();
+  } catch {
+    // non-critical
   }
 
   let body: PreviewBody;

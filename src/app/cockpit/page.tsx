@@ -15,6 +15,7 @@
 import { getTradingMode } from '@/lib/env/mode';
 import { isAdminAuthenticated } from '@/lib/infrastructure/auth/server-auth';
 import { getActiveSession } from '@/lib/cockpit/session-service';
+import { reapStaleExecutingPreviews } from '@/lib/cockpit/pending-actions-service';
 import {
   fetchClearinghouseState,
   type HlPosition,
@@ -35,6 +36,15 @@ export default async function CockpitPage() {
   const mode = getTradingMode();
   const session = await getActiveSession();
   const leaderAddress = session?.leaderAddress ?? null;
+
+  // Opportunistically recover any preview stuck 'executing' from a prior
+  // serverless death (rare) so it reappears in the popup. Fail-soft: a reap
+  // error must never break the page (matches the route's fail-soft ethos).
+  try {
+    await reapStaleExecutingPreviews();
+  } catch {
+    // non-critical maintenance sweep
+  }
 
   let leaderPositions: HlPosition[] = [];
   if (leaderAddress) {

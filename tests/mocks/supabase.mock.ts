@@ -34,6 +34,8 @@ export interface RecordedOp {
   filters: Array<{ column: string; value: unknown }>;
   /** Order clauses applied via .order(col, opts), in call order. */
   order?: Array<{ column: string; options: unknown }>;
+  /** Less-than comparators applied via .lt(col, val), in call order. */
+  lt?: Array<{ column: string; value: unknown }>;
 }
 
 export interface SupabaseMockResult {
@@ -80,6 +82,10 @@ export function createSupabaseMock(): SupabaseMock {
         // Chainable (a second `.order()` is a tiebreak) AND thenable via `then`
         // below, so `await q.order(...)` and `await q.order(...).order(...)` both
         // resolve to a list result.
+        return builder;
+      },
+      lt(column: string, value: unknown) {
+        (op.lt ??= []).push({ column, value });
         return builder;
       },
       select(_cols?: string) {

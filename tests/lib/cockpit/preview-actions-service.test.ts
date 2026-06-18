@@ -24,6 +24,7 @@ import {
   attachPreviewReview,
   finalizeExecutedPreview,
   revertClaimedPreview,
+  reapStaleExecutingPreviews,
 } from '@/lib/cockpit/pending-actions-service';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { PendingActionProposal } from '@/types/cockpit';
@@ -146,6 +147,30 @@ describe('finalize / revert — guarded on the executing claim', () => {
     const upd = mock.ops[0];
     expect((upd.payload as { status: string }).status).toBe('preview');
     expect(hasFilter(upd.filters, 'status', 'executing')).toBe(true);
+  });
+});
+
+describe('reapStaleExecutingPreviews — recover rows stuck executing', () => {
+  it('reverts stale operator executing rows → preview, guarded on status=executing + origin=operator + age cutoff', async () => {
+    mock.queueResult({ data: [{ id: 'p1' }, { id: 'p2' }], error: null });
+    const now = 1_000_000;
+    const ttl = 120_000;
+    const n = await reapStaleExecutingPreviews(ttl, client(), now);
+    expect(n).toBe(2);
+    const upd = mock.ops[0];
+    const payload = upd.payload as { status: string; decided_at: unknown };
+    expect(payload.status).toBe('preview');
+    expect(payload.decided_at).toBeNull();
+    expect(hasFilter(upd.filters, 'status', 'executing')).toBe(true);
+    expect(hasFilter(upd.filters, 'origin', 'operator')).toBe(true);
+    // Only rows whose claim is older than the cutoff (now - ttl) are reaped —
+    // a live, in-flight execute is never touched.
+    expect(upd.lt).toEqual([{ column: 'decided_at', value: new Date(now - ttl).toISOString() }]);
+  });
+
+  it('returns 0 when nothing is stale', async () => {
+    mock.queueResult({ data: [], error: null });
+    expect(await reapStaleExecutingPreviews(120_000, client(), 1_000_000)).toBe(0);
   });
 });
 

@@ -181,7 +181,10 @@ export async function claimPreviewForExecute(
 
   const { data, error } = await client
     .from('pending_actions')
-    .update({ status: 'executing', proposal: nextProposal })
+    // Stamp decided_at = claim time so the reaper can age a row that gets stuck
+    // 'executing' (serverless death before finalize/revert). finalize overwrites
+    // it with the real decision time; revert clears it.
+    .update({ status: 'executing', proposal: nextProposal, decided_at: new Date().toISOString() })
     .eq('id', id)
     .eq('status', 'preview')
     .eq('origin', 'operator')
@@ -215,10 +218,42 @@ export async function revertClaimedPreview(
 ): Promise<void> {
   const { error } = await client
     .from('pending_actions')
-    .update({ status: 'preview' })
+    .update({ status: 'preview', decided_at: null })
     .eq('id', id)
     .eq('status', 'executing');
   if (error) throw new Error(`revertClaimedPreview failed: ${error.message}`);
+}
+
+/**
+ * Recover rows stuck in 'executing' — the rare case where the serverless function
+ * died AFTER the atomic claim (preview→executing) but BEFORE the catch could
+ * revert (or finalize). Such a row is invisible to the operator (the preview
+ * selector only surfaces 'preview') and otherwise unrecoverable (claim/discard
+ * guard on 'preview'). This reverts any operator 'executing' row whose claim is
+ * older than `ttlMs` back to 'preview' so it reappears and can be retried or
+ * discarded.
+ *
+ * SAFE: a genuinely in-flight execute completes in seconds — far under `ttlMs` —
+ * so a live claim is never reaped; and even if a reaped row is re-executed, the
+ * stable clientIntentId dedupes in persistFill (no double-fire). Returns the
+ * number of rows reaped. Called opportunistically (cockpit load + preview
+ * creation) — no cron needed. `now` is injectable for tests.
+ */
+export async function reapStaleExecutingPreviews(
+  ttlMs = 120_000,
+  client: SupabaseClient = getServiceRoleClient(),
+  now: number = Date.now(),
+): Promise<number> {
+  const cutoff = new Date(now - ttlMs).toISOString();
+  const { data, error } = await client
+    .from('pending_actions')
+    .update({ status: 'preview', decided_at: null })
+    .eq('status', 'executing')
+    .eq('origin', 'operator')
+    .lt('decided_at', cutoff)
+    .select('id');
+  if (error) throw new Error(`reapStaleExecutingPreviews failed: ${error.message}`);
+  return Array.isArray(data) ? data.length : 0;
 }
 
 /** Discard a preview (operator declined) — preview→'rejected'. Never executes. */

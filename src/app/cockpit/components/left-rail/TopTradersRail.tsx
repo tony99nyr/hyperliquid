@@ -14,11 +14,14 @@
 import { useMemo, useState } from 'react';
 import { css } from '@styled-system/css';
 import type { TopTraderRow } from '@/lib/hyperliquid/top-traders-service';
-import { GH, ZONE_COLORS, panelSurface, regimeColor } from '../panel-styles';
+import { useLeaderPositionsTable } from '@/hooks/useLeaderPositionsTable';
+import { GH, ZONE_COLORS, panelSurface } from '../panel-styles';
 import TraderDetailDrawer from './TraderDetailDrawer';
+import LeaderActionFeed from './LeaderActionFeed';
 import {
   DEFAULT_FILTER_STATE,
   applyTraderFilters,
+  buildHasTradeablePositionSet,
   type TraderFilterState,
 } from './top-traders-filter-helpers';
 import { formatRatingsDate, type RatingsFreshness } from './ratings-freshness-helpers';
@@ -102,7 +105,19 @@ export default function TopTradersRail({ traders, followedAddress, ratings }: To
   const toggle = (key: keyof TraderFilterState) =>
     setFilters((f) => ({ ...f, [key]: !f[key] }));
 
-  const shown = useMemo(() => applyTraderFilters(traders, filters), [traders, filters]);
+  // Live leader_positions (trade-watch) → the set of leaders currently holding a
+  // tradeable position. Powers the "Has position" filter. Pass the set ONLY once
+  // loaded — before then it's a no-op (omitted), so the chip never nukes the list
+  // while the feed is still connecting.
+  const leaderPositions = useLeaderPositionsTable();
+  const holdingTradeable = useMemo(
+    () => buildHasTradeablePositionSet(leaderPositions.rows),
+    [leaderPositions.rows],
+  );
+  const shown = useMemo(
+    () => applyTraderFilters(traders, filters, leaderPositions.loaded ? holdingTradeable : undefined),
+    [traders, filters, leaderPositions.loaded, holdingTradeable],
+  );
 
   return (
     <section
@@ -155,9 +170,9 @@ export default function TopTradersRail({ traders, followedAddress, ratings }: To
         />
         <FilterChip
           label="Has position"
-          title="Filter to wallets with a live open position — coming with the trade-watch feed"
-          active={false}
-          disabled
+          title="Show only wallets currently holding a live position in a tradeable coin (ETH / BTC / HYPE)"
+          active={filters.hasPosition}
+          onToggle={() => toggle('hasPosition')}
         />
       </div>
 
@@ -166,8 +181,9 @@ export default function TopTradersRail({ traders, followedAddress, ratings }: To
           No rated wallets — run the rating pipeline.
         </span>
       ) : shown.length === 0 ? (
-        <span data-testid="trader-filter-empty" className={css({ fontSize: 'xs', color: 'github.textMuted', fontFamily: 'mono' })}>
+        <span data-testid="trader-filter-empty" className={css({ fontSize: 'xs', color: 'github.textMuted', fontFamily: 'mono', lineHeight: '1.4' })}>
           No traders match the active filters.
+          {filters.hasPosition && ' No watched leader is holding a tradeable position right now.'}
         </span>
       ) : (
         <ol
@@ -184,7 +200,10 @@ export default function TopTradersRail({ traders, followedAddress, ratings }: To
             overflowY: 'auto',
             flex: '1 1 auto',
             minHeight: '0',
-            maxHeight: { base: 'none', lg: '62vh' },
+            // Cap below the viewport so the live action feed beneath stays in view
+            // (the rail aside scrolls, but the feed is glance-data — keep it above
+            // the fold). Was 62vh — lowered to fit the feed on short desktops.
+            maxHeight: { base: 'none', lg: '48vh' },
             paddingRight: '2px',
           })}
         >
@@ -257,22 +276,9 @@ export default function TopTradersRail({ traders, followedAddress, ratings }: To
         </ol>
       )}
 
-      {/* Future live action feed (deferred). Collapsed to a single-line footnote
-          so it labels the upcoming feed without claiming permanent rail space. */}
-      <div
-        data-testid="trader-feed-slot"
-        className={css({
-          borderTop: '1px solid token(colors.github.borderSubtle)',
-          paddingTop: '8px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-        })}
-      >
-        <span style={{ color: regimeColor('neutral') }} className={css({ fontFamily: 'mono', fontSize: '10px' })}>
-          ◌ live trader fills — coming soon
-        </span>
-      </div>
+      {/* LIVE action feed — watched-leader open/add/reduce/close/flip events from
+          the trade-watch leader_actions log (Supabase realtime, read-only). */}
+      <LeaderActionFeed />
 
       {selected && (
         <TraderDetailDrawer trader={selected} onClose={() => setSelected(null)} />

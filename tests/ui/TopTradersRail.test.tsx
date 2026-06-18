@@ -14,6 +14,17 @@ vi.stubGlobal('fetch', vi.fn(async () => ({
   json: async () => ({ ok: true, state: { positions: [], accountValueUsd: 0, stale: false } }),
 })) as unknown as typeof fetch);
 
+// The rail now subscribes to the GLOBAL leader tables (trade-watch). Mock the
+// realtime hooks so the render never touches the Supabase browser client (absent
+// in jsdom). Empty + loaded → the Has-position filter is a live no-op and the
+// feed shows its empty state.
+vi.mock('@/hooks/useLeaderPositionsTable', () => ({
+  useLeaderPositionsTable: () => ({ rows: [], loaded: true, subscribed: true, error: null }),
+}));
+vi.mock('@/hooks/useLeaderActionsFeed', () => ({
+  useLeaderActionsFeed: () => ({ rows: [], loaded: true, subscribed: true, error: null }),
+}));
+
 const emptyMetrics = {
   sharpe: null, winRate: null, profitFactor: null, maxDrawdownFrac: null,
   aggregatePnlUsd: null, medianHoldHours: null, nFills: null, worstLossVsMedianWin: null,
@@ -48,9 +59,11 @@ describe('TopTradersRail', () => {
     expect(rows[0].getAttribute('data-followed')).toBe('false');
   });
 
-  it('shows the deferred action-feed slot', () => {
+  it('renders the live leader-action feed', () => {
     render(<TopTradersRail traders={traders} />);
-    expect(screen.getByTestId('trader-feed-slot').textContent).toMatch(/coming soon/i);
+    expect(screen.getByTestId('leader-action-feed')).toBeTruthy();
+    // loaded + no rows (mocked) → the feed's empty state.
+    expect(screen.getByText(/No recent leader activity/i)).toBeTruthy();
   });
 
   it('shows an empty state with no traders', () => {
@@ -78,14 +91,18 @@ describe('TopTradersRail', () => {
     expect(screen.queryByTestId('trader-detail-drawer')).toBeNull();
   });
 
-  it('renders the filter chips (with the deferred "Has position" disabled)', () => {
+  it('renders the filter chips with "Has position" enabled + toggleable', () => {
     render(<TopTradersRail traders={traders} />);
     expect(screen.getByRole('button', { name: /clean book/i }).getAttribute('aria-pressed')).toBe('false');
     expect(screen.getByRole('button', { name: /hide at-risk/i }).getAttribute('aria-pressed')).toBe('false');
     // Tradeable-only defaults ON.
     expect(screen.getByRole('button', { name: /tradeable only/i }).getAttribute('aria-pressed')).toBe('true');
-    const soon = screen.getByRole('button', { name: /has position/i });
-    expect(soon.hasAttribute('disabled')).toBe(true);
+    // Has position is now LIVE (no longer a deferred/disabled placeholder).
+    const hasPos = screen.getByRole('button', { name: /has position/i });
+    expect(hasPos.hasAttribute('disabled')).toBe(false);
+    expect(hasPos.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(hasPos);
+    expect(hasPos.getAttribute('aria-pressed')).toBe('true');
   });
 
   it('Clean book chip narrows to clean-book wallets only', () => {
