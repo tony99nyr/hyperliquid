@@ -14,7 +14,7 @@
 
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { PendingActionProposal } from '@/types/cockpit';
 
@@ -260,13 +260,49 @@ function loadEnvLocal(): void {
   for (const path of candidates) {
     try {
       // existsSync avoids a noisy throw for the non-cwd candidate; the bare
-      // '.env.local' still goes straight to loadEnvFile (cwd may be the root).
+      // '.env.local' still goes straight to the loader (cwd may be the root).
       if (path !== '.env.local' && !existsSync(path)) continue;
-      process.loadEnvFile(path);
+      applyEnvFile(path);
       return;
     } catch {
       // Try the next candidate; if none load, env comes from the real environment.
     }
+  }
+}
+
+/**
+ * Apply one `.env.local` into process.env. Prefers Node's native
+ * `process.loadEnvFile` (Node ≥ 20.6), but FALLS BACK to a minimal hand parser on
+ * older Node — Synology NAS / other long-LTS boxes commonly run Node 18, where
+ * `process.loadEnvFile` is undefined and would otherwise silently leave Supabase
+ * unconfigured (tsx still runs, so the failure looks like "missing env" even with
+ * a valid file). The fallback handles `KEY=value`, `export KEY=value`, `#`
+ * comments, blank lines, and matching surrounding quotes; it does not clobber
+ * vars already set in the real environment.
+ */
+function applyEnvFile(path: string): void {
+  const native = (process as { loadEnvFile?: (p: string) => void }).loadEnvFile;
+  if (typeof native === 'function') {
+    native.call(process, path);
+    return;
+  }
+  const content = readFileSync(path, 'utf8');
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq === -1) continue;
+    let key = line.slice(0, eq).trim();
+    if (key.startsWith('export ')) key = key.slice('export '.length).trim();
+    if (!key) continue;
+    let val = line.slice(eq + 1).trim();
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
+      val = val.slice(1, -1);
+    }
+    if (process.env[key] === undefined) process.env[key] = val;
   }
 }
 
