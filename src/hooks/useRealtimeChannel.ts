@@ -48,6 +48,14 @@ export interface RealtimeChannelState<T> {
 }
 
 const DEFAULT_LIMIT = 200;
+/**
+ * Fallback snapshot-refetch cadence. Realtime drives instant updates when the
+ * socket is healthy; this is the SAFETY NET so a dropped/idle websocket (or a
+ * missed event during a reconnect window) can never leave a panel stale until a
+ * manual page refresh — the worst-case staleness is one interval. We also refetch
+ * immediately on tab-visible + network-reconnect.
+ */
+const REALTIME_REFETCH_MS = 20_000;
 
 /**
  * Per-effect-run uniqueness for the realtime channel topic.
@@ -110,25 +118,27 @@ export function useRealtimeChannel<T extends { id: string }>(
     let active = true;
     const client = getBrowserClient();
 
-    // 1) Initial snapshot.
-    void client
-      .from(table)
-      .select('*')
-      .eq('session_id', sessionId)
-      .order(orderColumn, { ascending: orderAscending })
-      .limit(limit)
-      .then(({ data, error: fetchErr }) => {
-        if (!active) return;
-        if (fetchErr) {
-          setError(fetchErr.message);
-          setLoaded(true);
-          return;
-        }
-        const mapped = (data ?? []).map((r) => mapRef.current(r as RealtimeRow));
-        mapped.sort(compareRef.current);
-        setRows(mapped.slice(0, limit));
+    // 1) Snapshot loader — the authoritative latest-N rows. Run on mount, then
+    // periodically + on tab-visible/reconnect as the realtime safety net.
+    const loadSnapshot = async () => {
+      const { data, error: fetchErr } = await client
+        .from(table)
+        .select('*')
+        .eq('session_id', sessionId)
+        .order(orderColumn, { ascending: orderAscending })
+        .limit(limit);
+      if (!active) return;
+      if (fetchErr) {
+        setError(fetchErr.message);
         setLoaded(true);
-      });
+        return;
+      }
+      const mapped = (data ?? []).map((r) => mapRef.current(r as RealtimeRow));
+      mapped.sort(compareRef.current);
+      setRows(mapped.slice(0, limit));
+      setLoaded(true);
+    };
+    void loadSnapshot();
 
     // 2) Realtime channel for INSERT + UPDATE.
     // Topic is unique PER EFFECT RUN (see uniqueTopicSuffix) so client.channel()
@@ -162,11 +172,26 @@ export function useRealtimeChannel<T extends { id: string }>(
         setSubscribed(status === 'SUBSCRIBED');
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           setError(`realtime ${status.toLowerCase()}`);
+          // A dropped channel won't deliver events — lean on the fallback refetch
+          // immediately so the panel recovers without waiting for the interval.
+          void loadSnapshot();
         }
       });
 
+    // 3) Safety net: periodic refetch + refetch on tab-visible / network back.
+    const interval = setInterval(() => void loadSnapshot(), REALTIME_REFETCH_MS);
+    const onVisible = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') void loadSnapshot();
+    };
+    const onOnline = () => void loadSnapshot();
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible);
+    if (typeof window !== 'undefined') window.addEventListener('online', onOnline);
+
     return () => {
       active = false;
+      clearInterval(interval);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible);
+      if (typeof window !== 'undefined') window.removeEventListener('online', onOnline);
       void client.removeChannel(channel);
       // Reset on teardown (session/table/coin change or unmount) so the next
       // subscription starts clean. Done in cleanup, not the effect body.

@@ -58,6 +58,8 @@ export interface RealtimeTableState<T> {
 }
 
 const DEFAULT_LIMIT = 200;
+/** Fallback snapshot-refetch cadence — see useRealtimeChannel for the rationale. */
+const REALTIME_REFETCH_MS = 20_000;
 
 let nonceCounter = 0;
 function uniqueTopicSuffix(): string {
@@ -103,24 +105,27 @@ export function useRealtimeTable<T extends { id: string }>(
     const pgFilter =
       filterColumn && filterValue !== null ? `${filterColumn}=eq.${filterValue}` : undefined;
 
-    // 1) Initial snapshot.
-    let q = client.from(table).select('*');
-    if (filterColumn && filterValue !== null) q = q.eq(filterColumn, filterValue);
-    void q
-      .order(orderColumn, { ascending: orderAscending })
-      .limit(limit)
-      .then(({ data, error: fetchErr }) => {
-        if (!active) return;
-        if (fetchErr) {
-          setError(fetchErr.message);
-          setLoaded(true);
-          return;
-        }
-        const mapped = (data ?? []).map((r) => mapRef.current(r as RealtimeRow));
-        mapped.sort(compareRef.current);
-        setRows(mapped.slice(0, limit));
+    // 1) Snapshot loader — authoritative latest-N rows. Run on mount, then
+    // periodically + on tab-visible/reconnect as the realtime safety net (a
+    // dropped/idle socket must not leave the table stale until a manual refresh).
+    const loadSnapshot = async () => {
+      let q = client.from(table).select('*');
+      if (filterColumn && filterValue !== null) q = q.eq(filterColumn, filterValue);
+      const { data, error: fetchErr } = await q
+        .order(orderColumn, { ascending: orderAscending })
+        .limit(limit);
+      if (!active) return;
+      if (fetchErr) {
+        setError(fetchErr.message);
         setLoaded(true);
-      });
+        return;
+      }
+      const mapped = (data ?? []).map((r) => mapRef.current(r as RealtimeRow));
+      mapped.sort(compareRef.current);
+      setRows(mapped.slice(0, limit));
+      setLoaded(true);
+    };
+    void loadSnapshot();
 
     // 2) Realtime channel for INSERT + UPDATE (+ DELETE handled by accumulate).
     // Unique topic per effect run — see useRealtimeChannel for the rationale.
@@ -146,11 +151,24 @@ export function useRealtimeTable<T extends { id: string }>(
         setSubscribed(status === 'SUBSCRIBED');
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           setError(`realtime ${status.toLowerCase()}`);
+          void loadSnapshot();
         }
       });
 
+    // 3) Safety net: periodic refetch + refetch on tab-visible / network back.
+    const interval = setInterval(() => void loadSnapshot(), REALTIME_REFETCH_MS);
+    const onVisible = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') void loadSnapshot();
+    };
+    const onOnline = () => void loadSnapshot();
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible);
+    if (typeof window !== 'undefined') window.addEventListener('online', onOnline);
+
     return () => {
       active = false;
+      clearInterval(interval);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible);
+      if (typeof window !== 'undefined') window.removeEventListener('online', onOnline);
       void client.removeChannel(channel);
       setRows([]);
       setLoaded(false);

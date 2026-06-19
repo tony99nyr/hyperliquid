@@ -303,6 +303,11 @@ export default function TraderDetailDrawer({ trader, onClose, detailOverride }: 
           coin={mirrorTarget?.coin ?? null}
           side={mirrorTarget?.side ?? null}
           leaderAddress={trader.address}
+          leaderLeverage={
+            mirrorTarget
+              ? detail.positions.find((p) => p.coin.toUpperCase() === mirrorTarget.coin.toUpperCase())?.leverage ?? null
+              : null
+          }
         />
       </section>
     </div>
@@ -402,27 +407,41 @@ function MicroStat({ label, value }: { label: string; value: string }) {
  * forces). NO-AUTO-FIRE: creating a preview executes NOTHING; only the operator's
  * Approve in the popup fires it. The UI still never places a trade directly.
  */
+/** The 5% stop the preview route uses for risk-based sizing (notional = risk/stop). */
+const MIRROR_STOP_FRAC = 0.05;
+
 function MirrorPanel({
   coin,
   side,
   leaderAddress,
+  leaderLeverage,
 }: {
   coin: string | null;
   side: 'buy' | 'sell' | null;
   leaderAddress: string;
+  leaderLeverage: number | null;
 }) {
   const [status, setStatus] = useState<'idle' | 'creating' | 'created' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
+  // Operator-set size (risk $) + leverage. Leverage defaults to the leader's (so
+  // it "matches the trader") and notional = risk / stopFrac. A small default risk
+  // keeps it usable on a small account (the old fixed $100 → $2k notional bug).
+  const [riskUsd, setRiskUsd] = useState(5);
+  const [leverage, setLeverage] = useState(() => (leaderLeverage && leaderLeverage > 0 ? Math.round(leaderLeverage) : 3));
+
+  const notionalUsd = riskUsd > 0 ? Math.round(riskUsd / MIRROR_STOP_FRAC) : 0;
+  const marginUsd = leverage > 0 ? notionalUsd / leverage : notionalUsd;
+  const matchesLeader = leaderLeverage != null && Math.round(leaderLeverage) === leverage;
 
   async function createPreview(): Promise<void> {
-    if (!coin || !side) return;
+    if (!coin || !side || !(riskUsd > 0)) return;
     setStatus('creating');
     setError(null);
     try {
       const res = await fetch('/api/cockpit/preview', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ coin, side, leaderAddress }),
+        body: JSON.stringify({ coin, side, leaderAddress, riskUsd, stopFrac: MIRROR_STOP_FRAC, leverage }),
       });
       const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!res.ok || !json.ok) {
@@ -431,9 +450,6 @@ function MirrorPanel({
         return;
       }
       setStatus('created');
-      // Re-enable after a beat so the operator can create another preview (e.g.
-      // a different side) without reopening the drawer — the confirmation shows
-      // briefly, then the button returns to idle.
       setTimeout(() => setStatus('idle'), 2500);
     } catch {
       setError('Network error — try again.');
@@ -443,6 +459,18 @@ function MirrorPanel({
 
   const sideLabel = side === 'buy' ? 'LONG' : 'SHORT';
   const busy = status === 'creating' || status === 'created';
+  const inputCss = css({
+    width: '58px',
+    bg: 'github.bg',
+    border: '1px solid token(colors.github.border)',
+    borderRadius: '5px',
+    color: 'github.textBright',
+    fontFamily: 'mono',
+    fontSize: '12px',
+    padding: '4px 6px',
+    _focusVisible: { outline: '1px solid token(colors.github.link)' },
+  });
+  const fieldLabel = css({ fontFamily: 'label', fontSize: '8px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.05em' });
 
   return (
     <div
@@ -465,13 +493,38 @@ function MirrorPanel({
       ) : (
         <>
           <span className={css({ fontSize: '11px', color: 'github.text', lineHeight: '1.4' })}>
-            Mirror their top position ({sideLabel} {coin}) as a preview. Claude can review it; you approve — or force — in the popup.
+            Mirror their top position ({sideLabel} {coin}) as a preview — set your size + leverage,
+            then approve (or force) in the popup. Claude can review it first.
           </span>
+
+          {/* Size (risk $) + leverage controls — so the mirror fits ANY account. */}
+          <div className={css({ display: 'flex', gap: '10px', alignItems: 'flex-end', flexWrap: 'wrap' })}>
+            <label className={css({ display: 'flex', flexDirection: 'column', gap: '2px' })}>
+              <span className={fieldLabel}>Risk $</span>
+              <input
+                type="number" min="0.5" step="0.5" value={riskUsd} data-testid="mirror-risk"
+                onChange={(e) => setRiskUsd(Math.max(0, Number(e.target.value) || 0))}
+                className={inputCss}
+              />
+            </label>
+            <label className={css({ display: 'flex', flexDirection: 'column', gap: '2px' })}>
+              <span className={fieldLabel}>Lev ×</span>
+              <input
+                type="number" min="1" step="1" value={leverage} data-testid="mirror-leverage"
+                onChange={(e) => setLeverage(Math.max(1, Math.round(Number(e.target.value) || 1)))}
+                className={inputCss}
+              />
+            </label>
+            <span className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted', paddingBottom: '4px', lineHeight: '1.3' })}>
+              ≈ ${notionalUsd} notional<br />${marginUsd.toFixed(marginUsd < 10 ? 2 : 0)} margin{matchesLeader ? ' · matches leader' : ''}
+            </span>
+          </div>
+
           <button
             type="button"
             data-testid="mirror-preview"
             onClick={() => void createPreview()}
-            disabled={busy}
+            disabled={busy || !(riskUsd > 0)}
             className={css({
               alignSelf: 'flex-start',
               bg: 'github.bg',
@@ -491,7 +544,7 @@ function MirrorPanel({
               ? 'Creating…'
               : status === 'created'
                 ? 'Preview created ✓'
-                : `Preview ${sideLabel} ${coin}`}
+                : `Preview ${sideLabel} ${coin} · $${notionalUsd}`}
           </button>
           {status === 'created' && (
             <span data-testid="mirror-created" className={css({ fontSize: '9px', color: 'zone.ok', fontFamily: 'mono' })}>
