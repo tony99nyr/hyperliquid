@@ -4,9 +4,9 @@
  * acquire: reap any expired lock for the key, then INSERT a fresh active lock.
  * The partial unique index (migration 0008) guarantees ONE active lock per key,
  * so a concurrent NAS+cron race resolves to a single winner (the loser gets a
- * unique violation → null). On SUCCESS the caller LEAVES the lock active until
- * expires_at (that IS the cooldown); on FAILURE the caller releases it so the
- * next cycle can retry.
+ * unique violation → null). The caller releases on a KNOWN outcome (close/no-fill/
+ * partial) so the next cycle can act; on an UNKNOWN outcome (the close threw, may
+ * have filled) it HOLDS the lock until expiry to block a blind double-fire.
  *
  * NOTE: this module never imports the fill path — it is execution-free (see the
  * lib/auto-exit no-execute static test).
@@ -80,8 +80,11 @@ export async function acquireExitLock(
 }
 
 /**
- * Release a held lock. Call on FAILURE/partial (so the next cycle retries). Do
- * NOT call on a clean full close — leaving it active until expiry IS the cooldown.
+ * Release a held lock. Call on a KNOWN terminal outcome — clean close, no-fill,
+ * partial, or nothing-to-close — so the next cycle can act (retry a partial/no-fill,
+ * or guard a reopened position after a clean close). Do NOT call on an UNKNOWN
+ * outcome (the close threw and may have filled on HL): hold the lock until expiry so
+ * a blind retry can't submit a second close — the reap step frees it after ttl.
  */
 export async function releaseExitLock(
   id: string,

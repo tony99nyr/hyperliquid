@@ -44,7 +44,6 @@ const CONFIG = {
   maxLossPctOfMargin: 0.6,
   minHealthScore: 15,
   hardExitAlerts: ['regime-flip-8h'],
-  cooldownMs: 120_000,
   lockTtlMs: 120_000,
 };
 
@@ -79,7 +78,7 @@ describe('performRiskExit', () => {
     const intent = executeIntent.mock.calls[0][0];
     expect(intent.reduceOnly).toBe(true);
     expect(intent.side).toBe('sell'); // closes a long
-    expect(releaseExitLock).toHaveBeenCalledWith('lock1', 'released'); // released in every terminal path
+    expect(releaseExitLock).toHaveBeenCalledWith('lock1', 'closed'); // clean close → release (guards reopen)
   });
 
   it('skips a flat position without touching execution', async () => {
@@ -109,11 +108,12 @@ describe('performRiskExit', () => {
     expect(executeIntent).not.toHaveBeenCalled();
   });
 
-  it('releases the lock + alerts loudly when the close throws, then rethrows', async () => {
+  it('HOLDS the lock (does NOT release) + alerts loudly when the close throws, then rethrows', async () => {
     loadPosition.mockResolvedValue(LONG);
     executeIntent.mockRejectedValue(new Error('HL rejected'));
     await expect(performRiskExit({ sessionId: 's1', coin: 'ETH', now: 1 })).rejects.toThrow(/HL rejected/);
-    expect(releaseExitLock).toHaveBeenCalledWith('lock1', 'released'); // finally releases even on throw
+    // UNKNOWN outcome → hold the lock so a blind retry can't double-fire a possibly-filled close.
+    expect(releaseExitLock).not.toHaveBeenCalled();
     const alerted = writeAnalysisLog.mock.calls.some(
       (c) => (c[0] as { severity?: string; message?: string }).severity === 'danger' &&
         /AUTO-EXIT FAILED/.test((c[0] as { message: string }).message),
@@ -166,7 +166,7 @@ describe('performRiskExit', () => {
     executeIntent.mockResolvedValue(fullFill({ sz: 0.4, partial: true }));
     const r = await performRiskExit({ sessionId: 's1', coin: 'ETH', now: 1 });
     expect(r).toMatchObject({ fired: true, partial: true });
-    expect(releaseExitLock).toHaveBeenCalledWith('lock1', 'released');
+    expect(releaseExitLock).toHaveBeenCalledWith('lock1', 'partial');
     const alerted = writeAnalysisLog.mock.calls.some((c) => /PARTIAL/.test((c[0] as { message: string }).message));
     expect(alerted).toBe(true);
   });
@@ -176,6 +176,27 @@ describe('performRiskExit', () => {
     executeIntent.mockResolvedValue(fullFill({ sz: 0 }));
     const r = await performRiskExit({ sessionId: 's1', coin: 'ETH', now: 1 });
     expect(r).toMatchObject({ fired: false, skipped: 'no-fill' });
-    expect(releaseExitLock).toHaveBeenCalledWith('lock1', 'released');
+    expect(releaseExitLock).toHaveBeenCalledWith('lock1', 'no-fill');
+  });
+
+  it('LIVE: ledger-open but venue-flat → skips (no reduce-only on a flat venue, no alert loop)', async () => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0x1234567890123456789012345678901234567890');
+    loadPosition.mockResolvedValue(LONG); // ledger still shows open
+    fetchClearinghouseState.mockResolvedValue({ stale: false, positions: [] }); // venue: ETH absent
+    const r = await performRiskExit({ sessionId: 's1', coin: 'ETH', now: 1 });
+    expect(r).toMatchObject({ fired: false, skipped: 'flat-on-venue' });
+    expect(acquireExitLock).not.toHaveBeenCalled();
+    expect(executeIntent).not.toHaveBeenCalled();
+  });
+
+  it('a health-engine failure does NOT abort the liq/loss exit (health best-effort)', async () => {
+    loadPosition.mockResolvedValue(LONG);
+    fetchAllMids.mockResolvedValue({ ETH: 950 }); // uPnL -50 → max-loss-usd
+    assessHealth.mockRejectedValue(new Error('candle feed down'));
+    executeIntent.mockResolvedValue(fullFill());
+    const r = await performRiskExit({ sessionId: 's1', coin: 'ETH', now: 1 });
+    expect(r.fired).toBe(true);
+    expect(r.reason).toMatch(/max-loss-usd/);
   });
 });

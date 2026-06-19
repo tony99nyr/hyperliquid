@@ -17,7 +17,8 @@ import { verifyCronBearer } from '@/lib/infrastructure/auth/auth';
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 import { performRiskExit } from '@/lib/trading/risk-exit-service';
 import { listExitCandidates } from '@/lib/auto-exit/auto-exit-scan';
-import { isAutoExitEnabled, getAutoExitCronSecret } from '@/lib/auto-exit/auto-exit-config';
+import { isAutoExitEnabled, getAutoExitCronSecret, getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
+import { getTradingMode } from '@/lib/env/mode';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,11 +45,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       results.push({ sessionId: c.sessionId, coin: c.coin, error: extractErrorMessage(e) });
     }
   }
+  // Surface which triggers are actually LIVE so "I thought I had liq protection"
+  // can't happen silently: liq-proximity + margin-% need clearinghouse data, which
+  // needs live mode + HL_ACCOUNT_ADDRESS. Without it only loss-USD + health run.
+  const liqMarginTriggers =
+    getTradingMode() === 'live' && getHlAccountAddress()
+      ? 'active'
+      : 'DISABLED (needs live mode + HL_ACCOUNT_ADDRESS) — only loss-USD + health triggers run';
+
   return NextResponse.json({
     ok: true,
     scanned: candidates.length,
     dropped, // surfaced, never silently truncated
     fired: results.filter((r) => r.fired).length,
+    coverage: { liqMarginTriggers },
     results,
   });
 }

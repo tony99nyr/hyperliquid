@@ -1,10 +1,9 @@
 {
-  "_comment": "Layer-1 auto-exit thresholds. EXIT-ONLY. Conservative defaults — auto-exit is a floor that prevents catastrophe, not an active trade manager. liqProximityPct/maxLossPctOfMargin require clearinghouse data (HL_ACCOUNT_ADDRESS); when absent they are auto-disabled and only maxLossUsd + health triggers run. cooldownMs prevents repeated fires per (session, coin); lockTtlMs bounds a stuck in-flight close.",
+  "_comment": "Layer-1 auto-exit thresholds. EXIT-ONLY. Conservative defaults — auto-exit is a floor that prevents catastrophe, not an active trade manager. liqProximityPct/maxLossPctOfMargin require clearinghouse data (HL_ACCOUNT_ADDRESS); when absent they are auto-disabled and only maxLossUsd + health triggers run. TUNE maxLossUsd to YOUR account size (a flat $ floor does not scale to position size). lockTtlMs is the active-lock window: it doubles as the re-fire cooldown after an unknown-outcome fire and as the stuck-lock reaper window.",
   "liqProximityPct": 0.03,
   "maxLossUsd": 40,
   "maxLossPctOfMargin": 0.6,
   "minHealthScore": 15,
   "hardExitAlerts": ["regime-flip-8h"],
-  "cooldownMs": 120000,
   "lockTtlMs": 120000
 }

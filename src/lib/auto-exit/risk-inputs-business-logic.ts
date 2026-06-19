@@ -25,9 +25,11 @@ export interface AutoExitConfig {
   maxLossPctOfMargin: number | null;
   minHealthScore: number | null;
   hardExitAlerts: string[];
-  /** Min ms between auto-exits per (session, coin). */
-  cooldownMs: number;
-  /** Max ms an in-flight exit lock may be held before it's reapable. */
+  /**
+   * Active-lock window (ms). Doubles as the re-fire cooldown for an UNKNOWN-outcome
+   * fire (the close threw → lock held this long before a retry can re-acquire) and
+   * as the stuck-lock reaper window (serverless death before release).
+   */
   lockTtlMs: number;
 }
 

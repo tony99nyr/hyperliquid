@@ -21,7 +21,6 @@ function normalize(raw: Partial<AutoExitConfig>): AutoExitConfig {
     maxLossPctOfMargin: raw.maxLossPctOfMargin ?? null,
     minHealthScore: raw.minHealthScore ?? null,
     hardExitAlerts: Array.isArray(raw.hardExitAlerts) ? raw.hardExitAlerts : [],
-    cooldownMs: typeof raw.cooldownMs === 'number' ? raw.cooldownMs : 120_000,
     lockTtlMs: typeof raw.lockTtlMs === 'number' ? raw.lockTtlMs : 120_000,
   };
 }

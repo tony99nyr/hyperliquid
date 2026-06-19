@@ -24,7 +24,6 @@ const CONFIG: AutoExitConfig = {
   maxLossPctOfMargin: 0.6,
   minHealthScore: 15,
   hardExitAlerts: ['regime-flip-8h'],
-  cooldownMs: 120_000,
   lockTtlMs: 120_000,
 };
 

@@ -134,13 +134,38 @@ All thresholds live in a versioned manifest (`data/auto-exit/`), tunable without
 | `hardExitAlerts` | manifest | `["regime-flip-8h"]` | alerts that force an exit |
 | `cooldownMs` | manifest | `120000` | min ms between exits per (session, coin) |
 
+## What you ACTUALLY get when you enable it (read before flipping it on)
+
+Enabling is not all-or-nothing — coverage depends on deploy state. Be honest with
+yourself about which of these is true:
+
+- **Detector cadence.** The NAS daemon (primary, sub-minute) is NOT yet wired to this
+  endpoint — until it is, the ONLY detector is the **Vercel cron every 5 minutes**. A
+  5-min poll + HTTP hop + IOC **cannot beat a fast liquidation cascade**; it catches
+  *gradual* drift. Don't treat it as a liquidation preventer until the NAS detector runs.
+- **Liq + margin triggers need `HL_ACCOUNT_ADDRESS` + live mode.** Without the address
+  they are **silently DISABLED** and only the loss-USD + health triggers run. The cron
+  response's `coverage.liqMarginTriggers` field tells you which state you're in — check it.
+- **Only positions in an ACTIVE cockpit session are scanned.** A position opened
+  directly on HL (outside the cockpit) or whose session is closed is **never guarded**.
+- **Threshold sizing.** `maxLossUsd` is a flat dollar floor — it does NOT scale to
+  position size. On a small account/position, tune it (or rely on `maxLossPctOfMargin`,
+  which needs clearinghouse) so ordinary noise doesn't nuisance-close a fine trade.
+- **Mode-agnostic + immediate.** Flipping `AUTO_EXIT_ENABLED=true` while
+  `TRADING_MODE=live` arms autonomous **real** closes on the **next cron tick** — don't
+  enable and walk away. In paper it closes paper positions (harmless rehearsal).
+
 ## Enabling it (do NOT skip)
 
-1. Critical-review the whole feature (exit-only proof, lock race, auth).
-2. Apply migration `0008_auto_exit_locks.sql` to Supabase.
-3. Set `HL_ACCOUNT_ADDRESS` (for liq/margin triggers), `AUTO_EXIT_CRON_SECRET`, and
-   `CRON_SECRET` (= the same value) in Vercel.
-4. Rehearse on **testnet** (`HL_NETWORK=testnet`) or in **paper** first — auto-exit is
-   mode-agnostic (it closes whatever the active mode holds), so a paper rehearsal
-   exercises the full path safely.
-5. Flip `AUTO_EXIT_ENABLED=true`. Watch the analysis log for the first real fire.
+1. Critical-review the whole feature (exit-only proof, lock race, auth). ✅ done 2026-06-19.
+2. Apply migration `0008_auto_exit_locks.sql` to Supabase. (If skipped, the lock acquire
+   throws and the fire safely ABORTS — fail-safe, never a lock-free double-fire.)
+3. Set `HL_ACCOUNT_ADDRESS` (else liq/margin triggers are DARK), `AUTO_EXIT_CRON_SECRET`,
+   and `CRON_SECRET` (= the same value) in Vercel.
+4. Tune `data/auto-exit/` thresholds to your real account size (esp. `maxLossUsd`);
+   consider dropping `regime-flip-8h` from `hardExitAlerts` for v1 (it's trade-management,
+   not catastrophe — it can flatten a fine position on a weak 8h flip).
+5. Wire + restart the NAS detector so you have a sub-minute primary, not a lone 5-min cron.
+6. Rehearse on **testnet** (`HL_NETWORK=testnet`) or in **paper** first (mode-agnostic),
+   and watch ONE real fire in the analysis log before trusting it overnight.
+7. Flip `AUTO_EXIT_ENABLED=true`.
