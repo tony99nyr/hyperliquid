@@ -164,7 +164,7 @@ export default function TopTradersRail({ traders, followedAddress, ratings }: To
         />
         <FilterChip
           label="Tradeable only"
-          title="Show only wallets that trade one of our coins (ETH / BTC / HYPE)"
+          title="Show only wallets that trade OR currently hold one of our coins (ETH / BTC / HYPE) — hides wallets active only in unsupported assets"
           active={filters.tradeableOnly}
           onToggle={() => toggle('tradeableOnly')}
         />

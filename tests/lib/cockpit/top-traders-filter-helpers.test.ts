@@ -74,6 +74,15 @@ describe('rowPasses / applyTraderFilters', () => {
     expect(rowPasses(row({ tradesTradeableCoin: false }), f)).toBe(false);
   });
 
+  it('tradeableOnly KEEPS a wallet that currently HOLDS a tradeable position even if its historical topCoins are not tradeable', () => {
+    const f = { ...allOff, tradeableOnly: true };
+    const holding = new Set(['0xabc']);
+    // tradesTradeableCoin false (historical alts) BUT holds a live tradeable position → kept.
+    expect(rowPasses(row({ address: '0xABC', tradesTradeableCoin: false }), f, holding)).toBe(true);
+    // tradesTradeableCoin false AND not holding a tradeable position → dropped.
+    expect(rowPasses(row({ address: '0xdef', tradesTradeableCoin: false }), f, holding)).toBe(false);
+  });
+
   it('filters COMPOSE with AND', () => {
     const f: TraderFilterState = { cleanBook: true, hideAtRisk: true, tradeableOnly: true, hasPosition: false };
     // clean + tradeable + no risk → passes

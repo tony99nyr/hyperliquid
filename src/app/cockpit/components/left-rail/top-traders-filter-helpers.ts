@@ -98,7 +98,19 @@ export function rowPasses(
 ): boolean {
   if (f.cleanBook && !row.cleanBook) return false;
   if (f.hideAtRisk && row.hasRisk) return false;
-  if (f.tradeableOnly && !row.tradesTradeableCoin) return false;
+  // "Tradeable only" keeps a wallet that HISTORICALLY trades a tradeable coin
+  // (tradesTradeableCoin, from the rated dataset's topCoins) OR CURRENTLY holds a
+  // live tradeable position (holdingTradeable, from leader_positions). Drop only
+  // when NEITHER holds — i.e. the wallet's activity is entirely in unsupported
+  // assets. (Historical topCoins alone misses a wallet that recently pivoted into
+  // ETH/BTC/HYPE; the live set rescues it.)
+  if (
+    f.tradeableOnly &&
+    !row.tradesTradeableCoin &&
+    !holdingTradeable?.has(row.address.toLowerCase())
+  ) {
+    return false;
+  }
   if (f.hasPosition && holdingTradeable && !holdingTradeable.has(row.address.toLowerCase()))
     return false;
   return true;
