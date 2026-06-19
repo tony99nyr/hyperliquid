@@ -5,105 +5,142 @@ An **autonomous, exit-only safety net** for live positions left unattended: it c
 leave trades on overnight without watching them. This is a **deliberate, scoped
 exception** to the cockpit's founding no-auto-fire rule.
 
-> **Status:** designed (this doc). Build order below. NOT enabled until built,
-> tested, polish-looped, and explicitly turned on via the kill-switch env.
+> **Status:** BUILT, shipped **DISABLED**. It does nothing until `AUTO_EXIT_ENABLED=true`
+> AND a critical review signs off (see "Enabling it"). The decision logic, execution
+> path, lock, routes, and cron are all in place and unit-tested.
 
 ---
 
 ## The one hard invariant: EXIT-ONLY
 
 The auto-exit can **only reduce/close** an existing position. It can **never open,
-add, or flip.** Opening exposure autonomously is out of scope, forever. The only
-autonomous action is `reduceOnly: true` to flatten risk. (This is what makes the
-exception acceptable: the worst it can do is take you *out* of the market.)
+add, or flip.** This is enforced *structurally*, not by convention: the reduce-only
+intent is built **only** by `buildMarketReduceOnlyClose(position, …)` (the same pure
+fn the Safe-Exit button uses), which derives the opposite side from the *live*
+position and hard-codes `reduceOnly: true`. The caller (NAS/cron) supplies only a
+`(sessionId, coin)` candidate — never a side, size, or "please open." The worst case
+is "flattened out of the market."
 
 ## Triggers (close when ANY fires)
 
-Per open position, each watch cycle:
+Per open position, re-verified server-side each cycle (pure `shouldAutoExit`):
 
-1. **Liquidation proximity** — liq price is within `LIQ_PROXIMITY_PCT` (e.g. 2.5%)
-   of the mark. The most important overnight guard for leveraged positions: exit
-   *before* HL liquidates you (which costs more than a clean close).
-2. **Loss threshold** — position unrealized P&L is worse than `MAX_LOSS_USD` (a $
-   floor) **or** `MAX_LOSS_PCT` of margin. A stop-loss you don't have to babysit.
-3. **Unhealthy / too risky** — the health engine's score is below
-   `MIN_HEALTH_SCORE` (e.g. 20) **or** a hard adverse signal fires (e.g.
-   `regime-flip-8h` against the position with high P(adverse)). This is the
-   "market turned, capital-preservation" call — the codification of "deem it too
-   risky to continue." (Uses the **per-coin** health from #14.)
+1. **Liquidation proximity** — liq price within `liqProximityPct` of the mark, **on
+   the loss side** (above mark for a short, below for a long; a bogus liq on the
+   profitable side never closes a winner). The key leveraged-overnight guard.
+2. **Loss threshold** — uPnL ≤ `−maxLossUsd`, **or** loss ≥ `maxLossPctOfMargin` of
+   margin, **or** margin fully eroded while losing. A stop you don't babysit.
+3. **Unhealthy / too risky** — health score < `minHealthScore`, **or** a hard adverse
+   alert (`hardExitAlerts`, e.g. `regime-flip-8h`). The "market turned, preserve
+   capital" call. Uses the **per-coin** health from #14.
 
-All thresholds live in a versioned config (manifest pattern), tunable per coin.
+**Fail-safe data handling:** a non-finite/≤0 critical input (mark/margin/P&L) never
+silently disables every trigger via NaN comparisons — the affected trigger is skipped
+and `dataDegraded` is flagged, which raises a danger alert so the operator re-checks
+the feed rather than trusting a false "all clear."
 
-## Architecture — NAS detects, Vercel executes
+**Threshold applicability:** `liquidationPx` + margin come only from HL's
+`clearinghouseState` (live + `HL_ACCOUNT_ADDRESS`). When that's unavailable, the liq +
+margin-%-of-margin triggers are **disabled** (not "degraded") and the always-computable
+loss-USD + health triggers carry the net. uPnL is computed from the live position + mark
+when clearinghouse uPnL is absent.
 
-The agent key (`HL_AGENT_PRIVATE_KEY`) lives **only on Vercel** and must stay
-there. So detection and execution are split:
+All thresholds live in a versioned manifest (`data/auto-exit/`), tunable without code.
+
+## Architecture — detect anywhere, execute in ONE place
 
 ```
- NAS watch daemon (~18s, already running)        Vercel (has the agent key)
- ────────────────────────────────────────       ─────────────────────────────────
- per position: mark + liq + P&L + health    →    POST /api/cockpit/risk-exit (authed)
- run PURE shouldAutoExit(thresholds)               → re-verify the condition server-side
- if exit → call the Vercel endpoint                → reduce-only CLOSE via executeIntent
-                                                    → log + notify
- + Vercel Cron (every few min) as a BACKUP detector → same endpoint (covers NAS downtime)
+ NAS watch detector (primary, frequent)            Vercel (has the agent key)
+ ──────────────────────────────────────            ─────────────────────────────────
+ finds open positions, POSTs candidates    →   POST /api/cockpit/risk-exit (cron token)
+ (sessionId, coin) to the endpoint                  │
+                                                    ▼
+ Vercel Cron /api/cron/auto-exit (backup)  →   performRiskExit(sessionId, coin)  ← the ONE site
+ lists open positions, calls the same site          ├─ RE-VERIFY from fresh data (mark + clearinghouse + health)
+                                                    ├─ run PURE shouldAutoExit
+                                                    ├─ acquire per-(session,coin) LOCK (anti-double-close)
+                                                    ├─ reduce-only CLOSE via executeIntent
+                                                    └─ log + loud alert (success / partial / failure)
 ```
 
-- **NAS = primary detector** (frequent, already computes all the inputs). It holds
-  only the **admin secret** to call the endpoint — never the trading key.
-- **Vercel = executor.** The endpoint **re-evaluates** the condition itself (never
-  trusts the caller's "please exit") before signing — defense in depth.
-- **Vercel Cron = backup detector** so a NAS outage doesn't leave positions
-  unguarded (dual-scheduler, like the iamrossi risk-monitor).
+- The **agent key (`HL_AGENT_PRIVATE_KEY`) stays only on Vercel.** Detectors never
+  hold it; they only POST candidates.
+- **`performRiskExit` is the single exit-only execution site.** Both the HTTP route and
+  the cron call it; it re-verifies the condition itself (never trusts the caller's
+  "please exit") before signing — defense in depth.
+- **`src/lib/auto-exit/**` is execution-free** (detection + config + lock only),
+  enforced by a static no-execute test, so the decision + firing live in exactly one
+  auditable place (`src/lib/trading/risk-exit-service.ts`).
+- **Dual scheduler** (NAS primary + Vercel cron backup) so a NAS outage doesn't leave
+  positions unguarded.
 
 ## Safety mechanisms
 
-- **Kill-switch:** `AUTO_EXIT_ENABLED` env (default OFF). Auto-exit does nothing
-  unless explicitly on — and the endpoint refuses when off.
-- **Exit-only enforced server-side:** the endpoint builds only a `reduceOnly`
-  close for an *existing* position; it cannot construct an opening intent.
-- **Re-verify before firing:** the Vercel endpoint recomputes liq/loss/health from
-  fresh data; a stale or spoofed NAS trigger can't fire a close on its own.
-- **Idempotency / no double-close:** a per-(session,coin) cooldown + the existing
-  reduce-only flatten (closing an already-flat position is a no-op) prevent
-  repeated fires.
-- **Bounded by mode:** only acts when `TRADING_MODE=live`; never in paper.
-- **Notifications:** every auto-exit writes the analysis log + a notification
-  (Discord/email) with the trigger + the fill, so you see what happened.
-- **Human override:** you can always close/Safe-Exit manually; the auto-exit is a
-  floor, not a substitute.
+- **Kill-switch:** `AUTO_EXIT_ENABLED` (default OFF). Both routes refuse and the cron
+  no-ops unless explicitly `true`.
+- **Exit-only, structurally:** intent built only by `buildMarketReduceOnlyClose` from
+  the live position; caller supplies only `(sessionId, coin)`.
+- **Re-verify before firing:** the server recomputes mark + clearinghouse + health and
+  re-runs the decision; a stale/spoofed candidate can't fire a close on its own.
+- **Dedicated auth:** the detector/cron present `AUTO_EXIT_CRON_SECRET` (a Bearer
+  token), **not** the admin secret — the NAS never holds the admin credential.
+  Constant-time compared. Manual admin triggers still work via admin auth + same-origin.
+- **Idempotency / no double-close:** an atomic per-(session,coin) lock
+  (`auto_exit_locks`, partial unique index → exactly one active lock). A NAS+cron race
+  resolves to a single winner; the lock window doubles as the cooldown. A failed/partial
+  close releases the lock immediately so the next cycle retries; a clean full close keeps
+  it until expiry (cooldown).
+- **Loud failure alerts:** a failed, no-fill, or partial close writes a **danger**-
+  severity analysis-log entry ("position STILL OPEN") so a silent failure can't hide.
+- **Notifications:** every fire logs the trigger reason + the fill.
+- **Human override:** Safe-Exit / manual close always available; auto-exit is a floor.
 
-## What it does NOT do
+## Honest limitations
 
-- Never opens / adds / flips (exit-only).
-- No discretionary LLM reasoning in the loop — Layer 1 is deterministic thresholds
-  (the health engine *is* the market read). Live Claude judgment is **Layer 2**
-  (a separate, bigger build; see the autonomous-risk-manager vision).
-- No position sizing decisions — it only flattens.
+- **It reduces, it does not eliminate, liquidation risk.** A ~5-min cron + an HTTP hop +
+  an IOC book-walk cannot beat a fast cascade liquidation; the liq-proximity trigger is a
+  buffer for *gradual* drift toward liq, not a guarantee. The NAS detector (more frequent)
+  tightens this but the same caveat holds.
+- **Layer 1 is deterministic thresholds only** — no LLM-in-the-loop reasoning. The health
+  engine *is* the market read. Discretionary live Claude judgment is **Layer 2** (a
+  separate, larger build).
+- **No sizing decisions** — it only flattens.
 
-## Build order (each step: validate / lint / test, then polish-loop the whole)
+## Build order (status)
 
-1. **PURE `auto-exit-business-logic.ts`** — `shouldAutoExit({ liqDistancePct,
-   pnlUsd, pnlPctOfMargin, healthScore, alerts, side }, thresholds) →
-   { exit: boolean, reason: string | null }`. Fully unit-tested (each trigger +
-   none + boundaries).
-2. **Config** — versioned thresholds (`data/auto-exit/` manifest), per-coin.
-3. **`/api/cockpit/risk-exit` route** — admin/cron-authed + same-origin; re-verify
-   the condition from fresh data; kill-switch gate; reduce-only close via
-   `executeIntent`; cooldown; log + notify. (Reuses the safe-exit close path.)
-4. **NAS detector** — extend the watch loop (or a sibling) to call the endpoint on
-   a trigger. Keep the watch daemon's no-direct-trade property (it calls HTTP,
-   doesn't import the fill path).
-5. **Vercel Cron backup** — `vercel.ts` cron hitting the same endpoint.
-6. **Critical review** before enabling; then flip `AUTO_EXIT_ENABLED` on.
+1. ✅ PURE `auto-exit-business-logic.ts` (`shouldAutoExit`) — unit-tested.
+2. ✅ PURE `risk-inputs-business-logic.ts` (assemble inputs + resolve thresholds) + config
+   manifest (`data/auto-exit/`) + env (`AUTO_EXIT_ENABLED`, `AUTO_EXIT_CRON_SECRET`,
+   `HL_ACCOUNT_ADDRESS`).
+3. ✅ Lock (`auto_exit_locks` migration 0008 + `auto-exit-lock-service.ts`).
+4. ✅ `performRiskExit` (`risk-exit-service.ts`) — re-verify + lock + reduce-only close +
+   alerts.
+5. ✅ `/api/cockpit/risk-exit` (cron-token | admin auth, kill-switch) + scan
+   (`auto-exit-scan.ts`) + `/api/cron/auto-exit` + `vercel.json` cron.
+6. ⏳ **Critical review, then enable.**
 
-## Config knobs (initial defaults — tune)
+## Config knobs
 
-| Knob | Default | Meaning |
-|---|---|---|
-| `AUTO_EXIT_ENABLED` | `false` | master kill-switch |
-| `LIQ_PROXIMITY_PCT` | `2.5%` | close if liq within this of mark |
-| `MAX_LOSS_USD` | (per your size) | close if uPnL below this |
-| `MAX_LOSS_PCT` | `50%` of margin | close if uPnL below this % of margin |
-| `MIN_HEALTH_SCORE` | `20` | close if health below this |
-| `COOLDOWN_S` | `120` | min seconds between auto-exits per coin |
+| Knob | Where | Default | Meaning |
+|---|---|---|---|
+| `AUTO_EXIT_ENABLED` | env | `false` | master kill-switch |
+| `AUTO_EXIT_CRON_SECRET` | env | — | Bearer token for the detector/cron |
+| `CRON_SECRET` | env (Vercel) | — | set EQUAL to `AUTO_EXIT_CRON_SECRET` so Vercel's cron header matches |
+| `HL_ACCOUNT_ADDRESS` | env | — | master account (public) for clearinghouse liq/margin reads |
+| `liqProximityPct` | manifest | `0.03` | close if liq within this of mark (needs clearinghouse) |
+| `maxLossUsd` | manifest | `40` | close if uPnL ≤ −this |
+| `maxLossPctOfMargin` | manifest | `0.6` | close if loss ≥ this fraction of margin (needs clearinghouse) |
+| `minHealthScore` | manifest | `15` | close if health below this |
+| `hardExitAlerts` | manifest | `["regime-flip-8h"]` | alerts that force an exit |
+| `cooldownMs` | manifest | `120000` | min ms between exits per (session, coin) |
+
+## Enabling it (do NOT skip)
+
+1. Critical-review the whole feature (exit-only proof, lock race, auth).
+2. Apply migration `0008_auto_exit_locks.sql` to Supabase.
+3. Set `HL_ACCOUNT_ADDRESS` (for liq/margin triggers), `AUTO_EXIT_CRON_SECRET`, and
+   `CRON_SECRET` (= the same value) in Vercel.
+4. Rehearse on **testnet** (`HL_NETWORK=testnet`) or in **paper** first — auto-exit is
+   mode-agnostic (it closes whatever the active mode holds), so a paper rehearsal
+   exercises the full path safely.
+5. Flip `AUTO_EXIT_ENABLED=true`. Watch the analysis log for the first real fire.

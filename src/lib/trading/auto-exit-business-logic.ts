@@ -4,17 +4,24 @@
  * Given one open position's live risk inputs + thresholds, decide whether to
  * CLOSE it (reduce-only). EXIT-ONLY by construction: this returns a boolean +
  * reason; it never opens/adds/flips. No I/O, no keys, no execution — the caller
- * (the risk-exit route) re-verifies and fires the reduce-only close. Fully unit-
- * tested. See docs/LIVE_AUTO_EXIT.md.
+ * (the risk-exit route) RE-VERIFIES from fresh data and fires the reduce-only
+ * close. Fully unit-tested. See docs/LIVE_AUTO_EXIT.md.
  *
  * Triggers (close when ANY fires), in priority order:
- *   1. liquidation proximity — liq within `liqProximityPct` of the mark
- *   2. max loss — uPnL ≤ −maxLossUsd, OR loss ≥ maxLossPctOfMargin of margin
+ *   1. liquidation proximity — liq within `liqProximityPct` of the mark (and on
+ *      the LOSS side: above mark for a short, below for a long)
+ *   2. max loss — uPnL ≤ −maxLossUsd, OR loss ≥ maxLossPctOfMargin of margin,
+ *      OR margin fully eroded while losing
  *   3. unhealthy — health score < minHealthScore, OR a hard-exit alert fired
+ *
+ * Fail-safe: a non-finite/≤0 critical input (mark, margin, P&L) NEVER silently
+ * disables every trigger via NaN comparisons. The affected trigger is skipped and
+ * `dataDegraded` is set so the caller re-fetches + alerts rather than trusting a
+ * no-exit on garbage data.
  */
 
 export interface AutoExitThresholds {
-  /** Close if |liq − mark| / mark ≤ this (e.g. 0.025 = within 2.5% of liq). */
+  /** Close if |liq − mark| / mark ≤ this (e.g. 0.025 = within 2.5% of liq). ≤0 disables. */
   liqProximityPct: number;
   /** Close if unrealized P&L ≤ −this (USD). null disables. */
   maxLossUsd: number | null;
@@ -48,33 +55,75 @@ export interface AutoExitDecision {
   exit: boolean;
   /** Machine + human reason, or null when not exiting. */
   reason: string | null;
+  /**
+   * True when a critical input (mark/margin/P&L) was unusable (NaN/±Inf/≤0) so a
+   * trigger could not be evaluated. The caller must re-fetch + alert rather than
+   * treat the no-exit as "all clear" — a broken feed is itself a risk signal.
+   */
+  dataDegraded?: boolean;
 }
 
-const NO_EXIT: AutoExitDecision = { exit: false, reason: null };
+/** Finite, real number (rejects NaN, ±Infinity, null, undefined). */
+function fin(n: number | null | undefined): n is number {
+  return typeof n === 'number' && Number.isFinite(n);
+}
 
 /** Decide whether to auto-close `inp`. PURE. Exit-only — never opens. */
 export function shouldAutoExit(inp: AutoExitInputs, t: AutoExitThresholds): AutoExitDecision {
+  const markOk = fin(inp.markPx) && inp.markPx > 0;
+  const marginFinite = fin(inp.marginUsd);
+  const marginOk = marginFinite && inp.marginUsd > 0;
+  const pnlOk = fin(inp.unrealizedPnlUsd);
+  let degraded = false;
+
   // 1. Liquidation proximity — the most important leveraged-overnight guard.
-  if (inp.liquidationPx != null && inp.markPx > 0) {
-    const distPct = Math.abs(inp.liquidationPx - inp.markPx) / inp.markPx;
-    if (distPct <= t.liqProximityPct) {
-      return { exit: true, reason: `liq-proximity: ${(distPct * 100).toFixed(2)}% from liquidation` };
+  //    Side-aware: only trust a liq price sitting on the LOSS side of the mark
+  //    (above for a short, below for a long); a bogus liq on the profitable side
+  //    must not auto-close a winner.
+  if (t.liqProximityPct > 0) {
+    if (markOk && fin(inp.liquidationPx)) {
+      const liq = inp.liquidationPx;
+      const onLossSide = inp.side === 'long' ? liq < inp.markPx : liq > inp.markPx;
+      if (onLossSide) {
+        const distPct = Math.abs(liq - inp.markPx) / inp.markPx;
+        if (distPct <= t.liqProximityPct) {
+          return { exit: true, reason: `liq-proximity: ${(distPct * 100).toFixed(2)}% from liquidation` };
+        }
+      }
+    } else if (!markOk) {
+      // Can't assess the primary guard with a bad mark — flag, don't silently pass.
+      degraded = true;
     }
   }
 
-  // 2. Max loss — absolute USD floor, then % of margin.
-  if (t.maxLossUsd != null && inp.unrealizedPnlUsd <= -Math.abs(t.maxLossUsd)) {
-    return { exit: true, reason: `max-loss-usd: uPnL $${inp.unrealizedPnlUsd.toFixed(2)} ≤ -$${Math.abs(t.maxLossUsd)}` };
+  // 2a. Max loss — absolute USD floor.
+  if (t.maxLossUsd != null) {
+    if (pnlOk) {
+      if (inp.unrealizedPnlUsd <= -Math.abs(t.maxLossUsd)) {
+        return { exit: true, reason: `max-loss-usd: uPnL $${inp.unrealizedPnlUsd.toFixed(2)} ≤ -$${Math.abs(t.maxLossUsd)}` };
+      }
+    } else {
+      degraded = true;
+    }
   }
-  if (t.maxLossPctOfMargin != null && inp.marginUsd > 0) {
-    const lossFrac = -inp.unrealizedPnlUsd / inp.marginUsd; // > 0 when losing
-    if (lossFrac >= t.maxLossPctOfMargin) {
-      return { exit: true, reason: `max-loss-pct: ${(lossFrac * 100).toFixed(0)}% of margin` };
+
+  // 2b. Max loss as a fraction of margin, plus the eroded-margin danger case.
+  if (t.maxLossPctOfMargin != null) {
+    if (marginOk && pnlOk) {
+      const lossFrac = -inp.unrealizedPnlUsd / inp.marginUsd; // > 0 when losing
+      if (lossFrac >= t.maxLossPctOfMargin) {
+        return { exit: true, reason: `max-loss-pct: ${(lossFrac * 100).toFixed(0)}% of margin` };
+      }
+    } else if (pnlOk && inp.unrealizedPnlUsd < 0 && marginFinite && inp.marginUsd <= 0) {
+      // Margin fully eroded while losing — exactly the danger the `> 0` guard skips.
+      return { exit: true, reason: 'margin-eroded: margin ≤ 0 with an open loss' };
+    } else if (!marginOk || !pnlOk) {
+      degraded = true;
     }
   }
 
   // 3. Unhealthy — health engine score below the floor, or a hard adverse alert.
-  if (t.minHealthScore != null && inp.healthScore != null && inp.healthScore < t.minHealthScore) {
+  if (t.minHealthScore != null && fin(inp.healthScore) && inp.healthScore < t.minHealthScore) {
     return { exit: true, reason: `unhealthy: health ${inp.healthScore.toFixed(0)} < ${t.minHealthScore}` };
   }
   if (t.hardExitAlerts.length > 0) {
@@ -82,5 +131,5 @@ export function shouldAutoExit(inp: AutoExitInputs, t: AutoExitThresholds): Auto
     if (hit) return { exit: true, reason: `hard-alert: ${hit}` };
   }
 
-  return NO_EXIT;
+  return degraded ? { exit: false, reason: null, dataDegraded: true } : { exit: false, reason: null };
 }

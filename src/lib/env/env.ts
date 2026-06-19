@@ -55,6 +55,23 @@ const envSchema = z.object({
   // Which HL network to sign + submit against. Default mainnet; set 'testnet' to
   // rehearse live execution safely first.
   HL_NETWORK: z.enum(['mainnet', 'testnet']).default('mainnet'),
+
+  // Master account address (PUBLIC — the account the agent trades for). Used to
+  // read clearinghouseState (liquidation price + margin) for the auto-exit liq
+  // guard. Not a secret. Without it, the liq + margin-pct triggers are disabled
+  // and auto-exit relies on the (always-computable) loss + health triggers.
+  HL_ACCOUNT_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'expected a 0x-prefixed 20-byte address').optional(),
+
+  // --- Layer-1 auto-exit (exit-only safety net; see docs/LIVE_AUTO_EXIT.md) ---
+  // Master kill-switch. Default OFF: the risk-exit endpoint refuses to fire and
+  // the detector no-ops unless this is explicitly 'true'. EXIT-ONLY when on.
+  AUTO_EXIT_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  // Dedicated bearer token for the detector/cron to call /api/cockpit/risk-exit.
+  // Separate from ADMIN_SECRET so the NAS/cron never holds the admin credential.
+  AUTO_EXIT_CRON_SECRET: z.string().min(1).optional(),
 });
 
 export type CockpitEnv = z.infer<typeof envSchema>;
@@ -81,5 +98,8 @@ export function validateEnv(source: NodeJS.ProcessEnv = process.env): CockpitEnv
     ADMIN_PIN: source.ADMIN_PIN,
     HL_AGENT_PRIVATE_KEY: source.HL_AGENT_PRIVATE_KEY,
     HL_NETWORK: source.HL_NETWORK,
+    HL_ACCOUNT_ADDRESS: source.HL_ACCOUNT_ADDRESS,
+    AUTO_EXIT_ENABLED: source.AUTO_EXIT_ENABLED,
+    AUTO_EXIT_CRON_SECRET: source.AUTO_EXIT_CRON_SECRET,
   });
 }
