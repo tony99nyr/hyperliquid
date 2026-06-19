@@ -111,54 +111,80 @@ export async function performRiskExit(args: {
     return { fired: false, reason: null, skipped: 'condition-not-met', dataDegraded: decision.dataDegraded };
   }
 
-  // 6) Claim the lock (anti-double-close + cooldown). Loser backs off.
+  // 6) Claim the lock — this SERIALIZES concurrent NAS+cron attempts (the partial
+  //    unique index admits one active lock per key). ttl is only a stuck-lock
+  //    reaper window (serverless death before release), NOT a cooldown: we release
+  //    in every terminal path below so a freshly reopened position on the same coin
+  //    is guarded immediately.
   const lock = await acquireExitLock(sessionId, coin, {
     reason: decision.reason ?? 'auto-exit',
     nowMs: now,
-    ttlMs: config.cooldownMs,
+    ttlMs: config.lockTtlMs,
   });
   if (!lock) {
     return { fired: false, reason: decision.reason, skipped: 'locked' };
   }
 
-  // 7) Build + submit the reduce-only close. The intent is derived ONLY here.
-  const intent = buildMarketReduceOnlyClose(position, { clientIntentId: randomUUID(), sessionId, now });
-  if (!intent) {
-    await releaseExitLock(lock.id, 'flat');
-    return { fired: false, reason: decision.reason, skipped: 'flat' };
-  }
-
-  let fill: CanonicalFill;
   try {
-    fill = await executeIntent(intent);
-  } catch (e) {
-    await releaseExitLock(lock.id, 'failed'); // free it so the next cycle retries
-    const msg = e instanceof Error ? e.message : String(e);
-    await alert(sessionId, `🚨 AUTO-EXIT FAILED for ${coin} (${decision.reason}): ${msg}. Position STILL OPEN — manual Safe-Exit may be needed.`);
-    throw e; // surface to the caller (route → 500, cron → logged)
-  }
+    // 7) Build the reduce-only close from the AUTHORITATIVE venue exposure when we
+    //    have it (clearinghouse). A cockpit-ledger size that UNDER-states the live
+    //    position (manual HL trade, fill drift) would otherwise under-close and
+    //    strand real exposure — the worst failure for a safety net. Fall back to the
+    //    ledger position in paper / no-address. The intent is derived ONLY here.
+    const closeSource =
+      hlPosition != null
+        ? {
+            coin,
+            side: hlPosition.side,
+            sz: hlPosition.size,
+            avgEntryPx: hlPosition.entryPx ?? position.avgEntryPx,
+            realizedPnlUsd: 0,
+            feesPaidUsd: 0,
+          }
+        : position;
+    const intent = buildMarketReduceOnlyClose(closeSource, { clientIntentId: randomUUID(), sessionId, now });
+    if (!intent) {
+      return { fired: false, reason: decision.reason, skipped: 'flat' };
+    }
 
-  if (fill.sz <= 0) {
-    await releaseExitLock(lock.id, 'no-fill');
-    await alert(sessionId, `🚨 AUTO-EXIT got NO FILL for ${coin} (${decision.reason}). Position STILL OPEN — will retry next cycle.`);
-    return { fired: false, reason: decision.reason, skipped: 'no-fill' };
-  }
+    let fill: CanonicalFill;
+    try {
+      fill = await executeIntent(intent);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      await alert(sessionId, `🚨 AUTO-EXIT FAILED for ${coin} (${decision.reason}): ${msg}. Position STILL OPEN — manual Safe-Exit may be needed.`);
+      throw e; // surface to the caller (route → 500, cron → logged); finally releases the lock
+    }
 
-  const partial = fill.partial || fill.sz < intent.sz;
-  if (partial) {
-    // Free the lock so the remainder closes next cycle; alert loudly.
-    await releaseExitLock(lock.id, 'partial');
-    await alert(
-      sessionId,
-      `🚨 AUTO-EXIT PARTIAL for ${coin} (${decision.reason}): closed ${fill.sz}/${intent.sz} @ $${fill.px}. Remainder retries next cycle.`,
-    );
-  } else {
-    // Clean full close — leave the lock active until expiry (= cooldown).
-    await alert(
-      sessionId,
-      `AUTO-EXIT fired (${decision.reason}): ${intent.side} ${fill.sz} ${coin} @ $${fill.px} reduce-only (source=${fill.source}).`,
-    );
-  }
+    if (fill.sz <= 0) {
+      await alert(sessionId, `🚨 AUTO-EXIT got NO FILL for ${coin} (${decision.reason}). Position STILL OPEN — will retry next cycle.`);
+      return { fired: false, reason: decision.reason, skipped: 'no-fill' };
+    }
 
-  return { fired: true, reason: decision.reason, skipped: null, fill, partial };
+    // Trust the fill's own partial flag (epsilon-aware at the exchange layer);
+    // guard the size compare with an epsilon so a rounded full fill isn't "partial".
+    const partial = fill.partial || fill.sz < intent.sz - 1e-9;
+    if (partial) {
+      await alert(
+        sessionId,
+        `🚨 AUTO-EXIT PARTIAL for ${coin} (${decision.reason}): closed ${fill.sz}/${intent.sz} @ $${fill.px}. Remainder retries next cycle.`,
+      );
+    } else {
+      await alert(
+        sessionId,
+        `AUTO-EXIT fired (${decision.reason}): ${intent.side} ${fill.sz} ${coin} @ $${fill.px} reduce-only (source=${fill.source}).`,
+      );
+    }
+    return { fired: true, reason: decision.reason, skipped: null, fill, partial };
+  } finally {
+    // Always release: the lock only serializes the in-flight attempt. A clean close
+    // leaves the position flat (re-fire no-ops); partial/no-fill retry next cycle; a
+    // reopened position must be guarded right away. Best-effort so a release failure
+    // can't mask the real outcome (or a thrown execute error).
+    try {
+      await releaseExitLock(lock.id, 'released');
+    } catch {
+      // swallow — the exit outcome stands; the stuck-lock reaper covers a missed release
+    }
+  }
 }

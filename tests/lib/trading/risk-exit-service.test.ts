@@ -79,7 +79,7 @@ describe('performRiskExit', () => {
     const intent = executeIntent.mock.calls[0][0];
     expect(intent.reduceOnly).toBe(true);
     expect(intent.side).toBe('sell'); // closes a long
-    expect(releaseExitLock).not.toHaveBeenCalled(); // clean full close keeps the lock (cooldown)
+    expect(releaseExitLock).toHaveBeenCalledWith('lock1', 'released'); // released in every terminal path
   });
 
   it('skips a flat position without touching execution', async () => {
@@ -113,7 +113,7 @@ describe('performRiskExit', () => {
     loadPosition.mockResolvedValue(LONG);
     executeIntent.mockRejectedValue(new Error('HL rejected'));
     await expect(performRiskExit({ sessionId: 's1', coin: 'ETH', now: 1 })).rejects.toThrow(/HL rejected/);
-    expect(releaseExitLock).toHaveBeenCalledWith('lock1', 'failed');
+    expect(releaseExitLock).toHaveBeenCalledWith('lock1', 'released'); // finally releases even on throw
     const alerted = writeAnalysisLog.mock.calls.some(
       (c) => (c[0] as { severity?: string; message?: string }).severity === 'danger' &&
         /AUTO-EXIT FAILED/.test((c[0] as { message: string }).message),
@@ -127,5 +127,55 @@ describe('performRiskExit', () => {
     const r = await performRiskExit({ sessionId: 's1', coin: 'ETH', now: 1 });
     expect(r).toMatchObject({ fired: false, skipped: 'bad-mark', dataDegraded: true });
     expect(executeIntent).not.toHaveBeenCalled();
+  });
+
+  it('LIVE: fires on a clearinghouse liq-proximity trigger and sizes the close from the HL position', async () => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0x1234567890123456789012345678901234567890');
+    loadPosition.mockResolvedValue(LONG); // ledger says sz 1
+    fetchAllMids.mockResolvedValue({ ETH: 1000 }); // no loss/health trigger
+    fetchClearinghouseState.mockResolvedValue({
+      stale: false,
+      positions: [
+        { coin: 'ETH', side: 'long', size: 2, szi: 2, entryPx: 1000, positionValue: 2000, unrealizedPnl: -2,
+          returnOnEquity: -0.02, leverage: 5, leverageType: 'cross', liquidationPx: 980, marginUsed: 200, maxLeverage: 50 },
+      ],
+    });
+    executeIntent.mockResolvedValue(fullFill({ sz: 2 }));
+    const r = await performRiskExit({ sessionId: 's1', coin: 'ETH', now: 1 });
+    expect(r.fired).toBe(true);
+    expect(r.reason).toMatch(/liq-proximity/); // 980 vs 1000 = 2% ≤ 3%
+    expect(executeIntent.mock.calls[0][0].sz).toBe(2); // HL size (2), not the ledger size (1)
+  });
+
+  it('LIVE but clearinghouse stale → falls back to computed uPnL + ledger (max-loss-usd)', async () => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0x1234567890123456789012345678901234567890');
+    loadPosition.mockResolvedValue(LONG);
+    fetchAllMids.mockResolvedValue({ ETH: 950 }); // uPnL -50 from the ledger
+    fetchClearinghouseState.mockResolvedValue({ stale: true, positions: [] });
+    executeIntent.mockResolvedValue(fullFill());
+    const r = await performRiskExit({ sessionId: 's1', coin: 'ETH', now: 1 });
+    expect(r.fired).toBe(true);
+    expect(r.reason).toMatch(/max-loss-usd/);
+    expect(executeIntent.mock.calls[0][0].sz).toBe(1); // fell back to the ledger size
+  });
+
+  it('partial fill → alerts PARTIAL, releases the lock, returns partial:true', async () => {
+    loadPosition.mockResolvedValue(LONG);
+    executeIntent.mockResolvedValue(fullFill({ sz: 0.4, partial: true }));
+    const r = await performRiskExit({ sessionId: 's1', coin: 'ETH', now: 1 });
+    expect(r).toMatchObject({ fired: true, partial: true });
+    expect(releaseExitLock).toHaveBeenCalledWith('lock1', 'released');
+    const alerted = writeAnalysisLog.mock.calls.some((c) => /PARTIAL/.test((c[0] as { message: string }).message));
+    expect(alerted).toBe(true);
+  });
+
+  it('no fill (sz 0) → skipped no-fill, releases the lock, alerts STILL OPEN', async () => {
+    loadPosition.mockResolvedValue(LONG);
+    executeIntent.mockResolvedValue(fullFill({ sz: 0 }));
+    const r = await performRiskExit({ sessionId: 's1', coin: 'ETH', now: 1 });
+    expect(r).toMatchObject({ fired: false, skipped: 'no-fill' });
+    expect(releaseExitLock).toHaveBeenCalledWith('lock1', 'released');
   });
 });

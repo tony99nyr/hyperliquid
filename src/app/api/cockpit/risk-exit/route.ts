@@ -11,8 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { timingSafeEqual } from 'node:crypto';
-import { verifyAdminAuth, getClientIdentifier } from '@/lib/infrastructure/auth/auth';
+import { verifyAdminAuth, verifyCronBearer, getClientIdentifier } from '@/lib/infrastructure/auth/auth';
 import { isSameOrigin } from '@/lib/infrastructure/auth/same-origin';
 import { checkRateLimit } from '@/lib/infrastructure/rate-limiting/in-memory-rate-limit';
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
@@ -21,18 +20,6 @@ import { isAutoExitEnabled, getAutoExitCronSecret } from '@/lib/auto-exit/auto-e
 
 export const dynamic = 'force-dynamic';
 
-/** Constant-time bearer-token check against the dedicated auto-exit cron secret. */
-export function bearerMatches(request: NextRequest, secret: string | undefined): boolean {
-  if (!secret) return false;
-  const header = request.headers.get('authorization') ?? '';
-  const m = /^Bearer\s+(.+)$/i.exec(header.trim());
-  if (!m) return false;
-  const provided = Buffer.from(m[1]);
-  const expected = Buffer.from(secret);
-  if (provided.length !== expected.length) return false;
-  return timingSafeEqual(provided, expected);
-}
-
 export async function POST(request: NextRequest): Promise<NextResponse> {
   // 1) Kill-switch FIRST — when off the endpoint does nothing, for anyone.
   if (!isAutoExitEnabled()) {
@@ -40,7 +27,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // 2) Auth: dedicated cron token (NAS/cron, cross-origin) OR admin + same-origin.
-  const cronAuthed = bearerMatches(request, getAutoExitCronSecret());
+  const cronAuthed = verifyCronBearer(request, getAutoExitCronSecret());
   if (!cronAuthed) {
     if (!(await verifyAdminAuth(request))) {
       return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });

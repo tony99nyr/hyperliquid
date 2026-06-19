@@ -108,7 +108,7 @@ All thresholds live in a versioned manifest (`data/auto-exit/`), tunable without
 
 ## Build order (status)
 
-1. ✅ PURE `auto-exit-business-logic.ts` (`shouldAutoExit`) — unit-tested.
+1. ✅ PURE `src/lib/trading/auto-exit-business-logic.ts` (`shouldAutoExit`) — unit-tested.
 2. ✅ PURE `risk-inputs-business-logic.ts` (assemble inputs + resolve thresholds) + config
    manifest (`data/auto-exit/`) + env (`AUTO_EXIT_ENABLED`, `AUTO_EXIT_CRON_SECRET`,
    `HL_ACCOUNT_ADDRESS`).

@@ -13,23 +13,28 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { verifyCronBearer } from '@/lib/infrastructure/auth/auth';
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 import { performRiskExit } from '@/lib/trading/risk-exit-service';
 import { listExitCandidates } from '@/lib/auto-exit/auto-exit-scan';
 import { isAutoExitEnabled, getAutoExitCronSecret } from '@/lib/auto-exit/auto-exit-config';
-import { bearerMatches } from '@/app/api/cockpit/risk-exit/route';
 
 export const dynamic = 'force-dynamic';
+
+/** Hard cap on positions processed per cron tick (guards the function timeout). */
+const MAX_CANDIDATES_PER_TICK = 40;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!isAutoExitEnabled()) {
     return NextResponse.json({ ok: true, skipped: 'disabled' });
   }
-  if (!bearerMatches(request, getAutoExitCronSecret())) {
+  if (!verifyCronBearer(request, getAutoExitCronSecret())) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
   }
 
-  const candidates = await listExitCandidates();
+  const all = await listExitCandidates();
+  const candidates = all.slice(0, MAX_CANDIDATES_PER_TICK);
+  const dropped = all.length - candidates.length;
   const results: Array<Record<string, unknown>> = [];
   for (const c of candidates) {
     try {
@@ -39,5 +44,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       results.push({ sessionId: c.sessionId, coin: c.coin, error: extractErrorMessage(e) });
     }
   }
-  return NextResponse.json({ ok: true, scanned: candidates.length, fired: results.filter((r) => r.fired).length, results });
+  return NextResponse.json({
+    ok: true,
+    scanned: candidates.length,
+    dropped, // surfaced, never silently truncated
+    fired: results.filter((r) => r.fired).length,
+    results,
+  });
 }

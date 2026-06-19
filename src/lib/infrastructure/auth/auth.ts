@@ -83,6 +83,20 @@ function constantTimeEquals(a: string, b: string): boolean {
 }
 
 /**
+ * Constant-time check of a request's `Authorization: Bearer <token>` against an
+ * expected secret. Length-safe (no throw on a length mismatch). Used by the
+ * auto-exit detector/cron, which present a dedicated token rather than the admin
+ * credential. Returns false when the secret is unset or the header is absent/bad.
+ */
+export function verifyCronBearer(request: NextRequest, secret: string | undefined): boolean {
+  if (!secret) return false;
+  const header = request.headers.get('authorization') ?? '';
+  const m = /^Bearer\s+(.+)$/i.exec(header.trim());
+  if (!m) return false;
+  return constantTimeEquals(m[1], secret);
+}
+
+/**
  * Verifies the PIN against ADMIN_PIN using constant-time comparison
  * (prevents timing attacks).
  */

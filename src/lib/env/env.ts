@@ -72,6 +72,10 @@ const envSchema = z.object({
   // Dedicated bearer token for the detector/cron to call /api/cockpit/risk-exit.
   // Separate from ADMIN_SECRET so the NAS/cron never holds the admin credential.
   AUTO_EXIT_CRON_SECRET: z.string().min(1).optional(),
+  // Vercel's native cron secret (auto-injected as `Authorization: Bearer $CRON_SECRET`
+  // on cron invocations). Accepted as a fallback so setting only CRON_SECRET (the
+  // Vercel convention) still authenticates the backup detector.
+  CRON_SECRET: z.string().min(1).optional(),
 });
 
 export type CockpitEnv = z.infer<typeof envSchema>;
@@ -101,5 +105,6 @@ export function validateEnv(source: NodeJS.ProcessEnv = process.env): CockpitEnv
     HL_ACCOUNT_ADDRESS: source.HL_ACCOUNT_ADDRESS,
     AUTO_EXIT_ENABLED: source.AUTO_EXIT_ENABLED,
     AUTO_EXIT_CRON_SECRET: source.AUTO_EXIT_CRON_SECRET,
+    CRON_SECRET: source.CRON_SECRET,
   });
 }

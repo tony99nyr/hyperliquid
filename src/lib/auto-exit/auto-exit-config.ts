@@ -42,9 +42,14 @@ export function isAutoExitEnabled(): boolean {
   return validateEnv().AUTO_EXIT_ENABLED;
 }
 
-/** Dedicated bearer token the detector/cron presents to /api/cockpit/risk-exit. */
+/**
+ * Dedicated bearer token the detector/cron presents to /api/cockpit/risk-exit.
+ * Falls back to Vercel's native CRON_SECRET so setting only that (the Vercel
+ * convention) still authenticates the backup cron rather than silently 401-ing.
+ */
 export function getAutoExitCronSecret(): string | undefined {
-  return validateEnv().AUTO_EXIT_CRON_SECRET;
+  const env = validateEnv();
+  return env.AUTO_EXIT_CRON_SECRET ?? env.CRON_SECRET;
 }
 
 /** Master account address (public) for clearinghouse reads; undefined disables liq/margin triggers. */
