@@ -12,7 +12,7 @@ function rgb(hex: string): string {
 }
 
 function snap(score: number, alerts: string[] = []): HealthSnapshot {
-  return { id: 'h', sessionId: 's', createdAt: 0, score, pContinuation: 0.55, pAdverse: 0.3, alerts };
+  return { id: 'h', sessionId: 's', coin: 'ETH', createdAt: 0, score, pContinuation: 0.55, pAdverse: 0.3, alerts };
 }
 
 /** Render the in-position (Trade Health) view: force inPositionOverride. */
@@ -22,8 +22,10 @@ function tradeHealthProps(snapshot: HealthSnapshot | null) {
 
 describe('HealthPanel — TRADE HEALTH (in a position)', () => {
   it('renders the score and probabilities', () => {
-    render(<HealthPanel {...tradeHealthProps(snap(72))} />);
+    render(<HealthPanel {...tradeHealthProps(snap(72))} coin="ETH" />);
     expect(screen.getByTestId('health-panel').getAttribute('data-mode')).toBe('trade-health');
+    // Coin-labeled title (per-position health — the multi-position fix).
+    expect(screen.getByText(/Trade Health · ETH/)).toBeTruthy();
     expect(screen.getByText('72')).toBeTruthy();
     expect(screen.getByTestId('p-continuation').textContent).toBe('55%');
     expect(screen.getByTestId('p-adverse').textContent).toBe('30%');
@@ -63,7 +65,7 @@ describe('HealthPanel — TRADE HEALTH (in a position)', () => {
 
   it('shows an awaiting state with a null snapshot', () => {
     render(<HealthPanel {...tradeHealthProps(null)} />);
-    expect(screen.getByText('awaiting assessment…')).toBeTruthy();
+    expect(screen.getByText('awaiting watcher assessment…')).toBeTruthy();
   });
 });
 

@@ -67,6 +67,7 @@ export function mapHealthSnapshotRow(row: RealtimeRow): HealthSnapshot {
   return {
     id: str(row.id),
     sessionId: str(row.session_id),
+    coin: row.coin == null ? null : str(row.coin),
     createdAt: toMs(row.created_at),
     score: num(row.score),
     pContinuation: num(row.p_continuation),

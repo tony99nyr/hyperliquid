@@ -126,13 +126,14 @@ describe('hypothesis-service', () => {
 describe('health-snapshot-service', () => {
   it('writes a health_snapshots row with probs + alerts', async () => {
     await writeHealthSnapshot(
-      { sessionId: 's1', score: 80, pContinuation: 0.65, pAdverse: 0.25, alerts: ['regime-flip-8h'] },
+      { sessionId: 's1', coin: 'ETH', score: 80, pContinuation: 0.65, pAdverse: 0.25, alerts: ['regime-flip-8h'] },
       client,
     );
     const op = mock.ops[0];
     expect(op.table).toBe('health_snapshots');
     expect(op.payload).toEqual({
       session_id: 's1',
+      coin: 'ETH',
       score: 80,
       p_continuation: 0.65,
       p_adverse: 0.25,

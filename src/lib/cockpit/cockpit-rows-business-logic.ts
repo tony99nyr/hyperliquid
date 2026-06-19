@@ -101,6 +101,8 @@ export function buildHypothesisRow(input: {
 
 export interface HealthSnapshotInsertRow {
   session_id: string;
+  /** The coin this assessment is for (per-position health). Omitted/null = legacy. */
+  coin: string | null;
   score: number;
   p_continuation: number;
   p_adverse: number;
@@ -109,6 +111,7 @@ export interface HealthSnapshotInsertRow {
 
 export function buildHealthSnapshotRow(input: {
   sessionId: string;
+  coin?: string | null;
   score: number;
   pContinuation: number;
   pAdverse: number;
@@ -116,6 +119,9 @@ export function buildHealthSnapshotRow(input: {
 }): HealthSnapshotInsertRow {
   return {
     session_id: input.sessionId,
+    // Normalize coin casing to match fills/positions (the watch daemon passes
+    // position.coin verbatim); read-side also upper-cases, so this is hygiene.
+    coin: input.coin ? input.coin.trim().toUpperCase() : null,
     score: input.score,
     p_continuation: input.pContinuation,
     p_adverse: input.pAdverse,

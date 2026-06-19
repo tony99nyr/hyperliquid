@@ -70,6 +70,7 @@ describe('insert-row builders (camelCase → snake_case)', () => {
     expect(
       buildHealthSnapshotRow({
         sessionId: 's1',
+        coin: 'ETH',
         score: 72,
         pContinuation: 0.6,
         pAdverse: 0.3,
@@ -77,6 +78,7 @@ describe('insert-row builders (camelCase → snake_case)', () => {
       }),
     ).toEqual({
       session_id: 's1',
+      coin: 'ETH',
       score: 72,
       p_continuation: 0.6,
       p_adverse: 0.3,

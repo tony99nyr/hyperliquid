@@ -130,13 +130,15 @@ export default function HealthPanel({
   regimeRowsOverride,
 }: HealthPanelProps) {
   const usingOverride = snapshotOverride !== undefined || inPositionOverride !== undefined;
+  const norm = coin.trim().toUpperCase();
 
   const live = useHealthSnapshots(snapshotOverride === undefined ? sessionId : null);
-  const snapshot = snapshotOverride !== undefined ? snapshotOverride : live.latest;
+  // Read the snapshot for the SELECTED coin (per-position health), not whichever
+  // coin's assessment was written last — that was the multi-position thrash.
+  const snapshot = snapshotOverride !== undefined ? snapshotOverride : (live.latestByCoin[norm] ?? null);
 
   // In override (test/RSC seed) mode keep the live subscriptions inert.
   const positionState = usePositionPnl(usingOverride ? null : sessionId);
-  const norm = coin.trim().toUpperCase();
   const derivedInPosition = positionState.positions.some(
     (p) => p.side !== 'flat' && p.coin.toUpperCase() === norm,
   );
@@ -147,7 +149,7 @@ export default function HealthPanel({
 
   if (inPosition) {
     return (
-      <TradeHealthView snapshot={snapshot} regimeCoin={regimeCoin} rowsOverride={regimeRowsOverride} />
+      <TradeHealthView snapshot={snapshot} coin={norm} regimeCoin={regimeCoin} rowsOverride={regimeRowsOverride} />
     );
   }
   return (
@@ -158,16 +160,18 @@ export default function HealthPanel({
 /** "TRADE HEALTH" — the held-position read (score + probabilities + alerts). */
 function TradeHealthView({
   snapshot,
+  coin,
   regimeCoin,
   rowsOverride,
 }: {
   snapshot: HealthSnapshot | null;
+  coin: string;
   regimeCoin: string;
   rowsOverride?: RegimeStripRow[];
 }) {
   return (
     <section data-testid="health-panel" data-mode="trade-health" className={css(sectionStyle)}>
-      <PanelHeader title="Trade Health" note={!snapshot ? 'awaiting assessment…' : undefined} />
+      <PanelHeader title={coin ? `Trade Health · ${coin}` : 'Trade Health'} note={!snapshot ? 'awaiting watcher assessment…' : undefined} />
 
       {snapshot && (
         <div className={css({ display: 'flex', gap: '14px', alignItems: 'center' })}>

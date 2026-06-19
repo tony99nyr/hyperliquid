@@ -90,6 +90,7 @@ export async function assessAndPersistHealth(
   const result = await assessHealth(coin, position, now);
   await writeHealthSnapshot({
     sessionId,
+    coin,
     score: result.score,
     pContinuation: result.pContinuation,
     pAdverse: result.pAdverse,

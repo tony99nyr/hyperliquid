@@ -9,10 +9,11 @@ import { getServiceRoleClient } from './supabase-server';
 import { buildHealthSnapshotRow } from './cockpit-rows-business-logic';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-/** Write a health snapshot for a session. */
+/** Write a health snapshot for a session + coin (per-position health). */
 export async function writeHealthSnapshot(
   input: {
     sessionId: string;
+    coin?: string | null;
     score: number;
     pContinuation: number;
     pAdverse: number;

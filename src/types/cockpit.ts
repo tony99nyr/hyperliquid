@@ -46,10 +46,13 @@ export interface Hypothesis {
   resolutionNote: string | null;
 }
 
-/** A health-engine snapshot written each assessment cycle. */
+/** A health-engine snapshot written each assessment cycle (per session + COIN —
+ *  each open position carries its own health; legacy rows may have a null coin). */
 export interface HealthSnapshot {
   id: string;
   sessionId: string;
+  /** The coin this assessment is for; null on legacy (pre-coin-scope) rows. */
+  coin: string | null;
   createdAt: number;
   /** 0–100 composite health score. */
   score: number;

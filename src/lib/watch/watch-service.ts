@@ -189,6 +189,7 @@ export async function runWatchTickForPosition(
   // snapshot carrying the live mark + unrealized P&L (drives the PositionPanel).
   await writeHealthSnapshot({
     sessionId,
+    coin,
     score: decision.snapshot.score,
     pContinuation: decision.snapshot.pContinuation,
     pAdverse: decision.snapshot.pAdverse,

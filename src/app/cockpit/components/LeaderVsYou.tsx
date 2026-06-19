@@ -97,7 +97,7 @@ export default function LeaderVsYou({
     >
       <header className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px' })}>
         <h2 className={css({ fontFamily: 'label', fontSize: 'sm', fontWeight: 'bold', color: 'github.textBright', textTransform: 'uppercase', letterSpacing: '0.06em' })}>
-          Leader vs You
+          Leader vs You · {norm}
         </h2>
         <span className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.link' })}>
           {leaderAddress.slice(0, 6)}…{leaderAddress.slice(-4)}
