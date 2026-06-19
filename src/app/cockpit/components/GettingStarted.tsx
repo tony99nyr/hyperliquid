@@ -2,14 +2,18 @@
 
 /**
  * GettingStarted — cold-start card shown in the cockpit when there is no active
- * session. The cockpit is a LIVE MIRROR of a Claude-driven PAPER trading
- * session: a human drives it from a Claude Code session (skills in this repo
- * write to Supabase → realtime → these panels), NOT from the web UI. So the
- * empty state must teach that flow rather than just say "no session".
+ * session. MODE-AWARE: in paper it teaches the (no-real-funds) flow; in LIVE it
+ * must loudly say REAL FUNDS — never "no real funds" when TRADING_MODE=live.
+ *
+ * You can open a position either from a Claude Code session (the skills here) OR
+ * directly in the cockpit via "New Position" / "Mirror this". The first fill
+ * creates the session and the cockpit starts live-tracking it.
  */
 
 import Link from 'next/link';
 import { css } from '@styled-system/css';
+import type { TradingMode } from '@/types/fill';
+import { ZONE_COLORS } from './panel-styles';
 
 /** Inline monospace skill name. */
 function Skill({ name }: { name: string }) {
@@ -30,49 +34,54 @@ function Skill({ name }: { name: string }) {
   );
 }
 
-const STEPS: { body: React.ReactNode }[] = [
-  {
-    body: (
-      <>
-        This cockpit <strong>live-mirrors a Claude-driven paper trading session</strong> — you drive
-        it from a Claude Code session, not from this page.
-      </>
-    ),
-  },
-  {
-    body: (
-      <>
-        Open a Claude Code session in the cockpit repo (<code className={css({ fontFamily: 'mono' })}>/g/hyperliquid</code>)
-        so its skills load.
-      </>
-    ),
-  },
-  {
-    body: (
-      <>
-        Run <Skill name="analyze-traders" /> to find and grade a Hyperliquid trader to follow.
-      </>
-    ),
-  },
-  {
-    body: (
-      <>
-        Run <Skill name="analyze-market-timeframes" /> to read the setup across 1d / 8h / 1h / 15m.
-      </>
-    ),
-  },
-  {
-    body: (
-      <>
-        Run <Skill name="open-position" /> to open a paper trade — this creates the session, and the
-        cockpit will start live-tracking the position, health, P&amp;L, hypotheses, and analysis
-        stream.
-      </>
-    ),
-  },
-];
+function buildSteps(live: boolean): { body: React.ReactNode }[] {
+  const tradeWord = live ? 'trade' : 'paper trade';
+  return [
+    {
+      body: (
+        <>
+          This cockpit <strong>live-mirrors your trading session</strong>. Open a position from a
+          Claude Code session (the skills below) <em>or</em> directly here with{' '}
+          <strong>New Position</strong> / <strong>Mirror this</strong>.
+        </>
+      ),
+    },
+    {
+      body: (
+        <>
+          Open a Claude Code session in the cockpit repo (<code className={css({ fontFamily: 'mono' })}>/g/hyperliquid</code>)
+          so its skills load — or just use the cockpit's own controls.
+        </>
+      ),
+    },
+    {
+      body: (
+        <>
+          Run <Skill name="analyze-traders" /> to find and grade a Hyperliquid trader to follow.
+        </>
+      ),
+    },
+    {
+      body: (
+        <>
+          Run <Skill name="analyze-market-timeframes" /> to read the setup across 1d / 8h / 1h / 15m.
+        </>
+      ),
+    },
+    {
+      body: (
+        <>
+          Run <Skill name="open-position" /> (or click <strong>New Position</strong>) to open a {tradeWord} —
+          this creates the session, and the cockpit starts live-tracking the position, health, P&amp;L,
+          hypotheses, and analysis stream.
+        </>
+      ),
+    },
+  ];
+}
 
-export default function GettingStarted() {
+export default function GettingStarted({ mode }: { mode: TradingMode }) {
+  const live = mode === 'live';
   return (
     <section
       data-testid="getting-started"
@@ -91,22 +100,35 @@ export default function GettingStarted() {
           Getting started
         </h2>
         <span
+          data-testid="getting-started-mode"
+          data-mode={mode}
+          style={{ color: live ? ZONE_COLORS.danger : ZONE_COLORS.ok, borderColor: live ? ZONE_COLORS.danger : undefined }}
           className={css({
             fontSize: 'xs',
             fontFamily: 'mono',
+            fontWeight: live ? 'bold' : 'normal',
             padding: '2px 8px',
             borderRadius: '6px',
             border: '1px solid token(colors.github.border)',
-            color: 'zone.ok',
           })}
         >
-          PAPER mode · no real funds
+          {live ? '● LIVE — REAL FUNDS AT RISK' : 'PAPER mode · no real funds'}
         </span>
       </div>
 
       <p className={css({ fontSize: 'sm', color: 'github.textMuted', lineHeight: '1.5' })}>
-        No active session yet. The cockpit comes alive once you open a paper position from a Claude
-        Code session — here is the flow:
+        {live ? (
+          <>
+            No active session yet.{' '}
+            <strong style={{ color: ZONE_COLORS.danger }}>This is a LIVE account — orders use real funds.</strong>{' '}
+            Open a position to bring the cockpit alive — here is the flow:
+          </>
+        ) : (
+          <>
+            No active session yet. The cockpit comes alive once you open a paper position — here is the
+            flow:
+          </>
+        )}
       </p>
 
       <ol
@@ -119,7 +141,7 @@ export default function GettingStarted() {
           padding: 0,
         })}
       >
-        {STEPS.map((step, i) => (
+        {buildSteps(live).map((step, i) => (
           <li
             key={i}
             className={css({ display: 'flex', gap: '10px', alignItems: 'flex-start' })}

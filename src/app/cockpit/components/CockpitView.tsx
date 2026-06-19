@@ -118,7 +118,7 @@ export default function CockpitView({
 
       {/* CENTER — chart → open positions → leader-vs-you / health → analysis. */}
       <main className={css({ order: { base: 1, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minHeight: { base: 'auto', lg: '0' }, overflowY: { base: 'visible', lg: 'auto' }, paddingRight: { lg: '2px' } })}>
-        {!hasSession && <GettingStarted />}
+        {!hasSession && <GettingStarted mode={mode} />}
         <CockpitCoinTabs coin={coin} coins={coins} onChange={onCoinChange} />
         <CandleChartPanel coin={coin} trade={trade} />
         <OpenPositionsPanel
