@@ -55,3 +55,4 @@ weekly-rerank.log
 logs/
 data/backups/perp-follow-study/
 data/backups/funding-study/
+.auto-exit-secret

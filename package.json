@@ -32,7 +32,8 @@
     "smoke:data": "tsx --tsconfig tsconfig.scripts.json scripts/_smoke.ts",
     "watch": "tsx --tsconfig tsconfig.scripts.json scripts/watch.ts",
     "trader-watch": "tsx --tsconfig tsconfig.scripts.json scripts/trader-watch.ts",
-    "upsert-rated": "tsx --tsconfig tsconfig.scripts.json scripts/upsert-rated-wallets.ts"
+    "upsert-rated": "tsx --tsconfig tsconfig.scripts.json scripts/upsert-rated-wallets.ts",
+    "gen:secret": "tsx --tsconfig tsconfig.scripts.json scripts/gen-secret.ts"
   },
   "dependencies": {
     "@nktkas/hyperliquid": "^0.32.2",
