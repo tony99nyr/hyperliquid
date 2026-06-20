@@ -1,0 +1,9 @@
+{
+  "_comment": "v0.2 — auto-exit tuned as a CATASTROPHE BACKSTOP for a small (~$150) account, sitting BELOW active management (the manual/loop thesis-stop exits first; this only fires if that didn't happen — you're asleep / Claude offline). Changes from v0.1: dropped regime-flip-8h from hardExitAlerts (that's trade-management, not catastrophe — it would flatten a fine position on a weak 8h flip); minHealthScore 15->12 (only deeply-unhealthy fires, less nuisance); liqProximityPct 0.03->0.04 (exit a touch earlier before liquidation); maxLossUsd 40->30 (a single position down $30 = ~20% of a $150 account = clear disaster). liqProximityPct + maxLossPctOfMargin require clearinghouse data (set HL_ACCOUNT_ADDRESS); without it only maxLossUsd + health run. RETUNE maxLossUsd when account size changes — a flat $ floor does not scale.",
+  "liqProximityPct": 0.04,
+  "maxLossUsd": 30,
+  "maxLossPctOfMargin": 0.5,
+  "minHealthScore": 12,
+  "hardExitAlerts": [],
+  "lockTtlMs": 120000
+}

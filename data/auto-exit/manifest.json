@@ -1,7 +1,8 @@
 {
   "description": "Layer-1 auto-exit thresholds (exit-only safety net). Bump 'active' to roll a new tuning forward; see docs/LIVE_AUTO_EXIT.md.",
-  "active": "0.1.0",
+  "active": "0.2.0",
   "versions": {
-    "0.1.0": "auto-exit-v0.1.0.json"
+    "0.1.0": "auto-exit-v0.1.0.json",
+    "0.2.0": "auto-exit-v0.2.0.json"
   }
 }
