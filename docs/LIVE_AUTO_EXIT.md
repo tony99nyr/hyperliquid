@@ -50,13 +50,13 @@ All thresholds live in a versioned manifest (`data/auto-exit/`), tunable without
 ## Architecture — detect anywhere, execute in ONE place
 
 ```
- NAS watch detector (primary, frequent)            Vercel (has the agent key)
+ NAS crontab (the single scheduler)                Vercel (has the agent key)
  ──────────────────────────────────────            ─────────────────────────────────
- finds open positions, POSTs candidates    →   POST /api/cockpit/risk-exit (cron token)
- (sessionId, coin) to the endpoint                  │
-                                                    ▼
- Vercel Cron /api/cron/auto-exit (backup)  →   performRiskExit(sessionId, coin)  ← the ONE site
- lists open positions, calls the same site          ├─ RE-VERIFY from fresh data (mark + clearinghouse + health)
+ */5 cron: curl /api/cron/auto-exit         →   GET /api/cron/auto-exit (Bearer CRON_SECRET)
+   (Bearer CRON_SECRET) — just pokes              │  lists open positions, then per position:
+   the executor; holds NO trading key             ▼
+ (optional manual: POST /api/cockpit/       →   performRiskExit(sessionId, coin)  ← the ONE site
+   risk-exit for an admin-triggered exit)          ├─ RE-VERIFY from fresh data (mark + clearinghouse + health)
                                                     ├─ run PURE shouldAutoExit
                                                     ├─ acquire per-(session,coin) LOCK (anti-double-close)
                                                     ├─ reduce-only CLOSE via executeIntent
@@ -71,8 +71,9 @@ All thresholds live in a versioned manifest (`data/auto-exit/`), tunable without
 - **`src/lib/auto-exit/**` is execution-free** (detection + config + lock only),
   enforced by a static no-execute test, so the decision + firing live in exactly one
   auditable place (`src/lib/trading/risk-exit-service.ts`).
-- **Dual scheduler** (NAS primary + Vercel cron backup) so a NAS outage doesn't leave
-  positions unguarded.
+- **Single scheduler = the NAS crontab** (no Vercel cron / no Vercel Pro needed). The
+  NAS curls the endpoint every 5 min; the executor + agent key stay on Vercel. A NAS
+  outage pauses the auto-exit checks (the manual Safe-Exit always remains).
 
 ## Safety mechanisms
 
@@ -116,33 +117,33 @@ All thresholds live in a versioned manifest (`data/auto-exit/`), tunable without
 4. ✅ `performRiskExit` (`risk-exit-service.ts`) — re-verify + lock + reduce-only close +
    alerts.
 5. ✅ `/api/cockpit/risk-exit` (cron-token | admin auth, kill-switch) + scan
-   (`auto-exit-scan.ts`) + `/api/cron/auto-exit` + `vercel.json` cron.
-6. ⏳ **Critical review, then enable.**
+   (`auto-exit-scan.ts`) + `/api/cron/auto-exit` (triggered by the **NAS crontab** — no
+   Vercel cron / no Pro needed).
+6. ✅ **Critical review done (2026-06-19); enable via the checklist below.**
 
 ## Config knobs
 
 | Knob | Where | Default | Meaning |
 |---|---|---|---|
 | `AUTO_EXIT_ENABLED` | env | `false` | master kill-switch |
-| `AUTO_EXIT_CRON_SECRET` | env | — | Bearer token for the detector/cron |
-| `CRON_SECRET` | env (Vercel) | — | set EQUAL to `AUTO_EXIT_CRON_SECRET` so Vercel's cron header matches |
+| `CRON_SECRET` | env (Vercel) | — | Bearer the NAS cron presents; the endpoint validates it (`AUTO_EXIT_CRON_SECRET` also accepted as a fallback) |
 | `HL_ACCOUNT_ADDRESS` | env | — | master account (public) for clearinghouse liq/margin reads |
-| `liqProximityPct` | manifest | `0.03` | close if liq within this of mark (needs clearinghouse) |
-| `maxLossUsd` | manifest | `40` | close if uPnL ≤ −this |
-| `maxLossPctOfMargin` | manifest | `0.6` | close if loss ≥ this fraction of margin (needs clearinghouse) |
-| `minHealthScore` | manifest | `15` | close if health below this |
-| `hardExitAlerts` | manifest | `["regime-flip-8h"]` | alerts that force an exit |
-| `cooldownMs` | manifest | `120000` | min ms between exits per (session, coin) |
+| `liqProximityPct` | manifest (v0.2) | `0.04` | close if liq within this of mark (needs clearinghouse) |
+| `maxLossUsd` | manifest (v0.2) | `30` | close if uPnL ≤ −this (**TUNE to account size**) |
+| `maxLossPctOfMargin` | manifest (v0.2) | `0.5` | close if loss ≥ this fraction of margin (needs clearinghouse) |
+| `minHealthScore` | manifest (v0.2) | `12` | close if health below this |
+| `hardExitAlerts` | manifest (v0.2) | `[]` | alerts that force an exit (regime-flip-8h dropped in v0.2) |
+| `lockTtlMs` | manifest | `120000` | active-lock window (cooldown after an unknown-outcome fire + stuck-lock reaper) |
 
 ## What you ACTUALLY get when you enable it (read before flipping it on)
 
 Enabling is not all-or-nothing — coverage depends on deploy state. Be honest with
 yourself about which of these is true:
 
-- **Detector cadence.** The NAS daemon (primary, sub-minute) is NOT yet wired to this
-  endpoint — until it is, the ONLY detector is the **Vercel cron every 5 minutes**. A
-  5-min poll + HTTP hop + IOC **cannot beat a fast liquidation cascade**; it catches
-  *gradual* drift. Don't treat it as a liquidation preventer until the NAS detector runs.
+- **Trigger cadence.** The NAS crontab pokes the endpoint every 5 min (the single
+  scheduler — no Vercel cron). A 5-min poll + HTTP hop + IOC **cannot beat a fast
+  liquidation cascade**; it catches *gradual* drift. Treat it as a slow-drift backstop,
+  not a liquidation preventer. (Tighten the cron to `*/2` if you want faster checks.)
 - **Liq + margin triggers need `HL_ACCOUNT_ADDRESS` + live mode.** Without the address
   they are **silently DISABLED** and only the loss-USD + health triggers run. The cron
   response's `coverage.liqMarginTriggers` field tells you which state you're in — check it.
@@ -160,12 +161,11 @@ yourself about which of these is true:
 1. Critical-review the whole feature (exit-only proof, lock race, auth). ✅ done 2026-06-19.
 2. Apply migration `0008_auto_exit_locks.sql` to Supabase. (If skipped, the lock acquire
    throws and the fire safely ABORTS — fail-safe, never a lock-free double-fire.)
-3. Set `HL_ACCOUNT_ADDRESS` (else liq/margin triggers are DARK), `AUTO_EXIT_CRON_SECRET`,
-   and `CRON_SECRET` (= the same value) in Vercel.
-4. Tune `data/auto-exit/` thresholds to your real account size (esp. `maxLossUsd`);
-   consider dropping `regime-flip-8h` from `hardExitAlerts` for v1 (it's trade-management,
-   not catastrophe — it can flatten a fine position on a weak 8h flip).
-5. Wire + restart the NAS detector so you have a sub-minute primary, not a lone 5-min cron.
+3. Set `HL_ACCOUNT_ADDRESS` (else liq/margin triggers are DARK) and `CRON_SECRET` in Vercel.
+4. Tune `data/auto-exit/` thresholds to your account size (esp. `maxLossUsd`). ✅ v0.2 is
+   tuned for a small (~$150) account and already dropped `regime-flip-8h`.
+5. Add the NAS crontab line that curls `/api/cron/auto-exit` every 5 min with
+   `Authorization: Bearer $CRON_SECRET` (the single scheduler).
 6. Rehearse on **testnet** (`HL_NETWORK=testnet`) or in **paper** first (mode-agnostic),
    and watch ONE real fire in the analysis log before trusting it overnight.
 7. Flip `AUTO_EXIT_ENABLED=true`.
