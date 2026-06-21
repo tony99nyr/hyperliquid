@@ -49,14 +49,22 @@ run(async () => {
   if (inputs.positions.length === 0) line('(flat — no open positions)');
   else inputs.positions.forEach((p) => line(`${p.coin} ${p.side} health=${p.healthScore ?? '—'} mark=${p.markPx}`));
 
-  // 3) Track record for the learning loop (win-rate by recent outcome).
+  // 3) Track record for the learning loop (win-rate by recent outcome) — scoped to
+  // SCOUT sessions only, so the scout's self-assessment excludes manual trades.
   const client = getServiceRoleClient();
-  const { data } = await client
-    .from('hypotheses')
-    .select('statement, status, resolution_note, created_at, resolved_at')
-    .order('created_at', { ascending: false })
-    .limit(30);
-  const summary = summarizeHypotheses((data ?? []) as HypothesisSummaryRow[]);
+  const { data: scoutSessions } = await client.from('sessions').select('id').eq('title', 'scout');
+  const scoutIds = (scoutSessions ?? []).map((s) => (s as { id: string }).id);
+  let hypRows: HypothesisSummaryRow[] = [];
+  if (scoutIds.length > 0) {
+    const { data } = await client
+      .from('hypotheses')
+      .select('statement, status, resolution_note, created_at, resolved_at')
+      .in('session_id', scoutIds)
+      .order('created_at', { ascending: false })
+      .limit(30);
+    hypRows = (data ?? []) as HypothesisSummaryRow[];
+  }
+  const summary = summarizeHypotheses(hypRows);
   header('TRACK RECORD (recent hypotheses)');
   line(`open=${summary.open}  confirmed=${summary.confirmed}  invalidated=${summary.invalidated}  resolved=${summary.resolved}`);
   if (summary.lastResolved.length > 0) {
