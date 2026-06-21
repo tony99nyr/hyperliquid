@@ -29,7 +29,7 @@ import {
   type MarkMap,
   type PerformanceKpis,
 } from './performance-business-logic';
-import { fetchAllMids } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { fetchAllMids, fetchClearinghouseState, isValidHlAddress } from '@/lib/hyperliquid/hyperliquid-info-service';
 import type { CanonicalFill } from '@/types/fill';
 
 /**
@@ -64,13 +64,33 @@ const FILL_COLUMNS =
   'client_intent_id, session_id, coin, side, px, sz, notional_usd, fee_usd, reduce_only, partial, source, hl_order_id, hl_raw, filled_at';
 
 /**
- * The REAL account balance anchor, or null when unknown. Set HL_ACCOUNT_EQUITY_USD
- * for a funded/live account so the absolute equity + % are shown; in paper mode
- * with no real account it stays null and we show "—" instead of inventing $50k.
+ * The REAL starting-balance anchor for the equity CURVE, or null when unknown.
+ * Static env (HL_ACCOUNT_EQUITY_USD); used to anchor the 30d series. Live current
+ * equity is resolved separately (fetchLiveAccountValue) — don't conflate them.
  */
 function realAccountBalance(): number | null {
   const env = Number(process.env.HL_ACCOUNT_EQUITY_USD ?? '');
   return Number.isFinite(env) && env > 0 ? env : null;
+}
+
+/**
+ * The LIVE current account equity from HL, or null. When HL_ACCOUNT_ADDRESS is set
+ * (the public master account), read clearinghouseState.accountValueUsd — the real
+ * total equity right now (cash + unrealized). This is what fills the "Account
+ * Equity" card with the actual balance instead of "—". Fail-soft → null (card
+ * falls back to env-anchored cumulative P&L). accountValueUsd already includes open
+ * uPnL, so it's shown DIRECTLY, never added to netPnlUsd.
+ */
+async function fetchLiveAccountValue(): Promise<number | null> {
+  const addr = process.env.HL_ACCOUNT_ADDRESS?.trim();
+  if (!addr || !isValidHlAddress(addr)) return null;
+  try {
+    const ch = await fetchClearinghouseState(addr);
+    if (ch.stale) return null;
+    return Number.isFinite(ch.accountValueUsd) && ch.accountValueUsd > 0 ? ch.accountValueUsd : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -79,14 +99,19 @@ function realAccountBalance(): number | null {
  */
 export async function getPerformanceSummary(sessionId: string): Promise<PerformanceSummary> {
   const now = Date.now();
+  // Live HL equity (real balance) takes precedence over the static env anchor for
+  // the displayed value. Resolved once, fail-soft. Even with no trades this lets a
+  // funded account show its real balance instead of "—".
+  const liveEquityUsd = await fetchLiveAccountValue();
+  const emptyEquityUsd = liveEquityUsd ?? realAccountBalance();
   const empty: PerformanceSummary = {
     sessionId,
     ledger: [],
     kpis: computeKpis([], {}, []),
     equity: [],
-    equityUsd: realAccountBalance(),
+    equityUsd: emptyEquityUsd,
     netPnlUsd: 0,
-    equity30dPct: realAccountBalance() === null ? null : 0,
+    equity30dPct: emptyEquityUsd === null ? null : 0,
     generatedAt: now,
   };
 
@@ -140,7 +165,9 @@ export async function getPerformanceSummary(sessionId: string): Promise<Performa
   const curveAnchor = (realBalance ?? 0) + netPnlUsd;
   const equity = buildEquitySeries(ledger, curveAnchor, now, 30);
   const kpis = computeKpis(ledger, marks, equity);
-  const equityUsd = realBalance === null ? null : realBalance + netPnlUsd;
+  // Card value: prefer the LIVE account equity (already includes open uPnL — shown
+  // directly), else the env-anchored cumulative (start balance + netPnl).
+  const equityUsd = liveEquityUsd ?? (realBalance === null ? null : realBalance + netPnlUsd);
   const first = equity[0]?.equity ?? curveAnchor;
   const equity30dPct =
     realBalance === null || first <= 0 ? null : (curveAnchor / first - 1) * 100;

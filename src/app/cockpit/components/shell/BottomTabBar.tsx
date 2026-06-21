@@ -39,6 +39,12 @@ export default function BottomTabBar({ tab, onTabChange }: BottomTabBarProps) {
         borderTop: '1px solid token(colors.github.border)',
         bg: 'cockpit.bar',
         paddingBottom: 'env(safe-area-inset-bottom)',
+        // Pin to the viewport bottom on mobile so a tall scrolling surface can't
+        // push the nav (Cockpit/Traders/Performance icons) below the fold — the
+        // "icons sometimes don't render" bug was really the bar scrolled off-screen.
+        position: { base: 'sticky', lg: 'static' },
+        bottom: 0,
+        zIndex: 20,
       })}
     >
       {TABS.map((t) => {
