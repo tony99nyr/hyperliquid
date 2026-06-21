@@ -20,17 +20,13 @@
 import { useState, useCallback } from 'react';
 import { css } from '@styled-system/css';
 import type { HlPosition } from '@/lib/hyperliquid/hyperliquid-info-service';
-import type { TopTraderRow } from '@/lib/hyperliquid/top-traders-service';
 import type { TradingMode } from '@/types/fill';
 import type { ActiveTrade } from './chart/candle-chart-helpers';
 import type { RegimeDir } from './open-positions-helpers';
 import { useHlOrderbook } from '@/hooks/useHlOrderbook';
 import CandleChartPanel from './chart/CandleChartPanel';
-import TopTradersRail from './left-rail/TopTradersRail';
-import type { RatingsFreshness } from './left-rail/ratings-freshness-helpers';
 import OpenPositionsPanel from './OpenPositionsPanel';
 import MarketRegimePanel from './right-rail/MarketRegimePanel';
-import Orderbook from './Orderbook';
 import OpportunityBoard from './opportunity/OpportunityBoard';
 import WhalePosture from './opportunity/WhalePosture';
 import HealthPanel from './HealthPanel';
@@ -49,15 +45,7 @@ export interface CockpitViewProps {
   trade: ActiveTrade | null;
   leaderAddress: string | null;
   leaderPositions: HlPosition[];
-  topTraders: TopTraderRow[];
-  /** Rail ratings freshness (built server-side: generatedAt + stale). */
-  ratings?: RatingsFreshness | null;
   currentEquityUsd: number;
-  /**
-   * Render the left Top-Traders rail. False on mobile, where Traders is its own
-   * bottom-tab surface (the design buries nothing behind the chart).
-   */
-  showTradersRail?: boolean;
 }
 
 export default function CockpitView({
@@ -70,10 +58,7 @@ export default function CockpitView({
   trade,
   leaderAddress,
   leaderPositions,
-  topTraders,
-  ratings = null,
   currentEquityUsd,
-  showTradersRail = true,
 }: CockpitViewProps) {
   // Net regime bias per coin (from the right-rail Market Regime panel) drives the
   // Open Positions alignment badge — fetched ONCE per coin, lifted up here.
@@ -101,56 +86,43 @@ export default function CockpitView({
       className={css({
         flex: 1,
         display: 'grid',
-        gridTemplateColumns: showTradersRail
-          ? { base: '1fr', lg: '262px minmax(0, 1fr) 332px' }
-          : { base: '1fr', lg: 'minmax(0, 1fr) 332px' },
+        // Chart-centric: a big chart on the LEFT, the decision column (positions +
+        // opportunities + reads) on the RIGHT next to it. No left rail (Traders is
+        // its own tab), no order book / activity feed (ambient, not actionable).
+        gridTemplateColumns: { base: '1fr', lg: 'minmax(0, 1fr) 420px' },
         gap: '12px',
         padding: '12px',
         overflow: { base: 'visible', lg: 'hidden' },
         minHeight: { base: 'auto', lg: '0' },
       })}
     >
-      {/* LEFT — Top Traders rail (desktop only; mobile uses the Traders tab). */}
-      {showTradersRail && (
-        <aside className={css({ order: { base: 3, lg: 0 }, minHeight: { base: 'auto', lg: '0' }, overflowY: { base: 'visible', lg: 'auto' } })}>
-          <TopTradersRail traders={topTraders} followedAddress={leaderAddress} ratings={ratings} />
-        </aside>
-      )}
-
-      {/* CENTER — chart → open positions → leader-vs-you / health → analysis. */}
+      {/* LEFT — the chart (the thing you watch price on). */}
       <main className={css({ order: { base: 1, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minHeight: { base: 'auto', lg: '0' }, overflowY: { base: 'visible', lg: 'auto' }, paddingRight: { lg: '2px' } })}>
         {!hasSession && <GettingStarted mode={mode} />}
         <CockpitCoinTabs coin={coin} coins={coins} onChange={onCoinChange} />
         <CandleChartPanel coin={coin} trade={trade} />
+      </main>
+
+      {/* RIGHT — the decision column: what you ACT on (positions + opportunities)
+          on top, then the reads (health / regime / leader posture / leader-vs-you).
+          On mobile this stacks directly under the chart. */}
+      <aside className={css({ order: { base: 2, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minHeight: { base: 'auto', lg: '0' }, overflowY: { base: 'visible', lg: 'auto' } })}>
         <OpenPositionsPanel
           sessionId={sessionId}
           regimeByCoin={regimeByCoin}
           currentEquityUsd={currentEquityUsd}
           onNewPosition={onNewPosition}
         />
-        {/* Adaptive Market-Read / Trade-Health + Leader-vs-You (wave-2). */}
-        <div className={css({ display: 'grid', gridTemplateColumns: { base: '1fr', md: 'minmax(0,1fr) minmax(0,1fr)' }, gap: '12px', alignItems: 'start' })}>
-          <HealthPanel sessionId={sessionId} coin={coin} />
-          <LeaderVsYou sessionId={sessionId} coin={coin} leaderAddress={leaderAddress} leaderPositions={leaderPositions} />
-        </div>
-        {/* Opportunity view (the rubric read) + leader posture — the decision surface. */}
         <OpportunityBoard
           order={coins}
           selectedCoin={coin}
           onSelectCoin={(c) => { if (coins.includes(c)) onCoinChange(c); }}
           onAskClaude={() => onNewPosition()}
         />
-        <WhalePosture coins={coins} />
-      </main>
-
-      {/* RIGHT — Market Regime + Order Book. On mobile the compact Market Regime
-          sits directly under the focal Open-Positions stack; the dense order book
-          is desktop-only (the phone surface stays scannable). */}
-      <aside className={css({ order: { base: 2, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minHeight: { base: 'auto', lg: '0' }, overflowY: { base: 'visible', lg: 'auto' } })}>
+        <HealthPanel sessionId={sessionId} coin={coin} />
         <MarketRegimePanel coin={coin} onNetBias={onNetBias} />
-        <div className={css({ display: { base: 'none', lg: 'block' } })}>
-          <Orderbook coin={coin} depth={8} />
-        </div>
+        <WhalePosture coins={coins} />
+        <LeaderVsYou sessionId={sessionId} coin={coin} leaderAddress={leaderAddress} leaderPositions={leaderPositions} />
       </aside>
 
       {/* SELF-SERVICE entry modal — floats above everything. NO-AUTO-FIRE: it only

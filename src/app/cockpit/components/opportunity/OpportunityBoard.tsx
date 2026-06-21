@@ -48,7 +48,7 @@ export default function OpportunityBoard({ order = [], selectedCoin, onSelectCoi
           {rowsOverride === undefined && !live.loaded ? 'loading opportunity reads…' : 'no rubric reads yet — the scan populates these'}
         </div>
       ) : (
-        <div className={css({ display: 'grid', gridTemplateColumns: { base: '1fr', sm: 'repeat(2, 1fr)', xl: 'repeat(2, 1fr)' }, gap: '10px' })}>
+        <div className={css({ display: 'grid', gridTemplateColumns: { base: '1fr', sm: 'repeat(2, 1fr)', lg: '1fr' }, gap: '10px' })}>
           {models.map((m) => (
             <OpportunityCard key={m.coin} model={m} now={clock} selected={selectedCoin?.toUpperCase() === m.coin} onSelect={onSelectCoin} onAskClaude={onAskClaude} />
           ))}

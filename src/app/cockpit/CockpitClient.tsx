@@ -82,10 +82,10 @@ export default function CockpitClient({
     setView(v);
     setMobileTab(v);
   };
-  // Mobile tab → keep the desktop view aligned (Traders maps to the cockpit grid).
+  // Mobile tab ↔ desktop view are now the same 3 keys (Cockpit/Traders/Performance).
   const onMobileTabChange = (t: MobileTab) => {
     setMobileTab(t);
-    setView(t === 'performance' ? 'performance' : 'cockpit');
+    setView(t);
   };
 
   // The single surface to render: on mobile the bottom tab wins; on desktop the
@@ -155,12 +155,16 @@ export default function CockpitClient({
       {surface === 'performance' ? (
         <PerformanceView sessionId={sessionId} />
       ) : surface === 'traders' ? (
-        // Mobile-only Traders surface (the Top Traders rail as a full screen).
+        // Traders surface (desktop nav + mobile tab) — the Top Traders rail, now a
+        // dedicated tab instead of the cockpit's left rail. Centered column so it
+        // reads intentionally full-screen rather than stretched.
         <section
-          data-testid="mobile-traders-view"
+          data-testid="traders-view"
           className={css({ flex: 1, overflowY: 'auto', padding: '12px' })}
         >
-          <TopTradersRail traders={topTraders} followedAddress={leaderAddress} ratings={ratings} />
+          <div className={css({ maxWidth: '760px', marginX: 'auto' })}>
+            <TopTradersRail traders={topTraders} followedAddress={leaderAddress} ratings={ratings} />
+          </div>
         </section>
       ) : (
         <CockpitView
@@ -173,10 +177,7 @@ export default function CockpitClient({
           trade={trade}
           leaderAddress={leaderAddress}
           leaderPositions={resolvedLeaderPositions}
-          topTraders={topTraders}
-          ratings={ratings}
           currentEquityUsd={equityUsd ?? 0}
-          showTradersRail={!isMobile}
         />
       )}
 
