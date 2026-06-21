@@ -73,7 +73,7 @@ export default async function CockpitPage() {
       leaderPositions={leaderPositions}
       topTraders={topTraders}
       ratings={ratings}
-      coins={['ETH', 'BTC', 'HYPE']}
+      coins={['ETH', 'BTC', 'HYPE', 'SOL']}
     />
   );
 }

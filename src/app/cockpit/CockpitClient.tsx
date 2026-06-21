@@ -66,7 +66,7 @@ export default function CockpitClient({
   leaderPositions,
   topTraders = [],
   ratings = null,
-  coins = ['ETH', 'BTC', 'HYPE'],
+  coins = ['ETH', 'BTC', 'HYPE', 'SOL'],
 }: CockpitClientProps) {
   const isMobile = useIsMobile();
   // Desktop: 2-view segmented nav (Cockpit / Performance) — Traders is the
