@@ -26,7 +26,9 @@ export interface OpportunityCardProps {
 export default function OpportunityCard({ model, now, selected, onSelect, onAskClaude }: OpportunityCardProps) {
   const stale = isStale(model.computedAt, now);
   const badge = badgeMeta(model.badge);
-  const dir = directionMeta(model.chosenSide !== 'none' ? model.chosenSide : model.display.side);
+  // Only show a direction when there's an actual edge — a NO-EDGE card shows "—"
+  // (don't imply LONG/SHORT when the rubric has no call).
+  const dir = directionMeta(model.chosenSide);
   const { score, band } = formatScore(model.display.opportunity, model.display.scoreBandLow, model.display.scoreBandHigh);
   const dots = confidenceDots(model.confidence);
   const segs = pillarSegments(model.display);
