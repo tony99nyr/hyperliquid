@@ -1,0 +1,7 @@
+{
+  "description": "Rubric engine thresholds + weights (deterministic opportunity scoring). Bump 'active' to roll a new tuning forward; weights are set by ROLE, not mined from history.",
+  "active": "0.1.0",
+  "versions": {
+    "0.1.0": "rubric-v0.1.0.json"
+  }
+}

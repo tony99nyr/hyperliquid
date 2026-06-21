@@ -37,6 +37,7 @@ export const HL_CACHE_TAGS = {
   allMids: 'hl:all-mids',
   clearinghouse: 'hl:clearinghouse',
   perpMeta: 'hl:perp-meta',
+  assetCtxs: 'hl:asset-ctxs',
 } as const;
 
 /** Revalidate windows (seconds). Tuned to keep the UI live while cutting HL hard. */
@@ -51,6 +52,8 @@ export const HL_REVALIDATE_S = {
   clearinghouse: 25,
   /** The perp universe (asset indices + szDecimals) changes very rarely. */
   perpMeta: 300,
+  /** Funding/OI context for the rubric scan (~20min cadence) — 60s is ample. */
+  assetCtxs: 60,
 } as const;
 
 // --- Layer 2: in-flight coalescing (per-instance) ---

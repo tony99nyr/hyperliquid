@@ -1,0 +1,22 @@
+{
+  "version": "0.1.0",
+  "thresholds": { "bar": 55, "go": 70, "margin": 12 },
+  "weights": { "leaders": 0.45, "carry": 0.2, "micro": 0.35 },
+  "regime": { "floor": 0.15, "confirmedConfidence": 0.6 },
+  "gates": {
+    "minDepthUsd": 50000,
+    "depthQueryFrac": 0.001,
+    "minRoomToTarget": 1.5,
+    "volContractionAtrPctile": 0.25,
+    "volContractionBbPctile": 0.25
+  },
+  "consensus": { "topN": 10, "tauHours": 12, "dirtyBookWeight": 0.4, "fullScoreNet": 3 },
+  "carry": { "fullScoreApr": 15 },
+  "micro": { "imbalanceFullScoreAt": 0.6, "maxSpreadBps": 8 },
+  "levels": { "entryZoneAtrFrac": 0.25, "stopAtrMult": 1.5, "targetAtrMult": 3.0 },
+  "portfolio": { "btcEthBeta": 1.7, "hypeBeta": 1.0, "maxSameDirBeta": 2.5 },
+  "review": { "exitBelow": 35, "trimBelow": 55, "addAbove": 75 },
+  "perCoin": {
+    "HYPE": { "gates": { "minDepthUsd": 20000 }, "consensus": { "topN": 8 } }
+  }
+}

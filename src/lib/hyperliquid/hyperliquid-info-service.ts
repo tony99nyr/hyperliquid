@@ -568,3 +568,64 @@ export async function fetchPerpMeta(network: 'mainnet' | 'testnet' = 'mainnet'):
   // path → direct (uncached) so it never collides with the mainnet cache key.
   return network === 'testnet' ? load() : cachedHlRead('perpMeta', ['all'], load);
 }
+
+/** Per-asset funding/OI context (from HL `metaAndAssetCtxs`), keyed by coin. */
+export interface HlAssetCtx {
+  coin: string;
+  /** Funding rate, HOURLY (decimal). Positive = longs pay shorts. */
+  fundingHourly: number;
+  openInterest: number;
+  premium: number;
+  markPx: number;
+  oraclePx: number;
+  /** 24h price change reference (prev-day px), 0 when unknown. */
+  prevDayPx: number;
+}
+
+interface RawAssetCtx {
+  funding?: string;
+  openInterest?: string;
+  premium?: string;
+  markPx?: string;
+  oraclePx?: string;
+  prevDayPx?: string;
+}
+
+/**
+ * Fetch funding/OI/premium per asset (HL `metaAndAssetCtxs`). The response is
+ * `[meta, ctxs]` where `meta.universe[i]` aligns to `ctxs[i]`. Returns a coin →
+ * HlAssetCtx map. Data-Cached ~60s (the rubric scan runs ~20min, so staleness is
+ * bounded). Throws on an empty/garbage body so the cache never pins emptiness.
+ */
+export async function fetchMetaAndAssetCtxs(
+  network: 'mainnet' | 'testnet' = 'mainnet',
+): Promise<Record<string, HlAssetCtx>> {
+  const load = async () => {
+    const raw = await hlInfoPost<[{ universe?: HlPerpAsset[] }, RawAssetCtx[]]>(
+      { type: 'metaAndAssetCtxs' },
+      hlInfoUrlFor(network),
+    );
+    const universe = raw?.[0]?.universe ?? [];
+    const ctxs = raw?.[1] ?? [];
+    const out: Record<string, HlAssetCtx> = {};
+    for (let i = 0; i < universe.length; i++) {
+      const name = universe[i]?.name;
+      const ctx = ctxs[i];
+      if (!name || !ctx) continue;
+      out[name.toUpperCase()] = {
+        coin: name.toUpperCase(),
+        fundingHourly: num(ctx.funding),
+        openInterest: num(ctx.openInterest),
+        premium: num(ctx.premium),
+        markPx: num(ctx.markPx),
+        oraclePx: num(ctx.oraclePx),
+        prevDayPx: num(ctx.prevDayPx),
+      };
+    }
+    if (Object.keys(out).length === 0) {
+      throw new Error('metaAndAssetCtxs empty: soft failure (no ctxs)');
+    }
+    return out;
+  };
+  return network === 'testnet' ? load() : cachedHlRead('assetCtxs', ['all'], load);
+}
