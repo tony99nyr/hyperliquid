@@ -34,9 +34,11 @@ import {
 import type { PriceCandle } from '@/types/trading-core';
 import {
   buildTradeLines,
+  buildOpportunityLines,
   maLine,
   toLwcCandles,
   type ActiveTrade,
+  type OpportunityLevels,
 } from './candle-chart-helpers';
 import { GH, ZONE_COLORS, TERM } from '../panel-styles';
 
@@ -46,6 +48,8 @@ export interface CandleChartProps {
   lastPx?: number | null;
   /** Active trade to overlay (entry/stop/target lines). */
   trade?: ActiveTrade | null;
+  /** Rubric opportunity levels to overlay when FLAT (entry zone / inval / target). */
+  opportunity?: OpportunityLevels | null;
   height?: number;
   /** Coin + interval identify the dataset; a change re-fits the view ONCE. */
   coin?: string;
@@ -62,6 +66,7 @@ export default function CandleChart({
   candles,
   lastPx = null,
   trade = null,
+  opportunity = null,
   height = 460,
   coin,
   interval,
@@ -72,6 +77,7 @@ export default function CandleChart({
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const maFastRef = useRef<ISeriesApi<'Line'> | null>(null);
   const maSlowRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const oppLinesRef = useRef<IPriceLine[]>([]);
   const priceLinesRef = useRef<IPriceLine[]>([]);
   // Effective render height, decided ONCE at mount (this is a client-only
   // ssr:false island, so `window` is safe and there is no SSR/first-paint flip
@@ -84,6 +90,11 @@ export default function CandleChart({
     }
     return height;
   });
+  // Decided ONCE at mount: on DESKTOP the chart fills its column (nothing below it
+  // to scroll past), so wheel-zoom is safe + wanted (no pinch on desktop). On
+  // MOBILE the page stacks below the chart, so the wheel must scroll the PAGE
+  // (pinch handles zoom there). This is the "scroll past the chart" vs "zoom" call.
+  const [wheelZoom] = useState(() => typeof window !== 'undefined' && window.innerWidth > 1023);
   // The dataset (coin|interval) we last fitContent()'d for — we re-fit ONCE per
   // dataset, never on subsequent polls (which would destroy user pan/zoom).
   const fittedKeyRef = useRef<string | null>(null);
@@ -113,11 +124,11 @@ export default function CandleChart({
       },
       rightPriceScale: { borderColor: GH.border },
       timeScale: { borderColor: GH.border, timeVisible: true, secondsVisible: false },
-      // Don't trap the mouse wheel: let it scroll the PAGE over the chart (the
-      // "scroll past the chart is annoying" fix). Pan via drag, zoom via pinch
-      // (mobile) or the time/price axes — wheel zoom is the only thing disabled.
-      handleScroll: { mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
-      handleScale: { mouseWheel: false, pinch: true, axisPressedMouseMove: true, axisDoubleClickReset: true },
+      // Wheel: zoom on DESKTOP (chart fills the column — nothing to scroll past),
+      // but on MOBILE let the wheel scroll the PAGE (pinch zooms there). Drag pans
+      // everywhere; double-click resets.
+      handleScroll: { mouseWheel: wheelZoom, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+      handleScale: { mouseWheel: wheelZoom, pinch: true, axisPressedMouseMove: true, axisDoubleClickReset: true },
       autoSize: true,
       height: effectiveHeight,
     });
@@ -241,6 +252,35 @@ export default function CandleChart({
       );
     }
   }, [trade]);
+
+  // --- Overlay the rubric OPPORTUNITY levels (entry zone / inval / target) when
+  // FLAT (no active trade overlay on this coin). Own ref array so its cleanup
+  // never fights the trade-line effect. Shows where a potential setup sits on the
+  // chart; hidden once you're in a position (the trade lines take over). ---
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+    for (const line of oppLinesRef.current) series.removePriceLine(line);
+    oppLinesRef.current = [];
+    if (trade) return; // in a position → trade lines own the overlay
+    const lines = buildOpportunityLines(opportunity ?? null, {
+      entry: TERM.accent,
+      invalidation: ZONE_COLORS.danger,
+      target: ZONE_COLORS.ok,
+    });
+    for (const l of lines) {
+      oppLinesRef.current.push(
+        series.createPriceLine({
+          price: l.price,
+          color: l.color,
+          lineWidth: 1,
+          lineStyle: l.dashed ? LineStyle.Dashed : LineStyle.Solid,
+          axisLabelVisible: true,
+          title: l.title,
+        }),
+      );
+    }
+  }, [opportunity, trade]);
 
   // `flexShrink: 0` + `minHeight` keep the canvas from collapsing to a sliver
   // when the panel is a flex column on mobile (autoSize's ResizeObserver would

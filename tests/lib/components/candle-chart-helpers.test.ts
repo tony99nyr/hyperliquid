@@ -3,6 +3,7 @@ import {
   toLwcCandles,
   maLine,
   buildTradeLines,
+  buildOpportunityLines,
 } from '@/app/cockpit/components/chart/candle-chart-helpers';
 import type { PriceCandle } from '@/types/trading-core';
 
@@ -60,5 +61,23 @@ describe('buildTradeLines', () => {
   it('omits lines for null/non-finite prices', () => {
     const lines = buildTradeLines({ side: 'short', entryPx: 2000, stopPx: null, targetPx: NaN }, colors);
     expect(lines.map((l) => l.title)).toEqual(['ENTRY']);
+  });
+});
+
+describe('buildOpportunityLines', () => {
+  const colors = { entry: '#5b8cff', invalidation: '#f24d5e', target: '#19c98a' };
+  it('returns [] when there is no edge (side none) or null', () => {
+    expect(buildOpportunityLines(null, colors)).toEqual([]);
+    expect(buildOpportunityLines({ side: 'none', entryLow: 1, entryHigh: 2, invalidation: 0, target: 3 }, colors)).toEqual([]);
+  });
+  it('builds entry-zone + invalidation + target (all dashed) for a directional setup', () => {
+    const lines = buildOpportunityLines({ side: 'short', entryLow: 1690, entryHigh: 1710, invalidation: 1740, target: 1640 }, colors);
+    expect(lines.map((l) => l.title)).toEqual(['ENTRY▼', 'ENTRY▲', 'INVAL', 'TGT']);
+    expect(lines.every((l) => l.dashed)).toBe(true);
+    expect(lines.find((l) => l.title === 'INVAL')?.color).toBe(colors.invalidation);
+  });
+  it('skips non-finite levels', () => {
+    const lines = buildOpportunityLines({ side: 'long', entryLow: 100, entryHigh: NaN, invalidation: null, target: 120 }, colors);
+    expect(lines.map((l) => l.title)).toEqual(['ENTRY▼', 'TGT']);
   });
 });

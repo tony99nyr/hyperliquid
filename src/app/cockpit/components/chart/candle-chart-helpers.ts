@@ -94,3 +94,38 @@ export function buildTradeLines(
   }
   return lines;
 }
+
+/** The selected coin's rubric levels, for overlaying a potential setup (no position yet). */
+export interface OpportunityLevels {
+  side: 'long' | 'short' | 'none';
+  entryLow: number | null;
+  entryHigh: number | null;
+  invalidation: number | null;
+  target: number | null;
+}
+
+/**
+ * Build the rubric opportunity price-line set (entry zone / invalidation / target)
+ * for a SETUP you don't yet hold. Empty when there's no directional edge
+ * (side==='none'). All dashed (it's a proposal, not a live trade). PURE.
+ */
+export function buildOpportunityLines(
+  opp: OpportunityLevels | null,
+  colors: { entry: string; invalidation: string; target: string },
+): TradePriceLine[] {
+  if (!opp || opp.side === 'none') return [];
+  const lines: TradePriceLine[] = [];
+  if (opp.entryLow != null && Number.isFinite(opp.entryLow)) {
+    lines.push({ price: opp.entryLow, color: colors.entry, title: 'ENTRY▼', dashed: true });
+  }
+  if (opp.entryHigh != null && Number.isFinite(opp.entryHigh)) {
+    lines.push({ price: opp.entryHigh, color: colors.entry, title: 'ENTRY▲', dashed: true });
+  }
+  if (opp.invalidation != null && Number.isFinite(opp.invalidation)) {
+    lines.push({ price: opp.invalidation, color: colors.invalidation, title: 'INVAL', dashed: true });
+  }
+  if (opp.target != null && Number.isFinite(opp.target)) {
+    lines.push({ price: opp.target, color: colors.target, title: 'TGT', dashed: true });
+  }
+  return lines;
+}

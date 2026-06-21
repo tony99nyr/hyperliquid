@@ -17,13 +17,15 @@
  * Wired to REAL data throughout (Supabase realtime + HL ws + candle polls).
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { css } from '@styled-system/css';
 import type { HlPosition } from '@/lib/hyperliquid/hyperliquid-info-service';
 import type { TradingMode } from '@/types/fill';
-import type { ActiveTrade } from './chart/candle-chart-helpers';
+import type { ActiveTrade, OpportunityLevels } from './chart/candle-chart-helpers';
 import type { RegimeDir } from './open-positions-helpers';
 import { useHlOrderbook } from '@/hooks/useHlOrderbook';
+import { useRubricScores } from '@/hooks/useRubricScores';
+import { toCardModels } from './opportunity/opportunity-helpers';
 import CandleChartPanel from './chart/CandleChartPanel';
 import OpenPositionsPanel from './OpenPositionsPanel';
 import MarketRegimePanel from './right-rail/MarketRegimePanel';
@@ -80,6 +82,22 @@ export default function CockpitView({
   const book = useHlOrderbook(coin);
   const entryPx = book.lastPx ?? book.book.mid ?? null;
 
+  // Rubric reads — subscribed ONCE here, fed to the board (override → its own
+  // subscription stays inert) and the chart (overlay the selected coin's levels).
+  const rubric = useRubricScores();
+  const cardModels = useMemo(() => toCardModels(rubric.rows, coins), [rubric.rows, coins]);
+  const selectedOpp: OpportunityLevels | null = useMemo(() => {
+    const m = cardModels.find((c) => c.coin === coin.toUpperCase());
+    if (!m) return null;
+    return {
+      side: m.chosenSide,
+      entryLow: m.display.entryLow,
+      entryHigh: m.display.entryHigh,
+      invalidation: m.display.invalidation,
+      target: m.display.target,
+    };
+  }, [cardModels, coin]);
+
   return (
     <div
       data-testid="cockpit-view"
@@ -100,7 +118,7 @@ export default function CockpitView({
       <main className={css({ order: { base: 1, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minHeight: { base: 'auto', lg: '0' }, overflowY: { base: 'visible', lg: 'auto' }, paddingRight: { lg: '2px' } })}>
         {!hasSession && <GettingStarted mode={mode} />}
         <CockpitCoinTabs coin={coin} coins={coins} onChange={onCoinChange} />
-        <CandleChartPanel coin={coin} trade={trade} />
+        <CandleChartPanel coin={coin} trade={trade} opportunity={selectedOpp} />
       </main>
 
       {/* RIGHT — the decision column: what you ACT on (positions + opportunities)
@@ -118,6 +136,8 @@ export default function CockpitView({
           selectedCoin={coin}
           onSelectCoin={(c) => { if (coins.includes(c)) onCoinChange(c); }}
           onAskClaude={() => onNewPosition()}
+          rowsOverride={rubric.rows}
+          now={Date.now()}
         />
         <HealthPanel sessionId={sessionId} coin={coin} />
         <MarketRegimePanel coin={coin} onNetBias={onNetBias} />

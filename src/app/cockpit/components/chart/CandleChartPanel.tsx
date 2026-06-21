@@ -16,7 +16,7 @@ import type { CandleInterval } from '@/lib/hyperliquid/candle-service';
 import { useCandles } from '@/hooks/useCandles';
 import { useHlOrderbook } from '@/hooks/useHlOrderbook';
 import { detectMarketRegime } from '@/lib/strategy/analysis/market-regime-detector';
-import type { ActiveTrade } from './candle-chart-helpers';
+import type { ActiveTrade, OpportunityLevels } from './candle-chart-helpers';
 import TimeframeTabs from './TimeframeTabs';
 import {
   GH,
@@ -46,6 +46,8 @@ export interface CandleChartPanelProps {
   coin: string;
   /** Active trade overlay (entry/stop/target), or null when flat. */
   trade?: ActiveTrade | null;
+  /** Rubric opportunity levels to overlay when flat (entry zone / inval / target). */
+  opportunity?: OpportunityLevels | null;
   /** Test seed: skip the timeframe selector default. */
   initialTimeframe?: CandleInterval;
 }
@@ -53,6 +55,7 @@ export interface CandleChartPanelProps {
 export default function CandleChartPanel({
   coin,
   trade = null,
+  opportunity = null,
   initialTimeframe = '15m',
 }: CandleChartPanelProps) {
   const [timeframe, setTimeframe] = useState<CandleInterval>(initialTimeframe);
@@ -154,7 +157,7 @@ export default function CandleChartPanel({
           loading {coin.toUpperCase()} {timeframe}…
         </div>
       ) : (
-        <CandleChart candles={candles} lastPx={lastPx} trade={trade} coin={coin} interval={timeframe} status={status} />
+        <CandleChart candles={candles} lastPx={lastPx} trade={trade} opportunity={opportunity} coin={coin} interval={timeframe} status={status} />
       )}
 
       <footer className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>
