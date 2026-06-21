@@ -21,10 +21,9 @@ import { css } from '@styled-system/css';
 import type { HealthSnapshot } from '@/types/cockpit';
 import { useHealthSnapshots } from '@/hooks/useHealthSnapshots';
 import { usePositionPnl } from '@/hooks/usePositionPnl';
-import { useRegimeStrip } from '@/hooks/useRegimeStrip';
 import RegimeStrip from './right-rail/RegimeStrip';
 import AlertChip from './right-rail/AlertChip';
-import { deriveEntryBias, type RegimeStripRow } from './right-rail/regime-strip-helpers';
+import type { RegimeStripRow } from './right-rail/regime-strip-helpers';
 import {
   GH,
   ZONE_COLORS,
@@ -33,7 +32,6 @@ import {
   healthGrade,
   healthZone,
   panelSurface,
-  regimeColor,
 } from './panel-styles';
 
 export interface HealthPanelProps {
@@ -144,16 +142,16 @@ export default function HealthPanel({
   );
   const inPosition = inPositionOverride !== undefined ? inPositionOverride : derivedInPosition;
 
-  // The regime strip / entry read fetches for a real coin; inert under overrides.
+  // The regime strip fetches for a real coin; inert under overrides.
   const regimeCoin = usingOverride || regimeRowsOverride ? '' : coin;
 
-  if (inPosition) {
-    return (
-      <TradeHealthView snapshot={snapshot} coin={norm} regimeCoin={regimeCoin} rowsOverride={regimeRowsOverride} />
-    );
-  }
+  // FLAT → render nothing. The Opportunity board (per-coin direction + regime
+  // pillar) is the entry read; the Market Regime panel is the multi-TF detail.
+  // The old "Market Read / Entry" view duplicated both, so it's gone — Health is
+  // now strictly the IN-POSITION read.
+  if (!inPosition) return null;
   return (
-    <MarketReadView coin={coin} regimeCoin={regimeCoin} rowsOverride={regimeRowsOverride} usingOverride={usingOverride} />
+    <TradeHealthView snapshot={snapshot} coin={norm} regimeCoin={regimeCoin} rowsOverride={regimeRowsOverride} />
   );
 }
 
@@ -205,57 +203,3 @@ function TradeHealthView({
   );
 }
 
-/** "MARKET READ / ENTRY" — the flat-session entry guidance (regime + bias). */
-function MarketReadView({
-  coin,
-  regimeCoin,
-  rowsOverride,
-  usingOverride,
-}: {
-  coin: string;
-  regimeCoin: string;
-  rowsOverride?: RegimeStripRow[];
-  usingOverride: boolean;
-}) {
-  // Pull the same rows the strip uses so we can derive a net directional bias.
-  // Inert (empty coin) under overrides; the override rows feed the bias directly.
-  const liveStrip = useRegimeStrip(rowsOverride || usingOverride ? '' : coin);
-  const rows = rowsOverride ?? liveStrip.rows;
-  const bias = deriveEntryBias(rows);
-  const biasColor = regimeColor(bias.side === 'long' ? 'bullish' : bias.side === 'short' ? 'bearish' : 'neutral');
-  const sideLabel = bias.side === 'long' ? 'LONG' : bias.side === 'short' ? 'SHORT' : 'NEUTRAL';
-
-  return (
-    <section data-testid="health-panel" data-mode="market-read" className={css(sectionStyle)}>
-      <PanelHeader title="Market Read / Entry" note="no position" />
-
-      <div className={css({ display: 'flex', flexDirection: 'column', gap: '3px' })}>
-        <span className={css({ fontFamily: 'label', fontSize: '9px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.06em' })}>
-          Net Directional Bias
-        </span>
-        <span
-          data-testid="entry-bias-side"
-          data-side={bias.side}
-          style={{ color: biasColor }}
-          className={css({ fontFamily: 'mono', fontSize: 'xl', fontWeight: 'bold', lineHeight: '1' })}
-        >
-          {sideLabel}
-          {bias.side !== 'neutral' && (
-            <span data-testid="entry-bias-strength" style={{ color: biasColor, fontFeatureSettings: '"tnum"' }} className={css({ fontSize: 'sm', marginLeft: '8px' })}>
-              {Math.round(bias.strength * 100)}%
-            </span>
-          )}
-        </span>
-        <span data-testid="entry-bias-guidance" className={css({ fontSize: 'xs', color: 'github.text', lineHeight: '1.4' })}>
-          {bias.guidance}
-        </span>
-      </div>
-
-      <RegimeStrip coin={regimeCoin} rowsOverride={rowsOverride} />
-
-      <span className={css({ fontSize: '10px', color: 'github.textMuted', fontFamily: 'mono', lineHeight: '1.4' })}>
-        Entry guidance only — no open {coin} position. Trade Health replaces this once a position is live.
-      </span>
-    </section>
-  );
-}

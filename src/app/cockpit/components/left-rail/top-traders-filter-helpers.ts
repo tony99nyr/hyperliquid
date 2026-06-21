@@ -18,7 +18,7 @@ import type { TopTraderRow } from '@/lib/hyperliquid/top-traders-service';
  * the cockpit coins prop + the server-side tradesTradeableCoin both derive from
  * it.
  */
-export const TRADEABLE_COINS = ['ETH', 'BTC', 'HYPE'] as const;
+export const TRADEABLE_COINS = ['ETH', 'BTC', 'HYPE', 'SOL'] as const;
 
 const TRADEABLE_SET = new Set<string>(TRADEABLE_COINS);
 

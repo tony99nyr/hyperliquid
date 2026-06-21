@@ -69,40 +69,10 @@ describe('HealthPanel — TRADE HEALTH (in a position)', () => {
   });
 });
 
-const bullRows: RegimeStripRow[] = [
-  { timeframe: '1d', regime: 'bullish', confidence: 0.8, rsi: 60, noData: false },
-  { timeframe: '8h', regime: 'bullish', confidence: 0.7, rsi: 58, noData: false },
-  { timeframe: '1h', regime: 'bullish', confidence: 0.6, rsi: 55, noData: false },
-  { timeframe: '15m', regime: 'neutral', confidence: 0.3, rsi: 50, noData: false },
-];
-
-const bearRows: RegimeStripRow[] = bullRows.map((r) => ({ ...r, regime: r.regime === 'bullish' ? 'bearish' : r.regime }));
-
-describe('HealthPanel — MARKET READ / ENTRY (flat)', () => {
-  it('renders the market-read frame when flat (no position)', () => {
-    render(<HealthPanel sessionId={null} inPositionOverride={false} regimeRowsOverride={bullRows} />);
-    const panel = screen.getByTestId('health-panel');
-    expect(panel.getAttribute('data-mode')).toBe('market-read');
-    expect(screen.getByText(/Market Read \/ Entry/i)).toBeTruthy();
-    // NO position-health score gauge for a non-existent position.
-    expect(screen.queryByRole('img')).toBeNull();
-    expect(screen.queryByTestId('p-continuation')).toBeNull();
-  });
-
-  it('derives a LONG bias from bullish higher timeframes', () => {
-    render(<HealthPanel sessionId={null} inPositionOverride={false} regimeRowsOverride={bullRows} />);
-    expect(screen.getByTestId('entry-bias-side').getAttribute('data-side')).toBe('long');
-    expect(screen.getByTestId('entry-bias-guidance').textContent).toMatch(/buy entry/i);
-  });
-
-  it('derives a SHORT bias from bearish higher timeframes', () => {
-    render(<HealthPanel sessionId={null} inPositionOverride={false} regimeRowsOverride={bearRows} />);
-    expect(screen.getByTestId('entry-bias-side').getAttribute('data-side')).toBe('short');
-  });
-
-  it('shows the regime strip as numbers in the entry read', () => {
-    render(<HealthPanel sessionId={null} inPositionOverride={false} regimeRowsOverride={bullRows} />);
-    expect(screen.getByTestId('regime-strip')).toBeTruthy();
-    expect(screen.getByTestId('regime-label-1d').textContent).toBe('BULL');
+describe('HealthPanel — FLAT (no position) renders nothing', () => {
+  it('renders nothing when flat (the Opportunity board + Market Regime panel are the entry read)', () => {
+    const { container } = render(<HealthPanel sessionId={null} inPositionOverride={false} />);
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByTestId('health-panel')).toBeNull();
   });
 });
