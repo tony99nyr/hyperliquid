@@ -31,7 +31,8 @@ import type { RatingsFreshness } from './left-rail/ratings-freshness-helpers';
 import OpenPositionsPanel from './OpenPositionsPanel';
 import MarketRegimePanel from './right-rail/MarketRegimePanel';
 import Orderbook from './Orderbook';
-import SecondaryStrip from './SecondaryStrip';
+import OpportunityBoard from './opportunity/OpportunityBoard';
+import WhalePosture from './opportunity/WhalePosture';
 import HealthPanel from './HealthPanel';
 import LeaderVsYou from './LeaderVsYou';
 import GettingStarted from './GettingStarted';
@@ -132,7 +133,14 @@ export default function CockpitView({
           <HealthPanel sessionId={sessionId} coin={coin} />
           <LeaderVsYou sessionId={sessionId} coin={coin} leaderAddress={leaderAddress} leaderPositions={leaderPositions} />
         </div>
-        <SecondaryStrip sessionId={sessionId} />
+        {/* Opportunity view (the rubric read) + leader posture — the decision surface. */}
+        <OpportunityBoard
+          order={coins}
+          selectedCoin={coin}
+          onSelectCoin={(c) => { if (coins.includes(c)) onCoinChange(c); }}
+          onAskClaude={() => onNewPosition()}
+        />
+        <WhalePosture coins={coins} />
       </main>
 
       {/* RIGHT — Market Regime + Order Book. On mobile the compact Market Regime

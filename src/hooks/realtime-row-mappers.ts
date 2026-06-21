@@ -332,3 +332,73 @@ export function byCreatedAtDesc<T extends { createdAt: number }>(a: T, b: T): nu
 export function byCreatedAtAsc<T extends { createdAt: number }>(a: T, b: T): number {
   return a.createdAt - b.createdAt;
 }
+
+/**
+ * A rubric_scores row (one per coin×side) — the deterministic opportunity read.
+ * id = `${coin}:${side}` so realtime updates REPLACE (newest per coin/side wins),
+ * like leader_positions. Mirrors supabase/migrations/0009_rubric.sql.
+ */
+export interface RubricScoreUiRow {
+  id: string;
+  coin: string;
+  side: 'long' | 'short';
+  opportunity: number;
+  pillarRegime: number;
+  pillarLeaders: number;
+  pillarCarry: number;
+  pillarMicro: number;
+  regimeMultiplier: number;
+  badge: 'GO' | 'WATCH' | 'NO-EDGE';
+  chosenSide: 'long' | 'short' | 'none';
+  noTradeReason: string | null;
+  entryLow: number | null;
+  entryHigh: number | null;
+  invalidation: number | null;
+  target: number | null;
+  triggerPx: number | null;
+  roomToTarget: number | null;
+  confidence: number;
+  scoreBandLow: number;
+  scoreBandHigh: number;
+  killedBy: string | null;
+  computedAt: number;
+}
+
+export function mapRubricScoreRow(row: RealtimeRow): RubricScoreUiRow {
+  const coin = str(row.coin).toUpperCase();
+  const side = str(row.side) === 'short' ? 'short' : 'long';
+  const badgeRaw = str(row.badge);
+  const badge = badgeRaw === 'GO' || badgeRaw === 'WATCH' ? badgeRaw : 'NO-EDGE';
+  const chosenRaw = str(row.chosen_side);
+  const chosenSide = chosenRaw === 'long' || chosenRaw === 'short' ? chosenRaw : 'none';
+  return {
+    id: `${coin}:${side}`,
+    coin,
+    side,
+    opportunity: num(row.opportunity),
+    pillarRegime: num(row.pillar_regime),
+    pillarLeaders: num(row.pillar_leaders),
+    pillarCarry: num(row.pillar_carry),
+    pillarMicro: num(row.pillar_micro),
+    regimeMultiplier: num(row.regime_multiplier),
+    badge,
+    chosenSide,
+    noTradeReason: row.no_trade_reason == null ? null : str(row.no_trade_reason),
+    entryLow: row.entry_low == null ? null : num(row.entry_low),
+    entryHigh: row.entry_high == null ? null : num(row.entry_high),
+    invalidation: row.invalidation == null ? null : num(row.invalidation),
+    target: row.target == null ? null : num(row.target),
+    triggerPx: row.trigger_px == null ? null : num(row.trigger_px),
+    roomToTarget: row.room_to_target == null ? null : num(row.room_to_target),
+    confidence: num(row.confidence),
+    scoreBandLow: num(row.score_band_low),
+    scoreBandHigh: num(row.score_band_high),
+    killedBy: row.killed_by == null ? null : str(row.killed_by),
+    computedAt: toMs(row.computed_at),
+  };
+}
+
+/** Stable comparator: coin asc, then side (long before short). */
+export function byCoinSideAsc(a: RubricScoreUiRow, b: RubricScoreUiRow): number {
+  return a.coin === b.coin ? a.side.localeCompare(b.side) : a.coin.localeCompare(b.coin);
+}
