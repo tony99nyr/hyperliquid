@@ -47,6 +47,13 @@ log "-> health watch (pnpm watch --once)"
 log "-> leader watch (pnpm trader-watch --once --top $TOP_N)"
 "$PNPM" trader-watch --once --top "$TOP_N" 2>&1 | sed 's/^/   /'
 
+# Rubric: deterministic opportunity scan + per-position reviews -> Supabase.
+# Read-only HL + Supabase-write (no agent key) so the NAS computes it directly;
+# no Vercel round-trip needed (unlike auto-exit). Runs AFTER leader-watch so
+# leader_positions is fresh for the consensus pillar. NEVER trades.
+log "-> rubric scan (pnpm rubric --once)"
+"$PNPM" rubric --once 2>&1 | sed 's/^/   /'
+
 # --- optional auto-exit poke (secret kept OUT of git) ---
 SECRET="${AUTO_EXIT_CRON_SECRET:-}"
 [ -z "$SECRET" ] && [ -f "$REPO/.auto-exit-secret" ] && SECRET="$(cat "$REPO/.auto-exit-secret" 2>/dev/null | tr -d '\r\n')"
