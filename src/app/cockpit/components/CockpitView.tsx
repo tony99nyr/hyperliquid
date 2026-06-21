@@ -137,7 +137,6 @@ export default function CockpitView({
           onSelectCoin={(c) => { if (coins.includes(c)) onCoinChange(c); }}
           onAskClaude={() => onNewPosition()}
           rowsOverride={rubric.rows}
-          now={Date.now()}
         />
         <HealthPanel sessionId={sessionId} coin={coin} />
         <MarketRegimePanel coin={coin} onNetBias={onNetBias} />

@@ -55,10 +55,14 @@ export default function OpportunityCard({ model, now, selected, onSelect, onAskC
         gap: '10px',
         cursor: 'pointer',
         opacity: stale ? 0.5 : 1,
-        outline: selected ? `1px solid ${TERM.accent}` : 'none',
-        transition: 'opacity 120ms, outline 120ms',
+        transition: 'opacity 120ms',
         _hover: { borderColor: 'rgba(91,140,255,0.4)' },
+        // Keyboard focus ring (card is role=button tabIndex=0) — distinct from the
+        // selected accent outline (which rides inline for its dynamic color).
+        _focusVisible: { outline: '2px solid token(colors.cockpit.accent)', outlineOffset: '1px' },
       })}
+      // Selected outline carries the dynamic accent color, so it lives inline (Panda
+      // can't statically extract an interpolated color into an atomic class).
       style={{ outline: selected ? `1px solid ${TERM.accent}` : undefined }}
     >
       {/* header: coin + direction + badge */}
@@ -90,9 +94,9 @@ export default function OpportunityCard({ model, now, selected, onSelect, onAskC
       </div>
 
       {/* 4-segment pillar bar */}
-      <div data-testid="pillar-bar" className={css({ display: 'flex', gap: '4px' })}>
+      <div data-testid="pillar-bar" role="group" aria-label="Pillar scores: regime, leaders, carry, micro" className={css({ display: 'flex', gap: '4px' })}>
         {segs.map((s) => (
-          <div key={s.key} data-pillar={s.key} className={css({ flex: 1, display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'center' })}>
+          <div key={s.key} data-pillar={s.key} title={`${s.label}: ${Math.round(s.value)}`} className={css({ flex: 1, display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'center' })}>
             <div className={css({ width: '100%', height: '4px', borderRadius: '2px', overflow: 'hidden', bg: 'github.bg' })}>
               <div style={{ width: `${Math.max(0, Math.min(100, s.value))}%`, height: '100%', background: s.color }} />
             </div>
@@ -120,7 +124,7 @@ export default function OpportunityCard({ model, now, selected, onSelect, onAskC
             onClick={(e) => { e.stopPropagation(); onAskClaude(buildAskClaudeSnapshot(model)); }}
             className={css({ fontFamily: 'label', fontSize: '9px', color: 'cockpit.accent', background: 'transparent', border: '1px solid rgba(91,140,255,0.3)', borderRadius: '5px', padding: '2px 7px', cursor: 'pointer', letterSpacing: '0.04em', _hover: { borderColor: 'cockpit.accent' } })}
           >
-            ⌕ ask
+            ask
           </button>
         )}
       </div>

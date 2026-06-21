@@ -29,7 +29,7 @@ export default function WhalePosture({ coins, positionsOverride, actionsOverride
   const rows = useMemo(() => summarizeWhalePosture(positions, actions, coins), [positions, actions, coins]);
 
   return (
-    <section data-testid="whale-posture" className={css({ display: 'flex', flexDirection: 'column', gap: '8px', bg: 'cockpit.panel', border: '1px solid token(colors.github.border)', borderRadius: '10px', padding: '12px' })}>
+    <section data-testid="whale-posture" className={css({ display: 'flex', flexDirection: 'column', gap: '8px', bg: 'cockpit.panel', border: '1px solid token(colors.github.border)', borderRadius: '12px', padding: '12px' })}>
       <header className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' })}>
         <h3 className={css({ fontFamily: 'label', fontSize: 'xs', fontWeight: 'bold', color: 'github.textBright', textTransform: 'uppercase', letterSpacing: '0.06em' })}>Leader Posture</h3>
         <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>top traders</span>

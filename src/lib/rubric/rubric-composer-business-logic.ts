@@ -51,6 +51,12 @@ export function computeRubric(inp: RubricInputs, cfg: RubricConfig): RubricResul
   const max = Math.max(long.opportunity, short.opportunity);
   const margin = Math.abs(long.opportunity - short.opportunity);
   const winner = long.opportunity >= short.opportunity ? long : short;
+  // vol-contraction is an asset-level gate (ATR/BB percentile, side-independent) —
+  // read it once rather than off whichever side happens to be the winner.
+  const volContraction = long.gates.volContraction;
+  // margin-too-thin only means something when BOTH sides are live: comparing a real
+  // score against a gated side's forced 0 is not a genuine two-sided contest.
+  const oneSideGated = Boolean(long.killedBy) !== Boolean(short.killedBy);
 
   let badge: Badge;
   let chosenSide: Side | 'none';
@@ -59,8 +65,8 @@ export function computeRubric(inp: RubricInputs, cfg: RubricConfig): RubricResul
   if (long.killedBy && short.killedBy) {
     badge = 'NO-EDGE';
     chosenSide = 'none';
-    noTradeReason = winner.gates.volContraction ? 'vol-contraction' : 'both-gated';
-  } else if (winner.killedBy && winner.gates.volContraction) {
+    noTradeReason = volContraction ? 'vol-contraction' : 'both-gated';
+  } else if (winner.killedBy && volContraction) {
     // The would-be winner is in a vol-contraction chop → stand down (chop-bleed guard).
     badge = 'NO-EDGE';
     chosenSide = 'none';
@@ -69,7 +75,7 @@ export function computeRubric(inp: RubricInputs, cfg: RubricConfig): RubricResul
     badge = 'NO-EDGE';
     chosenSide = 'none';
     noTradeReason = 'below-bar';
-  } else if (margin < cfg.thresholds.margin) {
+  } else if (!oneSideGated && margin < cfg.thresholds.margin) {
     badge = 'NO-EDGE';
     chosenSide = 'none';
     noTradeReason = 'margin-too-thin';

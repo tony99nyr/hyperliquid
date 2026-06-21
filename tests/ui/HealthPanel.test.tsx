@@ -3,7 +3,6 @@ import { render, screen } from '@testing-library/react';
 import HealthPanel from '@/app/cockpit/components/HealthPanel';
 import { ZONE_COLORS } from '@/app/cockpit/components/panel-styles';
 import type { HealthSnapshot } from '@/types/cockpit';
-import type { RegimeStripRow } from '@/app/cockpit/components/right-rail/regime-strip-helpers';
 
 /** jsdom normalizes inline hex colors to rgb(); convert for comparison. */
 function rgb(hex: string): string {

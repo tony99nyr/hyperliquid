@@ -37,8 +37,12 @@ function percentileRankLast(series: number[], lookback = 100): number {
   const window = series.slice(-lookback);
   const last = window[window.length - 1];
   if (!Number.isFinite(last)) return 0.5;
-  const le = window.filter((v) => Number.isFinite(v) && v <= last).length;
-  return le / window.length;
+  const finite = window.filter((v) => Number.isFinite(v));
+  // Dead-flat (or single-value) series has no percentile signal — every value is
+  // ≤ last, which would otherwise report a misleading 1.0 (max vol). Treat as neutral.
+  if (finite.length <= 1 || finite.every((v) => v === finite[0])) return 0.5;
+  const le = finite.filter((v) => v <= last).length;
+  return le / finite.length;
 }
 
 /** ATR (absolute) + ATR percentile + Bollinger-bandwidth percentile from 1h candles. */

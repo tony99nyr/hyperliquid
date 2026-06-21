@@ -8,6 +8,11 @@
 
 import type { RubricInputs, RubricResult } from './rubric-types';
 import type { PositionReview } from './rubric-position-review-business-logic';
+import { scoreBookImbalance } from './rubric-scorers-business-logic';
+
+// Fixed depth band for the hash's book signature — config-independent so the hash
+// stays stable across config edits while still tracking real order-book shifts.
+const HASH_BOOK_DEPTH_FRAC = 0.01;
 
 const r = (n: number, dp = 4): number => {
   const f = 10 ** dp;
@@ -33,6 +38,9 @@ export function rubricInputsHash(inp: RubricInputs): string {
   for (const [tf, sig] of Object.entries(inp.regimeByTf)) {
     if (sig) regime[tf] = [sig.regime, r(sig.confidence, 3)];
   }
+  // Fold in the book signature (imbalance + spread) so a book-driven micro-pillar
+  // change can't be silently de-duped away, and the leader long/short counts.
+  const bk = scoreBookImbalance(inp.book, HASH_BOOK_DEPTH_FRAC);
   const canonical = JSON.stringify({
     coin: inp.coin.toUpperCase(),
     mark: r(inp.markPx, 2),
@@ -41,6 +49,10 @@ export function rubricInputsHash(inp: RubricInputs): string {
     bbPctile: r(inp.bbBandwidthPctile, 3),
     regime,
     net: r(inp.consensus.net, 3),
+    longCount: inp.consensus.longCount,
+    shortCount: inp.consensus.shortCount,
+    bookImb: r(bk.imbalance, 3),
+    spreadBps: Number.isFinite(bk.spreadBps) ? r(bk.spreadBps, 1) : null,
     funding: inp.ctx ? r(inp.ctx.fundingHourly, 8) : null,
   });
   return fnv1a(canonical);

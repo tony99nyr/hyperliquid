@@ -50,7 +50,7 @@ function buildSteps(live: boolean): { body: React.ReactNode }[] {
       body: (
         <>
           Open a Claude Code session in the cockpit repo (<code className={css({ fontFamily: 'mono' })}>/g/hyperliquid</code>)
-          so its skills load — or just use the cockpit's own controls.
+          so its skills load — or just use the cockpit&apos;s own controls.
         </>
       ),
     },

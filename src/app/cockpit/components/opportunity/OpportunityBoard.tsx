@@ -8,7 +8,7 @@
  * rows override for tests/RSC seed.
  */
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { css } from '@styled-system/css';
 import { useRubricScores } from '@/hooks/useRubricScores';
 import type { RubricScoreUiRow } from '@/hooks/realtime-row-mappers';
@@ -32,7 +32,15 @@ export default function OpportunityBoard({ order = [], selectedCoin, onSelectCoi
   const live = useRubricScores({ enabled: rowsOverride === undefined });
   const rows = rowsOverride ?? live.rows;
   const models = useMemo(() => toCardModels(rows, order), [rows, order]);
-  const clock = now ?? Date.now();
+  // Self-ticking clock for staleness (kept out of render — Date.now() in render is
+  // impure). A `now` prop (tests/RSC seed) takes over and freezes the tick.
+  const [tick, setTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (now !== undefined) return;
+    const id = setInterval(() => setTick(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, [now]);
+  const clock = now ?? tick;
 
   return (
     <section data-testid="opportunity-board" className={css({ display: 'flex', flexDirection: 'column', gap: '10px' })}>
