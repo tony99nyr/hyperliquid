@@ -6,6 +6,13 @@
 
 export interface RubricConfig {
   version: string;
+  /**
+   * Coins the scan computes opportunities for (discovery universe). Wider than the
+   * tradeable set — surface opportunities broadly, trade only the supported coins.
+   * Keep to LIQUID HL perps (the book-too-thin gate guards thin names, but don't
+   * invite the long tail). Add a coin here + (optionally) a perCoin gate override.
+   */
+  universe: string[];
   /** Badge / NO-TRADE cutoffs on the 0–100 score. */
   thresholds: {
     /** Below this on both sides → NO-EDGE (below-bar). */

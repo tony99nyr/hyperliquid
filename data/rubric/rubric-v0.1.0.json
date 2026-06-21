@@ -1,5 +1,6 @@
 {
   "version": "0.1.0",
+  "universe": ["ETH", "BTC", "HYPE", "SOL"],
   "thresholds": { "bar": 55, "go": 70, "margin": 12 },
   "weights": { "leaders": 0.45, "carry": 0.2, "micro": 0.35 },
   "regime": { "floor": 0.15, "confirmedConfidence": 0.6 },

@@ -18,8 +18,6 @@ import { reviewPosition } from './rubric-position-review-business-logic';
 import { buildRubricScoreRows, buildPositionReviewRow } from './rubric-rows-business-logic';
 import type { RubricInputs, RubricResult, Side } from './rubric-types';
 
-const COINS = ['ETH', 'BTC', 'HYPE'];
-
 /** Open (non-flat) legs across all active sessions, for the portfolio cap. */
 async function gatherOpenLegs(): Promise<Array<OpenLeg & { sessionId: string }>> {
   const sessions = await listActiveSessions();
@@ -42,7 +40,7 @@ async function gatherOpenLegs(): Promise<Array<OpenLeg & { sessionId: string }>>
 export async function runRubricScan(opts: { now: number }): Promise<{ scored: number; coins: string[] }> {
   const cfgBase = loadRubricConfig();
   const pairs: Array<{ inp: RubricInputs; result: RubricResult }> = [];
-  for (const coin of COINS) {
+  for (const coin of cfgBase.universe) {
     const inp = await assembleInputs(coin, opts.now);
     if (!inp) continue;
     pairs.push({ inp, result: computeRubric(inp, resolveCoinConfig(cfgBase, coin)) });
