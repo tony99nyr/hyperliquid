@@ -83,11 +83,11 @@ export default function CandleChartPanel({
         gap: '10px',
         padding: '12px',
         minHeight: '0',
-        // The parent <main> is a flex column that scrolls (overflowY:auto); its
-        // children must size to content, not shrink. Without this the panel + its
-        // 250px (mobile) / 460px (desktop) canvas get compressed to a sliver and
-        // the chart/row content is clipped by overflow:hidden (cut-off-chart bug).
+        // Mobile: size to content (don't shrink the canvas to a sliver — the
+        // cut-off-chart bug). Desktop (lg): GROW to fill the left column so the
+        // chart uses the full container height (the column is just tabs + chart).
         flexShrink: 0,
+        flexGrow: { base: 0, lg: 1 },
         // Clip the lightweight-charts canvas to the card so it can never bleed
         // over the panels below (mobile: the chart sits above the focal
         // Open-Positions stack — design 11-mobile-cockpit).

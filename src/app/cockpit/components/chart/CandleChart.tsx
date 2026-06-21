@@ -17,7 +17,8 @@
  * imperative bridge to the charts lib.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { css } from '@styled-system/css';
 import {
   createChart,
   CandlestickSeries,
@@ -244,11 +245,23 @@ export default function CandleChart({
   // `flexShrink: 0` + `minHeight` keep the canvas from collapsing to a sliver
   // when the panel is a flex column on mobile (autoSize's ResizeObserver would
   // otherwise follow a shrunk container down to a few px — the cut-off chart bug).
+  // Mobile: a fixed height (the dynamic value rides a CSS var so Panda's static
+  // extraction is happy). Desktop (lg): FILL the panel — flex-grow + autoSize's
+  // ResizeObserver sizes the canvas to the available container height (the left
+  // column is just tabs + chart, so it fills cleanly without the mobile
+  // scroll-context churn).
   return (
     <div
       ref={containerRef}
       data-testid="candle-chart"
-      style={{ width: '100%', height: effectiveHeight, minHeight: effectiveHeight, flexShrink: 0 }}
+      style={{ '--chart-h': `${effectiveHeight}px` } as CSSProperties}
+      className={css({
+        width: '100%',
+        flexShrink: 0,
+        height: { base: 'var(--chart-h)', lg: 'auto' },
+        minHeight: { base: 'var(--chart-h)', lg: '0' },
+        flexGrow: { base: 0, lg: 1 },
+      })}
     />
   );
 }

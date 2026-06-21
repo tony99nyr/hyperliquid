@@ -44,7 +44,6 @@ import PerformanceView from './components/performance/PerformanceView';
 import TopTradersRail from './components/left-rail/TopTradersRail';
 import type { RatingsFreshness } from './components/left-rail/ratings-freshness-helpers';
 import ApprovalPopup from './components/ApprovalPopup';
-import Banners from './components/Banners';
 
 export interface CockpitClientProps {
   mode: TradingMode;
@@ -146,11 +145,6 @@ export default function CockpitClient({
         todayUsd={todayUsd}
         feedLive={feedLive}
       />
-
-      {/* Read-only / mode banner sits just under the bar (loud + persistent). */}
-      <div className={css({ paddingX: '12px', paddingTop: '8px' })}>
-        <Banners mode={mode} />
-      </div>
 
       {surface === 'performance' ? (
         <PerformanceView sessionId={sessionId} />
