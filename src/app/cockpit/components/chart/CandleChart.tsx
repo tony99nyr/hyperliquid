@@ -112,6 +112,11 @@ export default function CandleChart({
       },
       rightPriceScale: { borderColor: GH.border },
       timeScale: { borderColor: GH.border, timeVisible: true, secondsVisible: false },
+      // Don't trap the mouse wheel: let it scroll the PAGE over the chart (the
+      // "scroll past the chart is annoying" fix). Pan via drag, zoom via pinch
+      // (mobile) or the time/price axes — wheel zoom is the only thing disabled.
+      handleScroll: { mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+      handleScale: { mouseWheel: false, pinch: true, axisPressedMouseMove: true, axisDoubleClickReset: true },
       autoSize: true,
       height: effectiveHeight,
     });
