@@ -34,7 +34,11 @@
     "trader-watch": "tsx --tsconfig tsconfig.scripts.json scripts/trader-watch.ts",
     "upsert-rated": "tsx --tsconfig tsconfig.scripts.json scripts/upsert-rated-wallets.ts",
     "gen:secret": "tsx --tsconfig tsconfig.scripts.json scripts/gen-secret.ts",
-    "rubric": "tsx --tsconfig tsconfig.scripts.json scripts/rubric-scan.ts"
+    "rubric": "tsx --tsconfig tsconfig.scripts.json scripts/rubric-scan.ts",
+    "scout:watch": "tsx --tsconfig tsconfig.scripts.json scripts/scout-watch.ts",
+    "scout:cycle": "tsx --tsconfig tsconfig.scripts.json scripts/scout-cycle.ts",
+    "scout:trade": "tsx --tsconfig tsconfig.scripts.json scripts/scout-trade.ts",
+    "scout:review": "tsx --tsconfig tsconfig.scripts.json scripts/scout-review.ts"
   },
   "dependencies": {
     "@nktkas/hyperliquid": "^0.32.2",
