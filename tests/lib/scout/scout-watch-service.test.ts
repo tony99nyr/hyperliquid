@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { pickNewestRubricReads } from '@/lib/scout/scout-watch-service';
+import { pickNewestRubricReads, assessFeedDegradation, RUBRIC_STALE_MS, loadScoutState, saveScoutState } from '@/lib/scout/scout-watch-service';
+import { emptyScoutState } from '@/lib/scout/scout-trigger-business-logic';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 describe('pickNewestRubricReads', () => {
   it('keeps the newest row per coin×side (input is computed_at desc)', () => {
@@ -28,5 +31,41 @@ describe('pickNewestRubricReads', () => {
       { coin: 'ETH', side: 'short', opportunity: NaN as unknown as number, badge: 'GO', computed_at: 'x' },
     ]);
     expect(out[0].opportunity).toBe(0);
+  });
+});
+
+describe('assessFeedDegradation — freshness gate', () => {
+  const NOW = 1_700_000_000_000;
+  it('fresh rubric + marks present → not degraded', () => {
+    const r = assessFeedDegradation(NOW - 60_000, 4, NOW);
+    expect(r.degraded).toBe(false);
+    expect(r.reason).toBeNull();
+  });
+  it('stale rubric (older than the window) → degraded', () => {
+    const r = assessFeedDegradation(NOW - RUBRIC_STALE_MS - 60_000, 4, NOW);
+    expect(r.degraded).toBe(true);
+    expect(r.reason).toMatch(/rubric stale/);
+  });
+  it('no rubric at all → degraded (none)', () => {
+    const r = assessFeedDegradation(0, 4, NOW);
+    expect(r.degraded).toBe(true);
+    expect(r.reason).toMatch(/none/);
+  });
+  it('empty marks → degraded even if rubric is fresh', () => {
+    const r = assessFeedDegradation(NOW - 60_000, 0, NOW);
+    expect(r.degraded).toBe(true);
+    expect(r.reason).toMatch(/marks empty/);
+  });
+});
+
+describe('scout state persistence', () => {
+  const path = join(tmpdir(), `scout-state-test-${process.pid}.json`);
+  it('round-trips state to disk and back', () => {
+    const state = { ...emptyScoutState(), lastBadge: { 'ETH:short': 'GO' }, lastMark: { ETH: 1700 } };
+    saveScoutState(state, path);
+    expect(loadScoutState(path)).toEqual(state);
+  });
+  it('returns empty state for a missing file (fresh baseline)', () => {
+    expect(loadScoutState(join(tmpdir(), 'definitely-not-there-xyz.json'))).toEqual(emptyScoutState());
   });
 });

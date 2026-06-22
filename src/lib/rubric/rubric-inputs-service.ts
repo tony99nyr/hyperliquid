@@ -79,10 +79,11 @@ interface LeaderPositionRow {
   side: 'long' | 'short';
   position_value: number | null;
   account_value_usd: number | null;
+  updated_at: string | null;
 }
 
 /** Leader consensus for a coin from leader_positions (Supabase) + clean-book flags. */
-async function leaderConsensus(coin: string, cfg: RubricConfig): Promise<LeaderConsensus> {
+async function leaderConsensus(coin: string, cfg: RubricConfig, now: number): Promise<LeaderConsensus> {
   const empty: LeaderConsensus = { coin, net: 0, longCount: 0, shortCount: 0, topN: 0 };
   let client;
   try {
@@ -92,7 +93,7 @@ async function leaderConsensus(coin: string, cfg: RubricConfig): Promise<LeaderC
   }
   const { data, error } = await client
     .from('leader_positions')
-    .select('leader_address, side, position_value, account_value_usd')
+    .select('leader_address, side, position_value, account_value_usd, updated_at')
     .eq('coin', coin.toUpperCase());
   if (error || !Array.isArray(data) || data.length === 0) return empty;
 
@@ -104,11 +105,16 @@ async function leaderConsensus(coin: string, cfg: RubricConfig): Promise<LeaderC
     const pv = row.position_value ?? 0;
     // Conviction = position size vs account (capped); fallback 1 when account unknown.
     const conviction = acct > 0 ? Math.min(3, pv / acct) : 1;
+    // Freshness = age of OUR snapshot (updated_at), so a stale leader feed (dead
+    // watcher) decays toward 0 instead of counting as maximally fresh — fixes the
+    // hardcoded no-op. NOTE: this is DATA-snapshot age, not the leader's hold-age;
+    // true position-hold decay needs leader_actions.detected_at (a follow-up).
+    const ageMs = row.updated_at ? now - new Date(row.updated_at).getTime() : 0;
+    const freshnessHours = Number.isFinite(ageMs) && ageMs > 0 ? ageMs / 3_600_000 : 0;
     return {
       side: row.side,
       conviction: Number.isFinite(conviction) && conviction > 0 ? conviction : 1,
-      // Freshness from a single snapshot is unknown → 1 (flagged in config/docs).
-      freshnessHours: 0,
+      freshnessHours,
       cleanBook: clean.has(row.leader_address.toLowerCase()),
     };
   });
@@ -126,7 +132,7 @@ export async function assembleInputs(coin: string, now: number): Promise<RubricI
     fetchL2Book(upper).catch(() => ({ coin: upper, bids: [], asks: [] })),
     fetchMetaAndAssetCtxs(network).catch(() => ({}) as Record<string, HlAssetCtx>),
     regimeByTf(upper, now),
-    leaderConsensus(upper, cfg),
+    leaderConsensus(upper, cfg, now),
   ]);
 
   const markPx = mids[upper];

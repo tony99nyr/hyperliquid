@@ -57,6 +57,29 @@ export async function runRubricScan(opts: { now: number }): Promise<{ scored: nu
     });
     if (error) throw new Error(`rubric_scores upsert failed: ${error.message}`);
   }
+
+  // Persist a market snapshot per coin (funding/OI/premium/leader-net time series)
+  // for future backtested lanes (cascade-fade, funding/OI momentum). Best-effort:
+  // a snapshot-write failure must never fail the scan.
+  const snapshots = pairs
+    .filter((p) => p.inp.ctx)
+    .map((p) => ({
+      captured_at: new Date(opts.now).toISOString(),
+      coin: p.inp.coin.toUpperCase(),
+      mark_px: p.inp.markPx,
+      funding_hourly: p.inp.ctx!.fundingHourly,
+      open_interest: p.inp.ctx!.openInterest,
+      premium: p.inp.ctx!.premium,
+      leader_net: p.inp.consensus.net,
+      config_version: cfgBase.version,
+    }));
+  if (snapshots.length > 0) {
+    try {
+      await getServiceRoleClient().from('market_snapshots').insert(snapshots);
+    } catch {
+      /* best-effort time series */
+    }
+  }
   return { scored: capped.length, coins: pairs.map((p) => p.result.coin) };
 }
 

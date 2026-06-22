@@ -40,6 +40,13 @@ export interface TradeIntent {
    * to 1 (unleveraged) at the proposal builder when not supplied.
    */
   leverage?: number;
+  /**
+   * Who originated this intent. 'scout' = the autonomous paper scout — the seam
+   * (executeIntent) HARD-REFUSES a scout-origin intent in live mode, so the
+   * paper-only boundary travels with the intent, not just the caller. Omit for
+   * human/operator intents (the existing approval popup is their gate).
+   */
+  origin?: 'scout' | 'operator';
   /** Epoch ms the intent was created. */
   createdAt: number;
 }

@@ -76,7 +76,7 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
     throw new Error('Proposal has warnings; fix the inputs and retry.');
   }
 
-  const fill = await executeIntent(proposal.intent);
+  const fill = await executeIntent({ ...proposal.intent, origin: 'scout' });
   if (fill.source !== 'paper') throw new Error(`expected a paper fill, got source=${fill.source}`);
   line(`Filled (paper): ${fill.sz} ${fill.coin} @ $${fill.px} (fee=$${fill.feeUsd.toFixed(4)})`);
 
@@ -127,7 +127,7 @@ async function runExit(args: Record<string, string | boolean>): Promise<void> {
   }
 
   header('scout:trade EXIT (paper, autonomous reduce-only)');
-  const fill = await executeIntent(intent);
+  const fill = await executeIntent({ ...intent, origin: 'scout' });
   if (fill.source !== 'paper') throw new Error(`expected a paper fill, got source=${fill.source}`);
   line(`Closed (paper): ${fill.sz} ${fill.coin} @ $${fill.px} (fee=$${fill.feeUsd.toFixed(4)})`);
 

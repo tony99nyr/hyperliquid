@@ -12,6 +12,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { header, line, run } from './_skill-runtime';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
+import { fetchMetaAndAssetCtxs } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { gatherScoutInputs, scoutTriggerFilePath } from '@/lib/scout/scout-watch-service';
 import { scoutPlaybookPath, summarizeHypotheses, type HypothesisSummaryRow } from '@/lib/scout/scout-cycle-business-logic';
 
@@ -36,6 +37,11 @@ run(async () => {
 
   // 2) Deterministic reads: rubric + marks + open paper positions.
   const inputs = await gatherScoutInputs(now);
+  if (inputs.degraded) {
+    header('⏸ FEED DEGRADED — STAND DOWN');
+    line(`Reason: ${inputs.degradedReason}. Do NOT open a trade on this snapshot.`);
+    line('Manage existing positions conservatively (favor safety); wait for a fresh feed before any entry.');
+  }
   header('RUBRIC (newest per coin×side)');
   inputs.rubric
     .slice()
@@ -44,6 +50,19 @@ run(async () => {
 
   header('MARKS');
   inputs.marks.forEach((m) => line(`${m.coin} = ${m.markPx}`));
+
+  // Positioning context — funding/OI/premium. Surfaced for the model's JUDGMENT
+  // (e.g. don't short into negative funding; an extreme premium = stretched book).
+  // NOT baked into the deterministic rubric score until a backtest validates it.
+  const ctxs = await fetchMetaAndAssetCtxs().catch(() => ({} as Record<string, { fundingHourly: number; openInterest: number; premium: number }>));
+  header('FUNDING / OI / PREMIUM (context — for judgment, not auto-scored)');
+  for (const m of inputs.marks) {
+    const c = ctxs[m.coin];
+    if (!c) continue;
+    const apr = (c.fundingHourly * 24 * 365 * 100).toFixed(1);
+    const who = c.fundingHourly >= 0 ? 'longs pay / shorts earn' : 'shorts pay / longs earn';
+    line(`${m.coin}  funding ${(c.fundingHourly * 100).toFixed(4)}%/h (~${apr}% APR; ${who})  OI=${Math.round(c.openInterest)}  premium=${(c.premium * 100).toFixed(3)}%`);
+  }
 
   header('OPEN PAPER POSITIONS');
   if (inputs.positions.length === 0) line('(flat — no open positions)');

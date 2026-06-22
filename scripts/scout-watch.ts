@@ -24,8 +24,11 @@ import { fetchCandles } from '@/lib/hyperliquid/candle-service';
 import {
   runScoutWatchCycle,
   scoutTriggerFilePath,
+  loadScoutState,
+  saveScoutState,
+  writeScoutHeartbeat,
 } from '@/lib/scout/scout-watch-service';
-import { emptyScoutState, type ScoutState } from '@/lib/scout/scout-trigger-business-logic';
+import { type ScoutState } from '@/lib/scout/scout-trigger-business-logic';
 
 const DEFAULT_INTERVAL_SECONDS = 60;
 const MIN_INTERVAL_SECONDS = 15;
@@ -56,12 +59,16 @@ async function preflight(): Promise<void> {
 async function oneCycle(state: ScoutState): Promise<ScoutState> {
   const ts = new Date().toISOString();
   try {
-    const { triggers, state: next } = await runScoutWatchCycle(state);
-    if (triggers.length === 0) {
+    const { triggers, state: next, degraded, degradedReason } = await runScoutWatchCycle(state);
+    saveScoutState(next); // persist so a restart resumes from the latest baseline
+    if (degraded) {
+      line(`[${ts}] ⏸ STAND DOWN — feed degraded: ${degradedReason} (no triggers emitted)`);
+    } else if (triggers.length === 0) {
       line(`[${ts}] no triggers`);
     } else {
       for (const t of triggers) line(`[${ts}] ⚡ ${t.urgency.toUpperCase()} ${t.kind} — ${t.detail}`);
     }
+    await writeScoutHeartbeat(degraded ? 'degraded' : 'ok', degraded ? (degradedReason ?? 'degraded') : `${triggers.length} trigger(s)`);
     return next;
   } catch (err) {
     line(`[${ts}] WARN cycle error (continuing): ${err instanceof Error ? err.message : String(err)}`);
@@ -76,7 +83,9 @@ run(async () => {
 
   await preflight();
 
-  let state = emptyScoutState();
+  // Resume from persisted baseline (survives restart → no blind first cycle that
+  // could miss a breakout). Falls back to empty if absent/corrupt.
+  let state = loadScoutState();
 
   if (once) {
     header('scout-watch — single cycle (--once)');

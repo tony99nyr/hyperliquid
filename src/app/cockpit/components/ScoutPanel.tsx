@@ -8,11 +8,16 @@
  * (realtime, zero client HL calls). The full $/bar scorecard is `pnpm scout:review`.
  */
 
+import { useEffect, useState } from 'react';
 import { css } from '@styled-system/css';
 import { useScoutHypotheses } from '@/hooks/useScoutHypotheses';
+import { useScoutHeartbeat } from '@/hooks/useScoutHeartbeat';
 import type { Hypothesis } from '@/types/cockpit';
 import { panelSurface, GH, ZONE_COLORS } from './panel-styles';
 import { scoutStats, statusMeta } from './scout-panel-helpers';
+
+/** A daemon silent longer than this is presumed dead/hung (crash, OAuth expiry). */
+const HEARTBEAT_STALE_MS = 5 * 60 * 1000;
 
 export interface ScoutPanelProps {
   /** Test/RSC seed: render fixed theses instead of subscribing. */
@@ -30,6 +35,20 @@ export default function ScoutPanel({ hypsOverride }: ScoutPanelProps) {
   const error = hypsOverride === undefined ? live.error : null;
   const subscribed = hypsOverride !== undefined || live.subscribed;
 
+  // Daemon liveness: "watch tick Nm ago", red when silent past the stale window.
+  const heartbeat = useScoutHeartbeat({ enabled: hypsOverride === undefined });
+  const lastTickMs = heartbeat.rows[0]?.lastTickMs ?? 0;
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => {
+    if (hypsOverride !== undefined) return; // controlled (tests) — don't tick
+    const id = setInterval(() => setClock(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, [hypsOverride]);
+  const tickAgeMs = lastTickMs > 0 ? clock - lastTickMs : null;
+  const tickStale = tickAgeMs != null && tickAgeMs > HEARTBEAT_STALE_MS;
+  const tickLabel =
+    tickAgeMs == null ? 'watch: —' : `watch: ${tickAgeMs < 60_000 ? `${Math.round(tickAgeMs / 1000)}s` : `${Math.round(tickAgeMs / 60_000)}m`} ago`;
+
   return (
     <section
       data-testid="scout-panel"
@@ -41,7 +60,8 @@ export default function ScoutPanel({ hypsOverride }: ScoutPanelProps) {
         </h3>
         <span className={css({ display: 'inline-flex', alignItems: 'center', gap: '5px', fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>
           <span className={css({ width: '6px', height: '6px', borderRadius: '50%' })} style={{ background: subscribed ? ZONE_COLORS.ok : GH.textMuted }} />
-          paper · autonomous
+          <span data-testid="scout-heartbeat" style={{ color: tickStale ? ZONE_COLORS.danger : undefined }}>{tickLabel}</span>
+          {' · paper'}
         </span>
       </header>
 

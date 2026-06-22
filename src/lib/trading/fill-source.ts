@@ -12,6 +12,7 @@
 
 import type { CanonicalFill, TradeIntent } from '@/types/fill';
 import { getTradingMode } from '@/lib/env/mode';
+import { assertScoutPaperMode } from '@/lib/scout/scout-execution-guard';
 import { paperFill } from './fill-source-paper';
 import { liveFill } from './fill-source-live';
 import { applyFillToPosition } from './position-tracker';
@@ -42,6 +43,10 @@ export async function persistFill(fill: CanonicalFill): Promise<void> {
  * returned so the caller can report "no fill".
  */
 export async function executeIntent(intent: TradeIntent): Promise<CanonicalFill> {
+  // SEAM-LEVEL safety: a scout-origin intent can NEVER execute live, no matter
+  // who calls executeIntent. The boundary travels with the intent (defense in
+  // depth beyond the scout-trade caller-side guard). Real money = human popup.
+  if (intent.origin === 'scout') assertScoutPaperMode(getTradingMode());
   const fill = getTradingMode() === 'live' ? await liveFill(intent) : await paperFill(intent);
   if (fill.sz <= 0) return fill; // nothing filled — do not record (retry stays possible)
   await persistFill(fill);
