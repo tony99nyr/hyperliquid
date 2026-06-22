@@ -50,6 +50,8 @@ export function loadScoutState(path = scoutStateFilePath()): ScoutState {
       lastBadge: s.lastBadge ?? {},
       lastMark: s.lastMark ?? {},
       lastHealth: s.lastHealth ?? {},
+      driftAnchorPx: s.driftAnchorPx ?? {},
+      driftAnchorAt: s.driftAnchorAt ?? {},
     };
   } catch {
     return emptyScoutState();

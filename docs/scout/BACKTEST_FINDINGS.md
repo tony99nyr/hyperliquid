@@ -36,6 +36,28 @@ of the **regime/trend core**, NOT a verdict on the full multi-pillar rubric.
 4. **Only HYPE trends cleanly** (positive on trend, deeply negative on fade);
    ETH/BTC/SOL chop and pay the spread.
 
+## UPDATE (2026-06-22) — maker execution FLIPS the sign
+
+The friction hypothesis was tested directly with a maker fill model (passive limit
+entries: earn the rebate, fill only when price trades to you, MISS runaway winners;
+protective stops still cross as taker). Same signals, 90d, 4 coins:
+
+| Variant | net | win% |
+|---|---:|---:|
+| baseline (taker) | −$214 | 35% |
+| **MAKER (trend)** | **+$266** | 35% |
+| **MAKER + quick-target** | **+$242** | 44% |
+
+**The same trend signal flips from −$214 (taker) to +$266 (maker)** — positive on
+ETH/BTC/HYPE. **Friction was the killer, not the signal.** Earning the spread
+instead of paying it crosses the trend core from disproven to plausible.
+
+CAVEATS (don't over-trust): +$266/90d on $1k ≈ ~$89/mo — positive but not yet the
+bar; the harness maker model is OPTIMISTIC (it doesn't model queue position or the
+"filled-then-reversed" adverse selection — real maker fills are worse); SOL is
+negative in every maker variant. But the watershed stands: **maker execution is
+the validated lane to build toward.**
+
 ## Implications
 
 - **Do NOT go live on the current rubric.** The backtestable part (regime core)

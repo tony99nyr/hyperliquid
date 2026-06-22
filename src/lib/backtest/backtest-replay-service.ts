@@ -37,6 +37,8 @@ export interface BacktestOptions {
   targetAtrMult?: number;
   /** FADE mode: enter OPPOSITE the confirmed regime (mean-reversion hypothesis). */
   fade?: boolean;
+  /** Execution model — 'maker' tests passive entries + rebate (the friction fix). */
+  fillModel?: 'taker' | 'maker';
   notionalUsd?: number;
 }
 
@@ -103,7 +105,7 @@ export async function runBacktest(opts: BacktestOptions): Promise<BacktestRunRes
     });
   }
 
-  const result = simulateBacktest(bars, { slippageBps: baseSlippageBps(coin), barHours, notionalUsd });
+  const result = simulateBacktest(bars, { slippageBps: baseSlippageBps(coin), barHours, notionalUsd, fillModel: opts.fillModel });
 
   const periodDays = opts.days;
   const scorecard = buildScorecard({

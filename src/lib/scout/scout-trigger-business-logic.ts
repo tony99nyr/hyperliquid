@@ -46,7 +46,8 @@ export interface ScoutPositionRead {
 export type ScoutTriggerKind =
   | 'rubric-go' // a side crossed up into GO
   | 'rubric-jump' // opportunity moved by ≥ jumpThreshold since last cycle
-  | 'price-move' // |Δ mark| ≥ moveThresholdPct since last cycle
+  | 'price-move' // |Δ mark| ≥ moveThresholdPct in ONE cycle (fast spike)
+  | 'price-drift' // |Δ mark| ≥ driftThresholdPct vs a rolling anchor (slow trend — either direction)
   | 'position-health-drop' // open position health fell sharply / below the floor
   | 'position-near-stop'; // open position is within nearStopPct of its stop
 
@@ -74,6 +75,12 @@ export interface ScoutState {
   lastMark: Record<string, number>;
   /** key `${COIN}:${side}` → last position health score. */
   lastHealth: Record<string, number>;
+  /** key `COIN` → rolling drift anchor price (does NOT update every cycle, so a
+   *  slow cumulative move accumulates against it — catches grinds the per-cycle
+   *  `lastMark` delta misses). Resets on a drift trigger or after driftWindowMs. */
+  driftAnchorPx: Record<string, number>;
+  /** key `COIN` → epoch ms the drift anchor was set. */
+  driftAnchorAt: Record<string, number>;
 }
 
 export interface ScoutTriggerConfig {
@@ -89,6 +96,10 @@ export interface ScoutTriggerConfig {
   healthFloor: number;
   /** Distance to stop, as a fraction of mark, that fires `position-near-stop`. */
   nearStopPct: number;
+  /** Cumulative |Δ mark| (%) vs the rolling anchor that fires `price-drift` (slow trend). */
+  driftThresholdPct: number;
+  /** Anchor max age (ms): if no drift trigger fires within this, re-anchor (rolling window). */
+  driftWindowMs: number;
 }
 
 export const DEFAULT_SCOUT_TRIGGER_CONFIG: ScoutTriggerConfig = {
@@ -98,10 +109,12 @@ export const DEFAULT_SCOUT_TRIGGER_CONFIG: ScoutTriggerConfig = {
   healthDropThreshold: 15,
   healthFloor: 35,
   nearStopPct: 0.004, // within 0.4% of the stop
+  driftThresholdPct: 1.0, // a ≥1% cumulative move (either way) vs the anchor wakes the scout
+  driftWindowMs: 4 * 60 * 60 * 1000, // re-anchor every ~4h if no drift trigger fired
 };
 
 export function emptyScoutState(): ScoutState {
-  return { lastOpportunity: {}, lastBadge: {}, lastMark: {}, lastHealth: {} };
+  return { lastOpportunity: {}, lastBadge: {}, lastMark: {}, lastHealth: {}, driftAnchorPx: {}, driftAnchorAt: {} };
 }
 
 const sideKey = (coin: string, side: Side): string => `${coin.toUpperCase()}:${side}`;
@@ -132,6 +145,8 @@ export function detectScoutTriggers(
     lastBadge: { ...prev.lastBadge },
     lastMark: { ...prev.lastMark },
     lastHealth: { ...prev.lastHealth },
+    driftAnchorPx: { ...(prev.driftAnchorPx ?? {}) },
+    driftAnchorAt: { ...(prev.driftAnchorAt ?? {}) },
   };
 
   // --- Rubric: GO crossing + opportunity jumps (opportunity layer, "info"). ---
@@ -185,6 +200,34 @@ export function detectScoutTriggers(
       }
     }
     state.lastMark[k] = m.markPx;
+
+    // Cumulative DRIFT vs a rolling anchor — catches a slow trend (either
+    // direction) that never trips the per-cycle move threshold. The anchor only
+    // resets on a drift trigger or after driftWindowMs, so a sustained grind
+    // accumulates against it. THIS is what a +1.5%/2h move trips that the
+    // per-cycle delta misses.
+    const anchor = prev.driftAnchorPx?.[k];
+    const anchorAt = prev.driftAnchorAt?.[k];
+    if (anchor === undefined || anchor <= 0) {
+      state.driftAnchorPx[k] = m.markPx;
+      state.driftAnchorAt[k] = now;
+    } else {
+      const driftPct = ((m.markPx - anchor) / anchor) * 100;
+      if (Math.abs(driftPct) >= cfg.driftThresholdPct) {
+        triggers.push({
+          kind: 'price-drift',
+          coin: k,
+          urgency: 'info',
+          detail: `${k} drifted ${driftPct >= 0 ? '+' : ''}${driftPct.toFixed(2)}% vs anchor (${anchor}→${m.markPx}) — slow ${driftPct >= 0 ? 'rally' : 'selloff'}`,
+          at: now,
+        });
+        state.driftAnchorPx[k] = m.markPx; // re-anchor at the trigger point
+        state.driftAnchorAt[k] = now;
+      } else if (anchorAt !== undefined && now - anchorAt > cfg.driftWindowMs) {
+        state.driftAnchorPx[k] = m.markPx; // rolling re-anchor (no trigger)
+        state.driftAnchorAt[k] = now;
+      }
+    }
   }
 
   // --- Open positions: health drops + stop proximity (risk layer, "act"). ---

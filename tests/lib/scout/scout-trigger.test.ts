@@ -71,6 +71,38 @@ describe('detectScoutTriggers — price', () => {
   });
 });
 
+describe('detectScoutTriggers — cumulative drift (slow trend, either direction)', () => {
+  it('fires price-drift on a slow grind that NEVER trips the per-cycle move threshold', () => {
+    // anchor 64000; mark 65000 = +1.56% drift, but per-cycle delta (vs lastMark
+    // 64980) is only ~0.03% → no price-move, but price-DRIFT fires.
+    const prev: ScoutState = { ...emptyScoutState(), lastMark: { BTC: 64980 }, driftAnchorPx: { BTC: 64000 }, driftAnchorAt: { BTC: NOW - 3_600_000 } };
+    const r = detectScoutTriggers(input({ marks: [{ coin: 'BTC', markPx: 65000 }] }), prev);
+    const kinds = r.triggers.map((t) => t.kind);
+    expect(kinds).toContain('price-drift');
+    expect(kinds).not.toContain('price-move'); // the slow grind didn't trip the fast detector
+    expect(r.state.driftAnchorPx.BTC).toBe(65000); // re-anchored at the trigger
+  });
+
+  it('fires on a slow SELLOFF too (drift is direction-agnostic — wins on either side)', () => {
+    const prev: ScoutState = { ...emptyScoutState(), lastMark: { ETH: 1701 }, driftAnchorPx: { ETH: 1720 }, driftAnchorAt: { ETH: NOW - 3_600_000 } };
+    const r = detectScoutTriggers(input({ marks: [{ coin: 'ETH', markPx: 1700 }] }), prev);
+    expect(r.triggers.map((t) => t.kind)).toContain('price-drift');
+  });
+
+  it('sets an anchor on first sighting; no drift trigger without one', () => {
+    const r = detectScoutTriggers(input({ marks: [{ coin: 'SOL', markPx: 74 }] }), emptyScoutState());
+    expect(r.triggers).toEqual([]);
+    expect(r.state.driftAnchorPx.SOL).toBe(74);
+  });
+
+  it('holds the anchor below threshold (drift accumulates across cycles)', () => {
+    const prev: ScoutState = { ...emptyScoutState(), lastMark: { BTC: 64200 }, driftAnchorPx: { BTC: 64000 }, driftAnchorAt: { BTC: NOW } };
+    const r = detectScoutTriggers(input({ marks: [{ coin: 'BTC', markPx: 64300 }] }), prev); // +0.47% < 1%
+    expect(r.triggers.map((t) => t.kind)).not.toContain('price-drift');
+    expect(r.state.driftAnchorPx.BTC).toBe(64000); // anchor unchanged → keeps accumulating
+  });
+});
+
 describe('detectScoutTriggers — open positions (risk / act)', () => {
   it('fires position-health-drop on the floor crossing', () => {
     const prev: ScoutState = { ...emptyScoutState(), lastHealth: { 'ETH:long': 50 } };

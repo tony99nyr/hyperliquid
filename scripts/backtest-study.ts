@@ -18,15 +18,15 @@ const COINS = ['ETH', 'BTC', 'SOL', 'HYPE'];
 //  earlier    — lower confidence → enter sooner (tests "entries are late")
 //  wider-stop — 2.5× stop (tests "stops too tight → premature stop-outs")
 //  quick-tgt  — 2.0× target (tests "targets too far → fewer hit; better R:R hit-rate")
-const VARIANTS: Array<{ name: string; confThreshold?: number; stopAtrMult?: number; targetAtrMult?: number; fade?: boolean }> = [
-  { name: 'baseline' },
-  { name: 'earlier(conf.35)', confThreshold: 0.35 },
-  { name: 'wider-stop(2.5x)', stopAtrMult: 2.5 },
-  { name: 'quick-tgt(2.0x)', targetAtrMult: 2.0 },
-  // Mean-reversion hypothesis: fade the regime (a 35%-win, stop-dominated trend
-  // profile suggests the opposite side has edge). quick-tgt suits mean-reversion.
+const VARIANTS: Array<{ name: string; confThreshold?: number; stopAtrMult?: number; targetAtrMult?: number; fade?: boolean; fillModel?: 'taker' | 'maker' }> = [
+  { name: 'baseline(taker)' },
   { name: 'FADE(mean-rev)', fade: true },
-  { name: 'FADE+quick-tgt', fade: true, targetAtrMult: 2.0 },
+  // THE FRICTION EXPERIMENT: same signals, but PASSIVE maker entries (earn the
+  // rebate, miss runaway winners) instead of crossing the spread. If maker flips
+  // a losing taker signal to net-positive, friction was the killer, not the signal.
+  { name: 'MAKER(trend)', fillModel: 'maker' },
+  { name: 'MAKER+fade', fade: true, fillModel: 'maker' },
+  { name: 'MAKER+quick-tgt', fillModel: 'maker', targetAtrMult: 2.0 },
 ];
 
 function summarize(rs: BacktestRunResult[]): { net: number; trades: number; wins: number; losses: number; stops: number; targets: number } {
@@ -54,7 +54,7 @@ run(async () => {
     const rs: BacktestRunResult[] = [];
     for (const coin of COINS) {
       try {
-        rs.push(await runBacktest({ coin, days, confThreshold: v.confThreshold, stopAtrMult: v.stopAtrMult, targetAtrMult: v.targetAtrMult, fade: v.fade }));
+        rs.push(await runBacktest({ coin, days, confThreshold: v.confThreshold, stopAtrMult: v.stopAtrMult, targetAtrMult: v.targetAtrMult, fade: v.fade, fillModel: v.fillModel }));
       } catch (e) {
         line(`  ${coin} ${v.name}: skipped (${e instanceof Error ? e.message : String(e)})`);
       }

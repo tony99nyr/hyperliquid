@@ -76,6 +76,30 @@ describe('simulateBacktest', () => {
     expect(r.netUsd).toBe(0);
   });
 
+  it('MAKER: a passive entry MISSES a runaway move (price never returns to the limit)', () => {
+    // GO long at 100; price gaps up and never trades back to 100 → no fill → no trade.
+    const bars: BacktestBar[] = [
+      bar({ time: 1, close: 100, go: true, side: 'long', invalidation: 95, target: 110 }),
+      bar({ time: 2, close: 108, high: 109, low: 105 }), // low 105 > 100 limit → not touched
+      bar({ time: 3, close: 112, high: 113, low: 109 }),
+    ];
+    const r = simulateBacktest(bars, { ...CFG, fillModel: 'maker', maxBarsToFill: 3 });
+    expect(r.trades).toHaveLength(0); // missed the winner — the maker adverse-selection cost
+  });
+
+  it('MAKER: fills when price returns to the limit, earns rebate, no entry slippage', () => {
+    const bars: BacktestBar[] = [
+      bar({ time: 1, close: 100, go: true, side: 'long', invalidation: 95, target: 110 }),
+      bar({ time: 2, close: 100, high: 101, low: 99 }), // low 99 ≤ 100 → fills at 100
+      bar({ time: 3, close: 110, high: 111, low: 100 }), // target hit (maker exit)
+    ];
+    const r = simulateBacktest(bars, { ...CFG, slippageBps: 20, fillModel: 'maker', makerRebateBps: 1.5 });
+    expect(r.trades).toHaveLength(1);
+    expect(r.trades[0].entryPx).toBe(100); // filled at the posted limit, NOT 100 + slippage
+    expect(r.trades[0].reason).toBe('target');
+    expect(r.trades[0].grossPnlUsd).toBeGreaterThan(0);
+  });
+
   it('slippage worsens both legs (a clean target win nets less than gross move)', () => {
     const bars: BacktestBar[] = [
       bar({ time: 1, close: 100, go: true, side: 'long', invalidation: 95, target: 110 }),
