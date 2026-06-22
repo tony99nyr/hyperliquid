@@ -1,0 +1,44 @@
+[Unit]
+Description=HL Cockpit Scout-Watch (free deterministic PAPER trigger daemon)
+After=network-online.target
+Wants=network-online.target
+
+# --- INSTALL AS A systemd --user SERVICE (personal dev machine) ---
+# This is a USER unit (runs as you, no User= line). Install:
+#   mkdir -p ~/.config/systemd/user
+#   ln -sf /home/tony/gitrepos/hyperliquid/services/scout-watch/systemd/hl-scout-watch.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now hl-scout-watch
+#   loginctl enable-linger "$USER"   # keep the user manager (and this service) alive without an active login
+# Status / logs:  systemctl --user status hl-scout-watch ; journalctl --user -u hl-scout-watch -f
+#
+# WSL note: systemd only runs while WSL is up. "Leave the machine on" is not enough
+# if every WSL terminal closes — add a Windows Task-Scheduler task at logon that runs
+# `wsl.exe -d <distro> -u <user> --exec /bin/true` (or keeps a shell open) so the
+# distro (and this service) actually start. On native Linux, linger alone is enough.
+
+[Service]
+Type=simple
+# Adjust to your checkout path if it differs.
+WorkingDirectory=/home/tony/gitrepos/hyperliquid
+# scout-watch.ts self-loads .env.local from the repo root (cwd-independent), so no
+# EnvironmentFile= is needed. Pin paper defensively — loadEnvLocal won't clobber an
+# already-set var, so this wins regardless of what .env.local says. The daemon never
+# trades anyway; this is belt-and-suspenders.
+Environment="TRADING_MODE=paper"
+Environment="NODE_ENV=production"
+ExecStart=/home/tony/gitrepos/hyperliquid/node_modules/.bin/tsx --tsconfig tsconfig.scripts.json scripts/scout-watch.ts
+Restart=always
+RestartSec=10
+# Finish the in-flight cycle on stop (the loop traps SIGTERM and exits cleanly).
+KillSignal=SIGTERM
+TimeoutStopSec=60
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hl-scout-watch
+NoNewPrivileges=true
+# NOTE: do NOT set ProtectHome — the trigger/state files live at
+# ~/.hl-cockpit-scout-trigger.jsonl and ~/.hl-cockpit-scout-state.json.
+
+[Install]
+WantedBy=default.target
