@@ -13,6 +13,7 @@
 import type { CanonicalFill, TradeIntent } from '@/types/fill';
 import { fetchL2Book } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { matchIntentAgainstBook } from '@/lib/hyperliquid/orderbook-match';
+import { applyFillRealism, bandDepthUsd, baseSlippageBps } from './paper-fill-realism-business-logic';
 import { modelFeeUsd } from './paper-fee-model';
 
 export async function paperFill(intent: TradeIntent): Promise<CanonicalFill> {
@@ -21,17 +22,32 @@ export async function paperFill(intent: TradeIntent): Promise<CanonicalFill> {
 
   const match = matchIntentAgainstBook(intent.side, intent.sz, book, intent.limitPx);
 
+  // Realism: clamp to no-better-than the decision mark (kill favorable-selection),
+  // then apply size/depth-scaled adverse slippage so the recorded fill price (and
+  // thus realized P&L) is conservative, not optimistic. The raw book VWAP would
+  // inflate P&L upstream of any scorecard haircut.
+  const realism = applyFillRealism({
+    side: intent.side,
+    bookAvgPx: match.avgPx,
+    decisionPx: intent.decisionPx ?? null,
+    filledNotionalUsd: match.notionalUsd,
+    bandDepthUsd: bandDepthUsd(intent.side, book),
+    baseBps: baseSlippageBps(intent.coin),
+  });
+  const px = realism.effectivePx;
+  const notionalUsd = px * match.filledSz;
+
   // A taker walks resting liquidity; fee is charged only on what actually filled.
-  const feeUsd = modelFeeUsd(match.notionalUsd, 'taker');
+  const feeUsd = modelFeeUsd(notionalUsd, 'taker');
 
   return {
     clientIntentId: intent.clientIntentId,
     sessionId: intent.sessionId,
     coin: intent.coin,
     side: intent.side,
-    px: match.avgPx,
+    px,
     sz: match.filledSz,
-    notionalUsd: match.notionalUsd,
+    notionalUsd,
     feeUsd,
     reduceOnly: intent.reduceOnly,
     partial: match.partial,

@@ -74,9 +74,10 @@ describe('executeIntent (paper end-to-end)', () => {
   it('produces a paper CanonicalFill and persists + applies it', async () => {
     const fill = await executeIntent(intent({ sz: 1 }));
 
-    // Paper fill from the fresh book.
+    // Paper fill from the fresh book (px carries realism slippage → adverse of best).
     expect(fill.source).toBe('paper');
-    expect(fill.px).toBe(2000);
+    expect(fill.px).toBeGreaterThanOrEqual(2000);
+    expect(fill.px).toBeLessThan(2000 * 1.01);
     expect(fill.sz).toBe(1);
     expect(fill.hlOrderId).toBeNull();
     expect(fill.clientIntentId).toBe('intent-1');

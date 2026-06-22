@@ -47,6 +47,13 @@ export interface TradeIntent {
    * human/operator intents (the existing approval popup is their gate).
    */
   origin?: 'scout' | 'operator';
+  /**
+   * Mark price at the moment the decision was made. Paper fills clamp the fill
+   * price to no-better-than this (kills favorable-selection: a fresh book that
+   * drifted your way between decision and fill can't hand you a better price).
+   * Optional — omitted = no clamp (just the adverse-slippage offset).
+   */
+  decisionPx?: number;
   /** Epoch ms the intent was created. */
   createdAt: number;
 }

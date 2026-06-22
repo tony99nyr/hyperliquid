@@ -19,12 +19,6 @@ import { fetchMetaAndAssetCtxs } from '@/lib/hyperliquid/hyperliquid-info-servic
 import { fundingCostUsd } from '@/lib/trading/paper-funding-business-logic';
 import { buildScorecard, type ScorecardInput } from '@/lib/scout/scout-review-business-logic';
 
-// Per-coin adverse slippage (bps, ONE leg). Thin books (BTC on HL) cost more.
-const PER_COIN_SLIPPAGE_BPS: Record<string, number> = { BTC: 12, ETH: 5, SOL: 6, HYPE: 7 };
-const DEFAULT_SLIPPAGE_BPS = 8;
-// Exits fill worse than entries (they fire during adverse moves into thinning books).
-const EXIT_SLIPPAGE_MULT = 1.5;
-
 interface FillRow {
   coin: string;
   side: string;
@@ -35,14 +29,15 @@ interface FillRow {
 
 /**
  * Pair fills per coin into directional round-trips (handles adds, partial closes,
- * flips). Per closed leg: accrue SIGNED funding over the holding window (short in
- * positive funding earns carry → negative cost) + per-coin, exit-weighted slippage.
+ * flips) and accrue SIGNED funding over each holding window (a short in positive
+ * funding earns carry → negative cost). Slippage is NOT computed here: it is now
+ * embedded in the fill PRICE (paper-fill-realism), so it's already in realized
+ * P&L — adding it again would double-count.
  */
 function estimateFromFills(
   fills: FillRow[],
   fundingByCoin: Record<string, number>,
-): { slippageHaircutUsd: number; fundingHaircutUsd: number; earliestMs: number } {
-  let slippageHaircutUsd = 0;
+): { fundingHaircutUsd: number; earliestMs: number } {
   let fundingHaircutUsd = 0;
   let earliestMs = Number.POSITIVE_INFINITY;
 
@@ -57,15 +52,12 @@ function estimateFromFills(
 
   for (const [coin, rows] of byCoin) {
     rows.sort((a, b) => new Date(a.filled_at).getTime() - new Date(b.filled_at).getTime());
-    const legBps = PER_COIN_SLIPPAGE_BPS[coin] ?? DEFAULT_SLIPPAGE_BPS;
     const fundingRate = fundingByCoin[coin] ?? 0;
     let dir = 0; // +1 long, −1 short, 0 flat
     let notional = 0;
     let openAtMs = 0;
     const accrue = (side: 'long' | 'short', closed: number, t: number) => {
       const holdingHours = Math.max(0, (t - openAtMs) / 3_600_000);
-      // entry leg + exit leg (exit weighted heavier)
-      slippageHaircutUsd += closed * (legBps / 10_000) * (1 + EXIT_SLIPPAGE_MULT);
       fundingHaircutUsd += fundingCostUsd({ side, notionalUsd: closed, fundingRateHourly: fundingRate, holdingHours });
     };
     for (const f of rows) {
@@ -95,7 +87,7 @@ function estimateFromFills(
       }
     }
   }
-  return { slippageHaircutUsd, fundingHaircutUsd, earliestMs };
+  return { fundingHaircutUsd, earliestMs };
 }
 
 run(async () => {
@@ -138,7 +130,7 @@ run(async () => {
     .from('fills')
     .select('coin, side, notional_usd, reduce_only, filled_at')
     .in('session_id', sessionIds);
-  const { slippageHaircutUsd, fundingHaircutUsd, earliestMs } = estimateFromFills((fills ?? []) as FillRow[], fundingByCoin);
+  const { fundingHaircutUsd, earliestMs } = estimateFromFills((fills ?? []) as FillRow[], fundingByCoin);
   const periodDays = Number.isFinite(earliestMs) ? Math.max(1, (Date.now() - earliestMs) / 86_400_000) : 1;
 
   // Win/loss + closed count from resolved hypotheses (confirmed = win, invalidated = loss).
@@ -155,7 +147,7 @@ run(async () => {
 
   const input: ScorecardInput = {
     realizedGrossUsd,
-    slippageHaircutUsd,
+    slippageHaircutUsd: 0, // slippage is now embedded in the fill price (paper-fill-realism), already in realized P&L
     fundingHaircutUsd,
     tradeCount: closed,
     wins,
@@ -168,8 +160,7 @@ run(async () => {
 
   header('SCORECARD');
   line(`period: ${periodDays.toFixed(1)} days   trades: ${card.tradeCount}   win-rate: ${(card.winRate * 100).toFixed(0)}%   (open positions excluded: ${openCount})`);
-  line(`realized (closed, net of fees): $${card.realizedGrossUsd.toFixed(2)}`);
-  line(`− slippage haircut (per-coin, exit-weighted): $${card.slippageHaircutUsd.toFixed(2)}`);
+  line(`realized (net of fees + slippage-in-fill): $${card.realizedGrossUsd.toFixed(2)}`);
   line(`${card.fundingHaircutUsd >= 0 ? '−' : '+'} funding ${card.fundingHaircutUsd >= 0 ? 'cost' : 'CARRY earned'} (signed, per-coin): $${Math.abs(card.fundingHaircutUsd).toFixed(2)}`);
   line(`= NET: $${card.netUsd.toFixed(2)}`);
   line(`monthly run-rate: $${card.monthlyRunRateUsd.toFixed(0)}/mo   (bar $1000/mo; vs bar ${card.vsBarUsd >= 0 ? '+' : ''}$${card.vsBarUsd.toFixed(0)})`);

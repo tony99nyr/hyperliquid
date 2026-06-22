@@ -76,7 +76,11 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
     throw new Error('Proposal has warnings; fix the inputs and retry.');
   }
 
-  const fill = await executeIntent({ ...proposal.intent, origin: 'scout' });
+  const fill = await executeIntent({
+    ...proposal.intent,
+    origin: 'scout',
+    decisionPx: Number.isFinite(entryPx) ? entryPx : undefined, // favorable-selection clamp
+  });
   if (fill.source !== 'paper') throw new Error(`expected a paper fill, got source=${fill.source}`);
   line(`Filled (paper): ${fill.sz} ${fill.coin} @ $${fill.px} (fee=$${fill.feeUsd.toFixed(4)})`);
 
