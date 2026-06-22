@@ -143,6 +143,47 @@ describe('simulateBacktest', () => {
   });
 });
 
+describe('simulateBacktest — trailing-stop exit', () => {
+  it('lets a long winner RUN past the fixed target (no cap in trail mode)', () => {
+    // Uptrend: entry 100, fixed target 110, but price runs to 140.
+    const bars = [
+      bar({ time: 1, close: 100, side: 'long', go: true, invalidation: 95, target: 110, atr: 4, high: 100, low: 100 }),
+      bar({ time: 2, close: 120, high: 122, low: 110, atr: 4 }),
+      bar({ time: 3, close: 140, high: 142, low: 130, atr: 4 }),
+      bar({ time: 4, close: 132, high: 141, low: 131, atr: 4 }), // trail (≈142−1.5*4=136) hit at 136
+    ];
+    const fixed = simulateBacktest(bars, { ...CFG, exitMode: 'fixed' });
+    const trail = simulateBacktest(bars, { ...CFG, exitMode: 'trail', trailAtrMult: 1.5 });
+    expect(fixed.trades[0].reason).toBe('target');
+    expect(fixed.trades[0].exitPx).toBe(110); // capped
+    expect(trail.trades[0].reason).toBe('trail');
+    expect(trail.trades[0].exitPx).toBeGreaterThan(110); // rode well past the cap
+    expect(trail.trades[0].netPnlUsd).toBeGreaterThan(fixed.trades[0].netPnlUsd);
+  });
+
+  it('trailing stop ratchets up and never loosens (long)', () => {
+    const bars = [
+      bar({ time: 1, close: 100, side: 'long', go: true, invalidation: 96, target: 999, atr: 4, high: 100, low: 100 }),
+      bar({ time: 2, close: 108, high: 110, low: 102, atr: 4 }), // stop ratchets to 110−6=104
+      bar({ time: 3, close: 103, high: 106, low: 103.5, atr: 4 }), // low 103.5 < 104 → trail exit at 104
+    ];
+    const trail = simulateBacktest(bars, { ...CFG, exitMode: 'trail', trailAtrMult: 1.5 });
+    expect(trail.trades).toHaveLength(1);
+    expect(trail.trades[0].reason).toBe('trail');
+    expect(trail.trades[0].exitPx).toBe(104); // ratcheted stop, locked in a gain (>100 entry)
+    expect(trail.trades[0].netPnlUsd).toBeGreaterThan(0);
+  });
+
+  it('falls back to fixed behavior when bar.atr is absent in trail mode', () => {
+    const bars = [
+      bar({ time: 1, close: 100, side: 'long', go: true, invalidation: 95, target: 110, high: 100, low: 100 }),
+      bar({ time: 2, close: 112, high: 115, low: 108 }),
+    ];
+    const trail = simulateBacktest(bars, { ...CFG, exitMode: 'trail' });
+    expect(trail.trades[0].reason).toBe('target'); // no atr → fixed target still applies
+  });
+});
+
 describe('bucketByConfidence', () => {
   const EDGES = [0.5, 0.6, 0.7, 0.8, 1.0];
   const t = (entryConfidence: number, netPnlUsd: number): BacktestTrade => ({

@@ -150,6 +150,36 @@ per-trade risk/leverage should NOT be scaled by confidence; keep sizing fixed
 The remaining lever is WHAT (coin selection: ETH/SOL carry, BTC≈$0), evaluated
 against overfitting risk on a 2yr sample.
 
+### Exit policy (2026-06-22): trailing stop does NOT beat the fixed target
+
+A fixed ATR target caps trend winners (anti-trend-following), so we built a
+trailing-stop exit (ratcheting ATR stop, no fixed target — let winners run) and
+compared it head-to-head (`pnpm backtest:exit`, same 8×90d/4h windows):
+
+| trail width | fixed total | trail total | biggest single win (fixed→trail) |
+|---|---:|---:|---|
+| 1.5×ATR | +$1,915 | **+$718** | $187 → $261 |
+| 3.0×ATR | +$1,915 | **+$1,774** | $187 → $380 |
+
+A tight (1.5×) trail whipsaws on intra-trend pullbacks and loses badly. A wide
+(3×) trail is a **WASH** — it rides the fat tail (max win nearly doubles) but
+gives it back on the choppy coins. **Exit policy is not a material lever; the edge
+lives in the entry/regime, not the exit.** Keep the simpler fixed target. (Two
+widths bracket the result — not mining the exact value, that's overfitting.)
+
+Coin-conditional note (NOT acted on — overfit risk): ETH *improves* under trailing
+at both widths (+$853 → +$1,141/+$1,192); BTC/SOL get worse. Cleanly-trending
+instruments reward letting winners run; choppy ones punish it. Consistent with the
+ETH/SOL-carry, BTC-chop pattern, but too sample-specific to build a rule on.
+
+### Parked: leaders/carry/micro pillar replay is DATA-BLOCKED
+
+The only untested edge source (the multi-pillar rubric) needs historical
+funding/OI/leader-flow that the system only started logging into `market_snapshots`
+TODAY — as of 2026-06-22 there are ~2.5h banked (120 rows, 30/coin; `leader_net`
+IS populating). Revisit once weeks of history accumulate. Until then the trend core
+is the only backtestable signal, and it's been exhausted on the levers above.
+
 ## Implications
 
 - **Do NOT go live on the current rubric.** The backtestable part (regime core)

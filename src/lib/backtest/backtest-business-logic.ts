@@ -33,6 +33,8 @@ export interface BacktestBar {
   /** Levels for the chosen side (from deriveLevels). */
   invalidation: number; // stop
   target: number;
+  /** ATR at this bar — used by the trailing-stop exit mode to ratchet the stop. */
+  atr?: number;
   /** Hourly funding rate to accrue while holding (flat/assumed historically). */
   fundingHourly: number;
 }
@@ -68,6 +70,16 @@ export interface BacktestSimConfig {
    * underwater ("filled-then-reversed"). Counters the rebate. 0 = none (optimistic).
    */
   makerAdverseSelBps?: number;
+  /**
+   * Exit policy. 'fixed' (default): exit at the precomputed ATR target (caps the
+   * winner) or the fixed invalidation stop. 'trail': NO fixed target — the stop
+   * starts at the invalidation and RATCHETS in the favorable direction by
+   * `trailAtrMult × bar.atr` each bar, letting winners run until the trend breaks
+   * (the trend-following exit). Requires bar.atr; falls back to fixed if absent.
+   */
+  exitMode?: 'fixed' | 'trail';
+  /** Trailing-stop distance in ATRs (default = the entry stop multiplier, ~1.5). */
+  trailAtrMult?: number;
 }
 
 export interface BacktestTrade {
@@ -80,7 +92,7 @@ export interface BacktestTrade {
   grossPnlUsd: number; // price move on notional, after entry+exit slippage
   fundingUsd: number; // signed cost (− = earned)
   netPnlUsd: number;
-  reason: 'target' | 'stop' | 'flip' | 'end';
+  reason: 'target' | 'stop' | 'flip' | 'end' | 'trail';
   /** Regime/rubric confidence at the entry bar (0–1) — for the calibration check. */
   entryConfidence: number;
 }
@@ -172,6 +184,8 @@ export function simulateBacktest(bars: BacktestBar[], cfg: BacktestSimConfig): B
   const maxBarsToFill = cfg.maxBarsToFill ?? 3;
   const queueClear = (cfg.makerQueueClearBps ?? 0) / 10_000; // price must trade this far through to fill
   const adverseSel = (cfg.makerAdverseSelBps ?? 0) / 10_000; // filled-then-reversed entry penalty
+  const exitMode = cfg.exitMode ?? 'fixed';
+  const trailAtrMult = cfg.trailAtrMult ?? 1.5;
 
   let open:
     | { side: Side; entryPx: number; entryTime: number; entryIdx: number; stop: number; target: number; fundingHourly: number; entryRebateUsd: number; entryConfidence: number }
@@ -203,12 +217,18 @@ export function simulateBacktest(bars: BacktestBar[], cfg: BacktestSimConfig): B
     // signal FLIP crosses out (taker).
     if (open) {
       const targetLeg = model === 'maker' ? 'maker' : 'taker';
+      const trailing = exitMode === 'trail' && (bar.atr ?? 0) > 0;
       if (open.side === 'long') {
-        if (bar.low <= open.stop) closeTrade(open.stop, bar.time, i, 'stop', 'taker');
-        else if (bar.high >= open.target) closeTrade(open.target, bar.time, i, 'target', targetLeg);
+        // Stop (incl. the ratcheted trailing stop) is checked FIRST against this
+        // bar's low using the level set from PRIOR bars (no look-ahead).
+        if (bar.low <= open.stop) closeTrade(open.stop, bar.time, i, trailing ? 'trail' : 'stop', 'taker');
+        else if (!trailing && bar.high >= open.target) closeTrade(open.target, bar.time, i, 'target', targetLeg);
+        // Then ratchet the stop UP for subsequent bars (never down). No fixed target in trail mode.
+        else if (trailing) open.stop = Math.max(open.stop, bar.high - trailAtrMult * (bar.atr ?? 0));
       } else {
-        if (bar.high >= open.stop) closeTrade(open.stop, bar.time, i, 'stop', 'taker');
-        else if (bar.low <= open.target) closeTrade(open.target, bar.time, i, 'target', targetLeg);
+        if (bar.high >= open.stop) closeTrade(open.stop, bar.time, i, trailing ? 'trail' : 'stop', 'taker');
+        else if (!trailing && bar.low <= open.target) closeTrade(open.target, bar.time, i, 'target', targetLeg);
+        else if (trailing) open.stop = Math.min(open.stop, bar.low + trailAtrMult * (bar.atr ?? 0));
       }
       if (open && bar.go && bar.side !== 'none' && bar.side !== open.side) {
         closeTrade(bar.close, bar.time, i, 'flip', 'taker');

@@ -68,6 +68,10 @@ export interface BacktestOptions {
   endMs?: number;
   /** SIT OUT CHOP: skip entries when in vol-contraction (the rubric's chop gate). */
   sitOutChop?: boolean;
+  /** Exit policy: 'trail' lets winners run (ratcheting ATR stop, no fixed target). */
+  exitMode?: 'fixed' | 'trail';
+  /** Trailing-stop distance in ATRs (trail mode only). */
+  trailAtrMult?: number;
   notionalUsd?: number;
 }
 
@@ -140,6 +144,7 @@ export async function runBacktest(opts: BacktestOptions): Promise<BacktestRunRes
       side,
       go: confirmed,
       confidence: regime.confidence,
+      atr,
       invalidation: levels?.invalidation ?? 0,
       target: levels?.target ?? 0,
       fundingHourly: 0, // no historical funding → carry excluded (documented limit)
@@ -153,6 +158,8 @@ export async function runBacktest(opts: BacktestOptions): Promise<BacktestRunRes
     fillModel: opts.fillModel,
     makerQueueClearBps: opts.makerQueueClearBps,
     makerAdverseSelBps: opts.makerAdverseSelBps,
+    exitMode: opts.exitMode,
+    trailAtrMult: opts.trailAtrMult,
   });
 
   const periodDays = opts.days;
