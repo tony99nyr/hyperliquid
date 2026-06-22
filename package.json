@@ -39,7 +39,8 @@
     "scout:cycle": "tsx --tsconfig tsconfig.scripts.json scripts/scout-cycle.ts",
     "scout:trade": "tsx --tsconfig tsconfig.scripts.json scripts/scout-trade.ts",
     "scout:review": "tsx --tsconfig tsconfig.scripts.json scripts/scout-review.ts",
-    "backtest": "tsx --tsconfig tsconfig.scripts.json scripts/backtest.ts"
+    "backtest": "tsx --tsconfig tsconfig.scripts.json scripts/backtest.ts",
+    "backtest:study": "tsx --tsconfig tsconfig.scripts.json scripts/backtest-study.ts"
   },
   "dependencies": {
     "@nktkas/hyperliquid": "^0.32.2",

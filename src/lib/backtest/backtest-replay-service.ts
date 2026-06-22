@@ -29,8 +29,14 @@ export interface BacktestOptions {
   coin: string;
   days: number;
   interval?: CandleInterval;
-  /** Regime confidence to call a bar "confirmed" (drives entries). */
+  /** Regime confidence to call a bar "confirmed" (drives entries). Lower = earlier. */
   confThreshold?: number;
+  /** Override the ATR stop multiplier (default from config) — wider = more room. */
+  stopAtrMult?: number;
+  /** Override the ATR target multiplier (default from config). */
+  targetAtrMult?: number;
+  /** FADE mode: enter OPPOSITE the confirmed regime (mean-reversion hypothesis). */
+  fade?: boolean;
   notionalUsd?: number;
 }
 
@@ -50,7 +56,16 @@ export async function runBacktest(opts: BacktestOptions): Promise<BacktestRunRes
   const barHours = INTERVAL_HOURS[interval] ?? 1;
   const confThreshold = opts.confThreshold ?? 0.5;
   const notionalUsd = opts.notionalUsd ?? 1000;
-  const cfg = resolveCoinConfig(loadRubricConfig(), coin);
+  const baseCfg = resolveCoinConfig(loadRubricConfig(), coin);
+  // Apply level overrides (mechanism study) without mutating the loaded config.
+  const cfg = {
+    ...baseCfg,
+    levels: {
+      ...baseCfg.levels,
+      stopAtrMult: opts.stopAtrMult ?? baseCfg.levels.stopAtrMult,
+      targetAtrMult: opts.targetAtrMult ?? baseCfg.levels.targetAtrMult,
+    },
+  };
 
   const start = Date.now() - opts.days * 24 * 60 * 60 * 1000;
   const { candles } = await fetchCandles(coin, interval, start);
@@ -69,7 +84,9 @@ export async function runBacktest(opts: BacktestOptions): Promise<BacktestRunRes
     const regime = detectMarketRegime(candles, i);
     const atr = atrSeries[i - atrOffset] ?? 0;
     const confirmed = regime.regime !== 'neutral' && regime.confidence >= confThreshold && atr > 0;
-    const side = !confirmed ? 'none' : regime.regime === 'bullish' ? 'long' : 'short';
+    // FADE mode trades AGAINST the regime (mean-reversion); default trades WITH it.
+    const trendSide = regime.regime === 'bullish' ? 'long' : 'short';
+    const side = !confirmed ? 'none' : opts.fade ? (trendSide === 'long' ? 'short' : 'long') : trendSide;
     const levels = side === 'none' ? null : deriveLevels(c.close, atr, side, cfg);
     if (confirmed) signals++;
     bars.push({
