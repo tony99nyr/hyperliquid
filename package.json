@@ -44,7 +44,8 @@
     "backtest:oos": "tsx --tsconfig tsconfig.scripts.json scripts/backtest-oos.ts",
     "backtest:calibration": "tsx --tsconfig tsconfig.scripts.json scripts/backtest-calibration.ts",
     "backtest:exit": "tsx --tsconfig tsconfig.scripts.json scripts/backtest-exit.ts",
-    "backtest:funding": "tsx --tsconfig tsconfig.scripts.json scripts/backtest-funding.ts"
+    "backtest:funding": "tsx --tsconfig tsconfig.scripts.json scripts/backtest-funding.ts",
+    "backtest:htf": "tsx --tsconfig tsconfig.scripts.json scripts/backtest-htf.ts"
   },
   "dependencies": {
     "@nktkas/hyperliquid": "^0.32.2",

@@ -191,6 +191,24 @@ in bull windows and pays funding for it; the short-side carry tailwind is real b
 would sacrifice far more directional edge than the carry gained. (Funding modeled at the
 entry-bar rate held flat over the hold — approximate; rates drift intra-hold.)
 
+### Higher-TF trend filter (2026-06-22): it HURTS — the 4h regime leads the 1d
+
+Classic trend-following says "only trade with the higher-TF trend." We added a 1d
+regime gate on the 4h core (`pnpm backtest:htf`) in two modes:
+
+| filter | total net | trades | $/trade |
+|---|---:|---:|---:|
+| OFF | +$1,916 | 624 | $3.07 |
+| ON — 'agree' (1d must match; neutral blocks) | +$429 | 493 | $0.87 |
+| ON — 'non-opposing' (block only direct opposite) | +$499 | 504 | $0.99 |
+
+**Both modes HURT decisively** — and the tell is expectancy *collapsing* ($3.07 →
+~$0.9/trade): the filter removes WINNERS, not losers. The 4h regime **leads** the 1d;
+by the time the daily confirms, the move is mature/exhausted, so gating on it enters
+late and filters the best (early) entries. Robust across both modes → **HTF filtering
+is NOT a lever; skip it.** (Consistent with 4h≫1h earlier: the edge is timely regime
+detection — slowing it down destroys it.)
+
 ### Parked: leaders/carry/micro pillar replay is DATA-BLOCKED
 
 The only untested edge source (the multi-pillar rubric) needs historical

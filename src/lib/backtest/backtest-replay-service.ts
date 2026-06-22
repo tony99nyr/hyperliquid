@@ -74,7 +74,34 @@ export interface BacktestOptions {
   trailAtrMult?: number;
   /** Model real HL funding (longs pay / shorts earn) instead of the flat-0 default. */
   applyFunding?: boolean;
+  /** HIGHER-TF TREND FILTER: only take an entry when the higher-TF regime AGREES
+   *  (don't fight the dominant trend). Point-in-time (last CLOSED htf bar). */
+  htfFilter?: boolean;
+  /** Higher timeframe for the trend filter (default '1d'). */
+  htfInterval?: CandleInterval;
+  /** 'agree' (default): htf regime must MATCH (neutral blocks). 'non-opposing':
+   *  block only when htf is the OPPOSITE direction (neutral allowed). */
+  htfMode?: 'agree' | 'non-opposing';
   notionalUsd?: number;
+}
+
+/** Does the htf direction VETO a trade on `side` under the given mode? */
+export function htfVetoes(htfDir: string, regimeDir: string, mode: 'agree' | 'non-opposing'): boolean {
+  if (mode === 'non-opposing') {
+    const opposite = regimeDir === 'bullish' ? 'bearish' : regimeDir === 'bearish' ? 'bullish' : 'none';
+    return htfDir === opposite; // only a directly-opposing htf blocks; neutral allowed
+  }
+  return htfDir !== regimeDir; // strict agreement; neutral htf blocks
+}
+
+/** Regime direction as of the last CLOSED higher-TF bar at/before `t` (no look-ahead). */
+export function htfDirAt(series: { closeTime: number; dir: string }[], t: number): string {
+  let dir = 'neutral';
+  for (const p of series) {
+    if (p.closeTime <= t) dir = p.dir;
+    else break;
+  }
+  return dir;
 }
 
 export interface BacktestRunResult {
@@ -119,6 +146,18 @@ export async function runBacktest(opts: BacktestOptions): Promise<BacktestRunRes
   // the directional check clean; --funding turns it on for the honesty/carry study.
   const funding: FundingPoint[] = opts.applyFunding ? await fetchFundingHistory(coin, start, endMs) : [];
 
+  // Higher-TF trend filter: precompute the regime direction at each CLOSED htf bar.
+  const htfDir: { closeTime: number; dir: string }[] = [];
+  if (opts.htfFilter) {
+    const htfInterval = opts.htfInterval ?? '1d';
+    const htfBarMs = (INTERVAL_HOURS[htfInterval] ?? 24) * 60 * 60 * 1000;
+    const htfStart = start - 70 * 24 * 60 * 60 * 1000; // extra lookback for the htf regime warmup
+    const { candles: htf } = await fetchCandles(coin, htfInterval, htfStart, endMs);
+    for (let j = WARMUP_BARS; j < htf.length; j++) {
+      htfDir.push({ closeTime: htf[j].timestamp + htfBarMs, dir: detectMarketRegime(htf, j).regime });
+    }
+  }
+
   // ATR aligned to candle indices (offset = first index that has an ATR value).
   const atrSeries = calculateATR(candles, 14, true);
   const atrOffset = candles.length - atrSeries.length;
@@ -136,6 +175,9 @@ export async function runBacktest(opts: BacktestOptions): Promise<BacktestRunRes
       const vc = volContractionAt(candles, i);
       if (vc.atrPctile < cfg.gates.volContractionAtrPctile && vc.bbPctile < cfg.gates.volContractionBbPctile) confirmed = false;
     }
+    // HIGHER-TF TREND FILTER: require the higher-TF regime to AGREE with this bar's
+    // regime (neutral htf → blocks). Don't fight the dominant trend.
+    if (confirmed && opts.htfFilter && htfVetoes(htfDirAt(htfDir, c.timestamp), regime.regime, opts.htfMode ?? 'agree')) confirmed = false;
     // FADE mode trades AGAINST the regime (mean-reversion); default trades WITH it.
     const trendSide = regime.regime === 'bullish' ? 'long' : 'short';
     const side = !confirmed ? 'none' : opts.fade ? (trendSide === 'long' ? 'short' : 'long') : trendSide;
