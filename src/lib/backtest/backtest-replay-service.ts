@@ -15,7 +15,8 @@
 
 import { fetchCandles, type CandleInterval } from '@/lib/hyperliquid/candle-service';
 import { detectMarketRegime } from '@/lib/strategy/analysis/market-regime-detector';
-import { calculateATR } from '@/lib/strategy/indicators/indicators';
+import { calculateATR, calculateBollingerBands } from '@/lib/strategy/indicators/indicators';
+import type { PriceCandle } from '@/types/trading-core';
 import { loadRubricConfig, resolveCoinConfig } from '@/lib/rubric/rubric-config';
 import { deriveLevels } from '@/lib/rubric/rubric-gates-business-logic';
 import { baseSlippageBps } from '@/lib/trading/paper-fill-realism-business-logic';
@@ -24,6 +25,26 @@ import { buildScorecard, type Scorecard } from '@/lib/scout/scout-review-busines
 
 const INTERVAL_HOURS: Record<string, number> = { '15m': 0.25, '1h': 1, '4h': 4, '8h': 8, '1d': 24 };
 const WARMUP_BARS = 60; // regime + ATR need history before the first signal
+
+/** Fraction of finite values ≤ the last (the rubric's percentile rank; flat → 0.5). */
+function pctRankLast(series: number[]): number {
+  const finite = series.filter((v) => Number.isFinite(v));
+  if (finite.length <= 1 || finite.every((v) => v === finite[0])) return 0.5;
+  const last = finite[finite.length - 1];
+  return finite.filter((v) => v <= last).length / finite.length;
+}
+
+/** Per-bar vol-contraction read (ATR + Bollinger-bandwidth percentiles) over a
+ *  trailing window — the rubric's chop detector, computed point-in-time for bar i. */
+function volContractionAt(candles: PriceCandle[], i: number, lookback = 120): { atrPctile: number; bbPctile: number } {
+  const w = candles.slice(Math.max(0, i - lookback), i + 1);
+  if (w.length < 30) return { atrPctile: 0.5, bbPctile: 0.5 };
+  const atr = calculateATR(w, 14, true);
+  const closes = w.map((c) => c.close);
+  const bb = calculateBollingerBands(closes, 20, 2);
+  const bw = bb.middle.map((m, j) => (m > 0 ? (bb.upper[j] - bb.lower[j]) / m : 0));
+  return { atrPctile: pctRankLast(atr), bbPctile: pctRankLast(bw) };
+}
 
 export interface BacktestOptions {
   coin: string;
@@ -45,6 +66,8 @@ export interface BacktestOptions {
   makerAdverseSelBps?: number;
   /** As-of END of the window (epoch ms) for OOS/walk-forward testing; default now. */
   endMs?: number;
+  /** SIT OUT CHOP: skip entries when in vol-contraction (the rubric's chop gate). */
+  sitOutChop?: boolean;
   notionalUsd?: number;
 }
 
@@ -96,7 +119,13 @@ export async function runBacktest(opts: BacktestOptions): Promise<BacktestRunRes
     const c = candles[i];
     const regime = detectMarketRegime(candles, i);
     const atr = atrSeries[i - atrOffset] ?? 0;
-    const confirmed = regime.regime !== 'neutral' && regime.confidence >= confThreshold && atr > 0;
+    let confirmed = regime.regime !== 'neutral' && regime.confidence >= confThreshold && atr > 0;
+    // SIT OUT CHOP: skip when in vol-contraction (both ATR + BB-bandwidth percentiles
+    // below the rubric's contraction thresholds) — the proven chop-avoidance skill.
+    if (confirmed && opts.sitOutChop) {
+      const vc = volContractionAt(candles, i);
+      if (vc.atrPctile < cfg.gates.volContractionAtrPctile && vc.bbPctile < cfg.gates.volContractionBbPctile) confirmed = false;
+    }
     // FADE mode trades AGAINST the regime (mean-reversion); default trades WITH it.
     const trendSide = regime.regime === 'bullish' ? 'long' : 'short';
     const side = !confirmed ? 'none' : opts.fade ? (trendSide === 'long' ? 'short' : 'long') : trendSide;

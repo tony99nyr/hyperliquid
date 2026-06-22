@@ -42,6 +42,8 @@ run(async () => {
   // Track whether the strategy ever nets positive in a strongly-trending window.
   let trendingWindows = 0;
   let trendingPositive = 0;
+  let rawTotal = 0;
+  let gatedTotal = 0;
 
   for (let w = 0; w < windows; w++) {
     const endMs = now - w * days * DAY_MS;
@@ -55,7 +57,20 @@ run(async () => {
         line(`  ${coin}: skipped (${e instanceof Error ? e.message.slice(0, 60) : String(e)})`);
       }
     }
+    // Chop-gated pass (the money-machine candidate: trade trends, SIT OUT chop).
+    const gated: Record<string, BacktestRunResult> = {};
+    for (const coin of COINS) {
+      try {
+        gated[coin] = await runBacktest({ coin, days, endMs, interval, sitOutChop: true });
+      } catch {
+        /* skip */
+      }
+    }
+
     const total = results.reduce((s, r) => s + r.result.netUsd, 0);
+    const totalGated = Object.values(gated).reduce((s, r) => s + r.result.netUsd, 0);
+    rawTotal += total;
+    gatedTotal += totalGated;
     header(`window ${w} — ending ${ending} (${days}d)`);
     for (const r of results) {
       const strongTrend = Math.abs(r.priceMovePct) >= 15;
@@ -63,15 +78,18 @@ run(async () => {
         trendingWindows++;
         if (r.result.netUsd > 0) trendingPositive++;
       }
+      const g = gated[r.coin];
       line(
         `  ${r.coin.padEnd(4)} regime ${(r.priceMovePct >= 0 ? '+' : '') + r.priceMovePct.toFixed(1) + '%'} ${regimeLabel(r.priceMovePct).padEnd(9)}` +
-          `  trades ${String(r.result.trades.length).padStart(3)}  net ${(r.result.netUsd >= 0 ? '+' : '') + '$' + r.result.netUsd.toFixed(0)}`,
+          `  net ${(r.result.netUsd >= 0 ? '+' : '') + '$' + r.result.netUsd.toFixed(0)}  |  chop-gated ${g ? (g.result.netUsd >= 0 ? '+' : '') + '$' + g.result.netUsd.toFixed(0) + ` (${g.result.trades.length}t)` : '—'}`,
       );
     }
-    line(`  → window total: ${total >= 0 ? '+' : ''}$${total.toFixed(0)}`);
+    line(`  → window total: raw ${total >= 0 ? '+' : ''}$${total.toFixed(0)}  |  chop-gated ${totalGated >= 0 ? '+' : ''}$${totalGated.toFixed(0)}`);
   }
 
   header('VERDICT');
+  line(`TOTAL net across all windows:  raw trend ${rawTotal >= 0 ? '+' : ''}$${rawTotal.toFixed(0)}  vs  chop-gated ${gatedTotal >= 0 ? '+' : ''}$${gatedTotal.toFixed(0)}`);
+  line(gatedTotal > rawTotal ? '→ SIT-OUT-CHOP HELPS — gating improves total net (cuts chop bleed).' : '→ chop gate did NOT improve total — the bleed wasn\'t in the gated regimes.');
   line(`coin-windows WITH DATA: ${coinWindowsWithData} of ${windows * COINS.length} (empty = HL lacks history that far back)`);
   line(`strongly-trending coin-windows (|move|≥15%): ${trendingWindows}; of those, strategy net-positive: ${trendingPositive}`);
   const frac = trendingWindows > 0 ? trendingPositive / trendingWindows : 0;

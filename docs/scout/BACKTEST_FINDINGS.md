@@ -106,9 +106,22 @@ even in trends — ETH/SOL carry it); ~$79/mo on $1k scales with capital; still
 single-TF / ablated / no funding. But the headline stands: **there IS a
 regime-conditional edge — "no edge" was regime+timeframe-specific, not universal.**
 
-→ THE MONEY-MACHINE CANDIDATE: trade the trend core ONLY in confirmed trends and
-SIT OUT chop (the rubric's proven skill — vol-contraction / regime-confidence
-gate). That keeps the +$1,900 and cuts the chop losses. Backtest THAT next.
+### Chop-gate test (2026-06-22): the gate does NOT help — but coin-selection does
+
+Hypothesis "trade trends + SIT OUT chop (vol-contraction gate)" was TESTED across
+the 8 windows: **raw trend +$1,903 vs chop-gated +$1,778 (slightly worse).** The
+regime-confirmation requirement ALREADY filters chop (neutral regime → no trade),
+so the explicit vol-contraction gate is redundant and sometimes cuts pre-breakout
+entries. Sitting-out-chop is NOT the lever.
+
+THE REAL LEVERS (from per-coin sums over ~2yr on $1k):
+- **ETH ≈ +$843, SOL ≈ +$1,056** — they carry the entire edge.
+- **BTC ≈ $0** — breakeven, choppy, adds variance with no edge.
+→ Next levers: (1) COIN SELECTION (focus ETH/SOL, drop/down-weight BTC); (2)
+CONFIDENCE-SCALED SIZING — but first verify confidence is CALIBRATED (do
+higher-confidence trades actually perform better? — bucket-test in the harness)
+before sizing by it. The edge itself is the regime-confirmed trend core; refine it
+via WHAT (coins) and HOW MUCH (calibrated sizing), not an extra chop gate.
 
 ## Implications
 
