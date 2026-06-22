@@ -27,6 +27,9 @@ export interface BacktestBar {
   side: Side | 'none';
   /** True when the rubric said GO on `side` at this bar. */
   go: boolean;
+  /** Regime/rubric confidence at this bar (0–1) — carried onto the trade for the
+   *  calibration check (do higher-confidence entries actually perform better?). */
+  confidence?: number;
   /** Levels for the chosen side (from deriveLevels). */
   invalidation: number; // stop
   target: number;
@@ -78,6 +81,8 @@ export interface BacktestTrade {
   fundingUsd: number; // signed cost (− = earned)
   netPnlUsd: number;
   reason: 'target' | 'stop' | 'flip' | 'end';
+  /** Regime/rubric confidence at the entry bar (0–1) — for the calibration check. */
+  entryConfidence: number;
 }
 
 export interface BacktestResult {
@@ -90,6 +95,69 @@ export interface BacktestResult {
 }
 
 const bps = (px: number, b: number, adverseSign: number): number => px * (1 + (adverseSign * b) / 10_000);
+
+/** One confidence band's realized stats — the unit of the calibration check. */
+export interface CalibrationBucket {
+  /** Inclusive lower / exclusive upper confidence edge (last band's upper is inclusive). */
+  loEdge: number;
+  hiEdge: number;
+  label: string;
+  trades: number;
+  wins: number;
+  winRate: number; // wins / trades (0 when empty)
+  totalNetUsd: number;
+  avgNetUsd: number; // expectancy per trade (0 when empty)
+}
+
+export interface CalibrationReport {
+  buckets: CalibrationBucket[];
+  /** True if avg net per trade is non-decreasing across populated bands (calibrated). */
+  monotonic: boolean;
+  /** Spearman-style sign of the avg-net trend across populated bands: +1 up, −1 down, 0 flat/mixed. */
+  trend: 1 | 0 | -1;
+}
+
+/**
+ * PURE — bucket closed trades by their entry confidence and report realized
+ * win-rate + expectancy per band. The calibration question: do higher-confidence
+ * entries actually perform better? If avg-net rises monotonically across bands,
+ * confidence is calibrated and confidence-scaled sizing is justified; if flat/mixed,
+ * confidence is a GO gate only and sizing should stay fixed (avoid overfitting size
+ * to a non-signal). `edges` are ascending band boundaries (e.g. [0.5,0.6,0.7,0.8,1]).
+ */
+export function bucketByConfidence(trades: BacktestTrade[], edges: number[]): CalibrationReport {
+  const buckets: CalibrationBucket[] = [];
+  for (let b = 0; b < edges.length - 1; b++) {
+    const loEdge = edges[b];
+    const hiEdge = edges[b + 1];
+    const isLast = b === edges.length - 2;
+    const inBand = trades.filter((t) => t.entryConfidence >= loEdge && (isLast ? t.entryConfidence <= hiEdge : t.entryConfidence < hiEdge));
+    const wins = inBand.filter((t) => t.netPnlUsd > 0).length;
+    const totalNetUsd = inBand.reduce((s, t) => s + t.netPnlUsd, 0);
+    buckets.push({
+      loEdge,
+      hiEdge,
+      label: `${loEdge.toFixed(2)}–${hiEdge.toFixed(2)}`,
+      trades: inBand.length,
+      wins,
+      winRate: inBand.length > 0 ? wins / inBand.length : 0,
+      totalNetUsd,
+      avgNetUsd: inBand.length > 0 ? totalNetUsd / inBand.length : 0,
+    });
+  }
+  // Monotonicity / trend over POPULATED bands only (empty bands carry no signal).
+  const populated = buckets.filter((x) => x.trades > 0);
+  let monotonic = true;
+  let ups = 0;
+  let downs = 0;
+  for (let i = 1; i < populated.length; i++) {
+    if (populated[i].avgNetUsd < populated[i - 1].avgNetUsd - 1e-9) monotonic = false;
+    if (populated[i].avgNetUsd > populated[i - 1].avgNetUsd + 1e-9) ups++;
+    else if (populated[i].avgNetUsd < populated[i - 1].avgNetUsd - 1e-9) downs++;
+  }
+  const trend: 1 | 0 | -1 = ups > downs ? 1 : downs > ups ? -1 : 0;
+  return { buckets, monotonic, trend };
+}
 
 /**
  * Walk the bars; hold at most one position. Enter at the close of a GO bar; exit
@@ -106,10 +174,10 @@ export function simulateBacktest(bars: BacktestBar[], cfg: BacktestSimConfig): B
   const adverseSel = (cfg.makerAdverseSelBps ?? 0) / 10_000; // filled-then-reversed entry penalty
 
   let open:
-    | { side: Side; entryPx: number; entryTime: number; entryIdx: number; stop: number; target: number; fundingHourly: number; entryRebateUsd: number }
+    | { side: Side; entryPx: number; entryTime: number; entryIdx: number; stop: number; target: number; fundingHourly: number; entryRebateUsd: number; entryConfidence: number }
     | null = null;
   // Maker-only: a posted passive entry awaiting fill (fills when price trades to it).
-  let pending: { side: Side; limit: number; stop: number; target: number; fundingHourly: number; postedIdx: number; postedTime: number } | null = null;
+  let pending: { side: Side; limit: number; stop: number; target: number; fundingHourly: number; postedIdx: number; postedTime: number; entryConfidence: number } | null = null;
 
   // leg='taker' → cross the spread (adverse slippage, no rebate); 'maker' → fill at
   // the posted price (no adverse) + earn the rebate. Rebates are credited into gross.
@@ -123,7 +191,7 @@ export function simulateBacktest(bars: BacktestBar[], cfg: BacktestSimConfig): B
     const barsHeld = Math.max(1, exitIdx - open.entryIdx);
     const fundingUsd = dir * open.fundingHourly * cfg.notionalUsd * (barsHeld * cfg.barHours);
     const netPnlUsd = grossPnlUsd - fundingUsd;
-    trades.push({ side: open.side, entryTime: open.entryTime, exitTime, entryPx: open.entryPx, exitPx, barsHeld, grossPnlUsd, fundingUsd, netPnlUsd, reason });
+    trades.push({ side: open.side, entryTime: open.entryTime, exitTime, entryPx: open.entryPx, exitPx, barsHeld, grossPnlUsd, fundingUsd, netPnlUsd, reason, entryConfidence: open.entryConfidence });
     open = null;
   };
 
@@ -151,7 +219,7 @@ export function simulateBacktest(bars: BacktestBar[], cfg: BacktestSimConfig): B
       // Cross immediately at this bar's close (adverse).
       if (!open && bar.go && bar.side !== 'none') {
         const entryPx = bps(bar.close, cfg.slippageBps, bar.side === 'long' ? 1 : -1);
-        open = { side: bar.side, entryPx, entryTime: bar.time, entryIdx: i, stop: bar.invalidation, target: bar.target, fundingHourly: bar.fundingHourly, entryRebateUsd: 0 };
+        open = { side: bar.side, entryPx, entryTime: bar.time, entryIdx: i, stop: bar.invalidation, target: bar.target, fundingHourly: bar.fundingHourly, entryRebateUsd: 0, entryConfidence: bar.confidence ?? 0 };
       }
     } else {
       // MAKER: fill a resting entry only if price trades to it; else it ages out
@@ -165,7 +233,7 @@ export function simulateBacktest(bars: BacktestBar[], cfg: BacktestSimConfig): B
         if (filled) {
           const adverseSign = pending.side === 'long' ? 1 : -1;
           const entryPx = pending.limit * (1 + adverseSign * adverseSel);
-          open = { side: pending.side, entryPx, entryTime: bar.time, entryIdx: i, stop: pending.stop, target: pending.target, fundingHourly: pending.fundingHourly, entryRebateUsd: rebateUsd };
+          open = { side: pending.side, entryPx, entryTime: bar.time, entryIdx: i, stop: pending.stop, target: pending.target, fundingHourly: pending.fundingHourly, entryRebateUsd: rebateUsd, entryConfidence: pending.entryConfidence };
           pending = null;
         } else if (i - pending.postedIdx >= maxBarsToFill) {
           pending = null; // expired unfilled — missed
@@ -173,7 +241,7 @@ export function simulateBacktest(bars: BacktestBar[], cfg: BacktestSimConfig): B
       }
       // Post a fresh passive entry at the signal close when flat + nothing pending.
       if (!open && !pending && bar.go && bar.side !== 'none') {
-        pending = { side: bar.side, limit: bar.close, stop: bar.invalidation, target: bar.target, fundingHourly: bar.fundingHourly, postedIdx: i, postedTime: bar.time };
+        pending = { side: bar.side, limit: bar.close, stop: bar.invalidation, target: bar.target, fundingHourly: bar.fundingHourly, postedIdx: i, postedTime: bar.time, entryConfidence: bar.confidence ?? 0 };
       }
     }
   }

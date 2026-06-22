@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { simulateBacktest, type BacktestBar, type BacktestSimConfig } from '@/lib/backtest/backtest-business-logic';
+import { simulateBacktest, bucketByConfidence, type BacktestBar, type BacktestSimConfig, type BacktestTrade } from '@/lib/backtest/backtest-business-logic';
 
 const CFG: BacktestSimConfig = { slippageBps: 0, barHours: 1, notionalUsd: 1000 };
 
@@ -130,5 +130,62 @@ describe('simulateBacktest', () => {
     const noSlip = simulateBacktest(bars, { ...CFG, slippageBps: 0 });
     const withSlip = simulateBacktest(bars, { ...CFG, slippageBps: 20 });
     expect(withSlip.trades[0].netPnlUsd).toBeLessThan(noSlip.trades[0].netPnlUsd);
+  });
+
+  it('carries entry confidence from the GO bar onto the trade', () => {
+    const bars = [
+      bar({ time: 1, close: 100, side: 'long', go: true, confidence: 0.73, high: 100, low: 100, invalidation: 90, target: 110 }),
+      bar({ time: 2, close: 110, high: 115, low: 105 }),
+    ];
+    const r = simulateBacktest(bars, CFG);
+    expect(r.trades).toHaveLength(1);
+    expect(r.trades[0].entryConfidence).toBe(0.73);
+  });
+});
+
+describe('bucketByConfidence', () => {
+  const EDGES = [0.5, 0.6, 0.7, 0.8, 1.0];
+  const t = (entryConfidence: number, netPnlUsd: number): BacktestTrade => ({
+    side: 'long',
+    entryTime: 0,
+    exitTime: 1,
+    entryPx: 100,
+    exitPx: 100,
+    barsHeld: 1,
+    grossPnlUsd: netPnlUsd,
+    fundingUsd: 0,
+    netPnlUsd,
+    reason: 'target',
+    entryConfidence,
+  });
+
+  it('flags monotonic UP expectancy as CALIBRATED', () => {
+    const trades = [t(0.55, -10), t(0.55, -20), t(0.65, 5), t(0.75, 20), t(0.85, 50)];
+    const { monotonic, trend, buckets } = bucketByConfidence(trades, EDGES);
+    expect(monotonic).toBe(true);
+    expect(trend).toBe(1);
+    expect(buckets[0].trades).toBe(2); // 0.50–0.60 band
+    expect(buckets[0].avgNetUsd).toBe(-15);
+  });
+
+  it('flags inverted expectancy as trend −1 (do not size by it)', () => {
+    const trades = [t(0.55, 50), t(0.65, 10), t(0.75, -10), t(0.85, -40)];
+    const { trend } = bucketByConfidence(trades, EDGES);
+    expect(trend).toBe(-1);
+  });
+
+  it('reports flat expectancy as non-calibrated (trend 0)', () => {
+    const trades = [t(0.55, 10), t(0.65, 10), t(0.75, 10), t(0.85, 10)];
+    const { trend, monotonic } = bucketByConfidence(trades, EDGES);
+    expect(trend).toBe(0);
+    expect(monotonic).toBe(true); // non-decreasing, but no upward signal
+  });
+
+  it('ignores empty bands when judging monotonicity', () => {
+    const trades = [t(0.55, -5), t(0.85, 30)]; // 0.60–0.70 and 0.70–0.80 empty
+    const { trend, buckets } = bucketByConfidence(trades, EDGES);
+    expect(trend).toBe(1);
+    expect(buckets[1].trades).toBe(0);
+    expect(buckets[1].avgNetUsd).toBe(0);
   });
 });

@@ -123,6 +123,33 @@ higher-confidence trades actually perform better? — bucket-test in the harness
 before sizing by it. The edge itself is the regime-confirmed trend core; refine it
 via WHAT (coins) and HOW MUCH (calibrated sizing), not an extra chop gate.
 
+### Confidence calibration (2026-06-22): confidence is a GATE, NOT a sizing dial
+
+Before building confidence-scaled sizing we tested whether confidence is calibrated
+(`pnpm backtest:calibration` — pools every closed trade across 8×90d/4h windows,
+BTC/ETH/SOL, buckets by ENTRY confidence). 624 trades:
+
+| confidence | trades | win% | avg/trade |
+|---|---:|---:|---:|
+| 0.50–0.60 | 253 | 39% | +$2.31 |
+| 0.60–0.70 | 109 | 37% | +$4.11 |
+| 0.70–0.80 | 48 | 42% | +$3.84 |
+| 0.80–1.00 | 214 | 41% | +$3.27 |
+
+**FLAT / NON-CALIBRATED.** All four bands are profitable in a tight $2.31–$4.11
+range; win rates cluster 37–42%; there is NO monotonic gradient (peaks at 0.60–0.70,
+drifts down). Top−bottom expectancy = +$0.96 vs a pooled per-trade |avg| of $3.07 —
+the spread is well under one trade's expectancy, i.e. noise. The highest-confidence
+band (0.80–1.00) does NOT outperform; it's mid-pack.
+
+→ **Confidence-scaled sizing is REJECTED — it would overfit noise.** Confidence
+earns its keep as the GO/NO-TRADE gate (the threshold that produces these profitable
+trades at all), but it carries no information about trade *magnitude*. The scout's
+per-trade risk/leverage should NOT be scaled by confidence; keep sizing fixed
+(risk-based, leverage-independent — as `open-position-business-logic.ts` already does).
+The remaining lever is WHAT (coin selection: ETH/SOL carry, BTC≈$0), evaluated
+against overfitting risk on a 2yr sample.
+
 ## Implications
 
 - **Do NOT go live on the current rubric.** The backtestable part (regime core)

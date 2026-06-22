@@ -139,6 +139,7 @@ export async function runBacktest(opts: BacktestOptions): Promise<BacktestRunRes
       close: c.close,
       side,
       go: confirmed,
+      confidence: regime.confidence,
       invalidation: levels?.invalidation ?? 0,
       target: levels?.target ?? 0,
       fundingHourly: 0, // no historical funding → carry excluded (documented limit)
