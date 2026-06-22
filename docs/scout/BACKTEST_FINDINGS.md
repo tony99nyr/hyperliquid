@@ -272,6 +272,32 @@ by ETH/SOL; BTC ≈ breakeven. Every overlay tested to improve it:
 Anything that slows entry (HTF filter, higher TF) or dilutes/tilts it (sizing by a
 flat metric, chop gate) removes winners. The core is already near its tuned form.
 
+## Significance test (2026-06-22): positive within-sample, but WEAK + UNPROVEN
+
+`pnpm backtest:significance` — funding-aware core, 8×90d/4h, BTC/ETH/SOL, tested
+against H0: edge = 0, two ways (PURE + tested in `significance-business-logic.ts`):
+
+- **Per-trade t-stat (optimistic):** mean **+$2.77/trade vs sd $53**, n=622 → **t = 1.30.**
+  NOT significant (|t|<1.96) even assuming trades are independent (they aren't —
+  trend trades cluster, so this is already the generous bound).
+- **Block bootstrap by window (honest unit):** total +$1,721, **95% CI [$504, $3231]**,
+  P(≤0)=0.0%. By coin-window: CI [$156, $3377], P(≤0)=1.5%.
+- **Window-level Sharpe ≈ 0.8 (~1.6 annualized), 8 points** — wide error.
+
+**Read it honestly, not off the headline p:**
+1. The edge is **weak per-trade** (t=1.30) — it only emerges when aggregated to windows.
+2. The window P(≤0)=0% is **partly mechanical**: with 8 mostly-positive windows, a
+   resample can't sum negative, so p≈0 overstates confidence. **Trust the wide CI**
+   (the total could plausibly be anywhere from +$500 to +$3,200), not the tiny p.
+3. **HARD LIMIT:** the bootstrap resamples WITHIN the observed ~2 years = **one macro
+   regime** (the 2024–25 crypto bull, which flatters trend-following). It says nothing
+   about regimes not in the sample. Within-sample significance ≠ robust-across-regimes.
+
+→ **Verdict: encouraging, NOT proven.** The within-sample total is unlikely to be pure
+luck, but the per-trade signal is weak, the window n is tiny, and it's one regime. This
+is exactly why the live paper bar exists — backtest significance can't substitute for a
+forward, multi-regime track record.
+
 ## Implications
 
 - **The regime core has a real, lumpy, regime-conditional edge** (~+$68/mo on $1k,
