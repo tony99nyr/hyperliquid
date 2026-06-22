@@ -67,6 +67,9 @@ export interface RubricInputs {
   hasOpenPosition?: boolean;
   /** Current liquidation price when a position is open (for the liq-inside-stop gate). */
   liqPx?: number | null;
+  /** Per-coin leader de-risk signal ∈ [0,1] (size leaving vs entering); >threshold
+   *  vetoes a LONG when the (config-gated, default OFF) leader-derisk-veto is on. */
+  derisk?: number | null;
 }
 
 export interface GateStates {
@@ -75,6 +78,9 @@ export interface GateStates {
   roomTooTight: boolean;
   volContraction: boolean;
   liqInsideStop: boolean;
+  /** LONG-only risk-off veto when tracked leaders are mass-de-risking. Config-gated
+   *  (default OFF) until backtested as leader data accumulates. */
+  leaderDeriskVeto: boolean;
 }
 
 export interface Levels {

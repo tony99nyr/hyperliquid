@@ -113,7 +113,10 @@ export function diffLeaderPositions(
       continue;
     }
     if (p && !c) {
-      // Closed — report the vanished position's context; notional now 0.
+      // Closed — report the vanished position's context. Carry the LAST-KNOWN
+      // unrealizedPnl (≈ the position's realized P&L at close) instead of zeroing
+      // it: this is what makes per-trader realized P&L / win-rate computable from
+      // the close stream (previously discarded — the trader-info value gap).
       actions.push({
         leaderAddress,
         coin,
@@ -125,7 +128,7 @@ export function diffLeaderPositions(
         sizeDelta: -p.size,
         entryPx: p.entryPx,
         notionalUsd: 0,
-        unrealizedPnl: 0,
+        unrealizedPnl: p.unrealizedPnl,
       });
       continue;
     }

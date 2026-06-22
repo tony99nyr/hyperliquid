@@ -40,6 +40,9 @@ export interface RubricConfig {
     /** Vol-contraction gate fires when BOTH percentiles are below these. */
     volContractionAtrPctile: number;
     volContractionBbPctile: number;
+    /** LONG-only risk-off veto when leader de-risk ≥ threshold. Default OFF
+     *  (enabled:false) until a backtest validates it. Optional/absent = disabled. */
+    leaderDeriskVeto?: { enabled: boolean; threshold: number };
   };
   consensus: {
     topN: number;

@@ -9,7 +9,8 @@
     "depthQueryFrac": 0.001,
     "minRoomToTarget": 1.5,
     "volContractionAtrPctile": 0.25,
-    "volContractionBbPctile": 0.25
+    "volContractionBbPctile": 0.25,
+    "leaderDeriskVeto": { "enabled": false, "threshold": 0.7 }
   },
   "consensus": { "topN": 10, "tauHours": 12, "dirtyBookWeight": 0.4, "fullScoreNet": 3 },
   "carry": { "fullScoreApr": 15 },

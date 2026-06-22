@@ -16,7 +16,27 @@ import { computeRubric } from './rubric-composer-business-logic';
 import { applyPortfolioCaps, type OpenLeg } from './rubric-portfolio-business-logic';
 import { reviewPosition } from './rubric-position-review-business-logic';
 import { buildRubricScoreRows, buildPositionReviewRow } from './rubric-rows-business-logic';
+import { computeLeaderDerisk, type DeriskAction } from './leader-derisk-business-logic';
 import type { RubricInputs, RubricResult, Side } from './rubric-types';
+
+/** Per-coin leader de-risk signal from the recent action stream (last ~2h). Best-effort. */
+async function recentLeaderDerisk(now: number): Promise<Record<string, number>> {
+  try {
+    const since = new Date(now - 2 * 60 * 60 * 1000).toISOString();
+    const { data } = await getServiceRoleClient()
+      .from('leader_actions')
+      .select('coin, kind, size_delta, entry_px')
+      .gte('detected_at', since)
+      .limit(20000);
+    const actions: DeriskAction[] = (data ?? []).map((r) => {
+      const a = r as { coin: string; kind: string; size_delta: number; entry_px: number | null };
+      return { coin: a.coin, kind: a.kind as DeriskAction['kind'], sizeDelta: Number(a.size_delta) || 0, entryPx: a.entry_px };
+    });
+    return computeLeaderDerisk(actions);
+  } catch {
+    return {};
+  }
+}
 
 /** Retain ~60 days of market snapshots (enough for momentum/cascade backtests). */
 const SNAPSHOT_RETENTION_MS = 60 * 24 * 60 * 60 * 1000;
@@ -42,10 +62,15 @@ async function gatherOpenLegs(): Promise<Array<OpenLeg & { sessionId: string }>>
 /** Full opportunity scan: score every coin, apply the portfolio cap, persist. */
 export async function runRubricScan(opts: { now: number }): Promise<{ scored: number; coins: string[] }> {
   const cfgBase = loadRubricConfig();
+  // Per-coin leader de-risk signal (computed once; fed onto inputs so the veto
+  // gate can see it, and stored on the snapshot for backtesting). Veto is OFF by
+  // default, so this is inert on the score until a backtest enables it.
+  const deriskByCoin = await recentLeaderDerisk(opts.now);
   const pairs: Array<{ inp: RubricInputs; result: RubricResult }> = [];
   for (const coin of cfgBase.universe) {
     const inp = await assembleInputs(coin, opts.now);
     if (!inp) continue;
+    inp.derisk = deriskByCoin[coin.toUpperCase()] ?? null;
     pairs.push({ inp, result: computeRubric(inp, resolveCoinConfig(cfgBase, coin)) });
   }
   const openLegs = await gatherOpenLegs();
@@ -74,6 +99,7 @@ export async function runRubricScan(opts: { now: number }): Promise<{ scored: nu
       open_interest: p.inp.ctx!.openInterest,
       premium: p.inp.ctx!.premium,
       leader_net: p.inp.consensus.net,
+      leader_derisk: deriskByCoin[p.inp.coin.toUpperCase()] ?? null,
       config_version: cfgBase.version,
     }));
   if (snapshots.length > 0) {

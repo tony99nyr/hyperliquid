@@ -65,6 +65,13 @@ describe('diffLeaderPositions', () => {
     });
   });
 
+  it('carries the last-known unrealizedPnl on CLOSE (realized-P&L proxy, not zeroed)', () => {
+    const prev = [snap('ETH', 'short', 1.128, { entryPx: 1772.4, unrealizedPnl: 312.5 })];
+    const actions = diffLeaderPositions(LEADER, prev, []);
+    expect(actions[0].kind).toBe('close');
+    expect(actions[0].unrealizedPnl).toBe(312.5); // ← was 0 before; needed to rank traders by realized P&L
+  });
+
   it('detects an ADD when size grows on the same side', () => {
     const prev = [snap('BTC', 'long', 1)];
     const curr = [snap('BTC', 'long', 1.5)];

@@ -122,6 +122,22 @@ describe('gates + levels', () => {
     const chop = evaluateGates(inputs({ atrPctile: 0.1, bbBandwidthPctile: 0.1 }), deriveLevels(1700, 20, 'long', CFG), 'long', CFG);
     expect(chop.volContraction).toBe(true);
   });
+
+  it('leader-derisk veto: OFF by default; when enabled vetoes LONG only above threshold', () => {
+    const lvl = deriveLevels(1700, 20, 'long', CFG);
+    // Default config: veto disabled → never fires even at high de-risk.
+    expect(evaluateGates(inputs({ derisk: 0.95 }), lvl, 'long', CFG).leaderDeriskVeto).toBe(false);
+
+    const onCfg = deepMerge(CFG, { gates: { leaderDeriskVeto: { enabled: true, threshold: 0.7 } } }) as RubricConfig;
+    // Enabled + LONG + de-risk above threshold → veto fires (the kill reason).
+    const vetoed = evaluateGates(inputs({ derisk: 0.95 }), lvl, 'long', onCfg);
+    expect(vetoed.leaderDeriskVeto).toBe(true);
+    expect(firstFailingGate(vetoed)).toBe('leader-derisk-veto');
+    // Below threshold → no veto.
+    expect(evaluateGates(inputs({ derisk: 0.5 }), lvl, 'long', onCfg).leaderDeriskVeto).toBe(false);
+    // SHORT is never vetoed (risk-off helps shorts).
+    expect(evaluateGates(inputs({ derisk: 0.95 }), deriveLevels(1700, 20, 'short', CFG), 'short', onCfg).leaderDeriskVeto).toBe(false);
+  });
 });
 
 describe('composer — the keystone', () => {

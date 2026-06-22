@@ -9,6 +9,7 @@ import type { MarketRegimeSignal } from '@/lib/strategy/analysis/market-regime-d
 import type { RubricConfig } from './rubric-config-types';
 import type { GateStates, Levels, RubricInputs, Side } from './rubric-types';
 import { scoreBookImbalance } from './rubric-scorers-business-logic';
+import { isMassDerisking } from './leader-derisk-business-logic';
 
 /** Entry-zone / stop / target / trigger from mark + ATR for a side. */
 export function deriveLevels(markPx: number, atr: number, side: Side, cfg: RubricConfig): Levels {
@@ -66,7 +67,14 @@ export function evaluateGates(inp: RubricInputs, levels: Levels, side: Side, cfg
     liqInsideStop = side === 'long' ? inp.liqPx >= levels.invalidation : inp.liqPx <= levels.invalidation;
   }
 
-  return { bookTooThin, againstConfirmedHtf: againstHtf, roomTooTight, volContraction, liqInsideStop };
+  // LONG-only risk-off veto: tracked leaders mass-de-risking ⇒ don't go long.
+  // Config-gated (default OFF) until backtested; never vetoes shorts (risk-off
+  // helps them). Shorts are unaffected.
+  const veto = cfg.gates.leaderDeriskVeto;
+  const leaderDeriskVeto =
+    side === 'long' && veto?.enabled === true && isMassDerisking(inp.derisk, veto.threshold);
+
+  return { bookTooThin, againstConfirmedHtf: againstHtf, roomTooTight, volContraction, liqInsideStop, leaderDeriskVeto };
 }
 
 /** First failing gate name (the kill reason), or null when all pass. */
@@ -76,5 +84,6 @@ export function firstFailingGate(g: GateStates): string | null {
   if (g.roomTooTight) return 'room-too-tight';
   if (g.volContraction) return 'vol-contraction';
   if (g.liqInsideStop) return 'liq-inside-stop';
+  if (g.leaderDeriskVeto) return 'leader-derisk-veto';
   return null;
 }
