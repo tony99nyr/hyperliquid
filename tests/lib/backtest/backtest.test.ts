@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { simulateBacktest, bucketByConfidence, type BacktestBar, type BacktestSimConfig, type BacktestTrade } from '@/lib/backtest/backtest-business-logic';
+import { simulateBacktest, bucketByConfidence, bucketByEntryVol, type BacktestBar, type BacktestSimConfig, type BacktestTrade } from '@/lib/backtest/backtest-business-logic';
 
 const CFG: BacktestSimConfig = { slippageBps: 0, barHours: 1, notionalUsd: 1000 };
 
@@ -132,14 +132,15 @@ describe('simulateBacktest', () => {
     expect(withSlip.trades[0].netPnlUsd).toBeLessThan(noSlip.trades[0].netPnlUsd);
   });
 
-  it('carries entry confidence from the GO bar onto the trade', () => {
+  it('carries entry confidence + entry ATR% from the GO bar onto the trade', () => {
     const bars = [
-      bar({ time: 1, close: 100, side: 'long', go: true, confidence: 0.73, high: 100, low: 100, invalidation: 90, target: 110 }),
+      bar({ time: 1, close: 100, side: 'long', go: true, confidence: 0.73, atr: 4, high: 100, low: 100, invalidation: 90, target: 110 }),
       bar({ time: 2, close: 110, high: 115, low: 105 }),
     ];
     const r = simulateBacktest(bars, CFG);
     expect(r.trades).toHaveLength(1);
     expect(r.trades[0].entryConfidence).toBe(0.73);
+    expect(r.trades[0].entryAtrPct).toBeCloseTo(0.04); // atr 4 / entry 100
   });
 });
 
@@ -198,6 +199,7 @@ describe('bucketByConfidence', () => {
     netPnlUsd,
     reason: 'target',
     entryConfidence,
+    entryAtrPct: 0,
   });
 
   it('flags monotonic UP expectancy as CALIBRATED', () => {
@@ -228,5 +230,32 @@ describe('bucketByConfidence', () => {
     expect(trend).toBe(1);
     expect(buckets[1].trades).toBe(0);
     expect(buckets[1].avgNetUsd).toBe(0);
+  });
+});
+
+describe('bucketByEntryVol', () => {
+  const VOL_EDGES = [0, 0.02, 0.04, 0.06, 1];
+  const tv = (entryAtrPct: number, netPnlUsd: number): BacktestTrade => ({
+    side: 'long',
+    entryTime: 0,
+    exitTime: 1,
+    entryPx: 100,
+    exitPx: 100,
+    barsHeld: 1,
+    grossPnlUsd: netPnlUsd,
+    fundingUsd: 0,
+    netPnlUsd,
+    reason: 'target',
+    entryConfidence: 0.6,
+    entryAtrPct,
+  });
+
+  it('buckets by entry ATR% and surfaces a low-vol-is-better gradient', () => {
+    // low-vol entries win, high-vol entries lose → trend should be DOWN across rising vol.
+    const trades = [tv(0.01, 40), tv(0.03, 10), tv(0.05, -10), tv(0.08, -50)];
+    const { trend, buckets } = bucketByEntryVol(trades, VOL_EDGES);
+    expect(buckets[0].trades).toBe(1); // 0–0.02 band
+    expect(buckets[0].avgNetUsd).toBe(40);
+    expect(trend).toBe(-1); // expectancy falls as vol rises → favor low-vol (size them up)
   });
 });

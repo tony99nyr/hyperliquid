@@ -147,8 +147,22 @@ earns its keep as the GO/NO-TRADE gate (the threshold that produces these profit
 trades at all), but it carries no information about trade *magnitude*. The scout's
 per-trade risk/leverage should NOT be scaled by confidence; keep sizing fixed
 (risk-based, leverage-independent — as `open-position-business-logic.ts` already does).
-The remaining lever is WHAT (coin selection: ETH/SOL carry, BTC≈$0), evaluated
-against overfitting risk on a 2yr sample.
+
+**Entry-VOL calibration (same `pnpm backtest:calibration`, ATR%-bucketed):** also
+FLAT/non-calibrated — an inverted-U, not a gradient:
+
+| entry ATR% | trades | avg/trade |
+|---|---:|---:|
+| 0.00–0.01 | 23 | +$1.64 |
+| 0.01–0.02 | 270 | +$2.07 |
+| 0.02–0.03 | 224 | **+$5.75** |
+| 0.03–1.00 | 107 | +$0.27 |
+
+Mid-vol is the sweet spot; low- and high-vol are weak. So **risk-parity tilting
+(sizing UP tight-stop/low-vol entries) would NOT help** — it sizes up the WEAKEST
+(low-vol) band. Both sizing dimensions (confidence AND vol) are non-calibrated →
+**keep fixed risk-based sizing; there is no sizing-tilt lever.** (A mid-vol band edge
+is hinted but acting on it = overfitting a vol band on a 2yr sample.)
 
 ### Exit policy (2026-06-22): trailing stop does NOT beat the fixed target
 
@@ -236,22 +250,47 @@ TODAY — as of 2026-06-22 there are ~2.5h banked (120 rows, 30/coin; `leader_ne
 IS populating). Revisit once weeks of history accumulate. Until then the trend core
 is the only backtestable signal, and it's been exhausted on the levers above.
 
+## Lever scoreboard (2026-06-22) — the hardening sweep is EXHAUSTED
+
+Validated edge: the **regime-confirmed 4h trend core**, ~**+$1,638/$1k over 2yr
+(~+$68/mo), funding-aware**, taker, single-TF, leaders/carry/micro ablated. Carried
+by ETH/SOL; BTC ≈ breakeven. Every overlay tested to improve it:
+
+| Lever | Verdict |
+|---|---|
+| Sit-out-chop (vol-contraction gate) | ❌ redundant (regime-confirm already filters chop) |
+| Confidence-scaled sizing | ❌ confidence is FLAT → a gate, not a dial |
+| Entry-vol (risk-parity) sizing tilt | ❌ vol is FLAT (inverted-U) → no tilt lever |
+| Trailing-stop exit | ⚪ wash at 3×ATR (rides the tail, gives it back on chop) |
+| Carry/funding tilt | ❌ modeled (−14% drag), shorts earn only $48 → no tilt |
+| Higher-TF (1d) trend filter | ❌ HURTS (−$1.5k) — 4h leads the 1d |
+| Entry timeframe | ✅ 4h is a sharp single peak (8h/1d negative) |
+| Coin selection (drop BTC) | ⚠️ live-forward only (2yr fit = overfit risk) |
+| Pillar replay (leaders/carry/micro) | ⏸️ DATA-BLOCKED (~2.5h banked) |
+
+**One mechanism explains the negatives:** the edge is TIMELY 4h regime detection.
+Anything that slows entry (HTF filter, higher TF) or dilutes/tilts it (sizing by a
+flat metric, chop gate) removes winners. The core is already near its tuned form.
+
 ## Implications
 
-- **Do NOT go live on the current rubric.** The backtestable part (regime core)
-  loses; the potentially-edge-bearing pillars (leaders/carry/micro) are unproven
-  and not yet backtestable (data-blocked — `market_snapshots` is accumulating the
-  funding/OI/leader history a fuller replay would need).
-- The system's defensible value remains **drawdown-reduction / discipline (sitting
-  out)**, not alpha — consistent with the original benchmark conclusions.
-- Same fail-fast discipline that rejected the funding/copy-trading lanes: the
-  trend core is **REJECTED as a standalone entry signal**.
+- **The regime core has a real, lumpy, regime-conditional edge** (~+$68/mo on $1k,
+  funding-aware) — NOT the earlier "no edge" verdict, which was a chop-regime + 1h
+  artifact (see UPDATE 3). But it is small, concentrated in trend windows, and
+  ablated of the (still-unproven) leaders/carry/micro pillars.
+- **No sizing or overlay lever improves it** — the hardening sweep is done. The only
+  untested edge source is the multi-pillar rubric, which is **data-blocked** until
+  `market_snapshots` accumulates weeks of funding/OI/leader history.
+- **Going live** is a position-sizing + risk-discipline decision on a known-small,
+  known-lumpy edge — not a "find more alpha in the backtest" problem. The circuit
+  breaker + fixed risk-based sizing are the right wrappers; expect a paper→real haircut.
 
 ## Open / next (operator's call)
 
-- **Gather + revisit:** once `market_snapshots` has weeks of history, extend the
-  harness to replay the full multi-pillar rubric (the only untested edge source).
-- **One different signal:** a Bollinger-band mean-reversion *in low-vol regimes*
-  (distinct from regime-direction) — low expectations given friction dominates.
-- Friction is the killer: any viable lane needs far fewer/higher-conviction
-  trades, a genuinely predictive signal, or maker/passive execution (not taker).
+- **Gather + revisit (the live lever):** once `market_snapshots` has weeks of
+  history, extend the harness to replay the full multi-pillar rubric — the only
+  remaining untested edge source.
+- **Coin selection as live-forward observation:** watch whether BTC keeps
+  underperforming ETH/SOL in real paper trading rather than fitting it on 2yr.
+- **One different signal (low priority):** Bollinger-band mean-reversion in low-vol
+  regimes (distinct from regime-direction) — low expectations given friction.
