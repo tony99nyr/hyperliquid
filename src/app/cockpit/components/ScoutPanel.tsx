@@ -37,7 +37,7 @@ export default function ScoutPanel({ hypsOverride }: ScoutPanelProps) {
 
   // Daemon liveness: "watch tick Nm ago", red when silent past the stale window.
   const heartbeat = useScoutHeartbeat({ enabled: hypsOverride === undefined });
-  const lastTickMs = heartbeat.rows[0]?.lastTickMs ?? 0;
+  const lastTickMs = (heartbeat.rows.find((r) => r.source === 'scout-watch') ?? heartbeat.rows[0])?.lastTickMs ?? 0;
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => {
     if (hypsOverride !== undefined) return; // controlled (tests) — don't tick

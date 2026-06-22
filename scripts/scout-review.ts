@@ -110,8 +110,12 @@ run(async () => {
     return;
   }
 
-  // Realized P&L net of taker fees — CLOSED (flat) positions only, so an open
-  // position's entry fee can't drag the number with no offsetting mark-to-market.
+  // Realized P&L net of taker fees, summed over ALL positions. `realized_pnl_usd`
+  // is CUMULATIVE closed P&L per (session,coin), so a coin that closed a round-trip
+  // then reopened still contributes its realized gain (closed-only filtering would
+  // silently DROP it — the re-review caught that). An open position's entry fee is
+  // a REAL paid cost (included); only its unrealized P&L is excluded, which is
+  // correct for a realized scorecard.
   const { data: positions } = await client
     .from('positions')
     .select('side, realized_pnl_usd, fees_paid_usd')
@@ -120,7 +124,7 @@ run(async () => {
   let openCount = 0;
   for (const p of positions ?? []) {
     const r = p as { side: string; realized_pnl_usd: number; fees_paid_usd: number };
-    if (r.side !== 'flat') { openCount++; continue; } // exclude open positions
+    if (r.side !== 'flat') openCount++;
     realizedGrossUsd += (Number(r.realized_pnl_usd) || 0) - (Number(r.fees_paid_usd) || 0);
   }
 

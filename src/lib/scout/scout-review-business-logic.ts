@@ -39,7 +39,8 @@ export interface ScorecardInput {
 export interface ScorecardConfig {
   monthlyBarUsd: number; // graduation target (~$1000/mo)
   killAfterTrades: number; // churn: min trades before a negative-net KILL
-  slowBleedDays: number; // slow-bleed: KILL on negative net past this many days, any trade count
+  slowBleedDays: number; // slow-bleed: KILL on negative net past this many days
+  slowBleedMinTrades: number; // ...but only once there are at least this many CLOSED trades (so unclosed entry-fee drag alone can't KILL)
   minTradesToGraduate: number; // GRADUATE needs at least this many closed trades (sample size)
   maxDrawdownPct: number; // graduation DD ceiling (e.g. 0.15)
   graduationDays: number; // min track-record length before "graduate" (e.g. 90)
@@ -49,6 +50,7 @@ export const DEFAULT_SCORECARD_CONFIG: ScorecardConfig = {
   monthlyBarUsd: 1000,
   killAfterTrades: 15,
   slowBleedDays: 21,
+  slowBleedMinTrades: 3,
   minTradesToGraduate: 30,
   maxDrawdownPct: 0.15,
   graduationDays: 90,
@@ -88,8 +90,9 @@ export function buildScorecard(input: ScorecardInput, cfg: ScorecardConfig = DEF
   if (netUsd < 0 && input.tradeCount >= cfg.killAfterTrades) {
     verdict = 'kill';
     reason = `net $${netUsd.toFixed(0)} over ${input.tradeCount} trades — bleeding after the realism haircut; kill the lane.`;
-  } else if (netUsd < 0 && periodDays >= cfg.slowBleedDays) {
-    // Slow bleed: negative for weeks even without churn-level trade counts.
+  } else if (netUsd < 0 && periodDays >= cfg.slowBleedDays && input.tradeCount >= cfg.slowBleedMinTrades) {
+    // Slow bleed: negative for weeks WITH at least a few closed trades (so an
+    // open position's unclosed entry fee alone — 0 closed trades — can't KILL).
     verdict = 'kill';
     reason = `net $${netUsd.toFixed(0)} over ${periodDays.toFixed(0)}d (${input.tradeCount} trades) — slow bleed past ${cfg.slowBleedDays}d; kill the lane.`;
   } else if (

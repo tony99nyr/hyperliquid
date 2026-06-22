@@ -48,6 +48,11 @@ describe('buildScorecard — KILL', () => {
   it('no KILL on negative net below BOTH the trade floor and the bleed window', () => {
     expect(buildScorecard(input({ realizedGrossUsd: -30, tradeCount: 4, periodDays: 10 })).verdict).toBe('continue');
   });
+
+  it('slow-bleed does NOT fire on unclosed entry-fee drag alone (too few closed trades)', () => {
+    // negative net, past the day window, but only 1 closed trade → not a bleed
+    expect(buildScorecard(input({ realizedGrossUsd: -2, tradeCount: 1, periodDays: 25 })).verdict).toBe('continue');
+  });
 });
 
 describe('buildScorecard — GRADUATE gating', () => {

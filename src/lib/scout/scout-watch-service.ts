@@ -10,7 +10,7 @@
  * this file is the thin Supabase/HL bridge + the trigger-file sink.
  */
 
-import { appendFileSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync, renameSync, existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -56,10 +56,13 @@ export function loadScoutState(path = scoutStateFilePath()): ScoutState {
   }
 }
 
-/** Persist carried trigger state (best-effort; a write failure must not kill the loop). */
+/** Persist carried trigger state (best-effort; a write failure must not kill the loop).
+ * Atomic (temp + rename) so a crash mid-write can't leave a half-written file. */
 export function saveScoutState(state: ScoutState, path = scoutStateFilePath()): void {
   try {
-    writeFileSync(path, JSON.stringify(state), 'utf8');
+    const tmp = `${path}.tmp`;
+    writeFileSync(tmp, JSON.stringify(state), 'utf8');
+    renameSync(tmp, path);
   } catch {
     /* best-effort */
   }

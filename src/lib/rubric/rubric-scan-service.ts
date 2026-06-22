@@ -18,6 +18,9 @@ import { reviewPosition } from './rubric-position-review-business-logic';
 import { buildRubricScoreRows, buildPositionReviewRow } from './rubric-rows-business-logic';
 import type { RubricInputs, RubricResult, Side } from './rubric-types';
 
+/** Retain ~60 days of market snapshots (enough for momentum/cascade backtests). */
+const SNAPSHOT_RETENTION_MS = 60 * 24 * 60 * 60 * 1000;
+
 /** Open (non-flat) legs across all active sessions, for the portfolio cap. */
 async function gatherOpenLegs(): Promise<Array<OpenLeg & { sessionId: string }>> {
   const sessions = await listActiveSessions();
@@ -75,7 +78,12 @@ export async function runRubricScan(opts: { now: number }): Promise<{ scored: nu
     }));
   if (snapshots.length > 0) {
     try {
-      await getServiceRoleClient().from('market_snapshots').insert(snapshots);
+      const client = getServiceRoleClient();
+      await client.from('market_snapshots').insert(snapshots);
+      // Bound growth: drop snapshots older than the retention window (the future
+      // momentum/cascade lanes only need recent history). Best-effort.
+      const cutoff = new Date(opts.now - SNAPSHOT_RETENTION_MS).toISOString();
+      await client.from('market_snapshots').delete().lt('captured_at', cutoff);
     } catch {
       /* best-effort time series */
     }

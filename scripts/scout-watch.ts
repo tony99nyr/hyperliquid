@@ -9,8 +9,9 @@
  * inverted loop that keeps Opus/Sonnet usage rationed).
  *
  * NEVER trades. Mirrors the watch daemon's resilience: SIGINT-safe, fail-soft
- * per cycle, heartbeat each tick. In-process trigger state means a restart
- * re-baselines (the first cycle after restart emits nothing — intentional).
+ * per cycle, heartbeat each tick. Trigger state PERSISTS to disk and reloads on
+ * boot, so a restart resumes from the latest baseline instead of re-baselining
+ * blind (which would miss a breakout during the first post-restart cycle).
  *
  * Usage:
  *   pnpm scout:watch                 # loop every ~60s
