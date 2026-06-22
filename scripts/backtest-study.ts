@@ -18,15 +18,16 @@ const COINS = ['ETH', 'BTC', 'SOL', 'HYPE'];
 //  earlier    — lower confidence → enter sooner (tests "entries are late")
 //  wider-stop — 2.5× stop (tests "stops too tight → premature stop-outs")
 //  quick-tgt  — 2.0× target (tests "targets too far → fewer hit; better R:R hit-rate")
-const VARIANTS: Array<{ name: string; confThreshold?: number; stopAtrMult?: number; targetAtrMult?: number; fade?: boolean; fillModel?: 'taker' | 'maker' }> = [
+type Variant = { name: string; confThreshold?: number; stopAtrMult?: number; targetAtrMult?: number; fade?: boolean; fillModel?: 'taker' | 'maker'; makerQueueClearBps?: number; makerAdverseSelBps?: number };
+// Pessimistic maker realism: price must trade 5bps through to fill (queue), and a
+// 10bps adverse-selection penalty on fill (filled-then-reversed). If the signal
+// STILL nets positive under this, the maker edge is robust — not a fill mirage.
+const REAL = { makerQueueClearBps: 5, makerAdverseSelBps: 10 };
+const VARIANTS: Variant[] = [
   { name: 'baseline(taker)' },
-  { name: 'FADE(mean-rev)', fade: true },
-  // THE FRICTION EXPERIMENT: same signals, but PASSIVE maker entries (earn the
-  // rebate, miss runaway winners) instead of crossing the spread. If maker flips
-  // a losing taker signal to net-positive, friction was the killer, not the signal.
-  { name: 'MAKER(trend)', fillModel: 'maker' },
-  { name: 'MAKER+fade', fade: true, fillModel: 'maker' },
-  { name: 'MAKER+quick-tgt', fillModel: 'maker', targetAtrMult: 2.0 },
+  { name: 'MAKER-optimistic', fillModel: 'maker' },
+  { name: 'MAKER-REALISTIC', fillModel: 'maker', ...REAL },
+  { name: 'MAKER-REAL+quick-tgt', fillModel: 'maker', targetAtrMult: 2.0, ...REAL },
 ];
 
 function summarize(rs: BacktestRunResult[]): { net: number; trades: number; wins: number; losses: number; stops: number; targets: number } {
@@ -54,7 +55,7 @@ run(async () => {
     const rs: BacktestRunResult[] = [];
     for (const coin of COINS) {
       try {
-        rs.push(await runBacktest({ coin, days, confThreshold: v.confThreshold, stopAtrMult: v.stopAtrMult, targetAtrMult: v.targetAtrMult, fade: v.fade, fillModel: v.fillModel }));
+        rs.push(await runBacktest({ coin, days, confThreshold: v.confThreshold, stopAtrMult: v.stopAtrMult, targetAtrMult: v.targetAtrMult, fade: v.fade, fillModel: v.fillModel, makerQueueClearBps: v.makerQueueClearBps, makerAdverseSelBps: v.makerAdverseSelBps }));
       } catch (e) {
         line(`  ${coin} ${v.name}: skipped (${e instanceof Error ? e.message : String(e)})`);
       }

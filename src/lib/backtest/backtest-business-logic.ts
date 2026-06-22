@@ -54,6 +54,17 @@ export interface BacktestSimConfig {
   makerRebateBps?: number;
   /** Bars a posted maker entry rests before it's abandoned unfilled (default 3). */
   maxBarsToFill?: number;
+  /**
+   * REALISM: price must trade THROUGH the posted limit by ≥ this many bps to
+   * clear the queue ahead of you and fill (0 = a mere touch fills — optimistic).
+   */
+  makerQueueClearBps?: number;
+  /**
+   * REALISM: adverse-selection penalty (bps) applied to a maker ENTRY fill — you
+   * tend to fill because informed flow ran into you, so the position starts more
+   * underwater ("filled-then-reversed"). Counters the rebate. 0 = none (optimistic).
+   */
+  makerAdverseSelBps?: number;
 }
 
 export interface BacktestTrade {
@@ -91,6 +102,8 @@ export function simulateBacktest(bars: BacktestBar[], cfg: BacktestSimConfig): B
   const model = cfg.fillModel ?? 'taker';
   const rebateUsd = cfg.notionalUsd * ((cfg.makerRebateBps ?? 1.5) / 10_000);
   const maxBarsToFill = cfg.maxBarsToFill ?? 3;
+  const queueClear = (cfg.makerQueueClearBps ?? 0) / 10_000; // price must trade this far through to fill
+  const adverseSel = (cfg.makerAdverseSelBps ?? 0) / 10_000; // filled-then-reversed entry penalty
 
   let open:
     | { side: Side; entryPx: number; entryTime: number; entryIdx: number; stop: number; target: number; fundingHourly: number; entryRebateUsd: number }
@@ -144,9 +157,15 @@ export function simulateBacktest(bars: BacktestBar[], cfg: BacktestSimConfig): B
       // MAKER: fill a resting entry only if price trades to it; else it ages out
       // (a MISSED entry — the adverse selection that skips runaway winners).
       if (pending && !open) {
-        const touched = pending.side === 'long' ? bar.low <= pending.limit : bar.high >= pending.limit;
-        if (touched) {
-          open = { side: pending.side, entryPx: pending.limit, entryTime: bar.time, entryIdx: i, stop: pending.stop, target: pending.target, fundingHourly: pending.fundingHourly, entryRebateUsd: rebateUsd };
+        // Fill only if price trades THROUGH the limit by the queue-clearance margin
+        // (a touch alone leaves you behind the queue). On fill, the entry is nudged
+        // adverse (filled-then-reversed) — countering the rebate.
+        const fillThru = pending.side === 'long' ? pending.limit * (1 - queueClear) : pending.limit * (1 + queueClear);
+        const filled = pending.side === 'long' ? bar.low <= fillThru : bar.high >= fillThru;
+        if (filled) {
+          const adverseSign = pending.side === 'long' ? 1 : -1;
+          const entryPx = pending.limit * (1 + adverseSign * adverseSel);
+          open = { side: pending.side, entryPx, entryTime: bar.time, entryIdx: i, stop: pending.stop, target: pending.target, fundingHourly: pending.fundingHourly, entryRebateUsd: rebateUsd };
           pending = null;
         } else if (i - pending.postedIdx >= maxBarsToFill) {
           pending = null; // expired unfilled — missed

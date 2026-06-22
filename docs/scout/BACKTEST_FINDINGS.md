@@ -52,11 +52,36 @@ protective stops still cross as taker). Same signals, 90d, 4 coins:
 ETH/BTC/HYPE. **Friction was the killer, not the signal.** Earning the spread
 instead of paying it crosses the trend core from disproven to plausible.
 
-CAVEATS (don't over-trust): +$266/90d on $1k ≈ ~$89/mo — positive but not yet the
-bar; the harness maker model is OPTIMISTIC (it doesn't model queue position or the
-"filled-then-reversed" adverse selection — real maker fills are worse); SOL is
-negative in every maker variant. But the watershed stands: **maker execution is
-the validated lane to build toward.**
+CAVEAT FLAGGED: the maker model was OPTIMISTIC (no queue position, no
+"filled-then-reversed" adverse selection). So we hardened it and re-ran ↓
+
+## UPDATE 2 (2026-06-22) — the maker win was a FILL MIRAGE
+
+Added realistic maker frictions: a fill requires price to trade THROUGH the limit
+by a queue-clearance margin (a touch alone leaves you behind the queue), plus an
+adverse-selection penalty on entry (you fill because flow ran into you). 90d/4coins:
+
+| Variant | net |
+|---|---:|
+| baseline (taker) | −$189 |
+| MAKER-optimistic (touch fills, no adverse-sel) | +$274 |
+| **MAKER-REALISTIC** (5bps queue + 10bps adverse-sel) | **−$190** |
+| MAKER-REAL + quick-target | −$367 |
+
+**The +$274 evaporates to −$190 once fills are realistic — identical to taker.**
+The optimistic edge was entirely an artifact of assuming you fill at your limit
+with no queue and no adverse selection. For a passive bid that fills when price
+comes back to you in a trending market, adverse selection is structural (you fill
+the reversals, miss the runners). Sensitivity: the result swings ~$460 across the
+realism levers, so maker viability hinges entirely on real-world adverse selection
+— which is unfavorable for a directional passive entry.
+
+**FINAL VERDICT: the directional/trend core has NO edge — taker OR realistic maker.**
+Maker execution does not rescue it. Stop trying to trade this signal directionally.
+The defensible path to the (lumpy, ~$400/mo-over-a-year, compounding) goal is
+STRUCTURAL, not directional: idle-capital yield + delta-neutral funding carry +
+capital preservation (account-level circuit breaker), with the rubric used only as
+a sit-out / risk-overlay. Same fail-fast discipline as the rejected lanes.
 
 ## Implications
 

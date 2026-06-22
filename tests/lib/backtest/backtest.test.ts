@@ -100,6 +100,28 @@ describe('simulateBacktest', () => {
     expect(r.trades[0].grossPnlUsd).toBeGreaterThan(0);
   });
 
+  it('MAKER realism: queue-clearance requires trade-THROUGH (a mere touch no longer fills)', () => {
+    const bars: BacktestBar[] = [
+      bar({ time: 1, close: 100, go: true, side: 'long', invalidation: 95, target: 110 }),
+      bar({ time: 2, close: 100, high: 101, low: 100 }), // touches 100 exactly, doesn't trade through
+      bar({ time: 3, close: 102, high: 103, low: 101 }),
+    ];
+    // queueClear 5bps → must reach 100*(1-0.0005)=99.95; low never ≤ 99.95 → no fill.
+    const r = simulateBacktest(bars, { ...CFG, fillModel: 'maker', makerQueueClearBps: 5, maxBarsToFill: 3 });
+    expect(r.trades).toHaveLength(0);
+  });
+
+  it('MAKER realism: adverse-selection nudges the entry against you (filled-then-reversed)', () => {
+    const bars: BacktestBar[] = [
+      bar({ time: 1, close: 100, go: true, side: 'long', invalidation: 90, target: 120 }),
+      bar({ time: 2, close: 99, high: 100, low: 98 }), // trades through 100 → fills
+      bar({ time: 3, close: 99.5, high: 100, low: 99 }),
+    ];
+    const clean = simulateBacktest(bars, { ...CFG, fillModel: 'maker' });
+    const adverse = simulateBacktest(bars, { ...CFG, fillModel: 'maker', makerAdverseSelBps: 10 });
+    expect(adverse.trades[0].entryPx).toBeGreaterThan(clean.trades[0].entryPx); // buy fills higher (worse)
+  });
+
   it('slippage worsens both legs (a clean target win nets less than gross move)', () => {
     const bars: BacktestBar[] = [
       bar({ time: 1, close: 100, go: true, side: 'long', invalidation: 95, target: 110 }),

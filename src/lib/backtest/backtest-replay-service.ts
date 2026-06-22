@@ -39,6 +39,10 @@ export interface BacktestOptions {
   fade?: boolean;
   /** Execution model — 'maker' tests passive entries + rebate (the friction fix). */
   fillModel?: 'taker' | 'maker';
+  /** Maker realism: queue-clearance bps (price must trade through to fill). */
+  makerQueueClearBps?: number;
+  /** Maker realism: adverse-selection penalty bps on a maker fill. */
+  makerAdverseSelBps?: number;
   notionalUsd?: number;
 }
 
@@ -105,7 +109,14 @@ export async function runBacktest(opts: BacktestOptions): Promise<BacktestRunRes
     });
   }
 
-  const result = simulateBacktest(bars, { slippageBps: baseSlippageBps(coin), barHours, notionalUsd, fillModel: opts.fillModel });
+  const result = simulateBacktest(bars, {
+    slippageBps: baseSlippageBps(coin),
+    barHours,
+    notionalUsd,
+    fillModel: opts.fillModel,
+    makerQueueClearBps: opts.makerQueueClearBps,
+    makerAdverseSelBps: opts.makerAdverseSelBps,
+  });
 
   const periodDays = opts.days;
   const scorecard = buildScorecard({
