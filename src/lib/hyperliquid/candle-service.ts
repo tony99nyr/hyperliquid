@@ -316,6 +316,64 @@ export function _isBackingOff(): boolean {
   return Date.now() < backoffUntil;
 }
 
+/** One historical funding observation (hourly rate effective from `time`). */
+export interface FundingPoint {
+  time: number; // epoch ms the rate took effect
+  fundingHourly: number; // signed hourly rate (positive = longs pay shorts)
+}
+
+/**
+ * Fetch historical HOURLY funding rates over [startTime, endTime] via the public
+ * `/info` `fundingHistory` endpoint, PAGINATED (HL caps the response at ~500 rows,
+ * so a multi-week window needs several calls). Returns a time-ascending series.
+ * Used by the backtest to model carry honestly (longs pay / shorts earn funding) —
+ * the headline trend-core net was funding-blind. Fail-soft: returns what it has.
+ */
+export async function fetchFundingHistory(coin: string, startTime: number, endTime: number = Date.now()): Promise<FundingPoint[]> {
+  const normCoin = coin.trim().toUpperCase();
+  const out: FundingPoint[] = [];
+  let cursor = startTime;
+  const MAX_PAGES = 30; // 30 × 500 = 15k hourly samples ≈ 625 days — ample headroom
+  for (let page = 0; page < MAX_PAGES; page++) {
+    let raw: Array<{ time?: number; fundingRate?: string }>;
+    try {
+      raw = await hlInfoPost<Array<{ time?: number; fundingRate?: string }>>({
+        type: 'fundingHistory',
+        coin: normCoin,
+        startTime: cursor,
+        endTime,
+      });
+    } catch {
+      break; // fail-soft: return whatever pages we already have
+    }
+    if (!Array.isArray(raw) || raw.length === 0) break;
+    for (const r of raw) {
+      const t = typeof r.time === 'number' ? r.time : NaN;
+      const rate = Number(r.fundingRate);
+      if (Number.isFinite(t) && Number.isFinite(rate)) out.push({ time: t, fundingHourly: rate });
+    }
+    const last = raw[raw.length - 1]?.time;
+    if (typeof last !== 'number' || last <= cursor) break; // no progress → done
+    cursor = last + 1;
+    if (raw.length < 500) break; // last (partial) page
+  }
+  out.sort((a, b) => a.time - b.time);
+  return out;
+}
+
+/**
+ * PURE: the hourly funding rate effective at `t` = the most recent funding sample
+ * at or before `t` (series must be time-ascending). 0 when none precedes `t`.
+ */
+export function fundingRateAt(series: FundingPoint[], t: number): number {
+  let rate = 0;
+  for (const p of series) {
+    if (p.time <= t) rate = p.fundingHourly;
+    else break;
+  }
+  return rate;
+}
+
 /** Current number of live cache entries (test hook for bound verification). */
 export function _candleCacheSize(): number {
   return candleCache.size;

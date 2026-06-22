@@ -13,7 +13,7 @@
  * historical book/leader/funding the system only started logging via market_snapshots).
  */
 
-import { fetchCandles, type CandleInterval } from '@/lib/hyperliquid/candle-service';
+import { fetchCandles, fetchFundingHistory, fundingRateAt, type CandleInterval, type FundingPoint } from '@/lib/hyperliquid/candle-service';
 import { detectMarketRegime } from '@/lib/strategy/analysis/market-regime-detector';
 import { calculateATR, calculateBollingerBands } from '@/lib/strategy/indicators/indicators';
 import type { PriceCandle } from '@/types/trading-core';
@@ -72,6 +72,8 @@ export interface BacktestOptions {
   exitMode?: 'fixed' | 'trail';
   /** Trailing-stop distance in ATRs (trail mode only). */
   trailAtrMult?: number;
+  /** Model real HL funding (longs pay / shorts earn) instead of the flat-0 default. */
+  applyFunding?: boolean;
   notionalUsd?: number;
 }
 
@@ -113,6 +115,10 @@ export async function runBacktest(opts: BacktestOptions): Promise<BacktestRunRes
   }
   const priceMovePct = candles.length > 1 ? ((candles[candles.length - 1].close - candles[0].close) / candles[0].close) * 100 : 0;
 
+  // Real funding (carry) — longs pay, shorts earn. Off by default (flat 0) to keep
+  // the directional check clean; --funding turns it on for the honesty/carry study.
+  const funding: FundingPoint[] = opts.applyFunding ? await fetchFundingHistory(coin, start, endMs) : [];
+
   // ATR aligned to candle indices (offset = first index that has an ATR value).
   const atrSeries = calculateATR(candles, 14, true);
   const atrOffset = candles.length - atrSeries.length;
@@ -147,7 +153,7 @@ export async function runBacktest(opts: BacktestOptions): Promise<BacktestRunRes
       atr,
       invalidation: levels?.invalidation ?? 0,
       target: levels?.target ?? 0,
-      fundingHourly: 0, // no historical funding → carry excluded (documented limit)
+      fundingHourly: opts.applyFunding ? fundingRateAt(funding, c.timestamp) : 0,
     });
   }
 

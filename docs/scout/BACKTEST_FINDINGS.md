@@ -172,6 +172,25 @@ at both widths (+$853 → +$1,141/+$1,192); BTC/SOL get worse. Cleanly-trending
 instruments reward letting winners run; choppy ones punish it. Consistent with the
 ETH/SOL-carry, BTC-chop pattern, but too sample-specific to build a rule on.
 
+### Carry / funding (2026-06-22): real funding is a −14% drag — the edge SURVIVES
+
+The headline +$1,915 was funding-BLIND (`fundingHourly=0`). On HL longs pay funding,
+shorts earn it. We fetched real historical hourly funding (`fetchFundingHistory`,
+paginated) and re-ran funding OFF vs ON (`pnpm backtest:funding`, same 8×90d/4h):
+
+| | funding OFF | funding ON (real) |
+|---|---:|---:|
+| total net | +$1,915 | **+$1,638** |
+| carry Δ | — | **−$277 (−14%)** |
+
+Carry by side: **longs PAID $324**, **shorts EARNED $48**. The system is net-long-biased
+in bull windows and pays funding for it; the short-side carry tailwind is real but tiny.
+
+→ **The edge survives realistic funding** — honest headline is now **~+$1,638/$1k over
+2yr (~+$68/mo)**, not $1,915. No carry-tilt lever: favoring shorts to harvest the $48
+would sacrifice far more directional edge than the carry gained. (Funding modeled at the
+entry-bar rate held flat over the hold — approximate; rates drift intra-hold.)
+
 ### Parked: leaders/carry/micro pillar replay is DATA-BLOCKED
 
 The only untested edge source (the multi-pillar rubric) needs historical

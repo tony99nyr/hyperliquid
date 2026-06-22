@@ -5,8 +5,28 @@ import {
   _clearCandleCache,
   _candleCacheSize,
   _isBackingOff,
+  fundingRateAt,
+  type FundingPoint,
 } from '@/lib/hyperliquid/candle-service';
 import { INTERVAL_MS } from '@/lib/hyperliquid/candle-service-business-logic';
+
+describe('fundingRateAt', () => {
+  const series: FundingPoint[] = [
+    { time: 1000, fundingHourly: 0.00001 },
+    { time: 2000, fundingHourly: 0.00002 },
+    { time: 3000, fundingHourly: -0.00003 },
+  ];
+  it('returns the most recent rate at or before t', () => {
+    expect(fundingRateAt(series, 2500)).toBe(0.00002);
+    expect(fundingRateAt(series, 3000)).toBe(-0.00003); // inclusive
+  });
+  it('returns 0 before the first sample', () => {
+    expect(fundingRateAt(series, 500)).toBe(0);
+  });
+  it('holds the last rate after the final sample', () => {
+    expect(fundingRateAt(series, 99999)).toBe(-0.00003);
+  });
+});
 
 const rawRow = (t: number, c = '2000') => ({
   t,
