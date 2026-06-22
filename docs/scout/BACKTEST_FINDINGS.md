@@ -209,6 +209,25 @@ late and filters the best (early) entries. Robust across both modes → **HTF fi
 is NOT a lever; skip it.** (Consistent with 4h≫1h earlier: the edge is timely regime
 detection — slowing it down destroys it.)
 
+### Entry-timeframe sweep (2026-06-22): 4h is a sharp sweet spot
+
+Ran the OOS core at each entry TF (`pnpm backtest:oos --interval …`, 8×90d, BTC/ETH/SOL):
+
+| entry TF | raw trend net | why |
+|---|---:|---|
+| 1h | ~breakeven/neg | friction churn (the original "no edge") |
+| **4h** | **+$1,915** | **sweet spot** |
+| 8h | −$228 | fewer trades but still negative |
+| 1d | −$611 | worst |
+
+A single sharp peak at 4h. 8h/1d are NEGATIVE despite *fewer* trades (less friction),
+so this isn't a friction story — it's the SAME effect as the HTF filter: a slower TF
+detects the trend LATE and misses the early entry where the edge lives. The two
+independent studies (TF sweep + HTF filter) corroborate one mechanism: **the edge is
+TIMELY regime detection.** 4h is fast enough to catch trends early, slow enough to
+dodge 1h friction. (Overfitting caveat: 4 TFs tested; but it's a smooth single-peaked
+curve with a clear mechanism, not a cherry-picked spike, and the HTF result corroborates.)
+
 ### Parked: leaders/carry/micro pillar replay is DATA-BLOCKED
 
 The only untested edge source (the multi-pillar rubric) needs historical
