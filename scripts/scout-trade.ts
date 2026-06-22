@@ -18,6 +18,7 @@ import { randomUUID } from 'node:crypto';
 import { parseArgs, requireString, optionalNumber, header, line, run } from './_skill-runtime';
 import { getTradingMode } from '@/lib/env/mode';
 import { assertScoutPaperMode } from '@/lib/scout/scout-execution-guard';
+import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
 import { buildOpenProposal } from '@/lib/skills/open-position-business-logic';
 import { buildMarketReduceOnlyClose } from '@/lib/trading/safe-exit-business-logic';
 import { executeIntent } from '@/lib/trading/fill-source';
@@ -31,6 +32,17 @@ import type { OrderSide } from '@/types/fill';
 const SCOUT_TITLE = 'scout';
 
 async function runEntry(args: Record<string, string | boolean>): Promise<void> {
+  // ACCOUNT-LEVEL CIRCUIT BREAKER: refuse a new open when the daily-loss or
+  // drawdown halt is tripped. Exits are NOT gated (you can always reduce/close).
+  const breaker = await checkCircuitBreaker('scout');
+  if (breaker.blockNewEntries) {
+    header('⛔ CIRCUIT BREAKER — new entries halted');
+    line(`${breaker.reason}`);
+    line(`equity=$${breaker.equityUsd.toFixed(0)} peak=$${breaker.peakEquityUsd.toFixed(0)} dayStart=$${breaker.dayStartEquityUsd.toFixed(0)}`);
+    if (breaker.flattenRecommended) line('FLATTEN RECOMMENDED — review open positions for a safe exit (breaker never auto-fires).');
+    return; // no new position
+  }
+
   const coin = requireString(args, 'coin').toUpperCase();
   const sideRaw = requireString(args, 'side').toLowerCase();
   if (sideRaw !== 'buy' && sideRaw !== 'sell') throw new Error('--side must be buy or sell');

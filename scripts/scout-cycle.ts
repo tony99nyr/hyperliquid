@@ -14,6 +14,7 @@ import { header, line, run } from './_skill-runtime';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import { fetchMetaAndAssetCtxs } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { gatherScoutInputs, scoutTriggerFilePath } from '@/lib/scout/scout-watch-service';
+import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
 import { scoutPlaybookPath, summarizeHypotheses, type HypothesisSummaryRow } from '@/lib/scout/scout-cycle-business-logic';
 
 /** Tail the JSONL trigger file (most recent N lines). */
@@ -67,6 +68,12 @@ run(async () => {
   header('OPEN PAPER POSITIONS');
   if (inputs.positions.length === 0) line('(flat — no open positions)');
   else inputs.positions.forEach((p) => line(`${p.coin} ${p.side} health=${p.healthScore ?? '—'} mark=${p.markPx}`));
+
+  // Account-level circuit breaker — if HALTED, do not open new positions.
+  const breaker = await checkCircuitBreaker('scout', now);
+  header('CIRCUIT BREAKER');
+  line(`equity=$${breaker.equityUsd.toFixed(0)} (peak $${breaker.peakEquityUsd.toFixed(0)}, dayStart $${breaker.dayStartEquityUsd.toFixed(0)})`);
+  line(breaker.blockNewEntries ? `⛔ HALTED — ${breaker.reason} → NO new entries${breaker.flattenRecommended ? ' + flatten recommended' : ''}` : `✓ ${breaker.reason}`);
 
   // 3) Track record for the learning loop (win-rate by recent outcome) — scoped to
   // SCOUT sessions only, so the scout's self-assessment excludes manual trades.

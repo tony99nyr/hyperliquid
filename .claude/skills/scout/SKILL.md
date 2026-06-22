@@ -24,6 +24,10 @@ polling and wakes you only when something material happened (the inverted loop).
   but ONLY in paper mode. `scout-trade` hard-refuses to run in live mode. You
   NEVER place a real-money trade. A live idea you love is *surfaced to the human*
   (who uses the cockpit's approval popup), never auto-fired.
+- **Circuit breaker first.** If `scout:cycle` shows the CIRCUIT BREAKER HALTED
+  (daily-loss or drawdown trip), do NOT open any new position — `scout:trade` will
+  refuse it anyway. Manage/exit existing positions only; if a flatten is
+  recommended, propose a safe exit (the breaker never auto-fires).
 - **Bar before trade.** Open a paper position ONLY when a setup clears the
   pre-registered bar in `docs/scout/README.md`. The default action is STAND DOWN.
   Chop, thin edge, fighting funding, no-confluence → do nothing + log why.
