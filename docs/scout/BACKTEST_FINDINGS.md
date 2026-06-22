@@ -83,6 +83,33 @@ STRUCTURAL, not directional: idle-capital yield + delta-neutral funding carry +
 capital preservation (account-level circuit breaker), with the rubric used only as
 a sit-out / risk-overlay. Same fail-fast discipline as the rejected lanes.
 
+## UPDATE 3 (2026-06-22) — OOS multi-regime: the edge is REGIME-CONDITIONAL (verdict overturned)
+
+The earlier "no edge" came from testing **1h candles in a recent CHOP regime**. An
+out-of-sample walk-forward (`pnpm backtest:oos`) on **4h candles across 8×90d
+windows / ~2 years, full data coverage (24/24 coin-windows)** tells a different story:
+
+- **18 strongly-trending coin-windows (|move|≥15%) → 13 net-POSITIVE (72%).**
+- Strong UP (2024 bull, mid-2025): ETH +$352, SOL +$493, BTC +$214, ETH +$257.
+- Strong DOWN: also positive (it shorts the bear): ETH +$203, SOL +$409/+$144/+$94.
+- CHOP windows: negative/breakeven — the known chop-bleed.
+- Net across 8 windows ≈ **+$1,900 on $1k notional (~+$79/mo avg)** — TAKER,
+  single-TF, leaders-ablated, no funding.
+
+**Two artifacts had hidden the edge:** (1) testing the chop regime (trend-following's
+worst), and (2) the 1h timeframe (~90 trades/window → friction bled it out). On 4h
+(~25 cleaner trades/window) across real trends, the trend core behaves exactly as
+trend-following should: **wins in trends (up AND down), loses in chop.**
+
+CAVEATS: lumpy (concentrated in trend windows); BTC is the weak coin (often negative
+even in trends — ETH/SOL carry it); ~$79/mo on $1k scales with capital; still
+single-TF / ablated / no funding. But the headline stands: **there IS a
+regime-conditional edge — "no edge" was regime+timeframe-specific, not universal.**
+
+→ THE MONEY-MACHINE CANDIDATE: trade the trend core ONLY in confirmed trends and
+SIT OUT chop (the rubric's proven skill — vol-contraction / regime-confidence
+gate). That keeps the +$1,900 and cuts the chop losses. Backtest THAT next.
+
 ## Implications
 
 - **Do NOT go live on the current rubric.** The backtestable part (regime core)

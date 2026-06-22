@@ -43,6 +43,8 @@ export interface BacktestOptions {
   makerQueueClearBps?: number;
   /** Maker realism: adverse-selection penalty bps on a maker fill. */
   makerAdverseSelBps?: number;
+  /** As-of END of the window (epoch ms) for OOS/walk-forward testing; default now. */
+  endMs?: number;
   notionalUsd?: number;
 }
 
@@ -52,6 +54,9 @@ export interface BacktestRunResult {
   bars: number;
   signals: number; // bars that were a confirmed GO
   periodDays: number;
+  /** The window's buy-and-hold price move (first→last close, %) — the regime proxy. */
+  priceMovePct: number;
+  windowEndMs: number;
   result: BacktestResult;
   scorecard: Scorecard;
 }
@@ -73,11 +78,13 @@ export async function runBacktest(opts: BacktestOptions): Promise<BacktestRunRes
     },
   };
 
-  const start = Date.now() - opts.days * 24 * 60 * 60 * 1000;
-  const { candles } = await fetchCandles(coin, interval, start);
+  const endMs = opts.endMs ?? Date.now();
+  const start = endMs - opts.days * 24 * 60 * 60 * 1000;
+  const { candles } = await fetchCandles(coin, interval, start, endMs);
   if (candles.length < WARMUP_BARS + 5) {
-    throw new Error(`backtest: too few ${interval} candles for ${coin} (${candles.length}); widen --days.`);
+    throw new Error(`backtest: too few ${interval} candles for ${coin} (${candles.length}); widen --days or pick a window with data.`);
   }
+  const priceMovePct = candles.length > 1 ? ((candles[candles.length - 1].close - candles[0].close) / candles[0].close) * 100 : 0;
 
   // ATR aligned to candle indices (offset = first index that has an ATR value).
   const atrSeries = calculateATR(candles, 14, true);
@@ -131,5 +138,5 @@ export async function runBacktest(opts: BacktestOptions): Promise<BacktestRunRes
     equityUsd: notionalUsd, // DD as a fraction of the per-trade notional (proxy)
   });
 
-  return { coin, interval, bars: bars.length, signals, periodDays, result, scorecard };
+  return { coin, interval, bars: bars.length, signals, periodDays, priceMovePct, windowEndMs: endMs, result, scorecard };
 }
