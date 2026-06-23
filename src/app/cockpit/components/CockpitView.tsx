@@ -108,7 +108,11 @@ export default function CockpitView({
         // Chart-centric: a big chart on the LEFT, the decision column (positions +
         // opportunities + reads) on the RIGHT next to it. No left rail (Traders is
         // its own tab), no order book / activity feed (ambient, not actionable).
-        gridTemplateColumns: { base: '1fr', lg: 'minmax(0, 1fr) 420px' },
+        // base MUST be minmax(0, 1fr), not '1fr': a plain 1fr track lets grid items
+        // keep their min-content width (min-width:auto), so any wide child (a mono
+        // number row, a fixed grid) blows the column past the viewport → horizontal
+        // scroll on mobile. minmax(0,…) lets the track shrink; the items get min-width:0.
+        gridTemplateColumns: { base: 'minmax(0, 1fr)', lg: 'minmax(0, 1fr) 420px' },
         gap: '12px',
         padding: '12px',
         overflow: { base: 'visible', lg: 'hidden' },
@@ -116,7 +120,7 @@ export default function CockpitView({
       })}
     >
       {/* LEFT — the chart (the thing you watch price on). */}
-      <main className={css({ order: { base: 1, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minHeight: { base: 'auto', lg: '0' }, overflowY: { base: 'visible', lg: 'auto' }, paddingRight: { lg: '2px' } })}>
+      <main className={css({ order: { base: 1, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0, minHeight: { base: 'auto', lg: '0' }, overflowY: { base: 'visible', lg: 'auto' }, paddingRight: { lg: '2px' } })}>
         {!hasSession && <GettingStarted mode={mode} />}
         <CockpitCoinTabs coin={coin} coins={coins} onChange={onCoinChange} />
         <CandleChartPanel coin={coin} trade={trade} opportunity={selectedOpp} />
@@ -125,7 +129,7 @@ export default function CockpitView({
       {/* RIGHT — the decision column: what you ACT on (positions + opportunities)
           on top, then the reads (health / regime / leader posture / leader-vs-you).
           On mobile this stacks directly under the chart. */}
-      <aside className={css({ order: { base: 2, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minHeight: { base: 'auto', lg: '0' }, overflowY: { base: 'visible', lg: 'auto' } })}>
+      <aside className={css({ order: { base: 2, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0, minHeight: { base: 'auto', lg: '0' }, overflowY: { base: 'visible', lg: 'auto' } })}>
         <OpenPositionsPanel
           sessionId={sessionId}
           regimeByCoin={regimeByCoin}

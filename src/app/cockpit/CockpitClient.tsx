@@ -132,7 +132,12 @@ export default function CockpitClient({
         height: '100vh',
         display: 'flex',
         flexDirection: 'column',
-        overflow: { base: 'auto', lg: 'hidden' },
+        // Invariant: the mobile app shell must NEVER scroll horizontally (vertical
+        // scroll only). overflowX:hidden is the safety net under the structural
+        // grid fix in CockpitView; the one intentionally-wide view (the desktop
+        // Performance ledger) is md+ only with its own inner overflowX:auto.
+        overflowX: 'hidden',
+        overflowY: { base: 'auto', lg: 'hidden' },
         bg: 'cockpit.void',
         color: 'github.textBright',
       })}
