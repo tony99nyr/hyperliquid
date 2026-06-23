@@ -87,7 +87,9 @@ async function fetchLiveAccountValue(): Promise<number | null> {
   try {
     const ch = await fetchClearinghouseState(addr);
     if (ch.stale) return null;
-    return Number.isFinite(ch.accountValueUsd) && ch.accountValueUsd > 0 ? ch.accountValueUsd : null;
+    // >= 0 (not > 0): a real, reachable account that is currently flat should show
+    // "$0.00", not "—". "—" is reserved for UNKNOWN (no address / stale / error).
+    return Number.isFinite(ch.accountValueUsd) && ch.accountValueUsd >= 0 ? ch.accountValueUsd : null;
   } catch {
     return null;
   }
@@ -193,6 +195,27 @@ export type ActivePerformanceResult =
  * caller expects: it must equal the active session, otherwise the request is
  * forbidden (a leaked/guessed/stale id cannot read another session's ledger).
  */
+/**
+ * A summary with NO session — just the live ACCOUNT equity (perp clearinghouse),
+ * empty ledger/KPIs. Lets the top bar show the real balance even on a clean slate
+ * (no active session), instead of blanking to "—". Account equity is not
+ * session-scoped, so this is safe to serve without one.
+ */
+export async function getAccountOnlySummary(): Promise<PerformanceSummary> {
+  const now = Date.now();
+  const equityUsd = (await fetchLiveAccountValue()) ?? realAccountBalance();
+  return {
+    sessionId: '',
+    ledger: [],
+    kpis: computeKpis([], {}, []),
+    equity: [],
+    equityUsd,
+    netPnlUsd: 0,
+    equity30dPct: equityUsd === null ? null : 0,
+    generatedAt: now,
+  };
+}
+
 export async function getActivePerformanceSummary(
   requestedSessionId: string | null,
 ): Promise<ActivePerformanceResult> {

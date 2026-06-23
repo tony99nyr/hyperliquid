@@ -23,8 +23,10 @@ export interface TopBarProps {
   equityUsd: number | null;
   /** Today's realized PnL, or null until known. */
   todayUsd: number | null;
-  /** Realtime feed health for the pulsing dot. */
-  feedLive: boolean;
+  /** Realtime feed health for the pulsing dot. null = no active session → hidden
+   *  (the feed only means something while a session is live-tracked; showing
+   *  "feed idle" with no session reads as a fault when nothing is wrong). */
+  feedLive: boolean | null;
 }
 
 const NAV: { key: CockpitView; label: string }[] = [
@@ -134,17 +136,19 @@ export default function TopBar({ view, onViewChange, mode, equityUsd, todayUsd, 
         >
           {isLive ? '● LIVE' : '◉ PAPER'}
         </span>
-        <span
-          data-testid="feed-indicator"
-          className={css({ display: { base: 'none', sm: 'flex' }, alignItems: 'center', gap: '7px', fontFamily: 'mono', fontSize: '11px', color: 'zone.ok' })}
-        >
+        {feedLive !== null && (
           <span
-            aria-hidden
-            style={{ background: feedLive ? '#19c98a' : '#586273' }}
-            className={css({ width: '7px', height: '7px', borderRadius: '50%', animation: feedLive ? 'livePulse 2s infinite' : 'none' })}
-          />
-          {feedLive ? 'feed live' : 'feed idle'}
-        </span>
+            data-testid="feed-indicator"
+            className={css({ display: { base: 'none', sm: 'flex' }, alignItems: 'center', gap: '7px', fontFamily: 'mono', fontSize: '11px', color: 'zone.ok' })}
+          >
+            <span
+              aria-hidden
+              style={{ background: feedLive ? '#19c98a' : '#586273' }}
+              className={css({ width: '7px', height: '7px', borderRadius: '50%', animation: feedLive ? 'livePulse 2s infinite' : 'none' })}
+            />
+            {feedLive ? 'feed live' : 'feed idle'}
+          </span>
+        )}
       </div>
     </header>
   );

@@ -14,15 +14,13 @@ export interface BottomStatusBarProps {
   connected: boolean;
   leaderAddress: string | null;
   mode: TradingMode;
-  /** Realtime round-trip latency estimate (ms), if known. */
-  latencyMs?: number | null;
 }
 
 function shortAddr(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
-export default function BottomStatusBar({ connected, leaderAddress, mode, latencyMs }: BottomStatusBarProps) {
+export default function BottomStatusBar({ connected, leaderAddress, mode }: BottomStatusBarProps) {
   const [clock, setClock] = useState('');
   useEffect(() => {
     const tick = () => setClock(`${new Date().toLocaleTimeString('en-US', { hour12: false })} UTC`);
@@ -68,9 +66,6 @@ export default function BottomStatusBar({ connected, leaderAddress, mode, latenc
       </span>
       <span className={css({ flex: 1 })} />
       <span data-testid="status-mode">{mode === 'live' ? 'LIVE TRADING' : 'PAPER MODE'}</span>
-      <span className={css({ display: { base: 'none', sm: 'inline' } })}>
-        latency <span style={{ color: '#19c98a' }}>{latencyMs == null ? '—' : `${Math.round(latencyMs)}ms`}</span>
-      </span>
       <span data-testid="status-clock" style={{ fontFeatureSettings: '"tnum"' }}>{clock}</span>
     </footer>
   );

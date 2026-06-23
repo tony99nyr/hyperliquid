@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const verifyAdminAuth = vi.fn();
 const getActivePerformanceSummary = vi.fn();
+const getAccountOnlySummary = vi.fn();
 
 vi.mock('@/lib/infrastructure/auth/auth', () => ({
   verifyAdminAuth: (...a: unknown[]) => verifyAdminAuth(...a),
@@ -18,6 +19,7 @@ vi.mock('@/lib/infrastructure/auth/auth', () => ({
 }));
 vi.mock('@/lib/cockpit/performance-service', () => ({
   getActivePerformanceSummary: (...a: unknown[]) => getActivePerformanceSummary(...a),
+  getAccountOnlySummary: (...a: unknown[]) => getAccountOnlySummary(...a),
 }));
 
 import { GET } from '@/app/api/cockpit/performance/route';
@@ -70,10 +72,15 @@ describe('GET /api/cockpit/performance — session scoping', () => {
     expect(json.ok).toBe(false);
   });
 
-  it('404s when there is no active session at all', async () => {
+  it('returns the live ACCOUNT-only summary (200) when there is no active session', async () => {
     getActivePerformanceSummary.mockResolvedValue({ status: 'none' });
+    getAccountOnlySummary.mockResolvedValue({ sessionId: '', ledger: [], equityUsd: 149.6, netPnlUsd: 0 });
     const res = await GET(req({ sessionId: 'whatever' }));
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
+    expect(getAccountOnlySummary).toHaveBeenCalled();
+    const json = await res.json();
+    expect(json.ok).toBe(true);
+    expect(json.summary.equityUsd).toBe(149.6);
   });
 
   it('429s once the per-client rate limit (30/min) is exceeded — before session resolution', async () => {

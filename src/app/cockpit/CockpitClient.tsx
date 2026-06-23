@@ -125,7 +125,9 @@ export default function CockpitClient({
   // Feed-live indicator: a representative Supabase realtime channel's subscribe
   // state (mirrors RealtimeStatus). Inert without a session.
   const rt = useRealtimeChannel({ table: 'analysis_log', sessionId, map: mapAnalysisLogRow, compare: byCreatedAtDesc, limit: 1 });
-  const feedLive = sessionId === null ? false : rt.subscribed && rt.error === null;
+  // null = no session → indicators hide (feed only means something while a session
+  // is live-tracked; "idle"/"offline" with no session reads as a fault when it isn't).
+  const feedLive = sessionId === null ? null : rt.subscribed && rt.error === null;
 
   return (
     <div
@@ -200,7 +202,6 @@ export default function CockpitClient({
       ) : (
         <CockpitView
           sessionId={sessionId}
-          hasSession={session !== null}
           mode={mode}
           coin={coin}
           coins={coins}
@@ -214,7 +215,7 @@ export default function CockpitClient({
 
       <BottomTabBar tab={mobileTab} onTabChange={onMobileTabChange} />
 
-      <BottomStatusBar connected={feedLive} leaderAddress={leaderAddress} mode={mode} latencyMs={null} />
+      <BottomStatusBar connected={feedLive === true} leaderAddress={leaderAddress} mode={mode} />
 
       {/* The approval popup overlays everything when a pending action appears.
           NO-AUTO-FIRE: nothing executes until the human approves here. Leader

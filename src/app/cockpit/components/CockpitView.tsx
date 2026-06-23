@@ -33,12 +33,10 @@ import OpportunityBoard from './opportunity/OpportunityBoard';
 import WhalePosture from './opportunity/WhalePosture';
 import HealthPanel from './HealthPanel';
 import LeaderVsYou from './LeaderVsYou';
-import GettingStarted from './GettingStarted';
 import EntryModal from './EntryModal';
 
 export interface CockpitViewProps {
   sessionId: string | null;
-  hasSession: boolean;
   /** Trading mode (paper/live) — drives the entry modal's LIVE confirm gate. */
   mode: TradingMode;
   coin: string;
@@ -52,7 +50,6 @@ export interface CockpitViewProps {
 
 export default function CockpitView({
   sessionId,
-  hasSession,
   mode,
   coin,
   coins,
@@ -77,6 +74,23 @@ export default function CockpitView({
   // nothing fires on its own.
   const [showEntry, setShowEntry] = useState(false);
   const onNewPosition = useCallback(() => setShowEntry(true), []);
+
+  // Opportunity chart overlay is TOGGLEABLE: click a coin's opportunity to view its
+  // entry/stop/target on the chart; click the SAME coin again to clear it (reset to a
+  // clean chart). Clicking a different coin selects it AND turns the overlay on.
+  const [oppOverlayOn, setOppOverlayOn] = useState(false);
+  const onOpportunityClick = useCallback(
+    (c: string) => {
+      if (!coins.includes(c)) return;
+      if (c.toUpperCase() === coin.toUpperCase()) {
+        setOppOverlayOn((v) => !v);
+      } else {
+        onCoinChange(c);
+        setOppOverlayOn(true);
+      }
+    },
+    [coins, coin, onCoinChange],
+  );
 
   // Live mark for the selected coin (the entry modal's sizing needs a price).
   const book = useHlOrderbook(coin);
@@ -120,9 +134,8 @@ export default function CockpitView({
     >
       {/* LEFT — the chart (the thing you watch price on). */}
       <main className={css({ order: { base: 1, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0, minHeight: { base: 'auto', lg: '0' }, overflowY: { base: 'visible', lg: 'auto' }, paddingRight: { lg: '2px' } })}>
-        {!hasSession && <GettingStarted mode={mode} />}
         <CockpitCoinTabs coin={coin} coins={coins} onChange={onCoinChange} />
-        <CandleChartPanel coin={coin} trade={trade} opportunity={selectedOpp} />
+        <CandleChartPanel coin={coin} trade={trade} opportunity={oppOverlayOn ? selectedOpp : null} />
       </main>
 
       {/* RIGHT — the decision column: what you ACT on (positions + opportunities)
@@ -138,7 +151,7 @@ export default function CockpitView({
         <OpportunityBoard
           order={coins}
           selectedCoin={coin}
-          onSelectCoin={(c) => { if (coins.includes(c)) onCoinChange(c); }}
+          onSelectCoin={onOpportunityClick}
           onAskClaude={() => onNewPosition()}
           rowsOverride={rubric.rows}
         />

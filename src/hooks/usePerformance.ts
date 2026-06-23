@@ -28,7 +28,7 @@ export function usePerformance(
 ): PerformanceState {
   const [state, setState] = useState<PerformanceState>({
     summary: null,
-    loading: sessionId !== null,
+    loading: true,
     error: null,
   });
 
@@ -36,18 +36,19 @@ export function usePerformance(
   const [renderedId, setRenderedId] = useState(sessionId);
   if (renderedId !== sessionId) {
     setRenderedId(sessionId);
-    setState({ summary: null, loading: sessionId !== null, error: null });
+    setState({ summary: null, loading: true, error: null });
   }
 
   useEffect(() => {
-    if (!sessionId) return;
+    // Polls EVEN with no session: the route then returns the live ACCOUNT equity
+    // (not session-scoped) so the top bar shows the real balance on a clean slate.
     let active = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     async function poll(): Promise<void> {
       try {
         const res = await fetch(
-          `/api/cockpit/performance?sessionId=${encodeURIComponent(sessionId as string)}`,
+          sessionId ? `/api/cockpit/performance?sessionId=${encodeURIComponent(sessionId)}` : '/api/cockpit/performance',
           { headers: { accept: 'application/json' } },
         );
         if (!active) return;

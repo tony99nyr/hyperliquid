@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyAdminAuth, getClientIdentifier } from '@/lib/infrastructure/auth/auth';
 import { isSameOrigin } from '@/lib/infrastructure/auth/same-origin';
 import { checkRateLimit } from '@/lib/infrastructure/rate-limiting/in-memory-rate-limit';
-import { getActivePerformanceSummary } from '@/lib/cockpit/performance-service';
+import { getActivePerformanceSummary, getAccountOnlySummary } from '@/lib/cockpit/performance-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,7 +45,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'Session not active for this operator' }, { status: 403 });
   }
   if (result.status === 'none') {
-    return NextResponse.json({ ok: false, error: 'No active session' }, { status: 404 });
+    // No active session → still surface the live ACCOUNT equity (not session-scoped)
+    // so the top bar shows the real balance on a clean slate instead of blanking.
+    return NextResponse.json({ ok: true, summary: await getAccountOnlySummary() });
   }
   return NextResponse.json({ ok: true, summary: result.summary });
 }

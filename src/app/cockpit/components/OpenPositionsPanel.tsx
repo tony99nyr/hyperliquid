@@ -217,7 +217,7 @@ function PositionRowCard({
     <div
       data-testid="position-row"
       data-coin={pos.coin}
-      className={css({ display: 'grid', gridTemplateColumns: { base: '1fr', md: '180px 1fr 220px 150px' }, gap: { base: '10px', md: '16px' }, alignItems: 'center', padding: '13px 14px', bg: 'cockpit.row', border: '1px solid token(colors.github.borderSubtle)', borderRadius: '10px' })}
+      className={css({ display: 'flex', flexDirection: 'column', gap: '10px', padding: '13px 14px', bg: 'cockpit.row', border: '1px solid token(colors.github.borderSubtle)', borderRadius: '10px' })}
     >
       {/* Col 1 — market + side + size·lev */}
       <div className={css({ display: 'flex', flexDirection: 'column', gap: '6px' })}>
@@ -264,8 +264,8 @@ function PositionRowCard({
         </div>
       </div>
 
-      {/* Col 4 — actions */}
-      <div className={css({ display: 'flex', gap: '6px', justifyContent: { base: 'flex-start', md: 'flex-end' } })}>
+      {/* Actions */}
+      <div className={css({ display: 'flex', gap: '6px', justifyContent: 'flex-start' })}>
         <button
           type="button"
           data-testid="position-reduce"

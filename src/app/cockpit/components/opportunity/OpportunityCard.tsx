@@ -59,11 +59,13 @@ export default function OpportunityCard({ model, now, selected, onSelect, onAskC
         _hover: { borderColor: 'rgba(91,140,255,0.4)' },
         // Keyboard focus ring (card is role=button tabIndex=0) — distinct from the
         // selected accent outline (which rides inline for its dynamic color).
-        _focusVisible: { outline: '2px solid token(colors.cockpit.accent)', outlineOffset: '1px' },
+        _focusVisible: { outline: '2px solid token(colors.cockpit.accent)', outlineOffset: '-2px' },
       })}
-      // Selected outline carries the dynamic accent color, so it lives inline (Panda
-      // can't statically extract an interpolated color into an atomic class).
-      style={{ outline: selected ? `1px solid ${TERM.accent}` : undefined }}
+      // Selected accent rides inline (Panda can't extract an interpolated color). Use
+      // an INSET ring (border color + inset shadow), NOT an outline: the right-rail's
+      // overflowY:auto computes overflow-x to auto, which clips an edge-drawn outline
+      // — the "active border cut off on the sides" bug. An inset ring stays in-box.
+      style={selected ? { borderColor: TERM.accent, boxShadow: `inset 0 0 0 1px ${TERM.accent}` } : undefined}
     >
       {/* header: coin + direction + badge */}
       <div className={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' })}>
@@ -122,9 +124,23 @@ export default function OpportunityCard({ model, now, selected, onSelect, onAskC
             type="button"
             data-testid="ask-claude"
             onClick={(e) => { e.stopPropagation(); onAskClaude(buildAskClaudeSnapshot(model)); }}
-            className={css({ fontFamily: 'label', fontSize: '9px', color: 'cockpit.accent', background: 'transparent', border: '1px solid rgba(91,140,255,0.3)', borderRadius: '5px', padding: '2px 7px', cursor: 'pointer', letterSpacing: '0.04em', _hover: { borderColor: 'cockpit.accent' } })}
+            className={css({
+              fontFamily: 'label',
+              fontSize: '11px',
+              fontWeight: 'semibold',
+              color: 'cockpit.accent',
+              background: 'rgba(91,140,255,0.12)',
+              border: '1px solid rgba(91,140,255,0.45)',
+              borderRadius: '7px',
+              paddingX: '14px',
+              paddingY: '6px',
+              cursor: 'pointer',
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              _hover: { background: 'rgba(91,140,255,0.2)', borderColor: 'cockpit.accent' },
+            })}
           >
-            ask
+            Ask Claude
           </button>
         )}
       </div>
