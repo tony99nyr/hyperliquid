@@ -86,13 +86,13 @@ describe('entryLiqInsideStop', () => {
 });
 
 describe('entryLiveConfirmPhrase / matches', () => {
-  it('is "side sz coin" lowercased', () => {
-    expect(entryLiveConfirmPhrase('sell', 0.625, 'ETH')).toBe('sell 0.625 eth');
+  it('is "side coin" lowercased (size omitted — it recomputes per tick)', () => {
+    expect(entryLiveConfirmPhrase('sell', 'ETH')).toBe('sell eth');
   });
 
   it('matches case-insensitively and trimmed', () => {
-    expect(entryLivePhraseMatches('sell', 0.625, 'ETH', '  SELL 0.625 eth ')).toBe(true);
-    expect(entryLivePhraseMatches('sell', 0.625, 'ETH', 'buy 0.625 eth')).toBe(false);
+    expect(entryLivePhraseMatches('sell', 'ETH', '  SELL eth ')).toBe(true);
+    expect(entryLivePhraseMatches('sell', 'ETH', 'buy eth')).toBe(false);
   });
 });
 
@@ -132,13 +132,13 @@ describe('isEntryApproveEnabled', () => {
   it('LIVE: needs the exact phrase ON TOP of a ready proposal', () => {
     const p = buildEntryPreview(baseForm, 2000)!; // sz 0.625
     expect(isEntryApproveEnabled('live', p, false, false, '')).toBe(false);
-    expect(isEntryApproveEnabled('live', p, false, false, 'sell 0.625 eth')).toBe(true);
+    expect(isEntryApproveEnabled('live', p, false, false, 'sell eth')).toBe(true);
   });
 
   it('LIVE: a matching phrase still cannot bypass the liq gate', () => {
     const p = buildEntryPreview(baseForm, 2000)!;
-    expect(isEntryApproveEnabled('live', p, true, false, 'sell 0.625 eth')).toBe(false);
-    expect(isEntryApproveEnabled('live', p, true, true, 'sell 0.625 eth')).toBe(true);
+    expect(isEntryApproveEnabled('live', p, true, false, 'sell eth')).toBe(false);
+    expect(isEntryApproveEnabled('live', p, true, true, 'sell eth')).toBe(true);
   });
 });
 

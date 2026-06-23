@@ -137,10 +137,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     ? serverValidateLeverage(rawLeverage, coinMax, fallbackLev)
     : null;
 
-  // LIVE needs the STRONGER confirm: the exact "side sz coin" phrase recomputed
-  // server-side from the stored intent (a tampered client phrase can't pass).
+  // LIVE needs the STRONGER confirm: the exact "side coin" phrase (size omitted —
+  // it recomputes per tick and made the phrase a moving target; see helper).
   if (action.mode === 'live') {
-    const required = entryLiveConfirmPhrase(display.side, intent.sz, display.coin);
+    const required = entryLiveConfirmPhrase(display.side, display.coin);
     if (confirmPhrase.trim().toLowerCase() !== required) {
       return NextResponse.json(
         { ok: false, error: `LIVE confirm phrase mismatch — type exactly: ${required}` },

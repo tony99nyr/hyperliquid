@@ -215,7 +215,7 @@ export default function EntryModal({
   const szStr = proposal ? proposal.intent.sz.toLocaleString('en-US', { maximumFractionDigits: 6 }) : '—';
   const bias = regimeByCoin[form.coin] ?? null;
 
-  const requiredPhrase = proposal ? entryLiveConfirmPhrase(form.side, proposal.intent.sz, form.coin) : '';
+  const requiredPhrase = proposal ? entryLiveConfirmPhrase(form.side, form.coin) : '';
   const approveLabel = busy
     ? 'Submitting…'
     : isLive
@@ -300,10 +300,10 @@ export default function EntryModal({
 
           {/* Side toggle (LONG / SHORT) — editable here (unlike the approval readout). */}
           <div className={css({ display: 'flex', gap: '4px', borderRadius: '9px', padding: '4px', marginBottom: '18px' })} style={{ background: TERM.inset, border: '1px solid rgba(255,255,255,.08)' }}>
-            <button type="button" data-testid="entry-side-long" data-active={sideLong} onClick={() => patch({ side: 'buy' })} className={css({ flex: 1, border: 'none', cursor: 'pointer', borderRadius: '6px', padding: '0' })} style={{ background: 'transparent' }}>
+            <button type="button" data-testid="entry-side-long" data-active={sideLong} onClick={() => patch({ side: 'buy' })} className={css({ display: 'flex', flex: 1, border: 'none', cursor: 'pointer', borderRadius: '6px', padding: '0' })} style={{ background: 'transparent' }}>
               <SideSegment label="LONG" active={sideLong} activeColor={ZONE_COLORS.ok} />
             </button>
-            <button type="button" data-testid="entry-side-short" data-active={!sideLong} onClick={() => patch({ side: 'sell' })} className={css({ flex: 1, border: 'none', cursor: 'pointer', borderRadius: '6px', padding: '0' })} style={{ background: 'transparent' }}>
+            <button type="button" data-testid="entry-side-short" data-active={!sideLong} onClick={() => patch({ side: 'sell' })} className={css({ display: 'flex', flex: 1, border: 'none', cursor: 'pointer', borderRadius: '6px', padding: '0' })} style={{ background: 'transparent' }}>
               <SideSegment label="SHORT" active={!sideLong} activeColor={ZONE_COLORS.danger} />
             </button>
           </div>

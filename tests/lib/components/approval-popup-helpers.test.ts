@@ -15,8 +15,8 @@ import type { PendingActionDisplay } from '@/types/cockpit';
 const display: PendingActionDisplay = { coin: 'ETH', side: 'sell', sz: 1.5, estPx: 2000, stopPx: 1900, rationale: 'exit' };
 
 describe('liveConfirmPhrase', () => {
-  it('is "side sz coin" lowercased', () => {
-    expect(liveConfirmPhrase(display)).toBe('sell 1.5 eth');
+  it('is "side coin" lowercased (size omitted — it recomputes per tick)', () => {
+    expect(liveConfirmPhrase(display)).toBe('sell eth');
   });
 });
 
@@ -27,13 +27,13 @@ describe('isApproveEnabled', () => {
   it('LIVE: disabled until the exact phrase is typed', () => {
     expect(isApproveEnabled('live', display, '')).toBe(false);
     expect(isApproveEnabled('live', display, 'yes')).toBe(false);
-    expect(isApproveEnabled('live', display, 'sell 1.5 eth')).toBe(true);
+    expect(isApproveEnabled('live', display, 'sell eth')).toBe(true);
   });
   it('LIVE: case-insensitive + trims surrounding whitespace', () => {
-    expect(isApproveEnabled('live', display, '  SELL 1.5 ETH  ')).toBe(true);
+    expect(isApproveEnabled('live', display, '  SELL ETH  ')).toBe(true);
   });
-  it('LIVE: a wrong size does not enable', () => {
-    expect(isApproveEnabled('live', display, 'sell 2 eth')).toBe(false);
+  it('LIVE: the wrong direction does not enable', () => {
+    expect(isApproveEnabled('live', display, 'buy eth')).toBe(false);
   });
 });
 

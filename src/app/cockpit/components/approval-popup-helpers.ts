@@ -12,9 +12,14 @@ import type { PendingActionDisplay, PendingActionKind } from '@/types/cockpit';
 import type { TradingMode } from '@/types/fill';
 import { fmtPx } from './panel-styles';
 
-/** The exact phrase a LIVE approval must type: "side sz coin" (lowercased). */
-export function liveConfirmPhrase(display: Pick<PendingActionDisplay, 'side' | 'sz' | 'coin'>): string {
-  return `${display.side} ${display.sz} ${display.coin}`.trim().toLowerCase();
+/**
+ * The exact phrase a LIVE approval must type: "side coin" (lowercased). The size is
+ * intentionally omitted — it can recompute between preview and approval, which made
+ * the phrase a moving target the operator couldn't match. Direction + asset (with the
+ * size shown in the summary) is the live-confirm gate.
+ */
+export function liveConfirmPhrase(display: Pick<PendingActionDisplay, 'side' | 'coin'>): string {
+  return `${display.side} ${display.coin}`.trim().toLowerCase();
 }
 
 /**

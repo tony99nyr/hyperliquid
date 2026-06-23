@@ -64,7 +64,7 @@ describe('ApprovalPopup', () => {
     fireEvent.change(input, { target: { value: 'yes' } });
     expect(approve.disabled).toBe(true);
 
-    fireEvent.change(input, { target: { value: 'sell 1.5 eth' } });
+    fireEvent.change(input, { target: { value: 'sell eth' } });
     expect(approve.disabled).toBe(false);
   });
 
@@ -248,7 +248,7 @@ describe('ApprovalPopup — liq-inside-stop GATES Approve (Fix 2)', () => {
 
     // Go to 20× (liq inside stop) and type the exact phrase — still BLOCKED.
     fireEvent.change(screen.getByTestId('leverage-slider'), { target: { value: '20' } });
-    fireEvent.change(input, { target: { value: 'buy 1 eth' } });
+    fireEvent.change(input, { target: { value: 'buy eth' } });
     expect(approve.disabled).toBe(true);
 
     // Ack the danger → now enabled (typed phrase + ack both satisfied).

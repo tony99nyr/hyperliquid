@@ -13,7 +13,7 @@
 
 import { css } from '@styled-system/css';
 
-export type MobileTab = 'cockpit' | 'traders' | 'performance';
+export type MobileTab = 'cockpit' | 'traders' | 'performance' | 'scout';
 
 export interface BottomTabBarProps {
   tab: MobileTab;
@@ -24,6 +24,7 @@ const TABS: { key: MobileTab; label: string; icon: React.ReactNode }[] = [
   { key: 'cockpit', label: 'Cockpit', icon: <BarsIcon /> },
   { key: 'traders', label: 'Traders', icon: <ListIcon /> },
   { key: 'performance', label: 'Performance', icon: <TrendIcon /> },
+  { key: 'scout', label: 'Scout', icon: <BotIcon /> },
 ];
 
 export default function BottomTabBar({ tab, onTabChange }: BottomTabBarProps) {
@@ -108,6 +109,18 @@ function TrendIcon() {
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="2,12 6,8 9,10 16,3" />
       <polyline points="12,3 16,3 16,7" />
+    </svg>
+  );
+}
+
+function BotIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3.5" y="6" width="11" height="8" rx="2" />
+      <line x1="9" y1="3" x2="9" y2="6" />
+      <circle cx="9" cy="3" r="0.8" fill="currentColor" />
+      <line x1="7" y1="10" x2="7" y2="10.5" />
+      <line x1="11" y1="10" x2="11" y2="10.5" />
     </svg>
   );
 }

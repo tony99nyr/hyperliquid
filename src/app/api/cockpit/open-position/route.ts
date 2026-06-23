@@ -142,11 +142,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // LIVE needs the STRONGER confirm: the exact "side sz coin" phrase, computed
-  // server-side from the VALIDATED intent (so a tampered client phrase can't pass).
+  // LIVE needs the STRONGER confirm: the exact "side coin" phrase, computed
+  // server-side (size omitted — it recomputes per tick; see entryLiveConfirmPhrase).
   if (mode === 'live') {
     const typed = typeof body.confirmPhrase === 'string' ? body.confirmPhrase.trim().toLowerCase() : '';
-    const required = entryLiveConfirmPhrase(side, proposal.intent.sz, coin);
+    const required = entryLiveConfirmPhrase(side, coin);
     if (typed !== required) {
       return NextResponse.json(
         { ok: false, error: `LIVE confirm phrase mismatch — type exactly: ${required}` },

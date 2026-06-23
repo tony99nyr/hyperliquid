@@ -184,11 +184,11 @@ describe('POST /api/cockpit/open-position', () => {
     expect(executeIntent).not.toHaveBeenCalled();
   });
 
-  it('LIVE executes when the exact "side sz coin" phrase matches', async () => {
+  it('LIVE executes when the exact "side coin" phrase matches', async () => {
     getTradingMode.mockReturnValue('live');
     getActiveSession.mockResolvedValue({ id: 's1', mode: 'live' });
-    // size = 50 / (2000 * 0.04) = 0.625 → phrase "sell 0.625 eth".
-    const res = await POST(req({ ...validBody, confirmPhrase: 'sell 0.625 eth' }));
+    // phrase omits the (tick-recomputed) size → "sell eth".
+    const res = await POST(req({ ...validBody, confirmPhrase: 'sell eth' }));
     expect(res.status).toBe(200);
     expect(executeIntent).toHaveBeenCalledTimes(1);
     expect(executeIntent.mock.calls[0][0].reduceOnly).toBe(false);

@@ -42,6 +42,7 @@ import BottomTabBar, { type MobileTab } from './components/shell/BottomTabBar';
 import CockpitView from './components/CockpitView';
 import PerformanceView from './components/performance/PerformanceView';
 import TopTradersRail from './components/left-rail/TopTradersRail';
+import ScoutPanel from './components/ScoutPanel';
 import type { RatingsFreshness } from './components/left-rail/ratings-freshness-helpers';
 import ApprovalPopup from './components/ApprovalPopup';
 
@@ -151,7 +152,38 @@ export default function CockpitClient({
         feedLive={feedLive}
       />
 
-      {surface === 'performance' ? (
+      {surface === 'scout' ? (
+        // SCOUT surface — the autonomous PAPER scout, deliberately a SEPARATE tab
+        // from the LIVE cockpit so paper can never be mistaken for real. A loud
+        // banner makes the mode unmistakable; the panel reads the global scout
+        // hypotheses/heartbeat (no live account, no real money).
+        <section
+          data-testid="scout-view"
+          className={css({ flex: 1, overflowY: 'auto', padding: '12px' })}
+        >
+          <div className={css({ maxWidth: '760px', marginX: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' })}>
+            <div
+              data-testid="scout-paper-banner"
+              className={css({
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                padding: '10px 14px',
+                borderRadius: '10px',
+                fontFamily: 'mono',
+                fontSize: '12px',
+                fontWeight: 'semibold',
+                color: '#19c98a',
+                bg: 'rgba(25,201,138,0.08)',
+                border: '1px solid rgba(25,201,138,0.35)',
+              })}
+            >
+              ◉ PAPER · Autonomous Scout — simulated, no real money. Separate from your LIVE cockpit.
+            </div>
+            <ScoutPanel />
+          </div>
+        </section>
+      ) : surface === 'performance' ? (
         <PerformanceView sessionId={sessionId} />
       ) : surface === 'traders' ? (
         // Traders surface (desktop nav + mobile tab) — the Top Traders rail, now a

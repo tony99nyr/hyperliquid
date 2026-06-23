@@ -116,19 +116,20 @@ export function entryProposalReady(
   return !liqInsideStop || ackLiqInsideStop;
 }
 
-/** The exact phrase a LIVE entry must type: "side sz coin" (lowercased). */
-export function entryLiveConfirmPhrase(side: OrderSide, sz: number, coin: string): string {
-  return `${side} ${sz} ${coin}`.trim().toLowerCase();
+/**
+ * The exact phrase a LIVE entry must type: "side coin" (lowercased). Deliberately
+ * does NOT include the size: the size is risk-based and RECOMPUTES every price tick,
+ * so putting it in the phrase made it a moving target the operator could never
+ * match. Confirming direction + asset (with the size shown in the summary + the LIVE
+ * banner) is the safety gate; the size is not a fat-finger field.
+ */
+export function entryLiveConfirmPhrase(side: OrderSide, coin: string): string {
+  return `${side} ${coin}`.trim().toLowerCase();
 }
 
 /** True when the typed phrase exactly matches the required LIVE phrase. */
-export function entryLivePhraseMatches(
-  side: OrderSide,
-  sz: number,
-  coin: string,
-  typed: string,
-): boolean {
-  return typed.trim().toLowerCase() === entryLiveConfirmPhrase(side, sz, coin);
+export function entryLivePhraseMatches(side: OrderSide, coin: string, typed: string): boolean {
+  return typed.trim().toLowerCase() === entryLiveConfirmPhrase(side, coin);
 }
 
 /**
@@ -146,12 +147,7 @@ export function isEntryApproveEnabled(
   if (!entryProposalReady(proposal, liqInsideStop, ackLiqInsideStop)) return false;
   if (mode === 'paper') return true;
   if (!proposal) return false;
-  return entryLivePhraseMatches(
-    proposal.intent.side,
-    proposal.intent.sz,
-    proposal.intent.coin,
-    typed,
-  );
+  return entryLivePhraseMatches(proposal.intent.side, proposal.intent.coin, typed);
 }
 
 /** Compute whether the form's leverage would liquidate inside the stop. */
