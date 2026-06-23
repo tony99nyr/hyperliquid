@@ -15,7 +15,9 @@
 import { useEffect, useState } from 'react';
 import type { Session } from '@/types/cockpit';
 
-const POLL_MS = 5000;
+// 15s (was 5s): a mid-flow session open surfacing ~15s later is fine, and this is a
+// continuous background poll — 3x fewer function invocations (Vercel CPU + egress).
+const POLL_MS = 15_000;
 
 export function useActiveSession(initial: Session | null): Session | null {
   const [session, setSession] = useState<Session | null>(initial);
@@ -23,6 +25,9 @@ export function useActiveSession(initial: Session | null): Session | null {
   useEffect(() => {
     let active = true;
     async function poll(): Promise<void> {
+      // Pause while the tab is hidden — a backgrounded/left-open cockpit should not
+      // keep billing function invocations. Resumes immediately on visibilitychange.
+      if (typeof document !== 'undefined' && document.hidden) return;
       try {
         const res = await fetch('/api/cockpit/active-session', { cache: 'no-store' });
         if (!res.ok) return;
@@ -38,9 +43,12 @@ export function useActiveSession(initial: Session | null): Session | null {
     }
     void poll();
     const t = setInterval(() => void poll(), POLL_MS);
+    const onVis = () => { if (!document.hidden) void poll(); };
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVis);
     return () => {
       active = false;
       clearInterval(t);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVis);
     };
   }, []);
 

@@ -34,12 +34,18 @@ fi
 # Run tsx directly from the repo root for a clean (single-process) PID. Falls back
 # to `pnpm --dir` if the local tsx binary is absent.
 TSX_BIN="$REPO_ROOT/node_modules/.bin/tsx"
+# Cost control: leader positions don't change meaningfully every 30s, and each write
+# fans out as a Supabase realtime message + egress. 90s × top-25 (vs 30s × top-50) is
+# a ~6x cut in writes/realtime/egress — the dominant Supabase cost driver. Tune via
+# TRADER_WATCH_INTERVAL / TRADER_WATCH_TOP.
+WATCH_INTERVAL="${TRADER_WATCH_INTERVAL:-90}"
+WATCH_TOP="${TRADER_WATCH_TOP:-25}"
 if [ -x "$TSX_BIN" ]; then
-    ( cd "$REPO_ROOT" && "$TSX_BIN" --tsconfig tsconfig.scripts.json scripts/trader-watch.ts ) \
+    ( cd "$REPO_ROOT" && "$TSX_BIN" --tsconfig tsconfig.scripts.json scripts/trader-watch.ts --interval "$WATCH_INTERVAL" --top "$WATCH_TOP" ) \
         > "$LOG_FILE" 2>&1 &
 else
     echo "Local tsx not found at $TSX_BIN — falling back to pnpm (run 'pnpm install' in the repo)."
-    ( cd "$REPO_ROOT" && pnpm trader-watch ) > "$LOG_FILE" 2>&1 &
+    ( cd "$REPO_ROOT" && pnpm trader-watch --interval "$WATCH_INTERVAL" --top "$WATCH_TOP" ) > "$LOG_FILE" 2>&1 &
 fi
 
 echo $! > "$PID_FILE"

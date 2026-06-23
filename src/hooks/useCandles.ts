@@ -72,6 +72,9 @@ export function useCandles(coin: string, interval: CandleInterval): UseCandlesSt
     let active = true;
     const lookback = LOOKBACK_MS[interval];
     const load = async () => {
+      // Pause while hidden — candle payloads are the largest poll; don't refetch them
+      // for a tab you're not looking at (Vercel CPU + egress). Resumes on visible.
+      if (typeof document !== 'undefined' && document.hidden) return;
       const res = await fetchCandlesViaProxy(coin, interval, lookback);
       if (!active) return;
       setCandles(res.candles);
@@ -81,9 +84,12 @@ export function useCandles(coin: string, interval: CandleInterval): UseCandlesSt
     };
     void load();
     const timer = setInterval(load, REFRESH_MS[interval]);
+    const onVis = () => { if (!document.hidden) void load(); };
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVis);
     return () => {
       active = false;
       clearInterval(timer);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVis);
     };
   }, [coin, interval]);
 

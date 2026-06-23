@@ -20,7 +20,7 @@ export interface PerformanceState {
 }
 
 /** Refresh cadence — KPIs/ledger move on fills + marks; 12s is plenty. */
-const DEFAULT_POLL_MS = 12_000;
+const DEFAULT_POLL_MS = 30_000; // 30s (was 12s): equity/ledger don't need 12s freshness — fewer function calls
 
 export function usePerformance(
   sessionId: string | null,
@@ -46,6 +46,12 @@ export function usePerformance(
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     async function poll(): Promise<void> {
+      // Pause while hidden — don't keep folding the account ledger for a backgrounded
+      // tab (Vercel CPU + egress). Resumes on visibilitychange.
+      if (typeof document !== 'undefined' && document.hidden) {
+        timer = setTimeout(() => void poll(), pollMs);
+        return;
+      }
       try {
         const res = await fetch(
           sessionId ? `/api/cockpit/performance?sessionId=${encodeURIComponent(sessionId)}` : '/api/cockpit/performance',
@@ -66,9 +72,12 @@ export function usePerformance(
     }
 
     void poll();
+    const onVis = () => { if (!document.hidden) void poll(); };
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVis);
     return () => {
       active = false;
       if (timer) clearTimeout(timer);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVis);
     };
   }, [sessionId, pollMs]);
 
