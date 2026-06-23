@@ -7,6 +7,7 @@
 
 import { getServiceRoleClient } from './supabase-server';
 import { buildSessionRow } from './cockpit-rows-business-logic';
+import { getTradingMode } from '@/lib/env/mode';
 import type { Session } from '@/types/cockpit';
 import type { TradingMode } from '@/types/fill';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -43,10 +44,12 @@ export async function openSession(
 }
 
 /**
- * Read the most-recent active session (the one the cockpit live-tracks). Returns
- * null when none exists OR when Supabase is not yet configured — the cockpit page
- * renders in a "no session" state rather than erroring, so it is viewable before
- * the DB is provisioned.
+ * Read the most-recent active session FOR THE CURRENT TRADING MODE (the one the
+ * cockpit live-tracks). Mode-scoped on purpose: the live cockpit (TRADING_MODE=live)
+ * must NEVER resolve a paper session (e.g. the autonomous paper scout writing to the
+ * same Supabase) and vice-versa — a mode-blind "newest active" was the source of the
+ * paper-shown-as-real confusion. Returns null when none exists OR when Supabase is
+ * not yet configured (the cockpit renders a "no session" state rather than erroring).
  */
 export async function getActiveSession(
   clientFactory: () => SupabaseClient = getServiceRoleClient,
@@ -61,6 +64,7 @@ export async function getActiveSession(
     .from('sessions')
     .select('*')
     .eq('status', 'active')
+    .eq('mode', getTradingMode()) // mode-scoped: live cockpit never sees paper sessions
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();

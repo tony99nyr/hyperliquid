@@ -32,7 +32,6 @@ import MarketRegimePanel from './right-rail/MarketRegimePanel';
 import OpportunityBoard from './opportunity/OpportunityBoard';
 import WhalePosture from './opportunity/WhalePosture';
 import HealthPanel from './HealthPanel';
-import ScoutPanel from './ScoutPanel';
 import LeaderVsYou from './LeaderVsYou';
 import GettingStarted from './GettingStarted';
 import EntryModal from './EntryModal';
@@ -144,7 +143,6 @@ export default function CockpitView({
           rowsOverride={rubric.rows}
         />
         <HealthPanel sessionId={sessionId} coin={coin} />
-        <ScoutPanel />
         <MarketRegimePanel coin={coin} onNetBias={onNetBias} />
         <WhalePosture coins={coins} />
         <LeaderVsYou sessionId={sessionId} coin={coin} leaderAddress={leaderAddress} leaderPositions={leaderPositions} />
