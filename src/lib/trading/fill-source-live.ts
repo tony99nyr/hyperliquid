@@ -15,9 +15,17 @@
  */
 
 import type { CanonicalFill, TradeIntent } from '@/types/fill';
-import { submitOrder } from '@/lib/hyperliquid/hyperliquid-exchange-service';
+import { submitOrder, submitUpdateLeverage } from '@/lib/hyperliquid/hyperliquid-exchange-service';
 
 export async function liveFill(intent: TradeIntent): Promise<CanonicalFill> {
+  // OPENS: set the per-coin leverage on HL FIRST so the cockpit's chosen leverage is
+  // REAL on-chain (HL otherwise opens at the account's existing per-coin setting —
+  // the silent-20x bug). Reduce-only exits never touch leverage. Fail-closed: if the
+  // leverage update is rejected this throws and the order is NOT placed, rather than
+  // opening at the wrong (possibly far higher) leverage.
+  if (!intent.reduceOnly && typeof intent.leverage === 'number' && intent.leverage > 0) {
+    await submitUpdateLeverage(intent.coin, intent.leverage, true);
+  }
   const result = await submitOrder(intent);
 
   return {

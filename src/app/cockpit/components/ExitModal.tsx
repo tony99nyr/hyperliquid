@@ -139,8 +139,9 @@ export default function ExitModal({
     setBusy(true);
     setError(null);
     try {
-      const body: { coin?: string; fraction?: number } = {};
-      if (!isAll && target) {
+      const body: { coin?: string; fraction?: number; all?: boolean } = {};
+      if (isAll) body.all = true;
+      else if (target) {
         body.coin = target.coin;
         if (isReduce) body.fraction = frac;
       }
@@ -149,9 +150,23 @@ export default function ExitModal({
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        closed?: number;
+        failed?: number;
+        results?: Array<{ coin: string; ok: boolean; error?: string }>;
+      };
       if (!res.ok || json.ok === false) {
-        setError(json.error ?? `Failed (${res.status})`);
+        // Close-all: surface which legs actually failed (some may have closed) so
+        // the operator never sees a false "done". Single: the route's error.
+        if (isAll && json.results) {
+          const fails = json.results.filter((r) => !r.ok).map((r) => `${r.coin}: ${r.error ?? 'failed'}`).join('; ');
+          const total = (json.closed ?? 0) + (json.failed ?? 0);
+          setError(`Closed ${json.closed ?? 0} of ${total}${fails ? ` — ${fails}` : ''}. Re-run, or close the rest in the HL app.`);
+        } else {
+          setError(json.error ?? `Failed (${res.status})`);
+        }
         setBusy(false);
         return;
       }
@@ -255,9 +270,11 @@ export default function ExitModal({
               </>
             ) : (
               <>
-                <SummaryRow label="Positions closed" value={String(openCount)} />
+                {/* PREVIEW (pre-confirm), not a result — labels say "to close" /
+                    "current" so a failed fire can never read as success. */}
+                <SummaryRow label="Positions to close" value={String(openCount)} />
                 <SummaryRow label="Mode" value="Market · reduce-only" color={GH.textMuted} />
-                <SummaryRow label="Resulting equity" value={`$${currentEquityUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} last />
+                <SummaryRow label="Current equity" value={`$${currentEquityUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} last />
               </>
             )}
           </div>

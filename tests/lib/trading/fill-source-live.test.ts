@@ -11,8 +11,10 @@ import type { TradeIntent } from '@/types/fill';
 
 // Mock the isolated exchange service so liveFill is tested without any key/network.
 const submitOrder = vi.fn();
+const submitUpdateLeverage = vi.fn();
 vi.mock('@/lib/hyperliquid/hyperliquid-exchange-service', () => ({
   submitOrder: (...args: unknown[]) => submitOrder(...args),
+  submitUpdateLeverage: (...args: unknown[]) => submitUpdateLeverage(...args),
 }));
 
 import { liveFill } from '@/lib/trading/fill-source-live';
@@ -29,7 +31,11 @@ const intent: TradeIntent = {
   createdAt: 0,
 };
 
-beforeEach(() => submitOrder.mockReset());
+beforeEach(() => {
+  submitOrder.mockReset();
+  submitUpdateLeverage.mockReset();
+  submitUpdateLeverage.mockResolvedValue(undefined);
+});
 
 describe('liveFill — maps an HL confirmation → CanonicalFill', () => {
   it('full fill: carries intent fields + maps px/sz/notional/fee/oid/raw, source=live', async () => {
@@ -74,6 +80,27 @@ describe('liveFill — maps an HL confirmation → CanonicalFill', () => {
     expect(f.sz).toBe(0);
     expect(f.notionalUsd).toBe(0);
     expect(f.source).toBe('live');
+  });
+});
+
+describe('liveFill — sets leverage on HL for OPENS (the silent-20x fix)', () => {
+  it('an OPEN sets the per-coin leverage BEFORE placing the order', async () => {
+    submitOrder.mockResolvedValue({ avgPx: 2000, filledSz: 1.5, partial: false, feeUsd: 0.75, hlOrderId: 'oid-1', raw: {} });
+    await liveFill(intent); // reduceOnly:false, leverage:5
+    expect(submitUpdateLeverage).toHaveBeenCalledWith('ETH', 5, true);
+    expect(submitUpdateLeverage).toHaveBeenCalledTimes(1);
+  });
+
+  it('a REDUCE-ONLY exit never touches leverage', async () => {
+    submitOrder.mockResolvedValue({ avgPx: 2000, filledSz: 1.5, partial: false, feeUsd: 0.75, hlOrderId: 'oid-x', raw: {} });
+    await liveFill({ ...intent, reduceOnly: true });
+    expect(submitUpdateLeverage).not.toHaveBeenCalled();
+  });
+
+  it('FAIL-CLOSED: a rejected leverage update aborts the open (order never placed)', async () => {
+    submitUpdateLeverage.mockRejectedValue(new Error('updateLeverage rejected'));
+    await expect(liveFill(intent)).rejects.toThrow('updateLeverage rejected');
+    expect(submitOrder).not.toHaveBeenCalled();
   });
 });
 

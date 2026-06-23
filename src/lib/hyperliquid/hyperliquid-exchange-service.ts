@@ -86,6 +86,43 @@ function readAgentKey(): `0x${string}` {
 }
 
 /**
+ * Set the per-coin leverage on HL via the `updateLeverage` L1 action (signed +
+ * submitted exactly like an order). This makes the cockpit's chosen leverage REAL:
+ * HL otherwise opens at the account's EXISTING per-coin leverage (e.g. its 20x max),
+ * which is the "cockpit says 5x, HL is 20x" bug — leverage was metadata only.
+ *
+ * Call this BEFORE an opening order. Cross margin by default. Leverage is coerced to
+ * a positive integer (HL requires an int). Throws on a rejected action so the caller
+ * can ABORT the open (fail-closed: never silently open at the wrong leverage).
+ *
+ * NOTE: this is live-signing I/O — rehearse on testnet (HL_NETWORK=testnet) before
+ * trusting it with real funds.
+ */
+export async function submitUpdateLeverage(coin: string, leverage: number, isCross = true): Promise<void> {
+  const lev = Math.max(1, Math.round(leverage));
+  const testnet = isTestnet();
+  const network = testnet ? 'testnet' : 'mainnet';
+  const wallet = privateKeyToAccount(readAgentKey());
+  const universe = await fetchPerpMeta(network);
+  const { assetIndex } = resolveAsset(universe, coin);
+
+  // HL `updateLeverage` action — field order { type, asset, isCross, leverage } is
+  // the canonical msgpack shape the signature is verified against.
+  const action = { type: 'updateLeverage', asset: assetIndex, isCross, leverage: lev };
+  const nonce = nextNonce();
+  const signature = await signL1Action({ wallet, action: action as unknown as Record<string, unknown>, nonce, isTestnet: testnet });
+  const res = await fetch(testnet ? EXCHANGE_URL.testnet : EXCHANGE_URL.mainnet, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, nonce, signature }),
+  });
+  const json = (await res.json().catch(() => ({}))) as { status?: string };
+  if (!res.ok || json.status !== 'ok') {
+    throw new Error(`HL updateLeverage(${coin}=${lev}x${isCross ? ' cross' : ' isolated'}) failed: ${JSON.stringify(json)}`);
+  }
+}
+
+/**
  * Sign + submit `intent` to HL as an aggressive IOC order, returning the
  * normalized {@link HlOrderResult}. Throws on a rejected order / top-level error
  * (surfaced to the operator); a non-crossing IOC returns filledSz 0 (no fill).
