@@ -12,7 +12,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyAdminAuth, getClientIdentifier } from '@/lib/infrastructure/auth/auth';
 import { isSameOrigin } from '@/lib/infrastructure/auth/same-origin';
 import { checkRateLimit } from '@/lib/infrastructure/rate-limiting/in-memory-rate-limit';
-import { getActivePerformanceSummary, getAccountOnlySummary } from '@/lib/cockpit/performance-service';
+import { getAccountPerformanceSummary } from '@/lib/cockpit/performance-service';
+import { getTradingMode } from '@/lib/env/mode';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,20 +35,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'Too many requests' }, { status: 429 });
   }
 
-  // SECURITY: the session is resolved SERVER-SIDE (getActiveSession). The caller
-  // may pass `sessionId` only as an assertion of which session it expects — it is
-  // validated against the active session, NEVER folded blindly. A mismatch (a
-  // caller pointing at someone else's / a stale session) is rejected, so a leaked
-  // or guessed id can't read another session's fill ledger.
-  const requested = request.nextUrl.searchParams.get('sessionId')?.trim() || null;
-  const result = await getActivePerformanceSummary(requested);
-  if (result.status === 'forbidden') {
-    return NextResponse.json({ ok: false, error: 'Session not active for this operator' }, { status: 403 });
-  }
-  if (result.status === 'none') {
-    // No active session → still surface the live ACCOUNT equity (not session-scoped)
-    // so the top bar shows the real balance on a clean slate instead of blanking.
-    return NextResponse.json({ ok: true, summary: await getAccountOnlySummary() });
-  }
-  return NextResponse.json({ ok: true, summary: result.summary });
+  // ACCOUNT-WIDE: the Performance tab shows the operator's WHOLE history for the
+  // current trading mode (all sessions folded), NOT one session — so opening/closing
+  // sessions never hides past orders. Single-operator + admin-authed + same-origin,
+  // so there's no cross-session leak to guard (it's all the operator's own account).
+  // The `sessionId` query param is accepted but ignored (kept for URL compatibility).
+  const summary = await getAccountPerformanceSummary(getTradingMode());
+  return NextResponse.json({ ok: true, summary });
 }

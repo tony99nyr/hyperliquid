@@ -30,7 +30,7 @@ import {
   type PerformanceKpis,
 } from './performance-business-logic';
 import { fetchAllMids, fetchClearinghouseState, isValidHlAddress } from '@/lib/hyperliquid/hyperliquid-info-service';
-import type { CanonicalFill } from '@/types/fill';
+import type { CanonicalFill, TradingMode } from '@/types/fill';
 
 /**
  * Operator timezone for the "Today" day boundary. The operator trades from
@@ -196,24 +196,71 @@ export type ActivePerformanceResult =
  * forbidden (a leaked/guessed/stale id cannot read another session's ledger).
  */
 /**
- * A summary with NO session — just the live ACCOUNT equity (perp clearinghouse),
- * empty ledger/KPIs. Lets the top bar show the real balance even on a clean slate
- * (no active session), instead of blanking to "—". Account equity is not
- * session-scoped, so this is safe to serve without one.
+ * ACCOUNT-WIDE performance for a trading mode — folds the fills from ALL sessions of
+ * that mode (not one session) into the ledger/KPIs/equity, plus the live account
+ * equity. This is what the Performance tab shows: the operator's WHOLE live history,
+ * so opening/closing sessions never hides past orders (the "Performance got reset"
+ * bug). Single-operator + admin-authed, so there's no cross-session leak to guard.
  */
-export async function getAccountOnlySummary(): Promise<PerformanceSummary> {
+export async function getAccountPerformanceSummary(mode: TradingMode): Promise<PerformanceSummary> {
   const now = Date.now();
-  const equityUsd = (await fetchLiveAccountValue()) ?? realAccountBalance();
-  return {
+  const liveEquityUsd = await fetchLiveAccountValue();
+  const realBalance = realAccountBalance();
+  const empty: PerformanceSummary = {
     sessionId: '',
     ledger: [],
     kpis: computeKpis([], {}, []),
     equity: [],
-    equityUsd,
+    equityUsd: liveEquityUsd ?? realBalance,
     netPnlUsd: 0,
-    equity30dPct: equityUsd === null ? null : 0,
+    equity30dPct: (liveEquityUsd ?? realBalance) === null ? null : 0,
     generatedAt: now,
   };
+
+  let fills: CanonicalFill[] = [];
+  const leverageByCoin: Record<string, number | null> = {};
+  try {
+    const supabase = getServiceRoleClient();
+    const { data: sessRows } = await supabase.from('sessions').select('id').eq('mode', mode);
+    const ids = (sessRows ?? []).map((r) => (r as { id: string }).id);
+    if (ids.length === 0) return empty;
+    const { data: fillRows } = await supabase
+      .from('fills')
+      .select(FILL_COLUMNS)
+      .in('session_id', ids)
+      .order('filled_at', { ascending: true })
+      .limit(5000);
+    fills = (fillRows ?? []).map((r) => fillFromRow(r as FillSelectRow));
+    const { data: posRows } = await supabase.from('positions').select('coin, leverage').in('session_id', ids);
+    for (const row of posRows ?? []) {
+      const r = row as { coin: string; leverage: number | null };
+      leverageByCoin[r.coin.trim().toUpperCase()] = r.leverage ?? null;
+    }
+  } catch {
+    return empty;
+  }
+
+  if (fills.length === 0) return empty;
+
+  let marks: MarkMap = {};
+  try {
+    marks = await fetchAllMids();
+  } catch {
+    marks = {};
+  }
+
+  const ledger = buildLedger(fills, marks, now, leverageByCoin, operatorTz());
+  const realized = ledger.filter((t) => t.status !== 'open').reduce((s, t) => s + t.pnlUsd - t.feesUsd, 0);
+  const openUnrealized = ledger.filter((t) => t.status === 'open').reduce((s, t) => s + t.pnlUsd, 0);
+  const netPnlUsd = realized + openUnrealized;
+  const curveAnchor = (realBalance ?? 0) + netPnlUsd;
+  const equity = buildEquitySeries(ledger, curveAnchor, now, 30);
+  const kpis = computeKpis(ledger, marks, equity);
+  const equityUsd = liveEquityUsd ?? (realBalance === null ? null : realBalance + netPnlUsd);
+  const first = equity[0]?.equity ?? curveAnchor;
+  const equity30dPct = realBalance === null || first <= 0 ? null : (curveAnchor / first - 1) * 100;
+
+  return { sessionId: '', ledger, kpis, equity, equityUsd, netPnlUsd, equity30dPct, generatedAt: now };
 }
 
 export async function getActivePerformanceSummary(
