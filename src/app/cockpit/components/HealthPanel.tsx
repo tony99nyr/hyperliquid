@@ -38,6 +38,8 @@ export interface HealthPanelProps {
   sessionId: string | null;
   /** Coin for the multi-timeframe regime strip. */
   coin?: string;
+  /** Switch the cockpit's selected coin (clicking a position tab aligns the chart). */
+  onCoinChange?: (coin: string) => void;
   /** Test/RSC seed: render a fixed snapshot instead of subscribing. */
   snapshotOverride?: HealthSnapshot | null;
   /**
@@ -123,6 +125,7 @@ function PanelHeader({ title, note }: { title: string; note?: string }) {
 export default function HealthPanel({
   sessionId,
   coin = 'ETH',
+  onCoinChange,
   snapshotOverride,
   inPositionOverride,
   regimeRowsOverride,
@@ -131,27 +134,43 @@ export default function HealthPanel({
   const norm = coin.trim().toUpperCase();
 
   const live = useHealthSnapshots(snapshotOverride === undefined ? sessionId : null);
-  // Read the snapshot for the SELECTED coin (per-position health), not whichever
-  // coin's assessment was written last — that was the multi-position thrash.
-  const snapshot = snapshotOverride !== undefined ? snapshotOverride : (live.latestByCoin[norm] ?? null);
 
   // In override (test/RSC seed) mode keep the live subscriptions inert.
   const positionState = usePositionPnl(usingOverride ? null : sessionId);
-  const derivedInPosition = positionState.positions.some(
-    (p) => p.side !== 'flat' && p.coin.toUpperCase() === norm,
-  );
+  // The coins with an OPEN position (dedup, stable order) — these are the trades the
+  // health panel can represent. When 2+, the header shows tabs so it's unambiguous
+  // WHICH trade is shown (the prior confusion was a single panel silently bound to
+  // the chart coin).
+  const openCoins = [
+    ...new Set(positionState.positions.filter((p) => p.side !== 'flat').map((p) => p.coin.toUpperCase())),
+  ];
+  const derivedInPosition = openCoins.length > 0;
   const inPosition = inPositionOverride !== undefined ? inPositionOverride : derivedInPosition;
 
-  // The regime strip fetches for a real coin; inert under overrides.
-  const regimeCoin = usingOverride || regimeRowsOverride ? '' : coin;
+  // Which trade to show: the selected coin if it HAS a position, else fall back to
+  // the first open position so the panel never blanks while you hold a trade (the
+  // "health disappeared" case when the chart was on a non-position coin).
+  const shownCoin = inPositionOverride !== undefined ? norm : openCoins.includes(norm) ? norm : openCoins[0] ?? norm;
 
-  // FLAT → render nothing. The Opportunity board (per-coin direction + regime
-  // pillar) is the entry read; the Market Regime panel is the multi-TF detail.
-  // The old "Market Read / Entry" view duplicated both, so it's gone — Health is
-  // now strictly the IN-POSITION read.
+  // Read the snapshot for the SHOWN coin (per-position health), not whichever coin's
+  // assessment was written last — that was the multi-position thrash.
+  const snapshot = snapshotOverride !== undefined ? snapshotOverride : (live.latestByCoin[shownCoin] ?? null);
+
+  // The regime strip fetches for a real coin; inert under overrides.
+  const regimeCoin = usingOverride || regimeRowsOverride ? '' : shownCoin;
+
+  // FLAT (no open positions at all) → render nothing. The Opportunity board is the
+  // entry read; Health is strictly the IN-POSITION read.
   if (!inPosition) return null;
   return (
-    <TradeHealthView snapshot={snapshot} coin={norm} regimeCoin={regimeCoin} rowsOverride={regimeRowsOverride} />
+    <TradeHealthView
+      snapshot={snapshot}
+      coin={shownCoin}
+      regimeCoin={regimeCoin}
+      rowsOverride={regimeRowsOverride}
+      openCoins={inPositionOverride !== undefined ? [] : openCoins}
+      onSelectCoin={onCoinChange}
+    />
   );
 }
 
@@ -161,15 +180,48 @@ function TradeHealthView({
   coin,
   regimeCoin,
   rowsOverride,
+  openCoins = [],
+  onSelectCoin,
 }: {
   snapshot: HealthSnapshot | null;
   coin: string;
   regimeCoin: string;
   rowsOverride?: RegimeStripRow[];
+  /** All open-position coins — when 2+, render a tab per trade so WHICH one is clear. */
+  openCoins?: string[];
+  onSelectCoin?: (coin: string) => void;
 }) {
+  const multi = openCoins.length >= 2;
   return (
     <section data-testid="health-panel" data-mode="trade-health" className={css(sectionStyle)}>
-      <PanelHeader title={coin ? `Trade Health · ${coin}` : 'Trade Health'} note={!snapshot ? 'awaiting watcher assessment…' : undefined} />
+      {multi ? (
+        <header className={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' })}>
+          <h2 className={css({ fontFamily: 'label', fontSize: 'sm', fontWeight: 'bold', color: 'github.textBright', textTransform: 'uppercase', letterSpacing: '0.06em' })}>
+            Trade Health
+          </h2>
+          <div role="tablist" aria-label="Open positions" className={css({ display: 'flex', gap: '3px', bg: 'cockpit.navIdle', border: '1px solid token(colors.github.border)', borderRadius: '7px', padding: '2px' })}>
+            {openCoins.map((c) => {
+              const active = c === coin;
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  data-testid={`health-coin-tab-${c}`}
+                  onClick={() => onSelectCoin?.(c)}
+                  style={{ background: active ? '#1c2536' : 'transparent', color: active ? '#e8ebf2' : '#8b95a6' }}
+                  className={css({ fontFamily: 'mono', fontSize: '11px', fontWeight: 'semibold', paddingX: '10px', paddingY: '4px', borderRadius: '5px', border: 'none', cursor: 'pointer' })}
+                >
+                  {c}
+                </button>
+              );
+            })}
+          </div>
+        </header>
+      ) : (
+        <PanelHeader title={coin ? `Trade Health · ${coin}` : 'Trade Health'} note={!snapshot ? 'awaiting watcher assessment…' : undefined} />
+      )}
 
       {snapshot && (
         <div className={css({ display: 'flex', gap: '14px', alignItems: 'center' })}>

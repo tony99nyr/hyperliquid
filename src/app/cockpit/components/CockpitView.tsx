@@ -172,7 +172,7 @@ export default function CockpitView({
           onAskClaude={onAskOpportunity}
           rowsOverride={rubric.rows}
         />
-        <HealthPanel sessionId={sessionId} coin={coin} />
+        <HealthPanel sessionId={sessionId} coin={coin} onCoinChange={onCoinChange} />
         <MarketRegimePanel coin={coin} onNetBias={onNetBias} />
         <WhalePosture coins={coins} />
         <LeaderVsYou sessionId={sessionId} coin={coin} leaderAddress={leaderAddress} leaderPositions={leaderPositions} />
