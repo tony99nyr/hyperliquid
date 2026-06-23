@@ -35,10 +35,10 @@ export interface EntryFormState {
 }
 
 /** Sensible defaults the modal opens with. */
-export function defaultEntryForm(coin: string): EntryFormState {
+export function defaultEntryForm(coin: string, side: OrderSide = 'buy'): EntryFormState {
   return {
     coin: coin.trim().toUpperCase() || 'ETH',
-    side: 'buy',
+    side,
     riskUsd: 50,
     stopFrac: 0.04,
     leverage: 3,

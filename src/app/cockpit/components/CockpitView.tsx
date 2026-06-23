@@ -20,7 +20,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { css } from '@styled-system/css';
 import type { HlPosition } from '@/lib/hyperliquid/hyperliquid-info-service';
-import type { TradingMode } from '@/types/fill';
+import type { OrderSide, TradingMode } from '@/types/fill';
 import type { ActiveTrade, OpportunityLevels } from './chart/candle-chart-helpers';
 import type { RegimeDir } from './open-positions-helpers';
 import { useHlOrderbook } from '@/hooks/useHlOrderbook';
@@ -73,7 +73,24 @@ export default function CockpitView({
   // modal only POSTs /api/cockpit/open-position on that explicit Approve click;
   // nothing fires on its own.
   const [showEntry, setShowEntry] = useState(false);
-  const onNewPosition = useCallback(() => setShowEntry(true), []);
+  // Side to seed the entry preview with. Manual "+ New Position" defaults to buy;
+  // opening from an opportunity carries THAT opportunity's side (so a SHORT setup
+  // opens a SHORT preview, not the default long).
+  const [entrySide, setEntrySide] = useState<OrderSide>('buy');
+  const onNewPosition = useCallback(() => {
+    setEntrySide('buy');
+    setShowEntry(true);
+  }, []);
+  // From an opportunity card's "Ask Claude": switch to its coin + seed its side.
+  const onAskOpportunity = useCallback(
+    (snap: Record<string, unknown>) => {
+      const c = typeof snap.coin === 'string' ? snap.coin.toUpperCase() : coin;
+      if (coins.includes(c)) onCoinChange(c);
+      setEntrySide(snap.side === 'short' ? 'sell' : 'buy');
+      setShowEntry(true);
+    },
+    [coin, coins, onCoinChange],
+  );
 
   // Opportunity chart overlay is TOGGLEABLE: click a coin's opportunity to view its
   // entry/stop/target on the chart; click the SAME coin again to clear it (reset to a
@@ -152,7 +169,7 @@ export default function CockpitView({
           order={coins}
           selectedCoin={coin}
           onSelectCoin={onOpportunityClick}
-          onAskClaude={() => onNewPosition()}
+          onAskClaude={onAskOpportunity}
           rowsOverride={rubric.rows}
         />
         <HealthPanel sessionId={sessionId} coin={coin} />
@@ -168,6 +185,7 @@ export default function CockpitView({
         <EntryModal
           mode={mode}
           coin={coin}
+          initialSide={entrySide}
           coins={coins}
           entryPx={entryPx}
           regimeByCoin={regimeByCoin}

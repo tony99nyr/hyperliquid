@@ -150,4 +150,9 @@ describe('defaultEntryForm', () => {
     expect(f.riskUsd).toBeGreaterThan(0);
     expect(f.stopFrac).toBeGreaterThan(0);
   });
+
+  it('seeds the given side (so a SHORT opportunity opens a SHORT preview)', () => {
+    expect(defaultEntryForm('eth', 'sell').side).toBe('sell');
+    expect(defaultEntryForm('eth', 'buy').side).toBe('buy');
+  });
 });

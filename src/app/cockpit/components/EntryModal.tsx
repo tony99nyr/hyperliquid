@@ -49,6 +49,8 @@ export interface EntryModalProps {
   mode: TradingMode;
   /** The coin the cockpit is currently on (opens the form on it). */
   coin: string;
+  /** Side to seed the form with (e.g. an opportunity's SHORT). Defaults to buy/long. */
+  initialSide?: OrderSide;
   /** Coins the operator can pick from. */
   coins?: string[];
   /** Current mark for the selected coin (entry price; sizing needs it). */
@@ -67,6 +69,7 @@ export interface EntryModalProps {
 export default function EntryModal({
   mode,
   coin,
+  initialSide = 'buy',
   coins = [...ENTRY_COINS],
   entryPx,
   regimeByCoin = {},
@@ -76,7 +79,7 @@ export default function EntryModal({
   onExecuted,
 }: EntryModalProps) {
   const isLive = mode === 'live';
-  const [form, setForm] = useState<EntryFormState>(() => defaultEntryForm(coin));
+  const [form, setForm] = useState<EntryFormState>(() => defaultEntryForm(coin, initialSide));
   const [typed, setTyped] = useState('');
   const [ackLiqInsideStop, setAckLiqInsideStop] = useState(false);
   const [busy, setBusy] = useState(false);
