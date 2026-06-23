@@ -148,8 +148,19 @@ async function runExit(args: Record<string, string | boolean>): Promise<void> {
   line(`Closed (paper): ${fill.sz} ${fill.coin} @ $${fill.px} (fee=$${fill.feeUsd.toFixed(4)})`);
 
   if (hypothesisId) {
-    await resolveHypothesis({ hypothesisId, status: 'resolved', resolutionNote: note ?? `scout closed ${coin}` });
-    line(`Resolved hypothesis ${hypothesisId}.`);
+    // Resolve the thesis by OUTCOME so the scout's win/loss record is REAL — not a
+    // flat "resolved" for every close (which pinned W/L at 0/0 and win-rate blank on
+    // the panel). Net realized P&L on the closed portion: dir*(exit−entry)*sz − fee.
+    const dir = position.side === 'long' ? 1 : -1;
+    const netPnl = dir * (fill.px - position.avgEntryPx) * fill.sz - fill.feeUsd;
+    const status = netPnl > 0 ? 'confirmed' : netPnl < 0 ? 'invalidated' : 'resolved';
+    const pnlLabel = `${netPnl >= 0 ? '+' : '-'}$${Math.abs(netPnl).toFixed(2)}`;
+    await resolveHypothesis({
+      hypothesisId,
+      status,
+      resolutionNote: `${note ?? `scout closed ${coin}`} · realized ${pnlLabel}`,
+    });
+    line(`Resolved hypothesis ${hypothesisId} → ${status} (realized ${pnlLabel}).`);
   }
   await writeAnalysisLog({
     sessionId,
