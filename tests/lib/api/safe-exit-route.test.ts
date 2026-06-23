@@ -145,6 +145,17 @@ describe('POST /api/cockpit/safe-exit', () => {
     expect(intent.limitPx).toBeUndefined();
   });
 
+  it('ZERO fill (IOC did not cross) → 502 ok:false — the panic UI must NOT flash success', async () => {
+    // executeIntent resolving sz:0 means the reduce-only order did not cross; the
+    // position is STILL OPEN, so the route must report a FAILURE (not ok:true).
+    executeIntent.mockResolvedValue({ ...fill, sz: 0, notionalUsd: 0 });
+    const res = await POST(req({ coin: 'ETH' }));
+    expect(res.status).toBe(502);
+    const json = await res.json();
+    expect(json.ok).toBe(false);
+    expect(json.executed).toBe(false);
+  });
+
   it('FRESH plan with WRONG COIN → DISCARDS plan, market reduce-only fallback on the live coin', async () => {
     getSafeExitPlan.mockResolvedValue({
       id: 'p1',

@@ -23,8 +23,12 @@ export async function liveFill(intent: TradeIntent): Promise<CanonicalFill> {
   // the silent-20x bug). Reduce-only exits never touch leverage. Fail-closed: if the
   // leverage update is rejected this throws and the order is NOT placed, rather than
   // opening at the wrong (possibly far higher) leverage.
+  // ISOLATED margin: the cockpit's liquidation-price / ROE math is isolated-margin,
+  // and isolated caps loss to THIS position's margin (a liquidation can't drain the
+  // whole account). Cross would make the displayed liq price wrong once a 2nd
+  // position exists — exactly the risk-legibility gap to avoid.
   if (!intent.reduceOnly && typeof intent.leverage === 'number' && intent.leverage > 0) {
-    await submitUpdateLeverage(intent.coin, intent.leverage, true);
+    await submitUpdateLeverage(intent.coin, intent.leverage, false);
   }
   const result = await submitOrder(intent);
 

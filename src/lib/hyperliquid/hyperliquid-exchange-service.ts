@@ -91,14 +91,16 @@ function readAgentKey(): `0x${string}` {
  * HL otherwise opens at the account's EXISTING per-coin leverage (e.g. its 20x max),
  * which is the "cockpit says 5x, HL is 20x" bug — leverage was metadata only.
  *
- * Call this BEFORE an opening order. Cross margin by default. Leverage is coerced to
- * a positive integer (HL requires an int). Throws on a rejected action so the caller
- * can ABORT the open (fail-closed: never silently open at the wrong leverage).
+ * Call this BEFORE an opening order. ISOLATED margin by default (isCross=false) — the
+ * cockpit's liquidation/ROE math is isolated-margin and isolated caps loss to the
+ * position's own margin. Leverage is coerced to a positive integer (HL requires an
+ * int). Throws on a rejected action so the caller can ABORT the open (fail-closed:
+ * never silently open at the wrong leverage).
  *
  * NOTE: this is live-signing I/O — rehearse on testnet (HL_NETWORK=testnet) before
  * trusting it with real funds.
  */
-export async function submitUpdateLeverage(coin: string, leverage: number, isCross = true): Promise<void> {
+export async function submitUpdateLeverage(coin: string, leverage: number, isCross = false): Promise<void> {
   const lev = Math.max(1, Math.round(leverage));
   const testnet = isTestnet();
   const network = testnet ? 'testnet' : 'mainnet';

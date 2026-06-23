@@ -54,8 +54,11 @@ export default function SafeExitButton({ sessionId, planOverride }: SafeExitButt
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({}),
       });
-      const json = (await res.json().catch(() => ({}))) as FireResult & { error?: string };
-      if (!res.ok) {
+      const json = (await res.json().catch(() => ({}))) as FireResult & { ok?: boolean; error?: string };
+      // Gate on BOTH the HTTP status AND ok:false (parity with ExitModal). A panic
+      // button must never render "Executed" on a non-close, even if a future route
+      // change returns ok:false with a 2xx status.
+      if (!res.ok || json.ok === false) {
         setResult({ executed: false, usedFallback: false, error: json.error ?? `Failed (${res.status})` });
       } else {
         setResult({ executed: Boolean(json.executed), usedFallback: Boolean(json.usedFallback) });

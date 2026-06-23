@@ -87,7 +87,7 @@ describe('liveFill — sets leverage on HL for OPENS (the silent-20x fix)', () =
   it('an OPEN sets the per-coin leverage BEFORE placing the order', async () => {
     submitOrder.mockResolvedValue({ avgPx: 2000, filledSz: 1.5, partial: false, feeUsd: 0.75, hlOrderId: 'oid-1', raw: {} });
     await liveFill(intent); // reduceOnly:false, leverage:5
-    expect(submitUpdateLeverage).toHaveBeenCalledWith('ETH', 5, true);
+    expect(submitUpdateLeverage).toHaveBeenCalledWith('ETH', 5, false); // isolated margin
     expect(submitUpdateLeverage).toHaveBeenCalledTimes(1);
   });
 

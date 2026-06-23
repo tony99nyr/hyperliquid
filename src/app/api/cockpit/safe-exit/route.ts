@@ -183,6 +183,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
+  // A ZERO fill means the reduce-only IOC did NOT cross — the position is STILL
+  // OPEN. Report it as a FAILURE so the panic UI (ExitModal + SafeExitButton both
+  // gate on !ok) can never flash success on a non-close. This was the false-success
+  // bug — fixed for close-all; this closes it on the single path too.
+  if (!(fill.sz > 0)) {
+    return NextResponse.json(
+      { ok: false, executed: false, error: 'Close did not fill — the reduce-only order did not cross (price moved). Retry, or close in the HL app.' },
+      { status: 502 },
+    );
+  }
+
   // The trade has already executed and the fill is recorded by executeIntent.
   // A failed analysis-log write must NOT 500 the route and make a SUCCESSFUL
   // panic exit look like a failure to the operator — best-effort only.
