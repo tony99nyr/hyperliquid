@@ -117,6 +117,7 @@ export function useRealtimeChannel<T extends { id: string }>(
 
     let active = true;
     const client = getBrowserClient();
+    const hidden = () => typeof document !== 'undefined' && document.hidden;
 
     // 1) Snapshot loader — the authoritative latest-N rows. Run on mount, then
     // periodically + on tab-visible/reconnect as the realtime safety net.
@@ -138,50 +139,68 @@ export function useRealtimeChannel<T extends { id: string }>(
       setRows(mapped.slice(0, limit));
       setLoaded(true);
     };
-    void loadSnapshot();
 
-    // 2) Realtime channel for INSERT + UPDATE.
-    // Topic is unique PER EFFECT RUN (see uniqueTopicSuffix) so client.channel()
-    // can NEVER return a pre-existing, already-subscribed channel from a prior
-    // run whose async removeChannel() hasn't completed yet. `.on()` stays BEFORE
-    // `.subscribe()` (required by Supabase).
-    const topic = `rt:${table}:${sessionId}:${uniqueTopicSuffix()}`;
-    const channel: RealtimeChannel = client
-      .channel(topic)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table,
-          filter: `session_id=eq.${sessionId}`,
-        },
-        (payload) => {
+    // 2) Realtime channel lifecycle, gated by tab visibility. While HIDDEN the
+    // channel is torn down so Supabase stops delivering messages (realtime + egress
+    // cost of a left-open-but-unwatched cockpit); VISIBLE refetches + resubscribes.
+    // Topic is unique PER SUBSCRIBE (uniqueTopicSuffix) so client.channel() can
+    // never return a stale already-subscribed channel. `.on()` before `.subscribe()`.
+    let channel: RealtimeChannel | null = null;
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    const subscribe = () => {
+      if (channel) return;
+      const topic = `rt:${table}:${sessionId}:${uniqueTopicSuffix()}`;
+      channel = client
+        .channel(topic)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table,
+            filter: `session_id=eq.${sessionId}`,
+          },
+          (payload) => {
+            if (!active) return;
+            const raw = (payload.new ?? payload.old) as RealtimeRow | undefined;
+            if (!raw) return;
+            const mapped = mapRef.current(raw);
+            setRows((prev) => {
+              const acc = accumulateById(prev, mapped, compareRef.current);
+              return acc.slice(0, limit);
+            });
+          },
+        )
+        .subscribe((status) => {
           if (!active) return;
-          const raw = (payload.new ?? payload.old) as RealtimeRow | undefined;
-          if (!raw) return;
-          const mapped = mapRef.current(raw);
-          setRows((prev) => {
-            const acc = accumulateById(prev, mapped, compareRef.current);
-            return acc.slice(0, limit);
-          });
-        },
-      )
-      .subscribe((status) => {
-        if (!active) return;
-        setSubscribed(status === 'SUBSCRIBED');
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          setError(`realtime ${status.toLowerCase()}`);
-          // A dropped channel won't deliver events — lean on the fallback refetch
-          // immediately so the panel recovers without waiting for the interval.
-          void loadSnapshot();
-        }
-      });
+          setSubscribed(status === 'SUBSCRIBED');
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            setError(`realtime ${status.toLowerCase()}`);
+            // A dropped channel won't deliver events — lean on the fallback refetch
+            // immediately so the panel recovers without waiting for the interval.
+            void loadSnapshot();
+          }
+        });
+      interval = setInterval(() => void loadSnapshot(), REALTIME_REFETCH_MS);
+    };
 
-    // 3) Safety net: periodic refetch + refetch on tab-visible / network back.
-    const interval = setInterval(() => void loadSnapshot(), REALTIME_REFETCH_MS);
+    const unsubscribe = () => {
+      if (interval) { clearInterval(interval); interval = null; }
+      if (channel) { void client.removeChannel(channel); channel = null; }
+      if (active) setSubscribed(false);
+    };
+
+    void loadSnapshot();
+    if (!hidden()) subscribe();
+
     const onVisible = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') void loadSnapshot();
+      if (hidden()) {
+        unsubscribe();
+      } else {
+        void loadSnapshot();
+        subscribe();
+      }
     };
     const onOnline = () => void loadSnapshot();
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible);
@@ -189,10 +208,9 @@ export function useRealtimeChannel<T extends { id: string }>(
 
     return () => {
       active = false;
-      clearInterval(interval);
+      unsubscribe();
       if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible);
       if (typeof window !== 'undefined') window.removeEventListener('online', onOnline);
-      void client.removeChannel(channel);
       // Reset on teardown (session/table/coin change or unmount) so the next
       // subscription starts clean. Done in cleanup, not the effect body.
       setRows([]);

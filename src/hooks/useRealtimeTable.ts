@@ -104,6 +104,7 @@ export function useRealtimeTable<T extends { id: string }>(
     const client = getBrowserClient();
     const pgFilter =
       filterColumn && filterValue !== null ? `${filterColumn}=eq.${filterValue}` : undefined;
+    const hidden = () => typeof document !== 'undefined' && document.hidden;
 
     // 1) Snapshot loader — authoritative latest-N rows. Run on mount, then
     // periodically + on tab-visible/reconnect as the realtime safety net (a
@@ -125,40 +126,63 @@ export function useRealtimeTable<T extends { id: string }>(
       setRows(mapped.slice(0, limit));
       setLoaded(true);
     };
-    void loadSnapshot();
 
-    // 2) Realtime channel for INSERT + UPDATE (+ DELETE handled by accumulate).
-    // Unique topic per effect run — see useRealtimeChannel for the rationale.
-    const topic = `rt-table:${table}:${pgFilter ?? '*'}:${uniqueTopicSuffix()}`;
-    const channel: RealtimeChannel = client
-      .channel(topic)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table, ...(pgFilter ? { filter: pgFilter } : {}) },
-        (payload) => {
+    // 2) Realtime channel lifecycle, gated by tab visibility. While HIDDEN we tear
+    // the channel down so Supabase stops delivering postgres_changes messages (the
+    // realtime-message + egress cost of a left-open-but-unwatched cockpit). On
+    // VISIBLE we refetch a snapshot (catch up on anything missed) + resubscribe.
+    let channel: RealtimeChannel | null = null;
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    const subscribe = () => {
+      if (channel) return; // already subscribed
+      // Unique topic per subscribe — see useRealtimeChannel for the rationale.
+      const topic = `rt-table:${table}:${pgFilter ?? '*'}:${uniqueTopicSuffix()}`;
+      channel = client
+        .channel(topic)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table, ...(pgFilter ? { filter: pgFilter } : {}) },
+          (payload) => {
+            if (!active) return;
+            const raw = (payload.new ?? payload.old) as RealtimeRow | undefined;
+            if (!raw) return;
+            const mapped = mapRef.current(raw);
+            setRows((prev) => {
+              const acc = accumulateById(prev, mapped, compareRef.current);
+              return acc.slice(0, limit);
+            });
+          },
+        )
+        .subscribe((status) => {
           if (!active) return;
-          const raw = (payload.new ?? payload.old) as RealtimeRow | undefined;
-          if (!raw) return;
-          const mapped = mapRef.current(raw);
-          setRows((prev) => {
-            const acc = accumulateById(prev, mapped, compareRef.current);
-            return acc.slice(0, limit);
-          });
-        },
-      )
-      .subscribe((status) => {
-        if (!active) return;
-        setSubscribed(status === 'SUBSCRIBED');
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          setError(`realtime ${status.toLowerCase()}`);
-          void loadSnapshot();
-        }
-      });
+          setSubscribed(status === 'SUBSCRIBED');
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            setError(`realtime ${status.toLowerCase()}`);
+            void loadSnapshot();
+          }
+        });
+      // Safety-net refetch runs only while subscribed (i.e. visible).
+      interval = setInterval(() => void loadSnapshot(), REALTIME_REFETCH_MS);
+    };
 
-    // 3) Safety net: periodic refetch + refetch on tab-visible / network back.
-    const interval = setInterval(() => void loadSnapshot(), REALTIME_REFETCH_MS);
+    const unsubscribe = () => {
+      if (interval) { clearInterval(interval); interval = null; }
+      if (channel) { void client.removeChannel(channel); channel = null; }
+      if (active) setSubscribed(false);
+    };
+
+    // Initial: always snapshot; subscribe only if currently visible.
+    void loadSnapshot();
+    if (!hidden()) subscribe();
+
     const onVisible = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') void loadSnapshot();
+      if (hidden()) {
+        unsubscribe(); // PAUSE realtime while the tab is not being watched
+      } else {
+        void loadSnapshot(); // catch up on whatever changed while paused
+        subscribe();
+      }
     };
     const onOnline = () => void loadSnapshot();
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible);
@@ -166,10 +190,9 @@ export function useRealtimeTable<T extends { id: string }>(
 
     return () => {
       active = false;
-      clearInterval(interval);
+      unsubscribe();
       if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible);
       if (typeof window !== 'undefined') window.removeEventListener('online', onOnline);
-      void client.removeChannel(channel);
       setRows([]);
       setLoaded(false);
       setSubscribed(false);
