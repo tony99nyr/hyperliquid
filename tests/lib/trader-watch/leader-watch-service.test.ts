@@ -153,6 +153,22 @@ describe('runLeaderWatchCycle', () => {
     expect(calls.inserts).toHaveLength(1);
   });
 
+  it('does NOT re-upsert an UNCHANGED book on the second cycle (no needless realtime churn)', async () => {
+    const prior: LeaderSnapshotStore = new Map();
+    const { client } = fakeClient();
+    mFetch.mockResolvedValueOnce(chState([hlPos('ETH', 'short', 1.128)]));
+    await runLeaderWatchCycle(prior, { now: NOW, clientFactory: () => client }); // baseline writes
+
+    // Identical book next cycle → no actions → MUST NOT write (the egress/message fix).
+    mFetch.mockResolvedValueOnce(chState([hlPos('ETH', 'short', 1.128)]));
+    const { client: c2, calls } = fakeClient();
+    const result = await runLeaderWatchCycle(prior, { now: NOW + 60_000, clientFactory: () => c2 });
+
+    expect(result.actionsEmitted).toBe(0);
+    expect(calls.upserts).toHaveLength(0); // unchanged → skipped
+    expect(calls.inserts).toHaveLength(0);
+  });
+
   it('SKIPS a stale clearinghouse read (failure, no diff → no phantom closes)', async () => {
     const prior: LeaderSnapshotStore = new Map([[LEADER, [
       { coin: 'ETH', side: 'short', szi: -1, size: 1, entryPx: 1000, positionValue: 1000,

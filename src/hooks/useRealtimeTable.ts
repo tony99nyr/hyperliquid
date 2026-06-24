@@ -58,8 +58,10 @@ export interface RealtimeTableState<T> {
 }
 
 const DEFAULT_LIMIT = 200;
-/** Fallback snapshot-refetch cadence — see useRealtimeChannel for the rationale. */
-const REALTIME_REFETCH_MS = 20_000;
+/** Fallback snapshot-refetch cadence — see useRealtimeChannel for the rationale.
+ *  60s (was 20s): the PRIMARY update path for tables dropped from the realtime
+ *  publication (leader feeds), so it stays cheap on Supabase egress. */
+const REALTIME_REFETCH_MS = 60_000;
 
 let nonceCounter = 0;
 function uniqueTopicSuffix(): string {

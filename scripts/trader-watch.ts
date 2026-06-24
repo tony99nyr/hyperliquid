@@ -39,8 +39,10 @@ import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import { fetchClearinghouseState } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { getTopTraders } from '@/lib/hyperliquid/top-traders-service';
 
-/** Default poll interval (seconds) — ~30s balances freshness vs HL rate limits. */
-const DEFAULT_INTERVAL_SECONDS = 30;
+/** Default poll interval (seconds) — 60s balances freshness vs HL + Supabase load.
+ *  (Was 30s; with diff-only writes the rail rarely changes between cycles, so the
+ *  slower cadence cuts daemon load without meaningfully staling the leader feed.) */
+const DEFAULT_INTERVAL_SECONDS = 60;
 /** Floor so a fat-fingered --interval 0 cannot hammer HL/Supabase. */
 const MIN_INTERVAL_SECONDS = 5;
 /** Consecutive total-failure cycles before a LOUD escalation log. */

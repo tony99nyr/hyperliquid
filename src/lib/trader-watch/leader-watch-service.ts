@@ -199,15 +199,16 @@ export async function runLeaderTick(
     ? diffLeaderPositions(leaderAddress, prior.get(leaderAddress) ?? [], snapshots)
     : [];
 
-  // Always reconcile the live book first (so the rail is fresh even on baseline),
-  // then append any actions.
-  await reconcileLeaderPositions(
-    client,
-    leaderAddress,
-    snapshots,
-    state.accountValueUsd,
-    fetchedAtIso,
-  );
+  // Reconcile the live book ONLY when something actually changed (first baseline,
+  // or a detected open/add/reduce/close/flip). An idle leader's book is unchanged,
+  // so re-upserting it every cycle just churns `updated_at` and fires a needless
+  // realtime UPDATE per row — the dominant source of Realtime-message + egress
+  // blowout (50 leaders × every cycle). Skipping the no-op write cuts that to
+  // only-on-change. (size/side/entry only move on an action; accountValue drift
+  // is cosmetic for the rail and resyncs on the next real change.)
+  if (!hadBaseline || actions.length > 0) {
+    await reconcileLeaderPositions(client, leaderAddress, snapshots, state.accountValueUsd, fetchedAtIso);
+  }
   await writeLeaderActions(client, actions);
 
   // Update the baseline only AFTER a successful persist, so a write failure

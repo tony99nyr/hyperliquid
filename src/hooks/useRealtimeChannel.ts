@@ -54,8 +54,12 @@ const DEFAULT_LIMIT = 200;
  * missed event during a reconnect window) can never leave a panel stale until a
  * manual page refresh — the worst-case staleness is one interval. We also refetch
  * immediately on tab-visible + network-reconnect.
+ *
+ * 60s (was 20s): for tables DROPPED from the realtime publication (the high-churn
+ * leader feeds) this poll is now the PRIMARY update path, so it must stay cheap on
+ * Supabase egress; realtime-pushed tables still feel instant via the socket.
  */
-const REALTIME_REFETCH_MS = 20_000;
+const REALTIME_REFETCH_MS = 60_000;
 
 /**
  * Per-effect-run uniqueness for the realtime channel topic.
