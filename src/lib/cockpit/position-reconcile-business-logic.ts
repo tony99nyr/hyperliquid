@@ -22,6 +22,8 @@ export interface CockpitPos {
   side: PositionSide;
   sz: number;
   avgEntryPx: number;
+  /** Leverage recorded on the cockpit row (metadata; null/undefined when unknown). */
+  leverage?: number | null;
   /** Epoch ms the cockpit row was last written. Used by the freshness guard to
    *  AVOID reconciling a just-opened position against a cache-lagged HL read. */
   updatedAtMs?: number;
@@ -32,13 +34,16 @@ export interface HlPos {
   /** Signed size (negative = short, 0 = flat). */
   szi: number;
   entryPx: number | null;
+  /** Per-coin leverage HL reports for the open position (null when unknown). */
+  leverage?: number | null;
 }
 
 export interface ReconcileAction {
   sessionId: string;
   coin: string;
-  /** The state to WRITE to the cockpit row so it mirrors HL. */
-  target: { side: PositionSide; sz: number; avgEntryPx: number };
+  /** The state to WRITE to the cockpit row so it mirrors HL. `leverage` is only
+   *  present on a resync when HL reports one (a flatten never touches leverage). */
+  target: { side: PositionSide; sz: number; avgEntryPx: number; leverage?: number };
   reason: 'flatten' | 'resync';
   /** Size of the divergence in USD (for logging / observability). */
   deltaUsd: number;
@@ -96,17 +101,33 @@ export function reconcilePositions(cockpit: CockpitPos[], hl: HlPos[], opts: Rec
     }
     if (!real) continue; // unreachable (realSzi !== 0 ⇒ real defined) — narrows the type
 
-    // HL still holds it — only RESYNC when size/side drifted beyond the dust floor.
+    // HL still holds it — RESYNC when size/side drifted beyond the dust floor OR
+    // when the recorded leverage drifted from HL (leverage adjusted directly on HL,
+    // or never persisted on an older row). Leverage doesn't affect P&L but it drives
+    // the cockpit's liquidation/ROE display, so a drift makes that read wrong.
     const px = (real.entryPx ?? c.avgEntryPx) || c.avgEntryPx || 0;
     const deltaUsd = Math.abs(cockpitSigned - realSzi) * px;
-    if (deltaUsd < RECONCILE_MIN_DELTA_USD) continue; // in sync (within dust)
-    actions.push({
-      sessionId: c.sessionId,
-      coin: c.coin,
-      target: { side: realSzi > 0 ? 'long' : 'short', sz: Math.abs(realSzi), avgEntryPx: real.entryPx ?? c.avgEntryPx },
-      reason: 'resync',
-      deltaUsd,
-    });
+    const sizeDrift = deltaUsd >= RECONCILE_MIN_DELTA_USD;
+
+    const realLev = real.leverage != null && Number.isFinite(real.leverage) && real.leverage >= 1 ? real.leverage : null;
+    const cockLev = c.leverage != null && Number.isFinite(c.leverage) && c.leverage >= 1 ? c.leverage : null;
+    // Drift when HL reports a leverage and the cockpit either lacks one (backfill)
+    // or disagrees on the integer HL actually applies.
+    const levDrift = realLev != null && (cockLev == null || Math.round(realLev) !== Math.round(cockLev));
+
+    if (!sizeDrift && !levDrift) continue; // in sync (size within dust + leverage agrees)
+
+    // On a SIZE drift, mirror HL's size/side/entry. On a LEVERAGE-ONLY drift the
+    // position itself is in sync, so PRESERVE the cockpit's own (more precise,
+    // fill-folded) side/sz/avgEntryPx and change only leverage — don't clobber the
+    // folded entry with HL's tick-rounded entryPx (which would shift uPnL/ROE).
+    const target: ReconcileAction['target'] = sizeDrift
+      ? { side: realSzi > 0 ? 'long' : 'short', sz: Math.abs(realSzi), avgEntryPx: real.entryPx ?? c.avgEntryPx }
+      : { side: c.side, sz: c.sz, avgEntryPx: c.avgEntryPx };
+    // Persist the integer HL actually applies (HL leverage is integral; rounding
+    // here keeps the stored value tidy and consistent with the adjust route).
+    if (realLev != null) target.leverage = Math.round(realLev);
+    actions.push({ sessionId: c.sessionId, coin: c.coin, target, reason: 'resync', deltaUsd });
   }
   return actions;
 }

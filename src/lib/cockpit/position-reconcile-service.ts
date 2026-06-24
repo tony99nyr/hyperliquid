@@ -41,7 +41,7 @@ export async function reconcileLivePositions(client: SupabaseClient = getService
   try {
     const ch = await fetchClearinghouseState(addr);
     if (ch.stale) return { skipped: true, reason: 'HL read stale — refusing to reconcile', checked: 0, flattened: 0, resynced: 0 };
-    hl = ch.positions.map((p) => ({ coin: p.coin, szi: p.szi, entryPx: p.entryPx }));
+    hl = ch.positions.map((p) => ({ coin: p.coin, szi: p.szi, entryPx: p.entryPx, leverage: p.leverage }));
   } catch (err) {
     return { skipped: true, reason: `HL read failed: ${extractErrorMessage(err)}`, checked: 0, flattened: 0, resynced: 0 };
   }
@@ -53,13 +53,13 @@ export async function reconcileLivePositions(client: SupabaseClient = getService
 
   const { data: posRows } = await client
     .from('positions')
-    .select('session_id, coin, side, sz, avg_entry_px, updated_at')
+    .select('session_id, coin, side, sz, avg_entry_px, leverage, updated_at')
     .neq('side', 'flat')
     .in('session_id', ids);
   const cockpit: CockpitPos[] = (posRows ?? []).map((r) => {
-    const row = r as { session_id: string; coin: string; side: 'long' | 'short' | 'flat'; sz: number; avg_entry_px: number; updated_at: string };
+    const row = r as { session_id: string; coin: string; side: 'long' | 'short' | 'flat'; sz: number; avg_entry_px: number; leverage: number | null; updated_at: string };
     const t = Date.parse(row.updated_at);
-    return { sessionId: row.session_id, coin: row.coin, side: row.side, sz: row.sz, avgEntryPx: row.avg_entry_px, updatedAtMs: Number.isFinite(t) ? t : undefined };
+    return { sessionId: row.session_id, coin: row.coin, side: row.side, sz: row.sz, avgEntryPx: row.avg_entry_px, leverage: row.leverage, updatedAtMs: Number.isFinite(t) ? t : undefined };
   });
 
   // nowMs feeds the PURE freshness guard — a just-written row (mid-settlement / behind
@@ -92,10 +92,17 @@ export async function reconcileLivePositions(client: SupabaseClient = getService
   let resynced = 0;
   for (const a of actions) {
     // Write the target state; realized_pnl_usd / fees_paid_usd are preserved (not in
-    // the update payload) so historical realized P&L isn't lost.
+    // the update payload) so historical realized P&L isn't lost. Leverage is only
+    // written when HL reported one on a resync (never nulled — a flatten omits it).
+    const payload: { side: string; sz: number; avg_entry_px: number; leverage?: number } = {
+      side: a.target.side,
+      sz: a.target.sz,
+      avg_entry_px: a.target.avgEntryPx,
+    };
+    if (a.target.leverage != null) payload.leverage = a.target.leverage;
     const { error } = await client
       .from('positions')
-      .update({ side: a.target.side, sz: a.target.sz, avg_entry_px: a.target.avgEntryPx })
+      .update(payload)
       .eq('session_id', a.sessionId)
       .eq('coin', a.coin.trim().toUpperCase());
     if (error) continue; // fail-soft per row
@@ -106,7 +113,7 @@ export async function reconcileLivePositions(client: SupabaseClient = getService
         sessionId: a.sessionId,
         source: 'reconcile',
         severity: 'info',
-        message: `RECONCILE: ${a.coin} ${a.reason === 'flatten' ? 'flattened (HL holds none)' : `resynced to HL (${a.target.side} ${a.target.sz})`} — drift $${a.deltaUsd.toFixed(2)}.`,
+        message: `RECONCILE: ${a.coin} ${a.reason === 'flatten' ? 'flattened (HL holds none)' : `resynced to HL (${a.target.side} ${a.target.sz}${a.target.leverage != null ? ` @ ${Math.round(a.target.leverage)}x` : ''})`} — drift $${a.deltaUsd.toFixed(2)}.`,
       });
     } catch {
       /* non-critical */

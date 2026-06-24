@@ -81,6 +81,48 @@ export async function loadPosition(
 }
 
 /**
+ * Read just the recorded leverage for (session, coin), or null when none/unknown.
+ * Leverage is position METADATA (it doesn't affect P&L) and lives only on the
+ * positions row — loadPosition omits it. The adjust-leverage route needs the
+ * current value to detect a no-op + decide raise-vs-lower. Read-only.
+ */
+export async function loadPositionLeverage(
+  sessionId: string,
+  coin: string,
+  client: SupabaseClient = getServiceRoleClient(),
+): Promise<number | null> {
+  const { data, error } = await client
+    .from('positions')
+    .select('leverage')
+    .eq('session_id', sessionId)
+    .eq('coin', normalizeCoin(coin))
+    .maybeSingle();
+  if (error) throw new Error(`loadPositionLeverage failed: ${error.message}`);
+  const lev = (data as { leverage?: number | null } | null)?.leverage;
+  return typeof lev === 'number' && Number.isFinite(lev) && lev > 0 ? lev : null;
+}
+
+/**
+ * Persist a new leverage for (session, coin) WITHOUT touching size/side/entry —
+ * leverage is metadata, so this is a targeted column update (never a re-fold).
+ * Used by the adjust-leverage route AFTER the HL push succeeds (live) and by
+ * reconciliation. Returns false on a write error (caller decides how to surface).
+ */
+export async function updatePositionLeverage(
+  sessionId: string,
+  coin: string,
+  leverage: number,
+  client: SupabaseClient = getServiceRoleClient(),
+): Promise<boolean> {
+  const { error } = await client
+    .from('positions')
+    .update({ leverage })
+    .eq('session_id', sessionId)
+    .eq('coin', normalizeCoin(coin));
+  return !error;
+}
+
+/**
  * List ALL open (non-flat) positions for a session. Read-only. Used by the
  * non-agent watch daemon to discover which coins to monitor — a fill creates a
  * positions row, so polling this is how the daemon auto-picks-up a position the

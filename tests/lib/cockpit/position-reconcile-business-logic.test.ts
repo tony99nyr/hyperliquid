@@ -83,6 +83,73 @@ describe('reconcilePositions', () => {
     expect(actions[0].target.sz).toBe(2.5);
   });
 
+  describe('leverage drift', () => {
+    it('RESYNCS leverage when HL holds the same size but a different leverage', () => {
+      const cockpit = [cp({ coin: 'ETH', side: 'long', sz: 1, avgEntryPx: 2000, leverage: 5 })];
+      const hl: HlPos[] = [{ coin: 'ETH', szi: 1, entryPx: 2000, leverage: 10 }];
+      const actions = reconcilePositions(cockpit, hl);
+      expect(actions).toHaveLength(1);
+      expect(actions[0].reason).toBe('resync');
+      expect(actions[0].target.leverage).toBe(10);
+    });
+
+    it('BACKFILLS leverage when the cockpit row has none but HL reports one', () => {
+      const cockpit = [cp({ coin: 'ETH', side: 'long', sz: 1, avgEntryPx: 2000, leverage: null })];
+      const hl: HlPos[] = [{ coin: 'ETH', szi: 1, entryPx: 2000, leverage: 7 }];
+      const actions = reconcilePositions(cockpit, hl);
+      expect(actions).toHaveLength(1);
+      expect(actions[0].target.leverage).toBe(7);
+    });
+
+    it('does NOT resync when leverage agrees (integer compare) and size is in sync', () => {
+      const cockpit = [cp({ coin: 'ETH', side: 'long', sz: 1, avgEntryPx: 2000, leverage: 10 })];
+      const hl: HlPos[] = [{ coin: 'ETH', szi: 1, entryPx: 2000, leverage: 10 }];
+      expect(reconcilePositions(cockpit, hl)).toEqual([]);
+    });
+
+    it('does NOT churn on a fractional cockpit leverage that rounds to the HL integer (no write loop)', () => {
+      // HL applies integers; a stored 10.4 must compare-equal to HL's 10 so the
+      // cron converges (else it would re-resync every cycle forever).
+      const cockpit = [cp({ coin: 'ETH', side: 'long', sz: 1, avgEntryPx: 2000, leverage: 10.4 })];
+      const hl: HlPos[] = [{ coin: 'ETH', szi: 1, entryPx: 2000, leverage: 10 }];
+      expect(reconcilePositions(cockpit, hl)).toEqual([]);
+    });
+
+    it('PRESERVES the precise cockpit entry on a leverage-only resync (no entryPx clobber)', () => {
+      // size in sync; only leverage drifts. HL reports a tick-rounded entry that
+      // must NOT overwrite the cockpit's folded entry.
+      const cockpit = [cp({ coin: 'ETH', side: 'long', sz: 1, avgEntryPx: 2000.37, leverage: 5 })];
+      const hl: HlPos[] = [{ coin: 'ETH', szi: 1, entryPx: 2000, leverage: 10 }];
+      const actions = reconcilePositions(cockpit, hl);
+      expect(actions).toHaveLength(1);
+      expect(actions[0].target.avgEntryPx).toBe(2000.37); // cockpit entry retained
+      expect(actions[0].target.sz).toBe(1);
+      expect(actions[0].target.leverage).toBe(10);
+    });
+
+    it('does NOT resync on leverage when HL reports none (can not assert drift)', () => {
+      const cockpit = [cp({ coin: 'ETH', side: 'long', sz: 1, avgEntryPx: 2000, leverage: 5 })];
+      const hl: HlPos[] = [{ coin: 'ETH', szi: 1, entryPx: 2000, leverage: null }];
+      expect(reconcilePositions(cockpit, hl)).toEqual([]);
+    });
+
+    it('carries the HL leverage into a SIZE-drift resync too', () => {
+      const cockpit = [cp({ coin: 'ETH', side: 'long', sz: 2, avgEntryPx: 2000, leverage: 5 })];
+      const hl: HlPos[] = [{ coin: 'ETH', szi: 1.2, entryPx: 1990, leverage: 8 }];
+      const actions = reconcilePositions(cockpit, hl);
+      expect(actions[0].reason).toBe('resync');
+      expect(actions[0].target.sz).toBe(1.2);
+      expect(actions[0].target.leverage).toBe(8);
+    });
+
+    it('a flatten never carries leverage', () => {
+      const cockpit = [cp({ coin: 'SOL', side: 'short', sz: 18, avgEntryPx: 69, leverage: 5 })];
+      const actions = reconcilePositions(cockpit, []); // HL flat
+      expect(actions[0].reason).toBe('flatten');
+      expect(actions[0].target.leverage).toBeUndefined();
+    });
+  });
+
   describe('freshness guard (cache-lag race)', () => {
     const hlFlat: HlPos[] = []; // HL holds nothing
 

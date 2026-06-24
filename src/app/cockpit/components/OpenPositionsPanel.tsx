@@ -28,6 +28,7 @@ import { ZONE_COLORS, TERM, GH, fmtUsd, fmtPx } from './panel-styles';
 import { positionHealth, uPnlPct, type RegimeDir } from './open-positions-helpers';
 import { userPositionDisplay } from './position-panel-helpers';
 import ExitModal, { type ExitTarget } from './ExitModal';
+import AdjustLeverageModal, { type AdjustLeverageTarget } from './AdjustLeverageModal';
 
 export interface OpenPositionsPanelProps {
   sessionId: string | null;
@@ -58,6 +59,7 @@ export default function OpenPositionsPanel({
   const pnlByCoin = positionsOverride ? positionsOverride.latestPnlByCoin : live.latestPnlByCoin;
 
   const [exitReq, setExitReq] = useState<ExitRequest | null>(null);
+  const [adjustReq, setAdjustReq] = useState<AdjustLeverageTarget | null>(null);
   const [closeAll, setCloseAll] = useState(false);
 
   const open = positions.filter((p) => p.side !== 'flat');
@@ -127,6 +129,7 @@ export default function OpenPositionsPanel({
               regime={regimeByCoin[p.coin] ?? 'neutral'}
               onReduce={(t) => setExitReq({ target: t, initialPct: 25 })}
               onClose={(t) => setExitReq({ target: t, initialPct: 100 })}
+              onAdjust={(t) => setAdjustReq(t)}
             />
           ))}
         </div>
@@ -174,6 +177,12 @@ export default function OpenPositionsPanel({
           onClose={() => setCloseAll(false)}
         />
       )}
+      {adjustReq && (
+        <AdjustLeverageModal
+          target={adjustReq}
+          onClose={() => setAdjustReq(null)}
+        />
+      )}
     </section>
   );
 }
@@ -184,12 +193,14 @@ function PositionRowCard({
   regime,
   onReduce,
   onClose,
+  onAdjust,
 }: {
   pos: PositionRow;
   pnl: PnlSnapshot | undefined;
   regime: RegimeDir;
   onReduce: (t: ExitTarget) => void;
   onClose: (t: ExitTarget) => void;
+  onAdjust: (t: AdjustLeverageTarget) => void;
 }) {
   const d = userPositionDisplay(pos, pnl);
   const side = d.side;
@@ -211,6 +222,13 @@ function PositionRowCard({
   const target: ExitTarget | null =
     d.entryPx != null && d.markPx != null
       ? { coin: pos.coin, side, size: pos.sz, entryPx: d.entryPx, markPx: d.markPx }
+      : null;
+
+  // Adjusting leverage needs only an entry price (the liq math); a missing mark
+  // just disables the mark-relative danger guard, not the action.
+  const adjustTarget: AdjustLeverageTarget | null =
+    d.entryPx != null
+      ? { coin: pos.coin, side, entryPx: d.entryPx, markPx: d.markPx, currentLeverage: d.leverage }
       : null;
 
   return (
@@ -266,6 +284,15 @@ function PositionRowCard({
 
       {/* Actions */}
       <div className={css({ display: 'flex', gap: '6px', justifyContent: 'flex-start' })}>
+        <button
+          type="button"
+          data-testid="position-adjust-lev"
+          disabled={!adjustTarget}
+          onClick={() => adjustTarget && onAdjust(adjustTarget)}
+          className={css({ fontFamily: 'sans', fontSize: '11px', fontWeight: 'medium', color: 'cockpit.accent', bg: 'cockpit.button', border: '1px solid', borderColor: 'rgba(91,140,255,0.32)', borderRadius: '6px', paddingX: '11px', paddingY: '7px', cursor: 'pointer', _disabled: { opacity: 0.5, cursor: 'not-allowed' } })}
+        >
+          {d.leverage != null ? `${d.leverage}× lev` : 'Set lev'}
+        </button>
         <button
           type="button"
           data-testid="position-reduce"
