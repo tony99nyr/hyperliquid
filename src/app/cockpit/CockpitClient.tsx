@@ -34,17 +34,20 @@ import { useLeaderPositionsScoped } from '@/hooks/useLeaderPositionsTable';
 import { leaderPositionRowsToHlPositions } from '@/hooks/leader-position-adapt';
 import { usePerformance } from '@/hooks/usePerformance';
 import { useRealtimeChannel } from '@/hooks/useRealtimeChannel';
-import { useIsMobile } from '@/hooks/useIsMobile';
+import { useUrlParamState } from '@/hooks/useUrlParamState';
 import { mapAnalysisLogRow, byCreatedAtDesc } from '@/hooks/realtime-row-mappers';
 import TopBar, { type CockpitView as ViewKey } from './components/shell/TopBar';
 import BottomStatusBar from './components/shell/BottomStatusBar';
-import BottomTabBar, { type MobileTab } from './components/shell/BottomTabBar';
+import BottomTabBar from './components/shell/BottomTabBar';
 import CockpitView from './components/CockpitView';
 import PerformanceView from './components/performance/PerformanceView';
 import TopTradersRail from './components/left-rail/TopTradersRail';
 import ScoutPanel from './components/ScoutPanel';
 import type { RatingsFreshness } from './components/left-rail/ratings-freshness-helpers';
 import ApprovalPopup from './components/ApprovalPopup';
+
+/** The selectable surfaces — the allow-list for the `?tab=` URL param (junk → 'cockpit'). */
+const TAB_KEYS: readonly ViewKey[] = ['cockpit', 'traders', 'performance', 'scout'];
 
 export interface CockpitClientProps {
   mode: TradingMode;
@@ -68,30 +71,13 @@ export default function CockpitClient({
   ratings = null,
   coins = ['ETH', 'BTC', 'HYPE', 'SOL'],
 }: CockpitClientProps) {
-  const isMobile = useIsMobile();
-  // Desktop: 2-view segmented nav (Cockpit / Performance) — Traders is the
-  // cockpit grid's left rail. Mobile: 3-tab bottom bar (Cockpit / Traders /
-  // Performance) — Traders is its own surface. The two switches stay in sync so
-  // rotating the device preserves intent (e.g. Performance stays Performance).
-  const [view, setView] = useState<ViewKey>('cockpit');
-  const [mobileTab, setMobileTab] = useState<MobileTab>('cockpit');
+  // The selected surface (Cockpit / Traders / Performance / Scout). The desktop
+  // top-bar nav and the mobile bottom tab are two controls for the SAME selection,
+  // so it's one piece of state — mirrored to the `?tab=` URL param so refresh +
+  // browser back/forward retain it. SSR-safe (first render is 'cockpit'; the URL
+  // wins post-hydration). Each surface mounts EXACTLY once (no double subscriptions).
+  const [surface, setSurface] = useUrlParamState<ViewKey>('tab', 'cockpit', TAB_KEYS);
   const [coin, setCoin] = useState(coins[0] ?? 'ETH');
-
-  // Desktop nav → keep the mobile tab aligned (Traders has no desktop nav slot).
-  const onViewChange = (v: ViewKey) => {
-    setView(v);
-    setMobileTab(v);
-  };
-  // Mobile tab ↔ desktop view are now the same 3 keys (Cockpit/Traders/Performance).
-  const onMobileTabChange = (t: MobileTab) => {
-    setMobileTab(t);
-    setView(t);
-  };
-
-  // The single surface to render: on mobile the bottom tab wins; on desktop the
-  // segmented nav wins. Computed so each island stack mounts EXACTLY once (no
-  // double realtime subscriptions from a hidden-but-mounted duplicate).
-  const surface: MobileTab = isMobile ? mobileTab : view;
 
   // Auto-bind the latest active session (server seed → poll) so a session opened
   // MID-FLOW surfaces its popup + Safe-Exit without a refresh.
@@ -146,8 +132,8 @@ export default function CockpitClient({
       })}
     >
       <TopBar
-        view={view}
-        onViewChange={onViewChange}
+        view={surface}
+        onViewChange={setSurface}
         mode={mode}
         equityUsd={equityUsd}
         todayUsd={todayUsd}
@@ -213,7 +199,7 @@ export default function CockpitClient({
         />
       )}
 
-      <BottomTabBar tab={mobileTab} onTabChange={onMobileTabChange} />
+      <BottomTabBar tab={surface} onTabChange={setSurface} />
 
       <BottomStatusBar connected={feedLive === true} leaderAddress={leaderAddress} mode={mode} />
 
