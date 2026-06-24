@@ -25,9 +25,14 @@ export async function fetchCandlesViaProxy(
 ): Promise<CandleResult> {
   const normCoin = coin.trim().toUpperCase();
   try {
+    // Use the browser HTTP cache (respects the proxy's Cache-Control max-age): the
+    // URL is stable (constant lookbackMs; the window is bucketed server-side), so
+    // polls within the max-age window are served from cache with ZERO origin
+    // transfer. The live PRICE comes from the ws, so a ~30s-stale bar is fine. The
+    // old `no-store` forced a full candle-payload refetch on EVERY poll (the Fast
+    // Origin Transfer leak).
     const res = await fetch(
       `/api/hl/candles?coin=${encodeURIComponent(normCoin)}&interval=${interval}&lookbackMs=${lookbackMs}`,
-      { cache: 'no-store' },
     );
     if (!res.ok) return emptyResult(normCoin, interval, `proxy ${res.status}`);
     const json = (await res.json()) as { ok: boolean; result?: CandleResult; error?: string };
@@ -44,9 +49,10 @@ export async function fetchRegimeCandlesViaProxy(
 ): Promise<Record<string, CandleResult>> {
   const normCoin = coin.trim().toUpperCase();
   try {
-    const res = await fetch(`/api/hl/regime?coin=${encodeURIComponent(normCoin)}`, {
-      cache: 'no-store',
-    });
+    // Browser HTTP cache (respects the proxy max-age) — same rationale as candles:
+    // the regime set is slow-moving, so serving repeat polls from cache cuts the
+    // repeated multi-timeframe candle payload (origin transfer) to ~1 per window.
+    const res = await fetch(`/api/hl/regime?coin=${encodeURIComponent(normCoin)}`);
     if (!res.ok) return {};
     const json = (await res.json()) as { ok: boolean; byInterval?: Record<string, CandleResult> };
     if (!json.ok || !json.byInterval) return {};

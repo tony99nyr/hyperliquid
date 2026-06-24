@@ -29,8 +29,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const end = Math.floor(Date.now() / WINDOW_GRID_MS) * WINDOW_GRID_MS;
   const byInterval = await fetchRegimeCandleSet(coin, end);
 
+  // Regime is slow-moving; hold it in the browser cache for 90s so the strip's
+  // poll reads from cache (the multi-timeframe candle payload is large — serving
+  // it from cache is the bulk of the regime egress saving).
   return NextResponse.json(
     { ok: true, byInterval },
-    { headers: { 'Cache-Control': 'private, max-age=20' } },
+    { headers: { 'Cache-Control': 'private, max-age=90' } },
   );
 }

@@ -42,10 +42,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const end = Math.floor(Date.now() / WINDOW_GRID_MS) * WINDOW_GRID_MS;
   const result = await fetchCandles(coin, interval, end - lookbackMs, end);
 
-  // Let the browser/edge hold the response briefly too (second cache layer): the
-  // candles are valid for the TTL window and this further trims upstream load.
+  // Browser holds the response for 30s (the bars are valid for the cache window;
+  // the live price comes from the ws). The URL is stable, so a polling chart reads
+  // from its OWN HTTP cache within the window — near-zero origin transfer (the fix
+  // for the Fast Origin Transfer blowout, paired with dropping client `no-store`).
   return NextResponse.json(
     { ok: true, result },
-    { headers: { 'Cache-Control': 'private, max-age=15' } },
+    { headers: { 'Cache-Control': 'private, max-age=30' } },
   );
 }

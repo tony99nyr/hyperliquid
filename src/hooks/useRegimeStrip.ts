@@ -18,7 +18,8 @@ import {
   type RegimeStripRow,
 } from '@/app/cockpit/components/right-rail/regime-strip-helpers';
 
-const REFRESH_MS = 60_000;
+const REFRESH_MS = 120_000; // 2m: regimes move slowly + the response is a large
+// multi-timeframe candle payload — slower polling cuts origin egress sharply.
 
 export interface RegimeStripState {
   rows: RegimeStripRow[];
@@ -47,6 +48,9 @@ export function useRegimeStrip(coin: string): RegimeStripState {
     if (!coin) return;
     let active = true;
     const load = async () => {
+      // Pause while the tab is hidden — don't refetch the large regime payload for
+      // a backgrounded cockpit (a left-open tab was driving needless origin egress).
+      if (typeof document !== 'undefined' && document.hidden) return;
       const byInterval = await fetchRegimeCandlesViaProxy(coin);
       if (!active) return;
       setRows(buildRegimeStrip(byInterval));
@@ -56,9 +60,12 @@ export function useRegimeStrip(coin: string): RegimeStripState {
     };
     void load();
     const timer = setInterval(load, REFRESH_MS);
+    const onVis = () => { if (!document.hidden) void load(); };
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVis);
     return () => {
       active = false;
       clearInterval(timer);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVis);
     };
   }, [coin]);
 
