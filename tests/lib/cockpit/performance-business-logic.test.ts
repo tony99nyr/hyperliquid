@@ -166,6 +166,17 @@ describe('performance-business-logic', () => {
     it('is zero for a monotonically rising series', () => {
       expect(maxDrawdown([{ t: 0, equity: 100 }, { t: 1, equity: 110 }])).toBe(0);
     });
+
+    it('CLAMPS to 100% off a near-zero/crossing-zero baseline (the -10149% bug)', () => {
+      // A cumulative-P&L curve anchored at ~0: a tiny early positive peak then a
+      // dip below zero would otherwise yield a 10000%+ drawdown. Clamp at 100.
+      const series: EquityPoint[] = [
+        { t: 0, equity: 0.13 }, // tiny positive peak
+        { t: 1, equity: -13.06 }, // dips well below zero
+        { t: 2, equity: 5 },
+      ];
+      expect(maxDrawdown(series)).toBe(100);
+    });
   });
 
   describe('direct flip (no flat boundary)', () => {

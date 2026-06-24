@@ -331,14 +331,22 @@ export function computeKpis(
   };
 }
 
-/** Worst peak-to-trough drawdown over an equity series, as a positive percent. */
+/**
+ * Worst peak-to-trough drawdown over an equity series, as a positive percent.
+ *
+ * Clamped to [0, 100]: a decline can't sanely exceed 100% of the peak unless the
+ * equity baseline crossed zero — which only happens when the curve is anchored at
+ * ~0 (a cumulative-P&L line with no real balance). The real fix is anchoring at
+ * live equity; this clamp is a safety net so a degenerate baseline can never
+ * render an absurd "-10149%". When properly anchored at real equity it never bites.
+ */
 export function maxDrawdown(equity: EquityPoint[]): number {
   let peak = -Infinity;
   let maxDd = 0;
   for (const p of equity) {
     if (p.equity > peak) peak = p.equity;
     if (peak > 0) {
-      const dd = ((peak - p.equity) / peak) * 100;
+      const dd = Math.min(((peak - p.equity) / peak) * 100, 100);
       if (dd > maxDd) maxDd = dd;
     }
   }

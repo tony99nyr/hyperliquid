@@ -166,18 +166,19 @@ export async function getPerformanceSummary(sessionId: string): Promise<Performa
     .reduce((s, t) => s + t.pnlUsd, 0);
   const netPnlUsd = realized + openUnrealized;
 
-  // Anchor the curve at the REAL balance when known, else at 0 (a pure cumulative
-  // P&L line). We never invent a $50k baseline. Absolute equity + % are real-only.
+  // Anchor the curve at the REAL live equity when known (so the series + drawdown
+  // reflect actual capital), else env start balance + netPnl (curve shape only).
+  // We never invent a $50k baseline.
   const realBalance = realAccountBalance();
-  const curveAnchor = (realBalance ?? 0) + netPnlUsd;
+  const curveAnchor = liveEquityUsd ?? (realBalance ?? 0) + netPnlUsd;
   const equity = buildEquitySeries(ledger, curveAnchor, now, 30);
   const kpis = computeKpis(ledger, marks, equity);
-  // Card value: prefer the LIVE account equity (already includes open uPnL — shown
-  // directly), else the env-anchored cumulative (start balance + netPnl).
-  const equityUsd = liveEquityUsd ?? (realBalance === null ? null : realBalance + netPnlUsd);
+  // Card value: the LIVE account equity (perp + spot, includes open uPnL), else
+  // the env balance ALONE — never env + netPnl (double-count). null → "—".
+  const equityUsd = liveEquityUsd ?? realBalance;
   const first = equity[0]?.equity ?? curveAnchor;
-  const equity30dPct =
-    realBalance === null || first <= 0 ? null : (curveAnchor / first - 1) * 100;
+  const hasRealAnchor = liveEquityUsd !== null || realBalance !== null;
+  const equity30dPct = !hasRealAnchor || first <= 0 ? null : (curveAnchor / first - 1) * 100;
 
   return { sessionId, ledger, kpis, equity, equityUsd, netPnlUsd, equity30dPct, generatedAt: now };
 }
@@ -258,12 +259,20 @@ export async function getAccountPerformanceSummary(mode: TradingMode): Promise<P
   const realized = ledger.filter((t) => t.status !== 'open').reduce((s, t) => s + t.pnlUsd - t.feesUsd, 0);
   const openUnrealized = ledger.filter((t) => t.status === 'open').reduce((s, t) => s + t.pnlUsd, 0);
   const netPnlUsd = realized + openUnrealized;
-  const curveAnchor = (realBalance ?? 0) + netPnlUsd;
+  // Anchor the 30d curve at the REAL live equity (perp + spot) when known, so the
+  // series + max-drawdown reflect ACTUAL capital — not a cumulative-P&L line off ~0,
+  // which makes drawdown-as-%-of-peak explode. Fall back to the env start balance +
+  // netPnl only when live is unknown (reconstructed curve shape).
+  const curveAnchor = liveEquityUsd ?? (realBalance ?? 0) + netPnlUsd;
   const equity = buildEquitySeries(ledger, curveAnchor, now, 30);
   const kpis = computeKpis(ledger, marks, equity);
-  const equityUsd = liveEquityUsd ?? (realBalance === null ? null : realBalance + netPnlUsd);
+  // Displayed equity = the REAL live value (perp + spot). When live is unknown,
+  // fall back to the env balance ALONE — NEVER env + netPnl (that double-counts a
+  // current-balance env into the headline → the wrong ~$300 readout). null → "—".
+  const equityUsd = liveEquityUsd ?? realBalance;
   const first = equity[0]?.equity ?? curveAnchor;
-  const equity30dPct = realBalance === null || first <= 0 ? null : (curveAnchor / first - 1) * 100;
+  const hasRealAnchor = liveEquityUsd !== null || realBalance !== null;
+  const equity30dPct = !hasRealAnchor || first <= 0 ? null : (curveAnchor / first - 1) * 100;
 
   return { sessionId: '', ledger, kpis, equity, equityUsd, netPnlUsd, equity30dPct, generatedAt: now };
 }
