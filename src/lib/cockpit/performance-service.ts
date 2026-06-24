@@ -29,7 +29,7 @@ import {
   type MarkMap,
   type PerformanceKpis,
 } from './performance-business-logic';
-import { fetchAllMids, fetchClearinghouseState, isValidHlAddress } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { fetchAllMids, fetchClearinghouseState, fetchSpotUsdcBalance, isValidHlAddress } from '@/lib/hyperliquid/hyperliquid-info-service';
 import type { CanonicalFill, TradingMode } from '@/types/fill';
 
 /**
@@ -75,21 +75,26 @@ function realAccountBalance(): number | null {
 
 /**
  * The LIVE current account equity from HL, or null. When HL_ACCOUNT_ADDRESS is set
- * (the public master account), read clearinghouseState.accountValueUsd — the real
- * total equity right now (cash + unrealized). This is what fills the "Account
- * Equity" card with the actual balance instead of "—". Fail-soft → null (card
- * falls back to env-anchored cumulative P&L). accountValueUsd already includes open
- * uPnL, so it's shown DIRECTLY, never added to netPnlUsd.
+ * (the public master account), equity = PERP value (clearinghouseState.accountValue,
+ * which already includes margin + open uPnL) PLUS the SPOT USDC balance. HL keeps
+ * perp and spot SEPARATE: between trades the USDC sits in spot, so the perp value
+ * alone reads $0 even with a funded account — folding in spot USDC makes the card
+ * show the real total capital. Shown DIRECTLY, never added to netPnlUsd.
+ *
+ * Fail-soft → null only when BOTH sides are unknown ("—"). A reachable account
+ * that's genuinely empty shows "$0.00". A transient stale on ONE side treats that
+ * side as 0 rather than hiding the known side.
  */
 async function fetchLiveAccountValue(): Promise<number | null> {
   const addr = process.env.HL_ACCOUNT_ADDRESS?.trim();
   if (!addr || !isValidHlAddress(addr)) return null;
   try {
-    const ch = await fetchClearinghouseState(addr);
-    if (ch.stale) return null;
-    // >= 0 (not > 0): a real, reachable account that is currently flat should show
-    // "$0.00", not "—". "—" is reserved for UNKNOWN (no address / stale / error).
-    return Number.isFinite(ch.accountValueUsd) && ch.accountValueUsd >= 0 ? ch.accountValueUsd : null;
+    const [ch, spotUsdc] = await Promise.all([fetchClearinghouseState(addr), fetchSpotUsdcBalance(addr)]);
+    // Perp value: known only on a FRESH read (stale/garbage → unknown). >= 0 (not
+    // > 0) so a flat-but-funded account counts as a real 0, not "unknown".
+    const perpVal = !ch.stale && Number.isFinite(ch.accountValueUsd) && ch.accountValueUsd >= 0 ? ch.accountValueUsd : null;
+    if (perpVal === null && spotUsdc === null) return null; // both unknown → "—"
+    return (perpVal ?? 0) + (spotUsdc ?? 0);
   } catch {
     return null;
   }

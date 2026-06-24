@@ -302,6 +302,43 @@ export async function fetchClearinghouseState(rawAddress: string): Promise<HlCle
   }
 }
 
+interface RawSpotState {
+  balances?: Array<{ coin?: string; total?: string }>;
+}
+
+/**
+ * Fetch a wallet's SPOT USDC balance (spotClearinghouseState), or null when
+ * unknown (bad address / soft failure / error). HL keeps perp and spot as
+ * SEPARATE balances — `clearinghouseState` (perp) shows $0 when a flat account's
+ * USDC is parked in spot. This reads the spot side so "account equity" can
+ * reflect the total capital (perp value + movable spot USDC), not just the perp
+ * margin. Only USDC is summed (HL's perp collateral); other stables are ignored.
+ * Cross-instance cached (~25s) + fail-soft. An empty spot wallet returns 0.
+ */
+export async function fetchSpotUsdcBalance(rawAddress: string): Promise<number | null> {
+  const address = normalizeHlAddress(rawAddress);
+  if (!isValidHlAddress(address)) return null;
+  try {
+    const raw = await cachedHlRead('spot', [address], async () => {
+      const body = await hlInfoPost<RawSpotState>({ type: 'spotClearinghouseState', user: address });
+      // Soft-fail guard: a real response ALWAYS carries a `balances` array (empty
+      // when the wallet holds nothing). Its ABSENCE = a 200-with-garbage hiccup —
+      // throw so unstable_cache doesn't pin the bad body for the window.
+      if (!body || typeof body !== 'object' || !Array.isArray(body.balances)) {
+        throw new Error('spotClearinghouseState empty: soft failure (no balances)');
+      }
+      return body;
+    });
+    let usdc = 0;
+    for (const b of raw.balances ?? []) {
+      if (b.coin === 'USDC') usdc += num(b.total);
+    }
+    return Number.isFinite(usdc) && usdc >= 0 ? usdc : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Fetch a wallet's recent fills (userFillsByTime). Used for the leader's
  * cycle/add history in the analytics overlay. Cached for 60s, fail-soft.

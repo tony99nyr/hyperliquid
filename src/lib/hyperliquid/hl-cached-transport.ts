@@ -36,6 +36,7 @@ export const HL_CACHE_TAGS = {
   regime: 'hl:regime',
   allMids: 'hl:all-mids',
   clearinghouse: 'hl:clearinghouse',
+  spot: 'hl:spot',
   perpMeta: 'hl:perp-meta',
   assetCtxs: 'hl:asset-ctxs',
 } as const;
@@ -50,6 +51,8 @@ export const HL_REVALIDATE_S = {
   allMids: 10,
   /** Positions change less often than marks but should stay fresh. */
   clearinghouse: 25,
+  /** Spot balances move only when funds are transferred — 25s is plenty. */
+  spot: 25,
   /** The perp universe (asset indices + szDecimals) changes very rarely. */
   perpMeta: 300,
   /** Funding/OI context for the rubric scan (~20min cadence) — 60s is ample. */
