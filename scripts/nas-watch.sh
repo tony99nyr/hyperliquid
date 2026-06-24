@@ -91,15 +91,22 @@ run_step "health watch (pnpm watch --once)" "$PNPM" watch --once
 # trader-watch daemon. NEVER trades.
 run_step "rubric scan (pnpm rubric --once)" "$PNPM" rubric --once
 
-# --- optional auto-exit poke (secret kept OUT of git) ---
+# --- Vercel pokes (same CRON_SECRET, kept OUT of git) ---
 SECRET="${AUTO_EXIT_CRON_SECRET:-}"
 [ -z "$SECRET" ] && [ -f "$REPO/.auto-exit-secret" ] && SECRET="$(cat "$REPO/.auto-exit-secret" 2>/dev/null | tr -d '\r\n')"
+RECONCILE_URL="${RECONCILE_URL:-https://hyperliquid-rouge.vercel.app/api/cron/reconcile-positions}"
 if [ -n "$SECRET" ]; then
   log "-> auto-exit poke ($AUTO_EXIT_URL)"
   curl -s -m 30 -H "Authorization: Bearer $SECRET" "$AUTO_EXIT_URL" 2>&1 | sed 's/^/   /'
   echo ""
+  # Position reconciliation — mirror the cockpit's positions to the REAL HL account
+  # (flatten/resync anything closed or changed directly in the HL app). NOT gated by
+  # AUTO_EXIT — it's a data sync, never a trade. Runs server-side where the address lives.
+  log "-> reconcile-positions poke ($RECONCILE_URL)"
+  curl -s -m 30 -H "Authorization: Bearer $SECRET" "$RECONCILE_URL" 2>&1 | sed 's/^/   /'
+  echo ""
 else
-  log "-> auto-exit poke SKIPPED (no AUTO_EXIT_CRON_SECRET env and no $REPO/.auto-exit-secret file)"
+  log "-> Vercel pokes SKIPPED (no AUTO_EXIT_CRON_SECRET env and no $REPO/.auto-exit-secret file)"
 fi
 
 if [ "$ERR" -eq 0 ]; then
