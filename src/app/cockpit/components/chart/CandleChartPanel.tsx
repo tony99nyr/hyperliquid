@@ -9,15 +9,16 @@
  * crash on `document`), so this panel is safe to render server-side as a shell.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { css } from '@styled-system/css';
 import type { CandleInterval } from '@/lib/hyperliquid/candle-service';
 import { useCandles } from '@/hooks/useCandles';
 import { useHlOrderbook } from '@/hooks/useHlOrderbook';
+import { useUrlParamState } from '@/hooks/useUrlParamState';
 import { detectMarketRegime } from '@/lib/strategy/analysis/market-regime-detector';
 import type { ActiveTrade, OpportunityLevels } from './candle-chart-helpers';
-import TimeframeTabs from './TimeframeTabs';
+import TimeframeTabs, { CHART_TIMEFRAMES } from './TimeframeTabs';
 import {
   GH,
   ZONE_COLORS,
@@ -58,7 +59,9 @@ export default function CandleChartPanel({
   opportunity = null,
   initialTimeframe = '15m',
 }: CandleChartPanelProps) {
-  const [timeframe, setTimeframe] = useState<CandleInterval>(initialTimeframe);
+  // Timeframe is mirrored to the `?tf=` URL param so refresh + back/forward retain
+  // the selection. SSR-safe: first render is `initialTimeframe`, then the URL wins.
+  const [timeframe, setTimeframe] = useUrlParamState<CandleInterval>('tf', initialTimeframe, CHART_TIMEFRAMES);
   const { candles, loading, stale, error } = useCandles(coin, timeframe);
   const { lastPx, stale: pxStale, status } = useHlOrderbook(coin);
 
