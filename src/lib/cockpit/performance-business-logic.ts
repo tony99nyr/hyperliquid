@@ -341,14 +341,18 @@ export function computeKpis(
  * render an absurd "-10149%". When properly anchored at real equity it never bites.
  */
 export function maxDrawdown(equity: EquityPoint[]): number {
+  // A series that touches/crosses <= 0 has a DEGENERATE baseline (it's a
+  // cumulative-P&L line anchored at ~0, not a real-equity curve) — peak-to-trough
+  // % is meaningless there (it's what produced "-10149%"). Don't fabricate a
+  // number; report 0 (the card already shows "Cumulative P&L", not "Account
+  // Equity", in that state). A real-equity-anchored curve stays positive.
+  if (equity.length === 0 || equity.some((p) => p.equity <= 0)) return 0;
   let peak = -Infinity;
   let maxDd = 0;
   for (const p of equity) {
     if (p.equity > peak) peak = p.equity;
-    if (peak > 0) {
-      const dd = Math.min(((peak - p.equity) / peak) * 100, 100);
-      if (dd > maxDd) maxDd = dd;
-    }
+    const dd = ((peak - p.equity) / peak) * 100; // peak > 0 guaranteed (all > 0)
+    if (dd > maxDd) maxDd = dd;
   }
   return maxDd;
 }

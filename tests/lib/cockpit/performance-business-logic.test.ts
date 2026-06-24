@@ -167,15 +167,27 @@ describe('performance-business-logic', () => {
       expect(maxDrawdown([{ t: 0, equity: 100 }, { t: 1, equity: 110 }])).toBe(0);
     });
 
-    it('CLAMPS to 100% off a near-zero/crossing-zero baseline (the -10149% bug)', () => {
+    it('returns 0 for a degenerate zero-crossing baseline (the -10149% bug)', () => {
       // A cumulative-P&L curve anchored at ~0: a tiny early positive peak then a
-      // dip below zero would otherwise yield a 10000%+ drawdown. Clamp at 100.
+      // dip below zero would otherwise yield a 10000%+ drawdown. The baseline is
+      // degenerate (not real equity) → report 0, not a fabricated huge percent.
       const series: EquityPoint[] = [
         { t: 0, equity: 0.13 }, // tiny positive peak
-        { t: 1, equity: -13.06 }, // dips well below zero
+        { t: 1, equity: -13.06 }, // dips below zero
         { t: 2, equity: 5 },
       ];
-      expect(maxDrawdown(series)).toBe(100);
+      expect(maxDrawdown(series)).toBe(0);
+    });
+
+    it('computes a REAL drawdown on a positive (real-equity-anchored) curve', () => {
+      // Anchored at real equity ~$200: a dip to $188 off a $201 peak ≈ 6.5%.
+      const series: EquityPoint[] = [
+        { t: 0, equity: 195 },
+        { t: 1, equity: 201 }, // peak
+        { t: 2, equity: 188 }, // -6.47%
+        { t: 3, equity: 200 },
+      ];
+      expect(maxDrawdown(series)).toBeCloseTo(6.4677, 3);
     });
   });
 
