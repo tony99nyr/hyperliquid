@@ -304,6 +304,70 @@ export async function getAccountPerformanceSummary(mode: TradingMode): Promise<P
   return { sessionId: '', ledger, kpis, equity, equityUsd, equityBreakdown, netPnlUsd, equity30dPct, generatedAt: now };
 }
 
+/**
+ * Performance for the autonomous SCOUT — folds only the scout's sessions
+ * (title='scout', paper) so the cockpit can show the scout's REAL track record
+ * (net paper P&L, closed trades, win rate, a cumulative-P&L curve over time),
+ * distinct from the operator's own trading. Paper has no live HL account, so the
+ * curve is a cumulative-P&L line anchored at 0 (equityUsd null → "Cumulative P&L"
+ * mode). Fail-soft: any I/O error returns an empty summary.
+ */
+export async function getScoutPerformanceSummary(): Promise<PerformanceSummary> {
+  const now = Date.now();
+  const empty: PerformanceSummary = {
+    sessionId: '',
+    ledger: [],
+    kpis: computeKpis([], {}, []),
+    equity: [],
+    equityUsd: null,
+    equityBreakdown: null,
+    netPnlUsd: 0,
+    equity30dPct: null,
+    generatedAt: now,
+  };
+
+  let fills: CanonicalFill[] = [];
+  const leverageByCoin: Record<string, number | null> = {};
+  try {
+    const supabase = getServiceRoleClient();
+    const { data: sessRows } = await supabase.from('sessions').select('id').eq('title', 'scout');
+    const ids = (sessRows ?? []).map((r) => (r as { id: string }).id);
+    if (ids.length === 0) return empty;
+    const { data: fillRows } = await supabase
+      .from('fills')
+      .select(FILL_COLUMNS)
+      .in('session_id', ids)
+      .order('filled_at', { ascending: true })
+      .limit(5000);
+    fills = (fillRows ?? []).map((r) => fillFromRow(r as FillSelectRow));
+    const { data: posRows } = await supabase.from('positions').select('coin, leverage').in('session_id', ids);
+    for (const row of posRows ?? []) {
+      const r = row as { coin: string; leverage: number | null };
+      leverageByCoin[r.coin.trim().toUpperCase()] = r.leverage ?? null;
+    }
+  } catch {
+    return empty;
+  }
+  if (fills.length === 0) return empty;
+
+  let marks: MarkMap = {};
+  try {
+    marks = await fetchAllMids();
+  } catch {
+    marks = {};
+  }
+
+  const ledger = buildLedger(fills, marks, now, leverageByCoin, operatorTz());
+  const realized = ledger.filter((t) => t.status !== 'open').reduce((s, t) => s + t.pnlUsd - t.feesUsd, 0);
+  const openUnrealized = ledger.filter((t) => t.status === 'open').reduce((s, t) => s + t.pnlUsd, 0);
+  const netPnlUsd = realized + openUnrealized;
+  // Paper: cumulative-P&L curve anchored at 0 (no real account). The curve shows
+  // the scout's P&L trajectory over the last 30 days.
+  const equity = buildEquitySeries(ledger, netPnlUsd, now, 30);
+  const kpis = computeKpis(ledger, marks, equity);
+  return { sessionId: '', ledger, kpis, equity, equityUsd: null, equityBreakdown: null, netPnlUsd, equity30dPct: null, generatedAt: now };
+}
+
 export async function getActivePerformanceSummary(
   requestedSessionId: string | null,
 ): Promise<ActivePerformanceResult> {

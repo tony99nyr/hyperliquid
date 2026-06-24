@@ -12,11 +12,14 @@
 
 import { useEffect, useState } from 'react';
 import { css } from '@styled-system/css';
+import { ResponsiveContainer, AreaChart, Area, YAxis } from 'recharts';
 import { useScoutHypotheses } from '@/hooks/useScoutHypotheses';
 import { useScoutHeartbeat } from '@/hooks/useScoutHeartbeat';
 import { useScoutSessionIds } from '@/hooks/useScoutSessionIds';
+import { useScoutPerformance } from '@/hooks/useScoutPerformance';
 import { usePositionPnl } from '@/hooks/usePositionPnl';
 import type { PositionRow, PnlSnapshot } from '@/hooks/realtime-row-mappers';
+import type { PerformanceSummary } from '@/lib/cockpit/performance-service';
 import type { Hypothesis } from '@/types/cockpit';
 import { panelSurface, GH, ZONE_COLORS, fmtUsd, fmtPx } from './panel-styles';
 import { userPositionDisplay } from './position-panel-helpers';
@@ -31,14 +34,24 @@ export interface ScoutPanelProps {
   hypsOverride?: Hypothesis[];
   /** Test/RSC seed: render fixed open positions instead of subscribing. */
   positionsOverride?: { positions: PositionRow[]; latestPnlByCoin: Record<string, PnlSnapshot> };
+  /** Test/RSC seed: render this scout track record instead of fetching. */
+  perfOverride?: PerformanceSummary | null;
 }
 
-export default function ScoutPanel({ hypsOverride, positionsOverride }: ScoutPanelProps) {
+export default function ScoutPanel({ hypsOverride, positionsOverride, perfOverride }: ScoutPanelProps) {
   const controlled = hypsOverride !== undefined;
   const live = useScoutHypotheses({ enabled: !controlled });
   const hyps = hypsOverride ?? live.rows;
   const stats = scoutStats(hyps);
-  const winRatePct = stats.winRate == null ? '—' : `${Math.round(stats.winRate * 100)}%`;
+
+  // The scout's REAL trading track record (net paper P&L + win rate + a 30d
+  // cumulative-P&L curve), folded server-side from the scout's own fills. This is
+  // "how it's done over time" — distinct from the thesis outcomes below.
+  const perfState = useScoutPerformance({ enabled: perfOverride === undefined && !controlled });
+  const perf = perfOverride !== undefined ? perfOverride : perfState.summary;
+  const k = perf?.kpis;
+  const tradeWinPct = k && k.closedCount > 0 ? `${k.winRatePct.toFixed(0)}%` : '—';
+  const curve = perf?.equity ?? [];
 
   // The scout's OWN open positions: the active scout session (latestId) → its
   // folded positions + latest pnl snapshots. Read-only (the scout trades itself);
@@ -85,15 +98,49 @@ export default function ScoutPanel({ hypsOverride, positionsOverride }: ScoutPan
         </span>
       </header>
 
-      {/* summary: open theses / W-L / win-rate */}
-      <div className={css({ display: 'flex', gap: '14px', fontFamily: 'mono', fontSize: '11px' })}>
-        <span className={css({ color: 'github.textMuted' })}>theses <span style={{ color: GH.textBright }}>{stats.open}</span></span>
-        <span className={css({ color: 'github.textMuted' })}>
-          <span style={{ color: ZONE_COLORS.ok }}>{stats.wins}W</span>
-          {' / '}
-          <span style={{ color: ZONE_COLORS.danger }}>{stats.losses}L</span>
-        </span>
-        <span className={css({ color: 'github.textMuted' })}>win-rate <span style={{ color: GH.textBright }}>{winRatePct}</span></span>
+      {/* REAL track record — net paper P&L + trades + win rate + a 30d curve */}
+      <div data-testid="scout-track-record" className={css({ display: 'flex', flexDirection: 'column', gap: '7px' })}>
+        <div className={css({ display: 'flex', alignItems: 'baseline', gap: '12px', fontFamily: 'mono' })}>
+          <div className={css({ display: 'flex', flexDirection: 'column' })}>
+            <span className={css({ fontFamily: 'label', fontSize: '8.5px', fontWeight: 'bold', letterSpacing: '0.07em', textTransform: 'uppercase', color: 'cockpit.faint' })}>Net P&amp;L (paper)</span>
+            <span data-testid="scout-net-pnl" style={{ color: k == null ? GH.textMuted : k.netPnlUsd >= 0 ? ZONE_COLORS.ok : ZONE_COLORS.danger, fontFeatureSettings: '"tnum"' }} className={css({ fontSize: '17px', fontWeight: 'semibold' })}>
+              {k == null ? '—' : fmtUsd(k.netPnlUsd)}
+            </span>
+          </div>
+          <div className={css({ flex: 1 })} />
+          <div className={css({ display: 'flex', gap: '12px', fontSize: '11px' })}>
+            <span className={css({ color: 'github.textMuted' })}>trades <span style={{ color: GH.textBright }}>{k?.closedCount ?? '—'}</span></span>
+            <span className={css({ color: 'github.textMuted' })}>
+              <span style={{ color: ZONE_COLORS.ok }}>{k?.winCount ?? 0}W</span>
+              {' / '}
+              <span style={{ color: ZONE_COLORS.danger }}>{k?.lossCount ?? 0}L</span>
+            </span>
+            <span className={css({ color: 'github.textMuted' })}>win <span style={{ color: GH.textBright }}>{tradeWinPct}</span></span>
+          </div>
+        </div>
+        {curve.length > 1 && (() => {
+          // Color the curve by the net result so a losing scout doesn't read as a
+          // healthy green line (honest legibility).
+          const down = (k?.netPnlUsd ?? 0) < 0;
+          const stroke = down ? '#f24d5e' : '#19c98a';
+          const fillRgb = down ? '242,77,94' : '25,201,138';
+          return (
+            <div data-testid="scout-sparkline" data-down={down} style={{ height: 40 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={curve} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
+                  <defs>
+                    <linearGradient id="scout-spark-fill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={`rgba(${fillRgb},0.30)`} />
+                      <stop offset="100%" stopColor={`rgba(${fillRgb},0)`} />
+                    </linearGradient>
+                  </defs>
+                  <YAxis hide domain={['dataMin', 'dataMax']} />
+                  <Area type="monotone" dataKey="equity" stroke={stroke} strokeWidth={1.4} fill="url(#scout-spark-fill)" isAnimationActive={false} dot={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          );
+        })()}
       </div>
 
       {/* open positions the scout is holding right now */}
@@ -117,8 +164,14 @@ export default function ScoutPanel({ hypsOverride, positionsOverride }: ScoutPan
         )}
       </div>
 
-      {/* recent theses feed */}
-      <div className={css({ display: 'flex', flexDirection: 'column', gap: '5px' })}>
+      {/* recent theses feed — the scout's reasoning (distinct from trade P&L above) */}
+      <div className={css({ display: 'flex', flexDirection: 'column', gap: '5px', borderTop: '1px solid token(colors.github.borderSubtle)', paddingTop: '9px' })}>
+        <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' })}>
+          <span className={css({ fontFamily: 'label', fontSize: '9px', fontWeight: 'bold', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'github.textMuted' })}>
+            Theses <span style={{ color: GH.textBright }}>· {hyps.length}</span>
+          </span>
+          <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'cockpit.faint' })}>{stats.open} open</span>
+        </div>
         {error ? (
           <span data-testid="scout-error" className={css({ fontFamily: 'mono', fontSize: '10px', color: 'zone.warn' })}>
             scout feed unavailable

@@ -2,6 +2,26 @@ import { describe, it, expect } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import ScoutPanel from '@/app/cockpit/components/ScoutPanel';
 import type { PnlSnapshot, PositionRow } from '@/hooks/realtime-row-mappers';
+import type { PerformanceSummary } from '@/lib/cockpit/performance-service';
+
+function perf(over: Partial<PerformanceSummary['kpis']> = {}): PerformanceSummary {
+  return {
+    sessionId: '',
+    ledger: [],
+    kpis: {
+      netPnlUsd: 39.73, closedCount: 12, winRatePct: 50, winCount: 6, lossCount: 6,
+      profitFactor: 1.4, todayPnlUsd: 0, avgTradeUsd: 3.31, maxDrawdownPct: 8, feesUsd: 1.2,
+      openExposureUsd: 0, openCount: 0, ...over,
+    },
+    equity: [
+      { t: 1, equity: 0 }, { t: 2, equity: 12 }, { t: 3, equity: 39.73 },
+    ],
+    equityUsd: null,
+    netPnlUsd: 39.73,
+    equity30dPct: null,
+    generatedAt: 0,
+  };
+}
 
 function position(over: Partial<PositionRow> = {}): PositionRow {
   return {
@@ -72,5 +92,23 @@ describe('ScoutPanel — open positions', () => {
     );
     expect(screen.getByTestId('scout-positions')).toBeTruthy();
     expect(screen.getByTestId('scout-empty')).toBeTruthy(); // no theses → empty feed line
+  });
+});
+
+describe('ScoutPanel — track record', () => {
+  it('shows real net P&L, trade count and win rate from the perf fold', () => {
+    render(<ScoutPanel hypsOverride={[]} positionsOverride={{ positions: [], latestPnlByCoin: {} }} perfOverride={perf()} />);
+    const tr = screen.getByTestId('scout-track-record');
+    expect(screen.getByTestId('scout-net-pnl').textContent).toContain('39.73');
+    expect(tr.textContent).toContain('12'); // trades
+    expect(tr.textContent).toContain('6W');
+    expect(tr.textContent).toContain('50%'); // win rate
+    expect(screen.getByTestId('scout-sparkline')).toBeTruthy();
+  });
+
+  it('shows "—" net P&L when the scout has no track record yet', () => {
+    render(<ScoutPanel hypsOverride={[]} positionsOverride={{ positions: [], latestPnlByCoin: {} }} perfOverride={null} />);
+    expect(screen.getByTestId('scout-net-pnl').textContent).toBe('—');
+    expect(screen.queryByTestId('scout-sparkline')).toBeNull();
   });
 });
