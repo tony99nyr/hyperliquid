@@ -67,4 +67,42 @@ describe('reconcilePositions', () => {
   it('the dust floor constant is $1', () => {
     expect(RECONCILE_MIN_DELTA_USD).toBe(1);
   });
+
+  it('FLATTENS even when px is 0 (no entry known) — a phantom must clear regardless', () => {
+    const cockpit = [cp({ coin: 'SOL', side: 'short', sz: 18, avgEntryPx: 0 })];
+    const actions = reconcilePositions(cockpit, []); // HL flat, px=0
+    expect(actions).toHaveLength(1);
+    expect(actions[0].reason).toBe('flatten');
+  });
+
+  it('RESYNCS UP when HL holds MORE than the cockpit recorded', () => {
+    const cockpit = [cp({ coin: 'ETH', side: 'long', sz: 1, avgEntryPx: 2000 })];
+    const hl: HlPos[] = [{ coin: 'ETH', szi: 2.5, entryPx: 2000 }];
+    const actions = reconcilePositions(cockpit, hl);
+    expect(actions[0].reason).toBe('resync');
+    expect(actions[0].target.sz).toBe(2.5);
+  });
+
+  describe('freshness guard (cache-lag race)', () => {
+    const hlFlat: HlPos[] = []; // HL holds nothing
+
+    it('does NOT flatten a row written within the freshness window', () => {
+      const now = 1_000_000;
+      const cockpit = [cp({ coin: 'SOL', side: 'short', sz: 18, avgEntryPx: 69, updatedAtMs: now - 10_000 })]; // 10s old
+      expect(reconcilePositions(cockpit, hlFlat, { nowMs: now })).toEqual([]); // too fresh → skipped
+    });
+
+    it('DOES flatten a row older than the freshness window (a real manual-HL close)', () => {
+      const now = 1_000_000;
+      const cockpit = [cp({ coin: 'SOL', side: 'short', sz: 18, avgEntryPx: 69, updatedAtMs: now - 120_000 })]; // 2m old
+      const actions = reconcilePositions(cockpit, hlFlat, { nowMs: now });
+      expect(actions).toHaveLength(1);
+      expect(actions[0].reason).toBe('flatten');
+    });
+
+    it('without nowMs the guard is inert (back-compat)', () => {
+      const cockpit = [cp({ coin: 'SOL', side: 'short', sz: 18, avgEntryPx: 69, updatedAtMs: 5 })];
+      expect(reconcilePositions(cockpit, hlFlat)).toHaveLength(1); // no nowMs → not skipped
+    });
+  });
 });

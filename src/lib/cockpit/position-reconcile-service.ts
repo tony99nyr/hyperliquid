@@ -26,6 +26,9 @@ export interface ReconcileSummary {
   checked: number;
   flattened: number;
   resynced: number;
+  /** True when a run would flatten EVERY live position (≥2) — a likely wrong-account
+   *  (agent vs master) or HL-outage signature. Surfaced + alerted, not blocked. */
+  suspicious?: boolean;
 }
 
 export async function reconcileLivePositions(client: SupabaseClient = getServiceRoleClient()): Promise<ReconcileSummary> {
@@ -50,15 +53,41 @@ export async function reconcileLivePositions(client: SupabaseClient = getService
 
   const { data: posRows } = await client
     .from('positions')
-    .select('session_id, coin, side, sz, avg_entry_px')
+    .select('session_id, coin, side, sz, avg_entry_px, updated_at')
     .neq('side', 'flat')
     .in('session_id', ids);
   const cockpit: CockpitPos[] = (posRows ?? []).map((r) => {
-    const row = r as { session_id: string; coin: string; side: 'long' | 'short' | 'flat'; sz: number; avg_entry_px: number };
-    return { sessionId: row.session_id, coin: row.coin, side: row.side, sz: row.sz, avgEntryPx: row.avg_entry_px };
+    const row = r as { session_id: string; coin: string; side: 'long' | 'short' | 'flat'; sz: number; avg_entry_px: number; updated_at: string };
+    const t = Date.parse(row.updated_at);
+    return { sessionId: row.session_id, coin: row.coin, side: row.side, sz: row.sz, avgEntryPx: row.avg_entry_px, updatedAtMs: Number.isFinite(t) ? t : undefined };
   });
 
-  const actions = reconcilePositions(cockpit, hl);
+  // nowMs feeds the PURE freshness guard — a just-written row (mid-settlement / behind
+  // the clearinghouse cache) is not reconciled, so a real new position can't be flattened.
+  const actions = reconcilePositions(cockpit, hl, { nowMs: Date.now() });
+
+  // BLAST-RADIUS TRIPWIRE: flattening EVERY live position (≥2) in one run is the
+  // signature of a wrong HL_ACCOUNT_ADDRESS (agent vs master → empty account) or an HL
+  // outage. Most often it's a legit full-close, so we ALERT + flag (never block — a
+  // block would leave the cockpit stuck showing positions that are really closed).
+  // NOTE: a freshness-skipped row makes flattenCount < cockpit.length, so a coincident
+  // just-opened position can suppress this alert — it only ever MISSES an alert, never
+  // causes a wrong flatten (the freshness guard already protected the fresh row).
+  const flattenCount = actions.filter((a) => a.reason === 'flatten').length;
+  const suspicious = flattenCount >= 2 && flattenCount === cockpit.length;
+  if (suspicious) {
+    try {
+      await writeAnalysisLog({
+        sessionId: actions[0]?.sessionId ?? ids[0],
+        source: 'reconcile',
+        severity: 'danger',
+        message: `RECONCILE flattened ALL ${cockpit.length} live positions in one run — if you did NOT just close everything, verify HL_ACCOUNT_ADDRESS is the MASTER account (not the agent) and that HL isn't degraded.`,
+      });
+    } catch {
+      /* non-critical */
+    }
+  }
+
   let flattened = 0;
   let resynced = 0;
   for (const a of actions) {
@@ -68,7 +97,7 @@ export async function reconcileLivePositions(client: SupabaseClient = getService
       .from('positions')
       .update({ side: a.target.side, sz: a.target.sz, avg_entry_px: a.target.avgEntryPx })
       .eq('session_id', a.sessionId)
-      .eq('coin', a.coin);
+      .eq('coin', a.coin.trim().toUpperCase());
     if (error) continue; // fail-soft per row
     if (a.reason === 'flatten') flattened++;
     else resynced++;
@@ -83,5 +112,5 @@ export async function reconcileLivePositions(client: SupabaseClient = getService
       /* non-critical */
     }
   }
-  return { skipped: false, checked: cockpit.length, flattened, resynced };
+  return { skipped: false, checked: cockpit.length, flattened, resynced, suspicious };
 }
