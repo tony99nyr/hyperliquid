@@ -206,4 +206,28 @@ describe('pnl-business-logic', () => {
       expect(p.realizedPnlUsd).toBe(300); // closed 1 @ 2400 vs avg 2100
     });
   });
+
+  describe('dust guard (sub-lot residual → flat)', () => {
+    it('a reduce-only close leaving a sub-$1 residual folds to FLAT (the SOL-dust bug)', () => {
+      // Short 18.08 SOL @ $69.11, reduce-only buy 18.07 back → 0.00999… SOL (~$0.69) left.
+      let p = applyFill(emptyPosition('SOL'), fill({ coin: 'SOL', side: 'sell', px: 69.11, sz: 18.08 }));
+      expect(p.side).toBe('short');
+      p = applyFill(p, fill({ coin: 'SOL', side: 'buy', px: 69.11, sz: 18.07, reduceOnly: true }));
+      expect(p.side).toBe('flat');
+      expect(p.sz).toBe(0);
+      expect(p.avgEntryPx).toBe(0);
+    });
+
+    it('does NOT flatten a residual ABOVE the dust floor (1 SOL ≈ $69 stays open)', () => {
+      let p = applyFill(emptyPosition('SOL'), fill({ coin: 'SOL', side: 'sell', px: 69, sz: 18 }));
+      p = applyFill(p, fill({ coin: 'SOL', side: 'buy', px: 69, sz: 17, reduceOnly: true }));
+      expect(p.side).toBe('short');
+      expect(p.sz).toBeCloseTo(1, 6);
+    });
+
+    it('an OPENING (non-reduce-only) sub-$1 fill is NOT dust-flattened', () => {
+      const p = applyFill(emptyPosition('SOL'), fill({ coin: 'SOL', side: 'sell', px: 69, sz: 0.001 }));
+      expect(p.side).toBe('short'); // guard is reduce-only only — opens are never dusted
+    });
+  });
 });

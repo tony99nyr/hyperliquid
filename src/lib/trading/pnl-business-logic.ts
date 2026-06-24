@@ -64,6 +64,12 @@ function clampReduceOnlySize(fill: CanonicalFill, beforeSigned: number): number 
  * - Fees always accumulate into feesPaidUsd (and reduce net realized via the
  *   caller's reporting; here we track gross realized + fees separately).
  */
+/** Notional ($) below which a leftover position is DUST: a sub-lot / floating-point
+ *  residual HL can't trade (the close rounds below the lot size), which would
+ *  otherwise linger as a phantom open position. Cockpit positions are risk-based
+ *  (≫ $1), so a sub-$1 residual is unambiguously dust, never a real position. */
+const DUST_NOTIONAL_USD = 1;
+
 export function applyFill(pos: Position, fill: CanonicalFill): Position {
   if (fill.coin !== pos.coin) {
     throw new Error(
@@ -123,10 +129,20 @@ export function applyFill(pos: Position, fill: CanonicalFill): Position {
     }
   }
 
+  // DUST GUARD: a reduce-only close can leave a sub-lot / floating-point residual
+  // (e.g. 0.00999 SOL ≈ $0.69) that HL CANNOT trade — it rounds below the lot size,
+  // so the cockpit could never close it and it lingered as a phantom open position.
+  // Fold a residual whose notional is below the dust floor to FLAT (fully closed).
+  let finalSigned = afterSigned;
+  if (fill.reduceOnly && finalSigned !== 0 && Math.abs(finalSigned) * (avgEntryPx || fill.px) < DUST_NOTIONAL_USD) {
+    finalSigned = 0;
+    avgEntryPx = 0;
+  }
+
   return {
     coin: pos.coin,
-    side: sideFromSigned(afterSigned),
-    sz: Math.abs(afterSigned),
+    side: sideFromSigned(finalSigned),
+    sz: Math.abs(finalSigned),
     avgEntryPx,
     realizedPnlUsd,
     feesPaidUsd,
