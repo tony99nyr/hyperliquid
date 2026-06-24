@@ -271,6 +271,25 @@ function EquityCard({ summary }: { summary: PerformanceSummary }) {
           </span>
         )}
       </div>
+      {hasRealEquity && summary.equityBreakdown && (
+        <div
+          data-testid="equity-breakdown"
+          className={css({ display: 'flex', gap: '16px', padding: '9px 15px 0', fontFamily: 'mono', fontSize: '11px', flexWrap: 'wrap' })}
+        >
+          <span style={{ color: '#586273' }}>
+            cash (spot){' '}
+            <span style={{ color: '#9aa4b5', ...TNUM }}>
+              {summary.equityBreakdown.spotUsd == null ? '—' : `$${fmtMoney(summary.equityBreakdown.spotUsd)}`}
+            </span>
+          </span>
+          <span style={{ color: '#586273' }}>
+            perp (margin + uPnL){' '}
+            <span style={{ color: '#9aa4b5', ...TNUM }}>
+              {summary.equityBreakdown.perpUsd == null ? '—' : `$${fmtMoney(summary.equityBreakdown.perpUsd)}`}
+            </span>
+          </span>
+        </div>
+      )}
       <div style={{ height: 280, padding: '8px 4px' }}>
         {summary.equity.length === 0 ? (
           <div

@@ -106,6 +106,7 @@ export default function CockpitClient({
   // (derived server-side from the fills ledger; inert without a session).
   const perf = usePerformance(sessionId);
   const equityUsd = perf.summary?.equityUsd ?? null;
+  const equityBreakdown = perf.summary?.equityBreakdown ?? null;
   const todayUsd = perf.summary?.kpis.todayPnlUsd ?? null;
 
   // Feed-live indicator: a representative Supabase realtime channel's subscribe
@@ -136,6 +137,7 @@ export default function CockpitClient({
         onViewChange={setSurface}
         mode={mode}
         equityUsd={equityUsd}
+        equityBreakdown={equityBreakdown}
         todayUsd={todayUsd}
         feedLive={feedLive}
       />

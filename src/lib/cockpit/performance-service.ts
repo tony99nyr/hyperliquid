@@ -53,6 +53,15 @@ export interface PerformanceSummary {
    * anchor — the UI renders "—" when this is null.
    */
   equityUsd: number | null;
+  /**
+   * Breakdown of `equityUsd` into its HL components, so the headline number is
+   * legible (it blends spot cash + the margin on any open perp position):
+   *   - spotUsd: USDC sitting in the SPOT wallet (free cash).
+   *   - perpUsd: PERP account value = margin backing open positions + their uPnL
+   *     + any free perp USDC.
+   * Null when live equity is unknown (the card then shows "—" with no breakdown).
+   */
+  equityBreakdown?: { perpUsd: number | null; spotUsd: number | null } | null;
   /** Net realized + unrealized P&L (real, always known from the ledger). */
   netPnlUsd: number;
   /** 30-day equity change as a percent (vs the first point), or null when no real anchor. */
@@ -85,19 +94,31 @@ function realAccountBalance(): number | null {
  * that's genuinely empty shows "$0.00". A transient stale on ONE side treats that
  * side as 0 rather than hiding the known side.
  */
-async function fetchLiveAccountValue(): Promise<number | null> {
+interface LiveEquity {
+  /** perp value + spot USDC; null only when BOTH components are unknown. */
+  totalUsd: number | null;
+  perpUsd: number | null;
+  spotUsd: number | null;
+}
+
+async function fetchLiveAccountValue(): Promise<LiveEquity> {
   const addr = process.env.HL_ACCOUNT_ADDRESS?.trim();
-  if (!addr || !isValidHlAddress(addr)) return null;
+  if (!addr || !isValidHlAddress(addr)) return { totalUsd: null, perpUsd: null, spotUsd: null };
   try {
     const [ch, spotUsdc] = await Promise.all([fetchClearinghouseState(addr), fetchSpotUsdcBalance(addr)]);
     // Perp value: known only on a FRESH read (stale/garbage → unknown). >= 0 (not
     // > 0) so a flat-but-funded account counts as a real 0, not "unknown".
     const perpVal = !ch.stale && Number.isFinite(ch.accountValueUsd) && ch.accountValueUsd >= 0 ? ch.accountValueUsd : null;
-    if (perpVal === null && spotUsdc === null) return null; // both unknown → "—"
-    return (perpVal ?? 0) + (spotUsdc ?? 0);
+    const totalUsd = perpVal === null && spotUsdc === null ? null : (perpVal ?? 0) + (spotUsdc ?? 0);
+    return { totalUsd, perpUsd: perpVal, spotUsd: spotUsdc };
   } catch {
-    return null;
+    return { totalUsd: null, perpUsd: null, spotUsd: null };
   }
+}
+
+/** Breakdown for the summary, or null when no live component is known. */
+function equityBreakdownOf(live: LiveEquity): { perpUsd: number | null; spotUsd: number | null } | null {
+  return live.perpUsd === null && live.spotUsd === null ? null : { perpUsd: live.perpUsd, spotUsd: live.spotUsd };
 }
 
 /**
@@ -109,7 +130,9 @@ export async function getPerformanceSummary(sessionId: string): Promise<Performa
   // Live HL equity (real balance) takes precedence over the static env anchor for
   // the displayed value. Resolved once, fail-soft. Even with no trades this lets a
   // funded account show its real balance instead of "—".
-  const liveEquityUsd = await fetchLiveAccountValue();
+  const live = await fetchLiveAccountValue();
+  const liveEquityUsd = live.totalUsd;
+  const equityBreakdown = equityBreakdownOf(live);
   const emptyEquityUsd = liveEquityUsd ?? realAccountBalance();
   const empty: PerformanceSummary = {
     sessionId,
@@ -117,6 +140,7 @@ export async function getPerformanceSummary(sessionId: string): Promise<Performa
     kpis: computeKpis([], {}, []),
     equity: [],
     equityUsd: emptyEquityUsd,
+    equityBreakdown,
     netPnlUsd: 0,
     equity30dPct: emptyEquityUsd === null ? null : 0,
     generatedAt: now,
@@ -180,7 +204,7 @@ export async function getPerformanceSummary(sessionId: string): Promise<Performa
   const hasRealAnchor = liveEquityUsd !== null || realBalance !== null;
   const equity30dPct = !hasRealAnchor || first <= 0 ? null : (curveAnchor / first - 1) * 100;
 
-  return { sessionId, ledger, kpis, equity, equityUsd, netPnlUsd, equity30dPct, generatedAt: now };
+  return { sessionId, ledger, kpis, equity, equityUsd, equityBreakdown, netPnlUsd, equity30dPct, generatedAt: now };
 }
 
 /**
@@ -210,7 +234,9 @@ export type ActivePerformanceResult =
  */
 export async function getAccountPerformanceSummary(mode: TradingMode): Promise<PerformanceSummary> {
   const now = Date.now();
-  const liveEquityUsd = await fetchLiveAccountValue();
+  const live = await fetchLiveAccountValue();
+  const liveEquityUsd = live.totalUsd;
+  const equityBreakdown = equityBreakdownOf(live);
   const realBalance = realAccountBalance();
   const empty: PerformanceSummary = {
     sessionId: '',
@@ -218,6 +244,7 @@ export async function getAccountPerformanceSummary(mode: TradingMode): Promise<P
     kpis: computeKpis([], {}, []),
     equity: [],
     equityUsd: liveEquityUsd ?? realBalance,
+    equityBreakdown,
     netPnlUsd: 0,
     equity30dPct: (liveEquityUsd ?? realBalance) === null ? null : 0,
     generatedAt: now,
@@ -274,7 +301,7 @@ export async function getAccountPerformanceSummary(mode: TradingMode): Promise<P
   const hasRealAnchor = liveEquityUsd !== null || realBalance !== null;
   const equity30dPct = !hasRealAnchor || first <= 0 ? null : (curveAnchor / first - 1) * 100;
 
-  return { sessionId: '', ledger, kpis, equity, equityUsd, netPnlUsd, equity30dPct, generatedAt: now };
+  return { sessionId: '', ledger, kpis, equity, equityUsd, equityBreakdown, netPnlUsd, equity30dPct, generatedAt: now };
 }
 
 export async function getActivePerformanceSummary(

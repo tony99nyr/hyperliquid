@@ -63,6 +63,22 @@ describe('PerformanceView', () => {
     expect(statuses).toEqual(new Set(['OPEN', 'WIN', 'LOSS']));
   });
 
+  it('shows the equity breakdown (spot cash + perp) when present', () => {
+    const s = summary();
+    s.equityBreakdown = { spotUsd: 196.21, perpUsd: 167.59 };
+    render(<PerformanceView sessionId={null} summaryOverride={s} />);
+    const bd = screen.getByTestId('equity-breakdown');
+    expect(bd.textContent).toContain('196.21');
+    expect(bd.textContent).toContain('167.59');
+    expect(bd.textContent?.toLowerCase()).toContain('spot');
+    expect(bd.textContent?.toLowerCase()).toContain('perp');
+  });
+
+  it('omits the breakdown when absent (no real equity)', () => {
+    render(<PerformanceView sessionId={null} summaryOverride={summary()} />); // no equityBreakdown
+    expect(screen.queryByTestId('equity-breakdown')).toBeNull();
+  });
+
   it('renders profit factor "∞" when there are no losses (Infinity sentinel)', () => {
     const s = summary();
     s.kpis.profitFactor = Infinity;

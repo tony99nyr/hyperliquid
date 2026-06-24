@@ -21,6 +21,8 @@ export interface TopBarProps {
   mode: TradingMode;
   /** Current account equity (cash + unrealized), or null until known. */
   equityUsd: number | null;
+  /** Breakdown of equity into spot cash + perp value (for the hover tooltip). */
+  equityBreakdown?: { perpUsd: number | null; spotUsd: number | null } | null;
   /** Today's realized PnL, or null until known. */
   todayUsd: number | null;
   /** Realtime feed health for the pulsing dot. null = no active session → hidden
@@ -36,8 +38,13 @@ const NAV: { key: CockpitView; label: string }[] = [
   { key: 'scout', label: 'Scout' }, // PAPER — autonomous scout, kept separate from the LIVE cockpit
 ];
 
-export default function TopBar({ view, onViewChange, mode, equityUsd, todayUsd, feedLive }: TopBarProps) {
+export default function TopBar({ view, onViewChange, mode, equityUsd, equityBreakdown, todayUsd, feedLive }: TopBarProps) {
   const isLive = mode === 'live';
+  const fmt2 = (n: number) => `$${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+  const equityTitle =
+    equityBreakdown && (equityBreakdown.spotUsd != null || equityBreakdown.perpUsd != null)
+      ? `Total account equity${equityBreakdown.spotUsd != null ? ` · cash (spot) ${fmt2(equityBreakdown.spotUsd)}` : ''}${equityBreakdown.perpUsd != null ? ` · perp (margin + uPnL) ${fmt2(equityBreakdown.perpUsd)}` : ''}`
+      : undefined;
   return (
     <header
       data-testid="cockpit-topbar"
@@ -108,7 +115,7 @@ export default function TopBar({ view, onViewChange, mode, equityUsd, todayUsd, 
 
       {/* Right cluster */}
       <div className={css({ display: 'flex', alignItems: 'center', gap: { base: '14px', md: '22px' } })}>
-        <Metric label="Equity" value={equityUsd == null ? '—' : `$${equityUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}`} />
+        <Metric label="Equity" value={equityUsd == null ? '—' : `$${equityUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}`} title={equityTitle} />
         <Metric
           label="Today"
           value={todayUsd == null ? '—' : fmtUsd(todayUsd)}
@@ -154,9 +161,9 @@ export default function TopBar({ view, onViewChange, mode, equityUsd, todayUsd, 
   );
 }
 
-function Metric({ label, value, color }: { label: string; value: string; color?: string }) {
+function Metric({ label, value, color, title }: { label: string; value: string; color?: string; title?: string }) {
   return (
-    <div className={css({ textAlign: 'right' })}>
+    <div title={title} className={css({ textAlign: 'right' })}>
       <div className={css({ fontFamily: 'sans', fontSize: '10px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'cockpit.faint', fontWeight: 'semibold' })}>
         {label}
       </div>
