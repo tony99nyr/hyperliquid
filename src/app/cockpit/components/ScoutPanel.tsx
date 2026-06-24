@@ -2,18 +2,25 @@
 
 /**
  * ScoutPanel — the autonomous paper scout's track record at a glance. Shows the
- * scout's recent theses (what it decided) with win/loss outcomes + a summary, so
- * you can see on your phone whether the autonomous scout is finding edge — the
- * legibility half of "is this worth running?". Reads the global `hypotheses` table
- * (realtime, zero client HL calls). The full $/bar scorecard is `pnpm scout:review`.
+ * scout's CURRENT OPEN POSITIONS (coin/side/size·lev/entry/uPnL) + its recent
+ * theses (what it decided) with win/loss outcomes + a summary, so you can see on
+ * your phone what the scout is holding and whether it's finding edge — the
+ * legibility half of "is this worth running?". Reads `hypotheses` + the scout
+ * session's `positions`/`pnl` (realtime, zero client HL calls). Read-only: the
+ * scout trades itself. The full $/bar scorecard is `pnpm scout:review`.
  */
 
 import { useEffect, useState } from 'react';
 import { css } from '@styled-system/css';
 import { useScoutHypotheses } from '@/hooks/useScoutHypotheses';
 import { useScoutHeartbeat } from '@/hooks/useScoutHeartbeat';
+import { useScoutSessionIds } from '@/hooks/useScoutSessionIds';
+import { usePositionPnl } from '@/hooks/usePositionPnl';
+import type { PositionRow, PnlSnapshot } from '@/hooks/realtime-row-mappers';
 import type { Hypothesis } from '@/types/cockpit';
-import { panelSurface, GH, ZONE_COLORS } from './panel-styles';
+import { panelSurface, GH, ZONE_COLORS, fmtUsd, fmtPx } from './panel-styles';
+import { userPositionDisplay } from './position-panel-helpers';
+import { uPnlPct } from './open-positions-helpers';
 import { scoutStats, statusMeta } from './scout-panel-helpers';
 
 /** A daemon silent longer than this is presumed dead/hung (crash, OAuth expiry). */
@@ -22,13 +29,26 @@ const HEARTBEAT_STALE_MS = 5 * 60 * 1000;
 export interface ScoutPanelProps {
   /** Test/RSC seed: render fixed theses instead of subscribing. */
   hypsOverride?: Hypothesis[];
+  /** Test/RSC seed: render fixed open positions instead of subscribing. */
+  positionsOverride?: { positions: PositionRow[]; latestPnlByCoin: Record<string, PnlSnapshot> };
 }
 
-export default function ScoutPanel({ hypsOverride }: ScoutPanelProps) {
-  const live = useScoutHypotheses({ enabled: hypsOverride === undefined });
+export default function ScoutPanel({ hypsOverride, positionsOverride }: ScoutPanelProps) {
+  const controlled = hypsOverride !== undefined;
+  const live = useScoutHypotheses({ enabled: !controlled });
   const hyps = hypsOverride ?? live.rows;
   const stats = scoutStats(hyps);
   const winRatePct = stats.winRate == null ? '—' : `${Math.round(stats.winRate * 100)}%`;
+
+  // The scout's OWN open positions: the active scout session (latestId) → its
+  // folded positions + latest pnl snapshots. Read-only (the scout trades itself);
+  // legibility only. Seeded via positionsOverride in tests/RSC.
+  const { latestId } = useScoutSessionIds(!controlled);
+  const livePos = usePositionPnl(positionsOverride || controlled ? null : latestId);
+  const positions = positionsOverride ? positionsOverride.positions : livePos.positions;
+  const pnlByCoin = positionsOverride ? positionsOverride.latestPnlByCoin : livePos.latestPnlByCoin;
+  const openPos = positions.filter((p) => p.side !== 'flat');
+  const totalUpnl = openPos.reduce((s, p) => s + (userPositionDisplay(p, pnlByCoin[p.coin]).unrealizedPnlUsd ?? 0), 0);
   // Distinguish "still loading" from "genuinely empty" so the feed doesn't flash a
   // false "no theses yet" before the snapshot resolves. Overrides are always ready.
   const loading = hypsOverride === undefined && !live.loaded;
@@ -65,15 +85,36 @@ export default function ScoutPanel({ hypsOverride }: ScoutPanelProps) {
         </span>
       </header>
 
-      {/* summary: open / W-L / win-rate */}
+      {/* summary: open theses / W-L / win-rate */}
       <div className={css({ display: 'flex', gap: '14px', fontFamily: 'mono', fontSize: '11px' })}>
-        <span className={css({ color: 'github.textMuted' })}>open <span style={{ color: GH.textBright }}>{stats.open}</span></span>
+        <span className={css({ color: 'github.textMuted' })}>theses <span style={{ color: GH.textBright }}>{stats.open}</span></span>
         <span className={css({ color: 'github.textMuted' })}>
           <span style={{ color: ZONE_COLORS.ok }}>{stats.wins}W</span>
           {' / '}
           <span style={{ color: ZONE_COLORS.danger }}>{stats.losses}L</span>
         </span>
         <span className={css({ color: 'github.textMuted' })}>win-rate <span style={{ color: GH.textBright }}>{winRatePct}</span></span>
+      </div>
+
+      {/* open positions the scout is holding right now */}
+      <div data-testid="scout-positions" className={css({ display: 'flex', flexDirection: 'column', gap: '6px', borderTop: '1px solid token(colors.github.borderSubtle)', paddingTop: '9px' })}>
+        <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' })}>
+          <span className={css({ fontFamily: 'label', fontSize: '9px', fontWeight: 'bold', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'github.textMuted' })}>
+            Open positions <span data-testid="scout-pos-count" style={{ color: GH.textBright }}>· {openPos.length}</span>
+          </span>
+          {openPos.length > 0 && (
+            <span data-testid="scout-pos-total" style={{ color: totalUpnl > 0 ? ZONE_COLORS.ok : totalUpnl < 0 ? ZONE_COLORS.danger : GH.textMuted, fontFeatureSettings: '"tnum"' }} className={css({ fontFamily: 'mono', fontSize: '11px', fontWeight: 'medium' })}>
+              {fmtUsd(totalUpnl)}
+            </span>
+          )}
+        </div>
+        {openPos.length === 0 ? (
+          <span data-testid="scout-pos-flat" className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>
+            flat — no open positions
+          </span>
+        ) : (
+          openPos.map((p) => <ScoutPositionRow key={p.coin} pos={p} pnl={pnlByCoin[p.coin]} />)
+        )}
       </div>
 
       {/* recent theses feed */}
@@ -103,5 +144,30 @@ export default function ScoutPanel({ hypsOverride }: ScoutPanelProps) {
         )}
       </div>
     </section>
+  );
+}
+
+/** One compact, read-only row for an open scout position: side · size·lev ·
+ *  entry · uPnL. Mirrors the OpenPositionsPanel display fields (no actions). */
+function ScoutPositionRow({ pos, pnl }: { pos: PositionRow; pnl: PnlSnapshot | undefined }) {
+  const d = userPositionDisplay(pos, pnl);
+  const sideColor = d.side === 'long' ? ZONE_COLORS.ok : ZONE_COLORS.danger;
+  const pct = uPnlPct(d.side, d.entryPx, d.markPx);
+  const upnl = d.unrealizedPnlUsd;
+  const upnlColor = upnl == null ? GH.textMuted : upnl >= 0 ? ZONE_COLORS.ok : ZONE_COLORS.danger;
+  return (
+    <div data-testid="scout-position-row" data-coin={pos.coin} className={css({ display: 'flex', alignItems: 'baseline', gap: '8px', fontFamily: 'mono', fontSize: '10px' })}>
+      <span className={css({ color: 'github.textBright', fontWeight: 'semibold', width: '38px', flexShrink: 0 })}>{pos.coin}</span>
+      <span data-testid="scout-pos-side" style={{ color: sideColor }} className={css({ fontFamily: 'label', fontSize: '9px', fontWeight: 'bold', letterSpacing: '0.04em', width: '34px', flexShrink: 0 })}>
+        {d.side.toUpperCase()}
+      </span>
+      <span className={css({ color: 'github.textMuted', flexShrink: 0 })}>
+        {pos.sz.toLocaleString('en-US', { maximumFractionDigits: 4 })}{d.leverage != null ? ` · ${d.leverage}×` : ''}
+      </span>
+      <span className={css({ color: 'cockpit.faint', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })}>@ {fmtPx(d.entryPx)}</span>
+      <span data-testid="scout-pos-upnl" style={{ color: upnlColor, fontFeatureSettings: '"tnum"', flexShrink: 0 }}>
+        {upnl == null ? '—' : fmtUsd(upnl)}{pct == null ? '' : ` (${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%)`}
+      </span>
+    </div>
   );
 }

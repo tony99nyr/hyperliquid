@@ -8,10 +8,10 @@
  * HL calls. Mirrors useRubricScores (realtime, enabled-gated).
  */
 
-import { useEffect, useMemo, useState } from 'react';
-import { getBrowserClient } from '@/lib/cockpit/supabase-browser';
+import { useMemo } from 'react';
 import { mapHypothesisRow, byCreatedAtDesc } from './realtime-row-mappers';
 import { useRealtimeTable, type RealtimeTableState } from './useRealtimeTable';
+import { useScoutSessionIds } from './useScoutSessionIds';
 import type { Hypothesis } from '@/types/cockpit';
 
 export function useScoutHypotheses(opts: { enabled?: boolean } = {}): RealtimeTableState<Hypothesis> {
@@ -27,27 +27,9 @@ export function useScoutHypotheses(opts: { enabled?: boolean } = {}): RealtimeTa
     enabled,
   });
 
-  // Scout session ids (title='scout') — fetched once + refreshed so new scout
-  // sessions are picked up. null until the first fetch resolves (drives loading).
-  const [scoutIds, setScoutIds] = useState<Set<string> | null>(null);
-  useEffect(() => {
-    if (!enabled) return;
-    let cancelled = false;
-    const fetchIds = async () => {
-      try {
-        const { data } = await getBrowserClient().from('sessions').select('id').eq('title', 'scout');
-        if (!cancelled) setScoutIds(new Set((data ?? []).map((r) => (r as { id: string }).id)));
-      } catch {
-        if (!cancelled) setScoutIds(new Set());
-      }
-    };
-    void fetchIds();
-    const t = setInterval(() => void fetchIds(), 60_000);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
-  }, [enabled]);
+  // Scout session ids (title='scout', shared hook) — null until the first fetch
+  // resolves (drives loading so the feed doesn't flash a false "no theses yet").
+  const { set: scoutIds } = useScoutSessionIds(enabled);
 
   const rows = useMemo(
     () => (scoutIds == null ? [] : all.rows.filter((h) => scoutIds.has(h.sessionId))),
