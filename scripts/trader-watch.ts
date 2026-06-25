@@ -127,6 +127,9 @@ async function runOneCycle(
     const result = await runLeaderWatchCycle(prior, {
       config: { topN },
       shouldStop,
+      // Copy-trading pivot: watch the operator's favorites ∪ active-follow leaders
+      // (seeded from top-composite on first run), not the static top-N. The cost cut.
+      useFavorites: true,
     });
 
     const shortOf = new Map(getTopTraders(topN).map((t) => [t.address, t.short]));
