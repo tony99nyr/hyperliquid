@@ -41,7 +41,7 @@ import BottomStatusBar from './components/shell/BottomStatusBar';
 import BottomTabBar from './components/shell/BottomTabBar';
 import CockpitView from './components/CockpitView';
 import PerformanceView from './components/performance/PerformanceView';
-import TopTradersRail from './components/left-rail/TopTradersRail';
+import TradersTable from './components/left-rail/TradersTable';
 import ScoutPanel from './components/ScoutPanel';
 import type { RatingsFreshness } from './components/left-rail/ratings-freshness-helpers';
 import ApprovalPopup from './components/ApprovalPopup';
@@ -183,8 +183,8 @@ export default function CockpitClient({
           data-testid="traders-view"
           className={css({ flex: 1, overflowY: 'auto', padding: '12px' })}
         >
-          <div className={css({ maxWidth: '760px', marginX: 'auto' })}>
-            <TopTradersRail traders={topTraders} followedAddress={leaderAddress} ratings={ratings} />
+          <div className={css({ maxWidth: '1100px', marginX: 'auto' })}>
+            <TradersTable traders={topTraders} followedAddress={leaderAddress} ratings={ratings} />
           </div>
         </section>
       ) : (

@@ -2,7 +2,7 @@
 
 /**
  * TraderDetailDrawer — the "is this trader safe to follow?" detail panel, opened
- * by clicking a TopTradersRail row. Three reads, numbers-first:
+ * by clicking a TradersTable row. Three reads, numbers-first:
  *   1. LIVE positions — via useTraderPositions: read from the trade-watch feed
  *      (Supabase leader_positions) when the watcher covers this leader (zero HL
  *      load), else fetched on demand from HL. Per position side/coin/size/entry/

@@ -95,6 +95,18 @@ export function _resetHlBackoff(): void {
   consecutiveHlFailures = 0;
 }
 
+// Cold-start favorites seeding is attempted ONCE per process. After that, if the
+// operator empties their favorites the watch is respected as "watch nothing" rather
+// than silently re-seeding the top-12 every cycle (which would contradict the
+// "favorites = the watch set" model). A daemon restart re-attempts the seed so a
+// fresh process isn't left blind. Module-level so it survives across cycles.
+let favoritesSeedAttempted = false;
+
+/** Reset the once-per-process favorites-seed latch (test hook). */
+export function _resetFavoritesSeed(): void {
+  favoritesSeedAttempted = false;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -342,7 +354,10 @@ export async function runLeaderWatchCycle(
 
   let leaders: string[];
   if (opts.useFavorites) {
-    await seedFavoritesIfEmpty(client);
+    if (!favoritesSeedAttempted) {
+      await seedFavoritesIfEmpty(client);
+      favoritesSeedAttempted = true;
+    }
     leaders = await loadWatchSet(client);
     // Prune the in-memory baseline for leaders no longer watched, so a re-favorite
     // re-baselines silently (no phantom diff against a stale snapshot).

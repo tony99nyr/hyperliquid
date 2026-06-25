@@ -30,6 +30,22 @@ export interface TopTraderMetrics {
   medianHoldHours: number | null;
   nFills: number | null;
   worstLossVsMedianWin: number | null;
+  // Copyability "story" columns for the trader table (optional so existing slim
+  // fixtures stay valid; slimMetrics always populates them at runtime).
+  /** Net-of-cost return (the profitability headline). */
+  totalReturn?: number | null;
+  /** Adds per round-trip — the load-bearing cut-losers vs average-down discriminator. */
+  medianAddDepth?: number | null;
+  /** Deepest add stack on a single position (tail risk). */
+  maxAddDepth?: number | null;
+  /** Dry powder vs typical position (risk discipline). */
+  reserveMultiple?: number | null;
+  /** Concentration in majors (conviction). */
+  majorsShare?: number | null;
+  /** Liquidations on record (0 = clean). */
+  liquidations?: number | null;
+  /** Distinct coins traded (breadth vs concentration). */
+  distinctCoins?: number | null;
 }
 
 export interface TopTraderRow {
@@ -74,6 +90,13 @@ export function slimMetrics(m: RatedWalletMetrics): TopTraderMetrics {
     medianHoldHours: n(m.medianHoldHours),
     nFills: n(m.nFills),
     worstLossVsMedianWin: n(m.worstLossVsMedianWin),
+    totalReturn: n(m.totalReturn),
+    medianAddDepth: n(m.medianAddDepth),
+    maxAddDepth: n(m.maxAddDepth),
+    reserveMultiple: n(m.reserveMultiple),
+    majorsShare: n(m.majorsShare),
+    liquidations: n(m.liquidations),
+    distinctCoins: n(m.distinctCoins),
   };
 }
 
