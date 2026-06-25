@@ -39,6 +39,10 @@ import TraderCopyability from './TraderCopyability';
 export interface TraderDetailDrawerProps {
   trader: TopTraderRow;
   onClose: () => void;
+  /** Whether this trader is currently favorited (drives the header star). */
+  isFavorite?: boolean;
+  /** Toggle this trader's favorite from inside the modal (no need to close it). */
+  onToggleFavorite?: () => void;
   /** Test seed: render fixed positions instead of fetching. */
   detailOverride?: {
     positions: HlPosition[];
@@ -56,7 +60,7 @@ const SEVERITY_COLOR: Record<FlagSeverity, string> = {
   info: GH.textMuted,
 };
 
-export default function TraderDetailDrawer({ trader, onClose, detailOverride }: TraderDetailDrawerProps) {
+export default function TraderDetailDrawer({ trader, onClose, isFavorite, onToggleFavorite, detailOverride }: TraderDetailDrawerProps) {
   const live = useTraderPositions(detailOverride ? null : trader.address);
   const detail = detailOverride ?? live;
   // Where the positions came from: 'supabase' (watcher covers this leader — live,
@@ -195,6 +199,32 @@ export default function TraderDetailDrawer({ trader, onClose, detailOverride }: 
               {trader.address}
             </span>
           </div>
+          <div className={css({ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 })}>
+            {onToggleFavorite && (
+              <button
+                type="button"
+                data-testid="trader-detail-favorite"
+                onClick={onToggleFavorite}
+                aria-label={isFavorite ? `Unfavorite ${trader.short}` : `Favorite ${trader.short}`}
+                aria-pressed={!!isFavorite}
+                title={isFavorite ? 'Favorited — in the live watch set. Click to remove.' : 'Favorite (adds to the live watch set)'}
+                style={{ color: isFavorite ? '#ffcb47' : GH.textMuted }}
+                className={css({
+                  bg: 'github.bg',
+                  border: '1px solid token(colors.github.border)',
+                  borderRadius: '6px',
+                  width: '28px',
+                  height: '28px',
+                  fontSize: '15px',
+                  lineHeight: 1,
+                  cursor: 'pointer',
+                  _hover: { color: '#ffcb47', borderColor: '#ffcb47' },
+                  _focusVisible: { outline: '2px solid token(colors.github.link)' },
+                })}
+              >
+                {isFavorite ? '★' : '☆'}
+              </button>
+            )}
           <button
             ref={closeRef}
             type="button"
@@ -217,6 +247,7 @@ export default function TraderDetailDrawer({ trader, onClose, detailOverride }: 
           >
             ✕
           </button>
+          </div>
         </header>
 
         {selectedPosition ? (

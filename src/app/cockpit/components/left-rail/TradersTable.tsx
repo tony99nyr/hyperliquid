@@ -89,6 +89,11 @@ export default function TradersTable({ traders, followedAddress, ratings }: Trad
   const followed = followedAddress?.toLowerCase() ?? null;
   const fav = useFavorites();
   const [selected, setSelected] = useState<TopTraderRow | null>(null);
+  // The last trader whose drawer was opened — kept after close so the operator can
+  // see which row they were just looking at (the "I can't remember which I opened"
+  // fix). Lowercased to match the row key.
+  const [lastViewed, setLastViewed] = useState<string | null>(null);
+  const openTrader = (t: TopTraderRow) => { setSelected(t); setLastViewed(t.address.toLowerCase()); };
   const [sortKey, setSortKey] = useState<SortKey>('composite');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [filter, setFilter] = useState<TraderFilter>({ tradeableOnly: true });
@@ -222,12 +227,15 @@ export default function TradersTable({ traders, followedAddress, ratings }: Trad
               {page.map((t) => {
                 const isFollowed = followed !== null && t.address.toLowerCase() === followed;
                 const isFav = fav.isFavorite(t.address);
+                const isLastViewed = lastViewed !== null && t.address.toLowerCase() === lastViewed;
                 return (
                   <tr
                     key={t.address}
                     data-testid="traders-table-row"
                     data-followed={isFollowed}
-                    onClick={() => setSelected(t)}
+                    data-last-viewed={isLastViewed || undefined}
+                    onClick={() => openTrader(t)}
+                    style={isLastViewed && !selected ? { boxShadow: 'inset 2px 0 0 0 #ffcb47' } : undefined}
                     className={css({ cursor: 'pointer', borderBottom: '1px solid token(colors.github.borderSubtle)', _hover: { bg: 'github.bg' } })}
                   >
                     <td className={css({ padding: '5px 6px', maxWidth: '220px', position: 'sticky', left: 0, bg: 'github.bgSecondary' })}>
@@ -237,7 +245,7 @@ export default function TradersTable({ traders, followedAddress, ratings }: Trad
                         <button
                           type="button"
                           data-testid="trader-open"
-                          onClick={(e) => { e.stopPropagation(); setSelected(t); }}
+                          onClick={(e) => { e.stopPropagation(); openTrader(t); }}
                           aria-label={`Open detail for ${t.displayName ?? t.short}`}
                           style={isFollowed ? { color: '#5b8cff' } : undefined}
                           className={css({ bg: 'transparent', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'mono', fontSize: '11px', color: 'github.textBright', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '130px', textAlign: 'left', _hover: { textDecoration: 'underline' }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '1px' } })}
@@ -292,7 +300,14 @@ export default function TradersTable({ traders, followedAddress, ratings }: Trad
 
       <LeaderActionFeed />
 
-      {selected && <TraderDetailDrawer trader={selected} onClose={() => setSelected(null)} />}
+      {selected && (
+        <TraderDetailDrawer
+          trader={selected}
+          onClose={() => setSelected(null)}
+          isFavorite={fav.isFavorite(selected.address)}
+          onToggleFavorite={() => void fav.toggle(selected.address).catch(() => {})}
+        />
+      )}
     </section>
   );
 }
