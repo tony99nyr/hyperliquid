@@ -13,7 +13,8 @@ decisions before making architectural changes.
 ## Stack
 
 Next.js 16 (App Router + RSC) · Panda CSS · TypeScript strict · Vitest ·
-Supabase (Postgres + realtime) · recharts. Package manager: **pnpm**.
+Supabase (Postgres + realtime) · recharts + lightweight-charts · viem +
+`@nktkas/hyperliquid` (live signing). Package manager: **pnpm**.
 
 ## Build & Validation
 
@@ -76,17 +77,27 @@ else. Enforced by ONE rule:
 ## Layout
 
 ```
-src/types/{fill,position,cockpit,trading-core}.ts   # CanonicalFill, TradeIntent, Position, cockpit rows
+src/types/{fill,position,cockpit,trading-core,market}.ts  # CanonicalFill, TradeIntent, Position, cockpit rows
 src/lib/env/{mode,env}.ts                            # the ONE mode switch + zod env
-src/lib/trading/                                     # the seam (fill-source, pnl, position-tracker)
-src/lib/hyperliquid/                                 # HL info service (vendored) + orderbook-match (pure)
+src/lib/trading/                                     # the seam (fill-source[-paper|-live], pnl, position-tracker,
+                                                     #   safe-exit[-plan], leverage, risk-exit, paper fee/funding)
+src/lib/hyperliquid/                                 # HL info/exchange service (vendored) + orderbook-match,
+                                                     #   order/candle business-logic, rated-wallets, top-traders
 src/lib/strategy/                                    # VENDORED pure functions (regime/indicators/risk/validation)
+src/lib/health/                                      # multi-TF health engine (score + P(cont)/P(adverse) + alerts)
+src/lib/rubric/                                      # deterministic opportunity scoring (pillars + kill-gates) — ADR-0006
+src/lib/scout/                                       # autonomous PAPER scout (guard, trigger, cycle, review) — ADR-0005
+src/lib/auto-exit/ + src/lib/risk/                   # Layer-1 auto-exit + account circuit-breaker — ADR-0007
+src/lib/trader-watch/ + src/lib/watch/               # leader-position feed daemon + crash-safe position watcher
+src/lib/backtest/                                    # PURE regime-core replay + significance (scripts/backtest*.ts)
+src/lib/ws/                                          # HL websocket client + reducer + REST fallback (market data)
+src/hooks/                                           # realtime hooks (useRealtime{Channel,Table} + resubscribe guard)
+src/app/cockpit/{page,CockpitClient}.tsx + components/  # PIN-gated cockpit shell + panels (4 tabs)
 src/lib/cockpit/{supabase-server,supabase-browser}.ts
 src/lib/infrastructure/{auth,logging,config}/        # vendored admin-PIN + stubs
-supabase/migrations/0001_init.sql                    # 8 tables + RLS + realtime publication
-supabase/migrations/0003_position_leverage.sql       # positions.leverage (nullable) → PnlHero ROE
-data/backups/wallet-rating/rated-wallets.json        # vendored dataset
-docs/{CONTEXT.md, CODE_ORGANIZATION.md, adr/}
+supabase/migrations/0001_init.sql … 0014_*.sql       # 14 migrations (RLS + realtime publication; idempotent)
+data/{backups/wallet-rating/rated-wallets.json,auto-exit/}  # vendored dataset + versioned auto-exit thresholds
+docs/{CONTEXT.md, CODE_ORGANIZATION.md, adr/, scout/, LIVE_*.md}
 ```
 
 ## Vendored from iamrossi
@@ -140,16 +151,64 @@ the comments at the top of each vendored stub module.
     by a fresh, smart plan (not just the mechanical market-close fallback).
   - No-auto-fire (execute only after an approved popup or the Safe-Exit click),
     watch-only, and the paper↔live seam are all preserved + test-pinned.
-- **Phase 3b (live fill)**: implement `fill-source-live.ts` +
-  `hyperliquid-exchange-service.ts`, flip `TRADING_MODE=live`. No other code changes.
+- **Phase 3b (live fill) — BUILT, gated OFF**: `fill-source-live.ts` +
+  `hyperliquid-exchange-service.ts` (EIP-712 agent-key signing via
+  `@nktkas/hyperliquid`) + `hyperliquid-order-business-logic.ts` (pure) are
+  implemented and tested. Default `TRADING_MODE=paper` means nothing fires.
+  Going live is the operator sequence in `docs/LIVE_EXECUTION_RUNBOOK.md`
+  (two-key model, testnet→mainnet checklist) — still no code change to flip.
+- **Phase 4 — autonomous PAPER scout (DONE)**: a self-driving paper-only
+  opportunity finder + manager (`src/lib/scout/**`, `.claude/skills/scout` +
+  `scout-review`, `docs/scout/`). The inverted loop: a FREE deterministic daemon
+  (`pnpm scout:watch`) writes JSONL triggers → a cheap-model (Sonnet) scout
+  session vets them and makes paper calls → rare Opus escalation. Hard-guarded
+  PAPER-ONLY by `assertScoutPaperMode` — the boundary travels with the intent
+  (`intent.origin === 'scout'` is refused live AT THE SEAM). Learns via
+  `docs/scout/playbook.md` + a resolved-hypothesis track record; weekly
+  `pnpm scout:review` (Opus) curates the playbook against a pre-registered
+  kill/graduation bar. See **ADR-0005**.
+- **Phase 5 — deterministic opportunity + risk layers (DONE)**:
+  - **Rubric** (`src/lib/rubric/**`, `pnpm rubric`): per-asset×side scoring
+    (regime-as-multiplier × leaders/carry/micro pillars, boolean kill-gates,
+    portfolio beta cap) → `rubric_scores` → the cockpit OpportunityBoard.
+    Advisory only. See **ADR-0006**.
+  - **Auto-exit Layer-1** (`src/lib/auto-exit/**` detection + lock,
+    `risk-exit-service.ts` the ONE exit-only execution site): a scoped,
+    structurally-exit-only autonomous close on hard risk triggers. BUILT, shipped
+    DISABLED (`AUTO_EXIT_ENABLED=false`). See `docs/LIVE_AUTO_EXIT.md`.
+  - **Circuit-breaker** (`src/lib/risk/**`): account-level daily-loss / drawdown
+    halt that BLOCKS new entries + recommends (never auto-fires) a flatten.
+    Both risk layers preserve no-auto-fire. See **ADR-0007**.
+  - **Trader-watch** (`pnpm trader-watch`): polls top-N rated leaders, diffs
+    positions, writes the central `leader_positions`/`leader_actions` feed
+    (stops per-leader HL hammering). Watch-only.
+- **Phase 6 — perf + cockpit polish (DONE)**: Performance tab (equity = spot
+  cash + perp, 30d curve, trade ledger, scout track record), live leverage
+  adjustment + HL position reconciliation, URL-param tab/timeframe persistence,
+  preview-action flow (`review-previews` skill), realtime egress trims.
+- **Backtest/research suite** (`src/lib/backtest/**`, `scripts/backtest*.ts`,
+  `scripts/analysis/perp-follow-study/**`): PURE regime-core replay with honest
+  friction (fills/slippage/funding) for calibration, OOS, exit-policy, HTF, and
+  copy-trade-gating studies. Findings in `docs/scout/BACKTEST_FINDINGS.md`.
 
 ## Skills (Phase 1d)
 
 Each skill: one `.claude/skills/<name>/SKILL.md` (frontmatter + protocol) + one
 `scripts/<name>.ts` thin entrypoint + (where it has decision logic) a tested
 `src/lib/skills/<name>-business-logic.ts`. **The user decides and confirms every
-ACTION.** Advisory skills (analyze-*, assess-*) never trade; action skills
-(open-position, advise-exit) require an explicit `yes` (or `--confirm yes`) before
-`executeIntent` — they never auto-fire. `analyze-traders` enforces the
-**INSUFFICIENT_HISTORY gate**: a thin/page-capped wallet is capped at B and can
-never be a clean A (the 0x418aa6 $16M-martingale lesson), pinned by tests.
+HUMAN-LANE ACTION.** The roster (10):
+
+- **Advisory** (never trade): `analyze-traders`, `analyze-market-timeframes`,
+  `assess-trade-health`, `review-previews`, `report-context-budget`.
+- **Human action** (require an explicit `yes` / `--confirm yes` before
+  `executeIntent`; never auto-fire): `open-position`, `advise-exit`.
+- **Orchestration**: `run-session` — the PICK→APPROVE active loop (entry popup,
+  auto-monitor on fill, armed Safe-Exit); every entry/exit is still gated on an
+  explicit approval.
+- **Autonomous PAPER lane** (the ONE exception to the popup — auto-executes
+  paper fills, hard-guarded against live): `scout`; `scout-review` (weekly,
+  Opus, curates the playbook — NEVER trades). See ADR-0005.
+
+`analyze-traders` enforces the **INSUFFICIENT_HISTORY gate**: a thin/page-capped
+wallet is capped at B and can never be a clean A (the 0x418aa6 $16M-martingale
+lesson), pinned by tests (ADR-0003).

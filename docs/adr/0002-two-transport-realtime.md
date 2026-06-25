@@ -43,3 +43,14 @@ Two independent transports:
   every cockpit table so UPDATE/DELETE realtime payloads carry full rows.
 - Market data and trade state can never be confused — different transports,
   different lifetimes, different stores.
+
+## Refinement — realtime egress trim (migration 0014)
+
+The leader feeds (`leader_positions` / `leader_actions`), refreshed every cycle
+by `trader-watch`, drove a Supabase realtime-message + egress blowout (Vercel
+Fast Origin Transfer). Mitigations layered on WITHOUT changing the two-transport
+decision: narrow the `supabase_realtime` publication to the columns the cockpit
+actually renders, drop redundant per-poll re-fetches of static candle/regime
+payloads, and the client hooks unsubscribe while a tab is hidden + fall back to
+a 60s refetch. The browser is still anon/RLS-select-only; the change is purely
+volume control on the same Postgres-realtime transport.

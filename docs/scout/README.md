@@ -40,12 +40,16 @@ It runs `pnpm scout:cycle` each wake to gather the snapshot, decides per
 - **No real money, ever, from the scout.** `pnpm scout:trade` is hard-guarded by
   `assertScoutPaperMode` — it throws in live mode. Real trades go through the
   human approval popup (Tier-1), never the autonomous path.
-- **Open paper positions are covered by three layers:** (a) the scout reviews
+- **Open paper positions are covered by these layers:** (a) the scout reviews
   every open position on every wake (risk before opportunity); (b) the crash-safe
   `pnpm watch` daemon monitors + writes health/alerts even if the scout session
-  dies; (c) the manual Safe-Exit button. *Deterministic auto-close-when-scout-is-down
-  (risk-exit-service for paper) is a Phase-1.5 hardening — until then a dead scout
-  session leaves a paper position to the watch alerts + your manual safe-exit.*
+  dies; (c) the manual Safe-Exit button; (d) **optionally** the deterministic
+  auto-exit Layer-1 (`risk-exit-service.ts`, ADR-0007). That layer is
+  mode-agnostic, so pointing a cron at `/api/cron/auto-exit` with
+  `AUTO_EXIT_ENABLED=true` while the scout's session is the active one gives a
+  real auto-close-when-scout-is-down floor for PAPER positions too (harmless
+  rehearsal of the live path). With it off, a dead scout session leaves a paper
+  position to the watch alerts + your manual Safe-Exit.
 
 ## Pre-registered success / kill bar (decide BEFORE looking at results)
 

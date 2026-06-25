@@ -48,6 +48,53 @@ with one env var.** It lives deliberately OUTSIDE the iamrossi autonomous system
 - **Context gauge** — a rough, **self-reported** Claude context-usage %, with a
   warning zone so the human is never caught near a limit mid-trade. A safety
   cue, NOT a precise meter.
+- **Preview** — an operator-queued *proposed* OPEN sitting in the cockpit
+  (`pending_actions`, kind `preview`). Claude can write an advisory review onto
+  it (`review-previews`); only the operator's UI **Approve** ever fires it.
+- **Safe-Exit plan** — the always-available panic close. `buildBestExitPlan`
+  (PURE) picks MARKET reduce-only when health is adverse/urgent or the book is
+  thin, else a LIMIT reduce-only at the favorable top-of-book. Refreshed each
+  cycle so the panic button is backed by a fresh, smart plan.
+
+## Opportunity & leader vocabulary
+
+- **Rubric** — the deterministic opportunity scorer. Per **asset × side** it
+  computes an opportunity score (0–100) as `regime-multiplier × (leaders + carry
+  + micro)` pillars, then applies boolean **kill-gates** (book-too-thin,
+  against-confirmed-HTF, room-too-tight, vol-contraction, leader-derisk veto) —
+  any gate zeroes the side. Resolves to a **badge**: GO / WATCH / NO-EDGE. A
+  **portfolio beta cap** downgrades over-exposed same-direction legs to WATCH.
+  Advisory only; feeds the cockpit **Opportunity Board**. See ADR-0006.
+- **Opportunity Board** — the cockpit panel rendering the latest `rubric_scores`
+  (one card per scanned coin: badge + entry/stop/target zones).
+- **Leader / leader feed** — `trader-watch` polls top-N rated leaders, diffs
+  their positions, and writes one central `leader_positions` (reconciled each
+  cycle) + `leader_actions` (open/add/reduce/close/flip) feed the cockpit + the
+  rubric's leader pillar consume — instead of every client hammering HL.
+
+## Autonomous PAPER scout (ADR-0005)
+
+- **Scout** — an autonomous, **paper-only** opportunity finder + manager. It is
+  the ONE path that executes without the human approval popup — allowed for
+  paper fills ONLY, hard-guarded by `assertScoutPaperMode` (the boundary travels
+  with the intent: `origin: 'scout'` is refused live at the seam). Runs on the
+  cheap-model tier; escalates to Opus only for ambiguous calls.
+- **Playbook** (`docs/scout/playbook.md`) — the scout's curated trading rules;
+  read each cycle, deliberately updated by the weekly `scout-review` (not
+  recency-biased).
+- **Track record** — the scout's resolved `hypotheses` + `fills`/`pnl`, scored
+  on a **pre-registered kill/graduation bar** (paper net P&L incl. modeled
+  funding + slippage) decided before looking at results.
+
+## Risk layers (no-auto-fire preserved)
+
+- **Auto-exit (Layer 1)** — a scoped, structurally **exit-only** autonomous
+  close on hard risk triggers (liq-proximity / loss / unhealthy). Can only
+  reduce/close (never open/add/flip). BUILT, shipped DISABLED. See
+  `docs/LIVE_AUTO_EXIT.md` + ADR-0007.
+- **Circuit-breaker** — account-level daily-loss / drawdown halt: BLOCKS new
+  entries and *recommends* a flatten (never auto-fires it). The account brake
+  per-trade stops can't provide. See ADR-0007.
 
 ## Risk vocabulary (why this exists)
 
