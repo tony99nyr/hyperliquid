@@ -35,6 +35,7 @@ import {
   type LeaderAction,
   type LeaderPositionSnapshot,
 } from './leader-diff-business-logic';
+import { resolveWatchSet, normalizeLeaderAddress } from './watch-set-business-logic';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 /** Default number of top-rated leaders to watch. */
@@ -193,6 +194,70 @@ export async function pruneLeaderActions(
   if (error) throw new Error(`pruneLeaderActions failed: ${error.message}`);
 }
 
+// ---------------------------------------------------------------------------
+// Favorites-gated watch set (the copy-trading pivot cost win). The live watch
+// shrinks from top-50 to the operator's favorited_traders ∪ leaders of active
+// followed_positions, read from Supabase each cycle.
+// ---------------------------------------------------------------------------
+
+/** Starter watch-set size when favorites is empty — small (« 50) IS the cost cut;
+ *  the operator then curates via the favorites UI. */
+export const SEED_FAVORITES_N = 12;
+
+/**
+ * Seed `favorited_traders` from the top-composite rated set ONLY when it is empty,
+ * so a fresh deploy/migration isn't watching nothing (cold start). One-shot — once
+ * the operator has any favorite this no-ops. Returns the number seeded.
+ */
+export async function seedFavoritesIfEmpty(
+  client: SupabaseClient,
+  seedN: number = SEED_FAVORITES_N,
+): Promise<number> {
+  const { count } = await client.from('favorited_traders').select('*', { count: 'exact', head: true });
+  if ((count ?? 0) > 0) return 0;
+  const seed = getTopTraders(seedN).map((t) => ({
+    leader_address: normalizeLeaderAddress(t.address),
+    note: 'auto-seeded (top composite)',
+  }));
+  if (seed.length === 0) return 0;
+  const { error } = await client.from('favorited_traders').upsert(seed, { onConflict: 'leader_address' });
+  if (error) throw new Error(`seedFavoritesIfEmpty failed: ${error.message}`);
+  return seed.length;
+}
+
+/** Resolve the live watch set from Supabase: favorites ∪ leaders of active follows. */
+export async function loadWatchSet(client: SupabaseClient): Promise<string[]> {
+  const [favRes, followRes] = await Promise.all([
+    client.from('favorited_traders').select('leader_address'),
+    client.from('followed_positions').select('leader_address').eq('status', 'active'),
+  ]);
+  if (favRes.error) throw new Error(`loadWatchSet favorites failed: ${favRes.error.message}`);
+  if (followRes.error) throw new Error(`loadWatchSet follows failed: ${followRes.error.message}`);
+  return resolveWatchSet({
+    favorites: (favRes.data ?? []).map((r) => (r as { leader_address: string }).leader_address),
+    followLeaders: (followRes.data ?? []).map((r) => (r as { leader_address: string }).leader_address),
+  });
+}
+
+/**
+ * Durably delete leader_positions rows for leaders NO LONGER in the watch set
+ * (un-favorited / un-followed). The per-leader reconcile only deletes for leaders
+ * it ticks, so without this an un-favorited leader's book would linger forever. A
+ * no-op when there are no orphans; an EMPTY watch set deletes all leader rows.
+ */
+export async function pruneOrphanLeaderPositions(
+  client: SupabaseClient,
+  watchSet: string[],
+): Promise<void> {
+  let del = client.from('leader_positions').delete();
+  del =
+    watchSet.length > 0
+      ? del.not('leader_address', 'in', `(${watchSet.join(',')})`)
+      : del.not('leader_address', 'is', null); // delete-all needs an (always-true) filter
+  const { error } = await del;
+  if (error) throw new Error(`pruneOrphanLeaderPositions failed: ${error.message}`);
+}
+
 /**
  * Tick ONE leader: fetch clearinghouse, map snapshots, diff against the prior
  * baseline (if any), persist positions + actions, and update the in-memory
@@ -259,6 +324,10 @@ export async function runLeaderWatchCycle(
     now?: number;
     shouldStop?: () => boolean;
     clientFactory?: () => SupabaseClient;
+    /** Favorites-gated watch: select favorites ∪ active-follow leaders from Supabase
+     *  (seed if empty) instead of the static top-N. The production daemon sets this;
+     *  legacy/tests omit it and keep the getTopTraders path. */
+    useFavorites?: boolean;
   } = {},
 ): Promise<LeaderWatchCycleResult> {
   const config = opts.config ?? DEFAULT_LEADER_WATCH_CONFIG;
@@ -271,7 +340,19 @@ export async function runLeaderWatchCycle(
   const backoff = currentBackoffMs();
   if (backoff > 0) await interruptibleSleep(backoff, shouldStop);
 
-  const leaders = getTopTraders(config.topN).map((t) => t.address);
+  let leaders: string[];
+  if (opts.useFavorites) {
+    await seedFavoritesIfEmpty(client);
+    leaders = await loadWatchSet(client);
+    // Prune the in-memory baseline for leaders no longer watched, so a re-favorite
+    // re-baselines silently (no phantom diff against a stale snapshot).
+    const watching = new Set(leaders);
+    for (const addr of [...prior.keys()]) if (!watching.has(addr)) prior.delete(addr);
+    // Durable orphan cleanup: drop leader_positions for leaders no longer watched.
+    await pruneOrphanLeaderPositions(client, leaders);
+  } else {
+    leaders = getTopTraders(config.topN).map((t) => t.address);
+  }
 
   const results: WatchedLeaderResult[] = [];
   const failures: LeaderWatchCycleResult['failures'] = [];
