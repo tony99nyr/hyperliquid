@@ -225,7 +225,17 @@ export default function TraderDetailDrawer({ trader, onClose, detailOverride }: 
             <Stat label="Profit Factor" value={fmtNum(trader.metrics.profitFactor, 2)} />
             <Stat label="Max DD" value={fmtFracPct(trader.metrics.maxDrawdownFrac)} danger />
             <Stat label="PnL" value={trader.metrics.aggregatePnlUsd === null ? '—' : fmtCompactUsd(trader.metrics.aggregatePnlUsd)} signed={trader.metrics.aggregatePnlUsd} />
-            <Stat label="Median Hold" value={trader.metrics.medianHoldHours === null ? '—' : `${trader.metrics.medianHoldHours.toFixed(1)}h`} />
+            <Stat
+              label="Median Hold"
+              value={trader.metrics.medianHoldHours === null ? '—' : `~${trader.metrics.medianHoldHours.toFixed(1)}h`}
+              hint={
+                trader.metrics.medianHoldHours === null
+                  ? undefined
+                  : `Median over a handful of net-flat round-trips${
+                      trader.metrics.nFills ? ` (~${trader.metrics.nFills.toLocaleString('en-US')} fills)` : ''
+                    } — unstable across samples and hides bimodal behavior (many scaling fills around a long core). A rough band, not a precise figure.`
+              }
+            />
             <Stat label="Fills" value={trader.metrics.nFills === null ? '—' : trader.metrics.nFills.toLocaleString('en-US')} />
           </div>
         </Section>
@@ -325,7 +335,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Stat({ label, value, testid, danger, signed }: { label: string; value: string; testid?: string; danger?: boolean; signed?: number | null }) {
+function Stat({ label, value, testid, danger, signed, hint }: { label: string; value: string; testid?: string; danger?: boolean; signed?: number | null; hint?: string }) {
   const color =
     signed !== undefined && signed !== null
       ? signed > 0
@@ -343,7 +353,8 @@ function Stat({ label, value, testid, danger, signed }: { label: string; value: 
       </span>
       <span
         data-testid={testid}
-        style={{ color, fontFeatureSettings: '"tnum"' }}
+        title={hint}
+        style={{ color, fontFeatureSettings: '"tnum"', cursor: hint ? 'help' : undefined }}
         className={css({ fontFamily: 'mono', fontSize: 'sm', fontWeight: 'bold' })}
       >
         {value}
