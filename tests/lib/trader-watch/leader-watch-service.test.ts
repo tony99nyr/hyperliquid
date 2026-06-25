@@ -12,6 +12,8 @@ import { fetchClearinghouseState } from '@/lib/hyperliquid/hyperliquid-info-serv
 import { getTopTraders } from '@/lib/hyperliquid/top-traders-service';
 import {
   runLeaderWatchCycle,
+  pruneLeaderActions,
+  LEADER_ACTIONS_RETENTION_DAYS,
   _resetHlBackoff,
   type LeaderSnapshotStore,
 } from '@/lib/trader-watch/leader-watch-service';
@@ -86,11 +88,18 @@ function chState(positions: HlPosition[], over: Partial<HlClearinghouseState> = 
  * awaitable (delete returns a chainable thenable so `.eq(...).not(...)` works).
  */
 function fakeClient() {
-  const calls = { upserts: [] as unknown[][], inserts: [] as unknown[][], deletes: 0 };
+  const calls = {
+    upserts: [] as unknown[][],
+    inserts: [] as unknown[][],
+    deletes: 0,
+    deleteLt: null as { col: string; val: string } | null,
+    lastTable: '',
+  };
   const deleteChain = () => {
     const chain: Record<string, unknown> = {};
     chain.eq = () => chain;
     chain.not = () => chain;
+    chain.lt = (col: string, val: unknown) => { calls.deleteLt = { col, val: String(val) }; return chain; };
     chain.then = (resolve: (v: { error: null }) => void) => {
       calls.deletes++;
       return Promise.resolve({ error: null }).then(resolve);
@@ -98,7 +107,8 @@ function fakeClient() {
     return chain;
   };
   const client = {
-    from() {
+    from(table: string) {
+      calls.lastTable = table;
       return {
         delete: () => deleteChain(),
         upsert: (rows: unknown[]) => {
@@ -200,5 +210,26 @@ describe('runLeaderWatchCycle', () => {
     expect(result.watched).toBe(2);
     expect(result.failures).toHaveLength(1);
     expect(result.results).toHaveLength(1); // the healthy leader still ticked
+  });
+});
+
+describe('pruneLeaderActions', () => {
+  it('deletes leader_actions older than the retention window (no row bodies returned)', async () => {
+    const { client, calls } = fakeClient();
+    await pruneLeaderActions(client, LEADER_ACTIONS_RETENTION_DAYS, NOW);
+
+    expect(calls.lastTable).toBe('leader_actions');
+    expect(calls.deletes).toBe(1);
+    expect(calls.deleteLt?.col).toBe('detected_at');
+    // cutoff = now − retention days
+    const expectedCutoff = new Date(NOW - LEADER_ACTIONS_RETENTION_DAYS * 86_400_000).toISOString();
+    expect(calls.deleteLt?.val).toBe(expectedCutoff);
+  });
+
+  it('throws on a Supabase error so the caller can fail-soft / log it', async () => {
+    const errClient = {
+      from: () => ({ delete: () => ({ lt: () => Promise.resolve({ error: { message: 'boom' } }) }) }),
+    } as never;
+    await expect(pruneLeaderActions(errClient, 7, NOW)).rejects.toThrow(/pruneLeaderActions failed: boom/);
   });
 });

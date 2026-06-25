@@ -31,6 +31,8 @@
 import { parseArgs, optionalNumber, header, line, run } from './_skill-runtime';
 import {
   runLeaderWatchCycle,
+  pruneLeaderActions,
+  LEADER_ACTIONS_RETENTION_DAYS,
   DEFAULT_TOP_N,
   type LeaderSnapshotStore,
 } from '@/lib/trader-watch/leader-watch-service';
@@ -47,9 +49,24 @@ const DEFAULT_INTERVAL_SECONDS = 60;
 const MIN_INTERVAL_SECONDS = 5;
 /** Consecutive total-failure cycles before a LOUD escalation log. */
 const ESCALATE_AFTER_FAILED_CYCLES = 3;
+/** How often to prune the append-only leader_actions log (ms). Hourly keeps the
+ *  table bounded to its retention window without churning the loop. */
+const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Fire-and-forget retention prune; fail-soft (a transient Supabase error must
+ *  never kill the watch loop). Logs what it did. */
+async function pruneRetentionSoft(): Promise<void> {
+  const ts = new Date().toISOString();
+  try {
+    await pruneLeaderActions(getServiceRoleClient());
+    line(`[${ts}] pruned leader_actions older than ${LEADER_ACTIONS_RETENTION_DAYS}d.`);
+  } catch (err) {
+    line(`[${ts}] WARN leader_actions prune failed (continuing): ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 /**
@@ -171,6 +188,7 @@ run(async () => {
     header('trade-watch service — single cycle (--once)');
     line('WATCH-ONLY: this never places a trade. Running one cycle…');
     await runOneCycle(prior, topN);
+    await pruneRetentionSoft();
     line('Done (--once).');
     return;
   }
@@ -191,9 +209,19 @@ run(async () => {
   let consecutiveFailedCycles = 0;
   const intervalMs = interval * 1000;
 
+  // Prune once at startup (cleans up whatever accumulated while the daemon was
+  // down), then hourly thereafter.
+  await pruneRetentionSoft();
+  let lastPruneAt = Date.now();
+
   while (!stopping) {
     const cycleStart = Date.now();
     const outcome = await runOneCycle(prior, topN, () => stopping);
+
+    if (Date.now() - lastPruneAt >= PRUNE_INTERVAL_MS) {
+      await pruneRetentionSoft();
+      lastPruneAt = Date.now();
+    }
 
     if (outcome.ok) {
       lastSuccessfulCycleAt = Date.now();

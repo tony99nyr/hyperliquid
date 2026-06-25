@@ -117,6 +117,23 @@ describe('diffLeaderPositions', () => {
     expect(diffLeaderPositions(LEADER, prev, curr)).toEqual([]);
   });
 
+  it('treats a sub-materiality rebalance (1% of a big book) as NOISE — the floor regression', () => {
+    // A market-maker nudging a 1,000,000-unit book by 1% (10,000 units) is the
+    // exact churn that flooded leader_actions at the old 0.01% floor. At 5% it is
+    // correctly suppressed; only open/close/flip or a material add/reduce survive.
+    const prev = [snap('PUMP', 'long', 1_000_000)];
+    const curr = [snap('PUMP', 'long', 1_010_000)]; // +1% → below the 5% floor
+    expect(diffLeaderPositions(LEADER, prev, curr)).toEqual([]);
+  });
+
+  it('still registers a MATERIAL add (>= the floor)', () => {
+    const prev = [snap('PUMP', 'long', 1_000_000)];
+    const curr = [snap('PUMP', 'long', 1_080_000)]; // +8% → above the 5% floor
+    const actions = diffLeaderPositions(LEADER, prev, curr);
+    expect(actions).toHaveLength(1);
+    expect(actions[0].kind).toBe('add');
+  });
+
   it('handles multiple coins at once, ordered by coin', () => {
     const prev = [snap('ETH', 'long', 1), snap('SOL', 'short', 5)];
     const curr = [snap('ETH', 'long', 2), snap('BTC', 'long', 0.1)]; // ETH add, SOL close, BTC open

@@ -170,6 +170,29 @@ async function writeLeaderActions(client: SupabaseClient, actions: LeaderAction[
   if (error) throw new Error(`writeLeaderActions failed: ${error.message}`);
 }
 
+/** Default retention window for the append-only leader_actions log (days). */
+export const LEADER_ACTIONS_RETENTION_DAYS = 7;
+
+/**
+ * Delete leader_actions older than the retention window. leader_actions is an
+ * append-only event log — without this it grows unbounded (it had reached ~400k
+ * rows). The cockpit only ever reads the recent feed (limit 50), so anything past
+ * a few days is dead weight on storage + every snapshot poll. Called periodically
+ * from the daemon loop (NOT every cycle) and clientFactory-injectable for tests.
+ *
+ * No `.select()` so the deleted rows are never returned (zero egress for the prune
+ * itself). Returns nothing meaningful; the caller logs the timestamp it ran.
+ */
+export async function pruneLeaderActions(
+  client: SupabaseClient,
+  retentionDays: number = LEADER_ACTIONS_RETENTION_DAYS,
+  now: number = Date.now(),
+): Promise<void> {
+  const cutoff = new Date(now - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+  const { error } = await client.from('leader_actions').delete().lt('detected_at', cutoff);
+  if (error) throw new Error(`pruneLeaderActions failed: ${error.message}`);
+}
+
 /**
  * Tick ONE leader: fetch clearinghouse, map snapshots, diff against the prior
  * baseline (if any), persist positions + actions, and update the in-memory

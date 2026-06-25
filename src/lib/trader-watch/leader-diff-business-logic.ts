@@ -59,12 +59,20 @@ export interface LeaderAction {
 }
 
 /**
- * Relative size-change floor before an add/reduce counts. HL sizes are exact
- * discrete amounts, so this is really just a float-compare guard — a leader who
- * adds/trims by ≥ this fraction of the prior size registers; sub-floor jitter
- * (rounding, fee-dust) does not spam the action feed.
+ * Relative size-change floor before an add/reduce counts — a MATERIALITY gate, not
+ * just a float guard. A leader who adds/trims by ≥ this fraction of the prior size
+ * registers; smaller moves are treated as noise and emit no action.
+ *
+ * WHY 5% (was 1e-4): the watched leaders are large market-maker books that
+ * continuously rebalance multi-million-dollar positions by hundredths of a percent
+ * every poll cycle. At a 0.01% floor, every micro-nudge minted an add/reduce —
+ * ~700 actions/hour, ~400k rows/week of pure noise that drowned the few real
+ * open/close/flip signals AND defeated the leader_positions "only-on-change"
+ * reconcile gate (it keyed on actions.length > 0). 5% is a defensible "the leader
+ * MEANINGFULLY changed this position" threshold; open/close/flip are unaffected
+ * (they never pass through this floor). Tune here if the feed feels too sparse.
  */
-export const MIN_REL_SIZE_DELTA = 1e-4;
+export const MIN_REL_SIZE_DELTA = 0.05;
 
 /** True when |a − b| exceeds the relative floor scaled to the larger magnitude. */
 function sizeChanged(prevSize: number, currSize: number): boolean {
