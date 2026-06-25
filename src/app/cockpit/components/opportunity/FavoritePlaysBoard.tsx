@@ -35,7 +35,7 @@ function PlayCard({ play, nowMs }: { play: FavoritePlay; nowMs: number }) {
         <span className={css({ display: 'flex', alignItems: 'baseline', gap: '6px', minWidth: 0 })}>
           <span style={{ color: sideColor }} className={css({ fontFamily: 'label', fontSize: '10px', fontWeight: 'bold', letterSpacing: '0.04em' })}>{play.side.toUpperCase()}</span>
           <span className={css({ fontFamily: 'mono', fontSize: 'xs', color: 'github.textBright', fontWeight: 'bold' })}>{play.coin}</span>
-          <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>{shortAddr(play.leaderAddress)}</span>
+          <span title={play.leaderAddress} className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>{shortAddr(play.leaderAddress)}</span>
         </span>
         {play.kind === 'new' ? (
           <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>{ago(play.detectedAtMs, nowMs)}</span>
@@ -44,13 +44,13 @@ function PlayCard({ play, nowMs }: { play: FavoritePlay; nowMs: number }) {
         )}
       </div>
       <div className={css({ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'baseline' })}>
-        <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>entry {fmtPx(play.entryPx)}</span>
-        {play.markPx != null && <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>mark {fmtPx(play.markPx)}</span>}
+        <span style={{ fontFeatureSettings: '"tnum"' }} className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>entry {fmtPx(play.entryPx)}</span>
+        {play.markPx != null && <span style={{ fontFeatureSettings: '"tnum"' }} className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>mark {fmtPx(play.markPx)}</span>}
         {play.extendedPct != null && (
           <span
             data-testid="play-extended"
             title={`${play.extendedPct.toFixed(1)}% past the leader's entry — the more extended, the later (and riskier) it is to chase`}
-            style={{ color: extended ? ZONE_COLORS.warn : GH.textMuted }}
+            style={{ color: extended ? ZONE_COLORS.warn : GH.textMuted, fontFeatureSettings: '"tnum"' }}
             className={css({ fontFamily: 'mono', fontSize: '9px', fontWeight: extended ? 'bold' : 'normal' })}
           >
             {play.extendedPct >= 0 ? '+' : ''}{play.extendedPct.toFixed(1)}% extended{extended ? ' ⚠' : ''}
@@ -96,7 +96,7 @@ export default function FavoritePlaysBoard() {
 
           <span className={css({ fontFamily: 'label', fontSize: '9px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '4px' })}>Profitable holds</span>
           {shownProfitable.length === 0 ? (
-            <span className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>none{hiddenExtended > 0 ? ' (extended ones hidden)' : ''}</span>
+            <span className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>none{hiddenExtended > 0 ? ` — all ${hiddenExtended} are extended (chase-risk)` : ''}</span>
           ) : (
             <ul className={css({ display: 'flex', flexDirection: 'column', gap: '6px', margin: 0, padding: 0 })}>
               {shownProfitable.map((p) => <PlayCard key={`prof-${p.id}`} play={p} nowMs={nowMs} />)}

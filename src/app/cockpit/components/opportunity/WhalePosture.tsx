@@ -1,10 +1,11 @@
 'use client';
 
 /**
- * WhalePosture — a compact per-coin summary of where the tracked leaders sit
- * (net long/short + who's de-risking) from leader_positions + leader_actions
- * (already streaming; no new HL calls). The "smart money is short ETH / covering
- * HYPE" read the user kept asking Claude for, now native in the UI.
+ * WhalePosture — a compact per-coin summary of where the operator's FAVORITED
+ * traders sit (net long/short + who's de-risking) from leader_positions +
+ * leader_actions. Since the trade-watch daemon is favorites-gated, those feeds are
+ * favorites-only, so this is "Favorites' Posture" — the "are my traders short ETH /
+ * covering HYPE" read, native in the UI (no new HL calls).
  */
 
 import { useMemo } from 'react';

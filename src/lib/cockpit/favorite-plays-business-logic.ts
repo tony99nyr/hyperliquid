@@ -44,7 +44,12 @@ export function deriveFavoritePlays(input: {
   const win = input.newWindowMs ?? NEW_PLAY_WINDOW_MS;
 
   const newPlays: FavoritePlay[] = input.opens
-    .filter((a) => a.kind === 'open' && isFav(a.leaderAddress) && input.nowMs - a.detectedAt <= win)
+    .filter((a) => {
+      const age = input.nowMs - a.detectedAt;
+      // Lower bound guards clock skew: a future-dated detectedAt (negative age)
+      // would otherwise pass `<= win` and render a nonsensical "ago".
+      return a.kind === 'open' && isFav(a.leaderAddress) && age >= 0 && age <= win;
+    })
     .map((a) => ({
       id: a.id,
       leaderAddress: a.leaderAddress,
