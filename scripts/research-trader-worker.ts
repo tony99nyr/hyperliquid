@@ -17,6 +17,10 @@ import { parseArgs, header, line, run } from './_skill-runtime';
 import { processNextEvaluation, resetStuckProcessing } from '@/lib/hyperliquid/research-trader-service';
 
 const POLL_MS = 5000;
+// Space successive drains so a bulk enqueue (vetting the whole pool) doesn't burst
+// HL's per-IP weight budget → 429 → "clearinghouse stale" fast-fails. ~1.5s between
+// wallets keeps the deep-fill crawl under HL's rate limit.
+const WORK_PACING_MS = 1500;
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 run(async () => {
@@ -48,6 +52,7 @@ run(async () => {
     if (addr) {
       drained += 1;
       line(`[${new Date().toISOString()}] processed ${addr}`);
+      await sleep(WORK_PACING_MS); // pace to stay under HL's per-IP rate limit
       continue; // keep draining while work remains
     }
     if (once) {

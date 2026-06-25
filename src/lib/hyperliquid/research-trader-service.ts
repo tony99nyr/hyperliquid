@@ -18,6 +18,10 @@ const DAY = 24 * 60 * 60 * 1000;
 export const DEFAULT_WINDOW_DAYS = 30;
 /** Bounded so the worker fetch stays minutes, not unbounded, per address. */
 const MAX_FILLS = 12000;
+/** Retry a stale (almost always 429-under-load) clearinghouse read before erroring. */
+const CLEARINGHOUSE_RETRIES = 2;
+const CLEARINGHOUSE_RETRY_MS = 2500;
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 export interface TraderEvaluationRow {
   leader_address: string;
@@ -105,11 +109,18 @@ export async function processNextEvaluation(windowDays = DEFAULT_WINDOW_DAYS): P
   try {
     const addr = req.leader_address;
     const sinceMs = Date.now() - windowDays * DAY;
-    const [state, fillsRes] = await Promise.all([
-      fetchClearinghouseState(addr),
-      fetchAllFills(addr, { sinceMs, maxFills: MAX_FILLS }),
-    ]);
+    // Kick off the deep-fill crawl in parallel; await the clearinghouse with retry.
+    const fillsPromise = fetchAllFills(addr, { sinceMs, maxFills: MAX_FILLS });
+    let state = await fetchClearinghouseState(addr);
+    // `state.stale` means the HL read THREW (almost always a transient 429 under a
+    // bulk vet, not a dead account). Retry with backoff before erroring — a single
+    // 429 shouldn't permanently mark a wallet un-vettable.
+    for (let attempt = 0; state.stale && attempt < CLEARINGHOUSE_RETRIES; attempt++) {
+      await sleep(CLEARINGHOUSE_RETRY_MS * (attempt + 1));
+      state = await fetchClearinghouseState(addr);
+    }
     if (state.stale) throw new Error('clearinghouse stale — skipping');
+    const fillsRes = await fillsPromise;
     const fp = computeTraderFingerprint(fillsRes.fills, state, windowDays, fillsRes.truncated);
     const { error } = await client.from('trader_evaluations').insert({
       leader_address: addr,
