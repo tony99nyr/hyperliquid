@@ -33,6 +33,7 @@ import {
 } from '../panel-styles';
 import { describeFlags, followVerdict, type FlagSeverity } from './trader-flag-helpers';
 import { pickMirrorTarget } from './mirror-command-helpers';
+import PositionDetail from './PositionDetail';
 
 export interface TraderDetailDrawerProps {
   trader: TopTraderRow;
@@ -60,6 +61,9 @@ export default function TraderDetailDrawer({ trader, onClose, detailOverride }: 
   // Where the positions came from: 'supabase' (watcher covers this leader — live,
   // zero HL load) vs 'hl' (on-demand fallback). Null for a seeded override.
   const source = detailOverride ? null : live.source;
+  // When a position row is clicked, the drawer body is REPLACED with its drill-down
+  // (single dialog — no nested modal), with a back button to return to the list.
+  const [selectedPosition, setSelectedPosition] = useState<HlPosition | null>(null);
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
@@ -198,6 +202,14 @@ export default function TraderDetailDrawer({ trader, onClose, detailOverride }: 
           </button>
         </header>
 
+        {selectedPosition ? (
+          <PositionDetail
+            leaderAddress={trader.address}
+            position={selectedPosition}
+            onBack={() => setSelectedPosition(null)}
+          />
+        ) : (
+        <>
         {/* Verdict headline */}
         <div
           data-testid="trader-detail-verdict"
@@ -276,7 +288,7 @@ export default function TraderDetailDrawer({ trader, onClose, detailOverride }: 
           ) : (
             <ul data-testid="trader-positions" className={css({ display: 'flex', flexDirection: 'column', gap: '6px', listStyle: 'none', margin: 0, padding: 0 })}>
               {detail.positions.map((p) => (
-                <PositionRowView key={`${p.coin}-${p.side}`} p={p} />
+                <PositionRowView key={`${p.coin}-${p.side}`} p={p} onSelect={setSelectedPosition} />
               ))}
             </ul>
           )}
@@ -319,6 +331,8 @@ export default function TraderDetailDrawer({ trader, onClose, detailOverride }: 
               : null
           }
         />
+        </>
+        )}
       </section>
     </div>
   );
@@ -363,42 +377,53 @@ function Stat({ label, value, testid, danger, signed, hint }: { label: string; v
   );
 }
 
-function PositionRowView({ p }: { p: HlPosition }) {
+function PositionRowView({ p, onSelect }: { p: HlPosition; onSelect: (p: HlPosition) => void }) {
   const sideColor = p.side === 'long' ? ZONE_COLORS.ok : ZONE_COLORS.danger;
   const pnlColor = p.unrealizedPnl > 0 ? ZONE_COLORS.ok : p.unrealizedPnl < 0 ? ZONE_COLORS.danger : GH.textMuted;
   return (
-    <li
-      data-testid="trader-position-row"
-      className={css({
-        bg: 'github.bg',
-        border: '1px solid token(colors.github.borderSubtle)',
-        borderRadius: '6px',
-        padding: '7px 9px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '3px',
-      })}
-    >
-      <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px' })}>
-        <span className={css({ display: 'flex', alignItems: 'baseline', gap: '6px' })}>
-          <span style={{ color: sideColor }} className={css({ fontFamily: 'label', fontSize: '11px', fontWeight: 'bold', letterSpacing: '0.04em' })}>
-            {p.side.toUpperCase()}
+    <li data-testid="trader-position-row" className={css({ listStyle: 'none', margin: 0, padding: 0 })}>
+      <button
+        type="button"
+        data-testid="trader-position-open"
+        onClick={() => onSelect(p)}
+        aria-label={`View ${p.side} ${p.coin} position detail`}
+        className={css({
+          width: '100%',
+          textAlign: 'left',
+          cursor: 'pointer',
+          bg: 'github.bg',
+          border: '1px solid token(colors.github.borderSubtle)',
+          borderRadius: '6px',
+          padding: '7px 9px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '3px',
+          _hover: { borderColor: 'github.link' },
+          _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '1px' },
+        })}
+      >
+        <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px' })}>
+          <span className={css({ display: 'flex', alignItems: 'baseline', gap: '6px' })}>
+            <span style={{ color: sideColor }} className={css({ fontFamily: 'label', fontSize: '11px', fontWeight: 'bold', letterSpacing: '0.04em' })}>
+              {p.side.toUpperCase()}
+            </span>
+            <span className={css({ fontFamily: 'mono', fontSize: 'xs', color: 'github.textBright', fontWeight: 'bold' })}>{p.coin}</span>
+            {p.leverage !== null && (
+              <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>{p.leverage}x</span>
+            )}
+            <span aria-hidden className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>›</span>
           </span>
-          <span className={css({ fontFamily: 'mono', fontSize: 'xs', color: 'github.textBright', fontWeight: 'bold' })}>{p.coin}</span>
-          {p.leverage !== null && (
-            <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>{p.leverage}x</span>
-          )}
-        </span>
-        <span style={{ color: pnlColor, fontFeatureSettings: '"tnum"' }} className={css({ fontFamily: 'mono', fontSize: 'xs', fontWeight: 'bold' })}>
-          {fmtUsd(p.unrealizedPnl)}
-        </span>
-      </div>
-      <div className={css({ display: 'flex', gap: '12px', flexWrap: 'wrap' })}>
-        <MicroStat label="size" value={`${p.size}`} />
-        <MicroStat label="entry" value={fmtPx(p.entryPx)} />
-        <MicroStat label="value" value={fmtCompactUsd(p.positionValue)} />
-        {p.liquidationPx !== null && <MicroStat label="liq" value={fmtPx(p.liquidationPx)} />}
-      </div>
+          <span style={{ color: pnlColor, fontFeatureSettings: '"tnum"' }} className={css({ fontFamily: 'mono', fontSize: 'xs', fontWeight: 'bold' })}>
+            {fmtUsd(p.unrealizedPnl)}
+          </span>
+        </div>
+        <div className={css({ display: 'flex', gap: '12px', flexWrap: 'wrap' })}>
+          <MicroStat label="size" value={`${p.size}`} />
+          <MicroStat label="entry" value={fmtPx(p.entryPx)} />
+          <MicroStat label="value" value={fmtCompactUsd(p.positionValue)} />
+          {p.liquidationPx !== null && <MicroStat label="liq" value={fmtPx(p.liquidationPx)} />}
+        </div>
+      </button>
     </li>
   );
 }
