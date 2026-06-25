@@ -33,6 +33,7 @@ import { useLeaderPositions } from '@/hooks/useLeaderPositions';
 import { useLeaderPositionsScoped } from '@/hooks/useLeaderPositionsTable';
 import { leaderPositionRowsToHlPositions } from '@/hooks/leader-position-adapt';
 import { usePerformance } from '@/hooks/usePerformance';
+import { useFollowedPositionAlerts } from '@/hooks/useFollowedPositionAlerts';
 import { useRealtimeChannel } from '@/hooks/useRealtimeChannel';
 import { useUrlParamState } from '@/hooks/useUrlParamState';
 import { mapAnalysisLogRow, byCreatedAtDesc } from '@/hooks/realtime-row-mappers';
@@ -105,6 +106,10 @@ export default function CockpitClient({
   // Account equity / today's realized PnL for the top bar + exit-modal math
   // (derived server-side from the fills ledger; inert without a session).
   const perf = usePerformance(sessionId);
+  // Keep-matched follow alerts: stages reduce-only suggestions into the approval popup
+  // when a followed leader reduces/closes/flips. Gated OFF server-side (no-op until
+  // FOLLOW_MATCH_ENABLED); never auto-fires (human approves every stage).
+  useFollowedPositionAlerts();
   const equityUsd = perf.summary?.equityUsd ?? null;
   const equityBreakdown = perf.summary?.equityBreakdown ?? null;
   const todayUsd = perf.summary?.kpis.todayPnlUsd ?? null;

@@ -102,6 +102,9 @@ export async function createPreview(
     kind: PendingActionKind;
     mode: TradingMode;
     proposal: PendingActionProposal;
+    /** Optional idempotency key (e.g. hash of a leader_action.id) — the partial-unique
+     *  index on pending_actions.dedupe_key rejects a duplicate stage. */
+    dedupeKey?: string;
   },
   client: SupabaseClient = getServiceRoleClient(),
 ): Promise<PendingAction> {
@@ -114,6 +117,7 @@ export async function createPreview(
       proposal: input.proposal,
       status: 'preview',
       origin: 'operator',
+      dedupe_key: input.dedupeKey ?? null,
     })
     .select()
     .single();

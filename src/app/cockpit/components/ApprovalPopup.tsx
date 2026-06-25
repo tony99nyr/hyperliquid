@@ -250,6 +250,10 @@ function PopupBody({
   }
 
   const sideLong = display.side === 'buy';
+  // A reduce-only intent CLOSES/REDUCES exposure — it must NOT be presented with the
+  // open-style Long/Short vocabulary (a reduce-only close of a long has side 'sell',
+  // which would otherwise read as "Short"). The human is the last line of defense.
+  const isReduceOnly = action.proposal.intent.reduceOnly === true;
   const kindTitle =
     action.kind === 'exit' ? 'Confirm Exit' : action.kind === 'entry' ? 'Confirm Order' : 'Confirm Action';
 
@@ -278,7 +282,9 @@ function PopupBody({
     ? 'Submitting…'
     : isLive
       ? 'Approve LIVE'
-      : `Approve & ${sideLong ? 'Long' : 'Short'} ${szStr} ${display.coin}`;
+      : isReduceOnly
+        ? `Approve & Reduce ${szStr} ${display.coin}`
+        : `Approve & ${sideLong ? 'Long' : 'Short'} ${szStr} ${display.coin}`;
 
   return (
     <div
@@ -426,8 +432,14 @@ function PopupBody({
               })}
               style={{ background: TERM.inset, border: '1px solid rgba(255,255,255,.08)' }}
             >
-              <SideSegment label="LONG" active={sideLong} activeColor={ZONE_COLORS.ok} testid={sideLong ? 'approval-side' : undefined} />
-              <SideSegment label="SHORT" active={!sideLong} activeColor={ZONE_COLORS.danger} testid={!sideLong ? 'approval-side' : undefined} />
+              {isReduceOnly ? (
+                <SideSegment label={`REDUCE ${display.coin}`} active activeColor={ZONE_COLORS.warn} testid="approval-side" />
+              ) : (
+                <>
+                  <SideSegment label="LONG" active={sideLong} activeColor={ZONE_COLORS.ok} testid={sideLong ? 'approval-side' : undefined} />
+                  <SideSegment label="SHORT" active={!sideLong} activeColor={ZONE_COLORS.danger} testid={!sideLong ? 'approval-side' : undefined} />
+                </>
+              )}
             </div>
             <div
               className={css({
