@@ -8,7 +8,7 @@
  * a health read (liq-distance), the entry-vs-market chart, and a Follow toggle.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { css } from '@styled-system/css';
 import type { HlPosition } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { getBrowserClient } from '@/lib/cockpit/supabase-browser';
@@ -54,6 +54,12 @@ export default function PositionDetail({ leaderAddress, position: p, onBack, ove
   const [openLoaded, setOpenLoaded] = useState(Boolean(override));
   const [following, setFollowing] = useState(override?.following ?? false);
   const [busy, setBusy] = useState(false);
+  const [followError, setFollowError] = useState(false);
+  const backRef = useRef<HTMLButtonElement>(null);
+
+  // Move focus to the back button when this view replaces the drawer body, so
+  // keyboard/SR focus isn't dropped on <body> by the in-place swap.
+  useEffect(() => { backRef.current?.focus(); }, []);
 
   useEffect(() => {
     if (override) return;
@@ -98,6 +104,7 @@ export default function PositionDetail({ leaderAddress, position: p, onBack, ove
   async function toggleFollow() {
     if (busy) return;
     setBusy(true);
+    setFollowError(false);
     const next = !following;
     setFollowing(next);
     try {
@@ -110,6 +117,7 @@ export default function PositionDetail({ leaderAddress, position: p, onBack, ove
       if (!res.ok) throw new Error(String(res.status));
     } catch {
       setFollowing(!next); // revert
+      setFollowError(true);
     } finally {
       setBusy(false);
     }
@@ -118,22 +126,25 @@ export default function PositionDetail({ leaderAddress, position: p, onBack, ove
   return (
     <div data-testid="position-detail" className={css({ display: 'flex', flexDirection: 'column', gap: '12px' })}>
       <button
+        ref={backRef}
         type="button"
         data-testid="position-detail-back"
         onClick={onBack}
+        aria-label="Back to positions"
         className={css({ alignSelf: 'flex-start', fontFamily: 'mono', fontSize: '10px', color: 'github.link', bg: 'transparent', border: 'none', cursor: 'pointer', padding: 0, _hover: { textDecoration: 'underline' }, _focusVisible: { outline: '2px solid token(colors.github.link)' } })}
       >
-        ← positions
+        <span aria-hidden>← </span>positions
       </button>
 
       <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px' })}>
-        <span className={css({ display: 'flex', alignItems: 'baseline', gap: '6px' })}>
+        <span role="heading" aria-level={3} aria-label={`${p.side} ${coin} position detail`} className={css({ display: 'flex', alignItems: 'baseline', gap: '6px' })}>
           <span style={{ color: sideColor }} className={css({ fontFamily: 'label', fontSize: 'sm', fontWeight: 'bold', letterSpacing: '0.04em' })}>{p.side.toUpperCase()}</span>
           <span className={css({ fontFamily: 'mono', fontSize: 'sm', color: 'github.textBright', fontWeight: 'bold' })}>{coin}</span>
           {p.leverage !== null && <span className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>{p.leverage}x</span>}
         </span>
         <span
           data-testid="position-health"
+          aria-label={`Position health: ${HEALTH_LABEL[health.status]}${health.liqDistancePct != null ? `, ${health.liqDistancePct.toFixed(0)} percent to liquidation` : ', liquidation price unknown'}`}
           title={health.liqDistancePct != null ? `${health.liqDistancePct.toFixed(1)}% to liquidation` : 'liquidation price unknown'}
           style={{ color: HEALTH_COLOR[health.status], borderColor: HEALTH_COLOR[health.status] }}
           className={css({ fontFamily: 'mono', fontSize: '9px', fontWeight: 'bold', border: '1px solid', borderRadius: '4px', paddingX: '5px', paddingY: '1px' })}
@@ -161,13 +172,19 @@ export default function PositionDetail({ leaderAddress, position: p, onBack, ove
         type="button"
         data-testid="position-follow"
         aria-pressed={following}
+        aria-busy={busy}
         disabled={busy}
         onClick={toggleFollow}
         style={following ? { borderColor: '#5b8cff', color: '#e8ebf2', background: 'rgba(91,140,255,0.14)' } : undefined}
-        className={css({ fontFamily: 'mono', fontSize: '11px', fontWeight: 'bold', color: 'github.text', bg: 'github.bg', border: '1px solid token(colors.github.borderSubtle)', borderRadius: '6px', padding: '8px', cursor: busy ? 'wait' : 'pointer', _hover: { borderColor: 'github.link' }, _focusVisible: { outline: '2px solid token(colors.github.link)' } })}
+        className={css({ fontFamily: 'mono', fontSize: '11px', fontWeight: 'bold', color: 'github.text', bg: 'github.bg', border: '1px solid token(colors.github.borderSubtle)', borderRadius: '6px', padding: '8px', cursor: busy ? 'wait' : 'pointer', _disabled: { opacity: 0.6 }, _hover: { borderColor: 'github.link' }, _focusVisible: { outline: '2px solid token(colors.github.link)' } })}
       >
-        {following ? '✓ Following — tap to unfollow' : '+ Follow this position'}
+        {busy ? 'Saving…' : following ? '✓ Following — tap to unfollow' : '+ Follow this position'}
       </button>
+      {followError && (
+        <span role="status" data-testid="position-follow-error" style={{ color: ZONE_COLORS.danger }} className={css({ fontFamily: 'mono', fontSize: '9px' })}>
+          Follow update failed — tap to retry.
+        </span>
+      )}
       <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted', lineHeight: 1.4 })}>
         Following surfaces a keep-matched suggestion when this leader reduces/closes — you approve every action (no auto-fire).
       </span>

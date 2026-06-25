@@ -68,6 +68,22 @@ export default function TraderDetailDrawer({ trader, onClose, detailOverride }: 
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  // Key of the position row that opened the drill-down, so Back can restore focus
+  // to it (PositionDetail focuses its own back button on the forward swap).
+  const returnFocusKeyRef = useRef<string | null>(null);
+
+  const openPosition = (p: HlPosition) => {
+    returnFocusKeyRef.current = `${p.coin}-${p.side}`;
+    setSelectedPosition(p);
+  };
+  // On Back (selectedPosition → null), restore focus to the originating row.
+  useEffect(() => {
+    if (selectedPosition !== null || !returnFocusKeyRef.current) return;
+    const key = returnFocusKeyRef.current;
+    returnFocusKeyRef.current = null;
+    const el = dialogRef.current?.querySelector<HTMLElement>(`[data-pos-key="${key}"]`);
+    el?.focus();
+  }, [selectedPosition]);
 
   // A11y: focus the close button, inert + hide the rest of the page (same pattern
   // as ApprovalPopup), restore on unmount.
@@ -288,7 +304,7 @@ export default function TraderDetailDrawer({ trader, onClose, detailOverride }: 
           ) : (
             <ul data-testid="trader-positions" className={css({ display: 'flex', flexDirection: 'column', gap: '6px', listStyle: 'none', margin: 0, padding: 0 })}>
               {detail.positions.map((p) => (
-                <PositionRowView key={`${p.coin}-${p.side}`} p={p} onSelect={setSelectedPosition} />
+                <PositionRowView key={`${p.coin}-${p.side}`} p={p} onSelect={openPosition} />
               ))}
             </ul>
           )}
@@ -385,6 +401,7 @@ function PositionRowView({ p, onSelect }: { p: HlPosition; onSelect: (p: HlPosit
       <button
         type="button"
         data-testid="trader-position-open"
+        data-pos-key={`${p.coin}-${p.side}`}
         onClick={() => onSelect(p)}
         aria-label={`View ${p.side} ${p.coin} position detail`}
         className={css({

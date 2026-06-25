@@ -21,7 +21,7 @@ import { pickChartWindow } from '@/lib/cockpit/position-health-business-logic';
 const CandleChart = dynamic(() => import('../chart/CandleChart'), {
   ssr: false,
   loading: () => (
-    <div data-testid="position-chart-loading" className={css({ height: '220px', display: 'grid', placeItems: 'center', fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>
+    <div role="status" data-testid="position-chart-loading" className={css({ height: '240px', display: 'grid', placeItems: 'center', fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>
       loading chart…
     </div>
   ),
@@ -54,10 +54,13 @@ export default function PositionHistoryChart({ coin, side, entryPx, liquidationP
   }, [coin, openedAtMs]);
 
   if (error && !candles?.length) {
-    return <div data-testid="position-chart-error" className={css({ height: '120px', display: 'grid', placeItems: 'center', fontFamily: 'mono', fontSize: '10px', color: 'zone.danger' })}>chart unavailable — {error}</div>;
+    return <div role="status" data-testid="position-chart-error" className={css({ height: '240px', display: 'grid', placeItems: 'center', fontFamily: 'mono', fontSize: '10px', color: 'zone.danger', textAlign: 'center', padding: '0 12px' })}>chart unavailable — {error}</div>;
   }
   if (candles === null) {
-    return <div data-testid="position-chart-loading" className={css({ height: '220px', display: 'grid', placeItems: 'center', fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>loading chart…</div>;
+    return <div role="status" data-testid="position-chart-loading" className={css({ height: '240px', display: 'grid', placeItems: 'center', fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>loading chart…</div>;
+  }
+  if (candles.length === 0) {
+    return <div role="status" data-testid="position-chart-empty" className={css({ height: '240px', display: 'grid', placeItems: 'center', fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>no candle data for this window</div>;
   }
   return (
     <div data-testid="position-history-chart">
