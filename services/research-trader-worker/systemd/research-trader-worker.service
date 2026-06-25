@@ -1,0 +1,39 @@
+[Unit]
+Description=HL Cockpit Research-Trader Worker (on-demand copyability vetting queue drainer)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust User/paths to your NAS layout. WorkingDirectory MUST be the hl-cockpit
+# repo root (the service runs the repo's TypeScript via tsx — no separate build).
+User=research-trader-worker
+Group=research-trader-worker
+WorkingDirectory=/opt/hl-cockpit
+Environment="NODE_ENV=production"
+# The repo's env (Supabase HL_TRADERS_* keys etc.). pnpm env:pull writes .env.local.
+EnvironmentFile=/opt/hl-cockpit/.env.local
+ExecStart=/opt/hl-cockpit/node_modules/.bin/tsx --tsconfig tsconfig.scripts.json scripts/research-trader-worker.ts
+Restart=always
+RestartSec=10
+# Finish the in-flight request on stop (the loop traps SIGTERM and exits cleanly).
+KillSignal=SIGTERM
+TimeoutStopSec=60
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=research-trader-worker
+
+# Security hardening (outbound-only service — no inbound port).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/hl-cockpit
+ReadOnlyPaths=/usr
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
