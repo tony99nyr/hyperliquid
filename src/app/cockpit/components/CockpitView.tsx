@@ -17,19 +17,17 @@
  * Wired to REAL data throughout (Supabase realtime + HL ws + candle polls).
  */
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback } from 'react';
 import { css } from '@styled-system/css';
 import type { HlPosition } from '@/lib/hyperliquid/hyperliquid-info-service';
 import type { OrderSide, TradingMode } from '@/types/fill';
-import type { ActiveTrade, OpportunityLevels } from './chart/candle-chart-helpers';
+import type { ActiveTrade } from './chart/candle-chart-helpers';
 import type { RegimeDir } from './open-positions-helpers';
 import { useHlOrderbook } from '@/hooks/useHlOrderbook';
-import { useRubricScores } from '@/hooks/useRubricScores';
-import { toCardModels } from './opportunity/opportunity-helpers';
 import CandleChartPanel from './chart/CandleChartPanel';
 import OpenPositionsPanel from './OpenPositionsPanel';
 import MarketRegimePanel from './right-rail/MarketRegimePanel';
-import OpportunityBoard from './opportunity/OpportunityBoard';
+import FavoritePlaysBoard from './opportunity/FavoritePlaysBoard';
 import WhalePosture from './opportunity/WhalePosture';
 import HealthPanel from './HealthPanel';
 import LeaderVsYou from './LeaderVsYou';
@@ -81,53 +79,10 @@ export default function CockpitView({
     setEntrySide('buy');
     setShowEntry(true);
   }, []);
-  // From an opportunity card's "Ask Claude": switch to its coin + seed its side.
-  const onAskOpportunity = useCallback(
-    (snap: Record<string, unknown>) => {
-      const c = typeof snap.coin === 'string' ? snap.coin.toUpperCase() : coin;
-      if (coins.includes(c)) onCoinChange(c);
-      setEntrySide(snap.side === 'short' ? 'sell' : 'buy');
-      setShowEntry(true);
-    },
-    [coin, coins, onCoinChange],
-  );
-
-  // Opportunity chart overlay is TOGGLEABLE: click a coin's opportunity to view its
-  // entry/stop/target on the chart; click the SAME coin again to clear it (reset to a
-  // clean chart). Clicking a different coin selects it AND turns the overlay on.
-  const [oppOverlayOn, setOppOverlayOn] = useState(false);
-  const onOpportunityClick = useCallback(
-    (c: string) => {
-      if (!coins.includes(c)) return;
-      if (c.toUpperCase() === coin.toUpperCase()) {
-        setOppOverlayOn((v) => !v);
-      } else {
-        onCoinChange(c);
-        setOppOverlayOn(true);
-      }
-    },
-    [coins, coin, onCoinChange],
-  );
 
   // Live mark for the selected coin (the entry modal's sizing needs a price).
   const book = useHlOrderbook(coin);
   const entryPx = book.lastPx ?? book.book.mid ?? null;
-
-  // Rubric reads — subscribed ONCE here, fed to the board (override → its own
-  // subscription stays inert) and the chart (overlay the selected coin's levels).
-  const rubric = useRubricScores();
-  const cardModels = useMemo(() => toCardModels(rubric.rows, coins), [rubric.rows, coins]);
-  const selectedOpp: OpportunityLevels | null = useMemo(() => {
-    const m = cardModels.find((c) => c.coin === coin.toUpperCase());
-    if (!m) return null;
-    return {
-      side: m.chosenSide,
-      entryLow: m.display.entryLow,
-      entryHigh: m.display.entryHigh,
-      invalidation: m.display.invalidation,
-      target: m.display.target,
-    };
-  }, [cardModels, coin]);
 
   return (
     <div
@@ -152,7 +107,7 @@ export default function CockpitView({
       {/* LEFT — the chart (the thing you watch price on). */}
       <main className={css({ order: { base: 1, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0, minHeight: { base: 'auto', lg: '0' }, overflowY: { base: 'visible', lg: 'auto' }, paddingRight: { lg: '2px' } })}>
         <CockpitCoinTabs coin={coin} coins={coins} onChange={onCoinChange} />
-        <CandleChartPanel coin={coin} trade={trade} opportunity={oppOverlayOn ? selectedOpp : null} />
+        <CandleChartPanel coin={coin} trade={trade} />
       </main>
 
       {/* RIGHT — the decision column: what you ACT on (positions + opportunities)
@@ -165,13 +120,7 @@ export default function CockpitView({
           currentEquityUsd={currentEquityUsd}
           onNewPosition={onNewPosition}
         />
-        <OpportunityBoard
-          order={coins}
-          selectedCoin={coin}
-          onSelectCoin={onOpportunityClick}
-          onAskClaude={onAskOpportunity}
-          rowsOverride={rubric.rows}
-        />
+        <FavoritePlaysBoard />
         <HealthPanel sessionId={sessionId} coin={coin} onCoinChange={onCoinChange} />
         <MarketRegimePanel coin={coin} onNetBias={onNetBias} />
         <WhalePosture coins={coins} />
