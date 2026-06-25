@@ -13,7 +13,6 @@
  */
 
 import type { HlFill, HlClearinghouseState } from './hyperliquid-info-service';
-import { buildCopyMonitorAnalytics } from './copy-monitor-analytics';
 
 const EPS = 1e-9;
 const HOUR = 60 * 60 * 1000;
@@ -40,6 +39,9 @@ export interface FingerprintMetrics {
   addsPerTrip: number | null;
   liquidations: number;
   activeDayFrac: number | null;
+  openPositions: number;
+  /** Window hit the fill cap → oldest fills dropped; the read is recency-biased. */
+  truncated: boolean;
 }
 
 export interface TraderFingerprint {
@@ -69,9 +71,13 @@ function percentile(xs: number[], p: number): number {
   return s[i];
 }
 
-interface RoundTrip { coin: string; openTime: number; closeTime: number; holdMs: number; pnl: number; }
+interface RoundTrip { coin: string; openTime: number; closeTime: number; holdMs: number; pnl: number; adds: number; }
 
-/** Reconstruct round-trips per coin by tracking signed running size across fills. PURE. */
+/**
+ * Reconstruct round-trips per coin by tracking signed running size across fills. PURE.
+ * `adds` counts same-direction size-increasing fills WITHIN a trip (after the opener)
+ * — the averaging-down discriminator, counted per-trip (not a window-wide total).
+ */
 export function reconstructRoundTrips(fills: HlFill[]): RoundTrip[] {
   const byCoin = new Map<string, HlFill[]>();
   for (const f of fills) {
@@ -81,18 +87,23 @@ export function reconstructRoundTrips(fills: HlFill[]): RoundTrip[] {
   const trips: RoundTrip[] = [];
   for (const [coin, fs] of byCoin) {
     fs.sort((a, b) => a.time - b.time);
-    let pos = 0, openTime = 0, pnlAccum = 0;
+    let pos = 0, openTime = 0, pnlAccum = 0, adds = 0;
     for (const f of fs) {
       const delta = f.side === 'buy' ? f.sz : -f.sz;
-      if (Math.abs(pos) < EPS && Math.abs(delta) > EPS) openTime = f.time;
-      pnlAccum += f.closedPnl ?? 0;
       const prev = pos;
-      pos += delta;
+      if (Math.abs(prev) < EPS && Math.abs(delta) > EPS) {
+        openTime = f.time; // opening from flat — the opener, not an add
+      } else if (prev * delta > 0) {
+        adds += 1; // same-direction increase = an add (averaging in/up)
+      }
+      pnlAccum += f.closedPnl ?? 0;
+      pos = prev + delta;
       const crossedZero = Math.abs(pos) < EPS || prev * pos < 0;
       if (crossedZero && openTime > 0) {
-        trips.push({ coin, openTime, closeTime: f.time, holdMs: f.time - openTime, pnl: pnlAccum });
+        trips.push({ coin, openTime, closeTime: f.time, holdMs: f.time - openTime, pnl: pnlAccum, adds });
         pnlAccum = 0;
-        openTime = Math.abs(pos) > EPS ? f.time : 0;
+        adds = 0;
+        openTime = Math.abs(pos) > EPS ? f.time : 0; // sign-flip reopens immediately (adds reset)
       }
     }
   }
@@ -104,6 +115,7 @@ export function computeTraderFingerprint(
   fills: HlFill[],
   state: HlClearinghouseState,
   windowDays: number,
+  truncated = false,
 ): TraderFingerprint {
   const nFills = fills.length;
   const trips = reconstructRoundTrips(fills);
@@ -136,7 +148,7 @@ export function computeTraderFingerprint(
   const maxDrawdownFrac = peak > 0 ? maxDd / peak : null;
 
   const liquidations = fills.filter((f) => /liquidat/i.test(f.dir ?? '')).length;
-  const totalAdds = buildCopyMonitorAnalytics(null, state, fills).totalAdds;
+  const totalAdds = trips.reduce((s, t) => s + t.adds, 0);
   const addsPerTrip = trips.length ? totalAdds / trips.length : null;
   const worstLossVsMedianWin = medWin > 0 ? Math.abs(worstLoss) / medWin : null;
 
@@ -159,6 +171,8 @@ export function computeTraderFingerprint(
     addsPerTrip,
     liquidations,
     activeDayFrac,
+    openPositions: state.positions.length,
+    truncated,
   };
 
   // --- Verdict: OPERATIONAL FEASIBILITY (copyable-with-a-stop), not profit (A4) ---
@@ -192,6 +206,10 @@ export function computeTraderFingerprint(
         why = `Clean copyable shape: no liqs, cuts losers, ${metrics.medianHoldHours != null ? `~${metrics.medianHoldHours.toFixed(0)}h holds, ` : ''}concentrated. (Feasibility, not a profit guarantee.)`;
       }
     }
+  }
+
+  if (truncated && verdict !== 'avoid') {
+    why += ' (Window hit the fill cap — oldest fills dropped, so this is a recency-biased read.)';
   }
 
   return {

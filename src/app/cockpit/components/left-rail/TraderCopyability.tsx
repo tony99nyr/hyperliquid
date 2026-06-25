@@ -90,7 +90,12 @@ export default function TraderCopyability({ address }: { address: string }) {
           {vetButton('Re-vet →')}
         </>
       )}
-      {error && <span role="status" style={{ color: ZONE_COLORS.danger }} className={css({ fontFamily: 'mono', fontSize: '9px' })}>{error}</span>}
+      {vetting && (
+        <span role="status" data-testid="copyability-vetting" className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>
+          Vetting — worker fetching fills (up to 45s)…
+        </span>
+      )}
+      {error && <span role="alert" style={{ color: ZONE_COLORS.danger }} className={css({ fontFamily: 'mono', fontSize: '9px' })}>{error}</span>}
     </div>
   );
 }

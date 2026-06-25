@@ -53,13 +53,29 @@ export async function enqueueEvaluation(address: string): Promise<{ queued: bool
 export async function getLatestEvaluation(address: string): Promise<TraderEvaluationRow | null> {
   const leader_address = normalizeLeaderAddress(address);
   if (!leader_address) return null;
-  const { data } = await getServiceRoleClient()
+  const { data, error } = await getServiceRoleClient()
     .from('trader_evaluations')
     .select('*')
     .eq('leader_address', leader_address)
     .order('generated_at', { ascending: false })
     .limit(1);
+  if (error) throw new Error(`getLatestEvaluation failed: ${error.message}`); // don't mask as "never vetted"
   return (data?.[0] as TraderEvaluationRow | undefined) ?? null;
+}
+
+/**
+ * Reclaim rows stuck in 'processing' (a worker crashed mid-fetch) back to 'pending'.
+ * Single-worker model: any 'processing' row at worker STARTUP is orphaned. Without
+ * this, enqueueEvaluation's in-flight dedup would block that address forever.
+ */
+export async function resetStuckProcessing(): Promise<number> {
+  const { data, error } = await getServiceRoleClient()
+    .from('evaluation_requests')
+    .update({ status: 'pending' })
+    .eq('status', 'processing')
+    .select('id');
+  if (error) throw new Error(`resetStuckProcessing failed: ${error.message}`);
+  return data?.length ?? 0;
 }
 
 /**
@@ -77,7 +93,15 @@ export async function processNextEvaluation(windowDays = DEFAULT_WINDOW_DAYS): P
     .limit(1);
   const req = pend?.[0] as { id: string; leader_address: string } | undefined;
   if (!req) return null;
-  await client.from('evaluation_requests').update({ status: 'processing' }).eq('id', req.id);
+  // Atomic claim: only proceed if WE flipped pending→processing (guards a 2nd worker
+  // instance racing the same row); otherwise try the next pending.
+  const { data: claimed } = await client
+    .from('evaluation_requests')
+    .update({ status: 'processing' })
+    .eq('id', req.id)
+    .eq('status', 'pending')
+    .select('id');
+  if (!claimed || claimed.length === 0) return processNextEvaluation(windowDays);
   try {
     const addr = req.leader_address;
     const sinceMs = Date.now() - windowDays * DAY;
@@ -86,7 +110,7 @@ export async function processNextEvaluation(windowDays = DEFAULT_WINDOW_DAYS): P
       fetchAllFills(addr, { sinceMs, maxFills: MAX_FILLS }),
     ]);
     if (state.stale) throw new Error('clearinghouse stale — skipping');
-    const fp = computeTraderFingerprint(fillsRes.fills, state, windowDays);
+    const fp = computeTraderFingerprint(fillsRes.fills, state, windowDays, fillsRes.truncated);
     const { error } = await client.from('trader_evaluations').insert({
       leader_address: addr,
       verdict: fp.verdict,

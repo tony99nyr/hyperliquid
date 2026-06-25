@@ -14,7 +14,7 @@
  */
 
 import { parseArgs, header, line, run } from './_skill-runtime';
-import { processNextEvaluation } from '@/lib/hyperliquid/research-trader-service';
+import { processNextEvaluation, resetStuckProcessing } from '@/lib/hyperliquid/research-trader-service';
 
 const POLL_MS = 5000;
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -24,6 +24,14 @@ run(async () => {
   const once = args['once'] === true || args['once'] === 'true';
 
   header(once ? 'research-trader worker — drain once' : 'research-trader worker — poll loop (Ctrl-C to stop)');
+
+  // Reclaim any request orphaned in 'processing' by a crashed prior run (single-worker).
+  try {
+    const reclaimed = await resetStuckProcessing();
+    if (reclaimed > 0) line(`reclaimed ${reclaimed} stuck 'processing' request(s) → pending.`);
+  } catch (err) {
+    line(`WARN reset stuck failed (continuing): ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   let stopping = false;
   process.on('SIGINT', () => { stopping = true; });

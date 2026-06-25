@@ -30,7 +30,7 @@ export interface UseTraderEvaluationState {
 }
 
 const POLL_MS = 4000;
-const POLL_TIMEOUT_MS = 90_000;
+const POLL_TIMEOUT_MS = 45_000;
 
 function mapRow(r: Record<string, unknown> | null): TraderEvaluation | null {
   if (!r) return null;
@@ -69,6 +69,9 @@ export function useTraderEvaluation(address: string | null): UseTraderEvaluation
     const e = await fetchLatest();
     setEvaluation(e);
     setLoading(false);
+    // A fresh load (incl. on address change) means no vet is in progress for THIS read.
+    setVetting(false);
+    setError(null);
   }, [fetchLatest]);
 
   useEffect(() => {
@@ -79,7 +82,8 @@ export function useTraderEvaluation(address: string | null): UseTraderEvaluation
   }, [refetch]);
 
   const vetTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  useEffect(() => () => { if (vetTimer.current) clearInterval(vetTimer.current); }, []);
+  // Clear a running vet poll on unmount OR address change (no stale cross-trader write).
+  useEffect(() => () => { if (vetTimer.current) { clearInterval(vetTimer.current); vetTimer.current = null; } }, [addr]);
 
   const vet = useCallback(async () => {
     if (!addr || vetting) return;
