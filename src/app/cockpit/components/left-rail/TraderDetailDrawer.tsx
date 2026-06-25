@@ -34,6 +34,7 @@ import {
 import { describeFlags, followVerdict, type FlagSeverity } from './trader-flag-helpers';
 import { pickMirrorTarget } from './mirror-command-helpers';
 import PositionDetail from './PositionDetail';
+import TraderCopyability from './TraderCopyability';
 
 export interface TraderDetailDrawerProps {
   trader: TopTraderRow;
@@ -266,6 +267,11 @@ export default function TraderDetailDrawer({ trader, onClose, detailOverride }: 
             />
             <Stat label="Fills" value={trader.metrics.nFills === null ? '—' : trader.metrics.nFills.toLocaleString('en-US')} />
           </div>
+        </Section>
+
+        {/* COPYABILITY — the on-demand vetting fingerprint (operational feasibility). */}
+        <Section title="Copyability">
+          <TraderCopyability address={trader.address} />
         </Section>
 
         {/* LIVE POSITIONS */}

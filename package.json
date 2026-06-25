@@ -32,6 +32,8 @@
     "smoke:data": "tsx --tsconfig tsconfig.scripts.json scripts/_smoke.ts",
     "watch": "tsx --tsconfig tsconfig.scripts.json scripts/watch.ts",
     "trader-watch": "tsx --tsconfig tsconfig.scripts.json scripts/trader-watch.ts",
+    "research-trader-worker": "tsx --tsconfig tsconfig.scripts.json scripts/research-trader-worker.ts",
+    "review-trader": "tsx --tsconfig tsconfig.scripts.json scripts/review-trader.ts",
     "upsert-rated": "tsx --tsconfig tsconfig.scripts.json scripts/upsert-rated-wallets.ts",
     "gen:secret": "tsx --tsconfig tsconfig.scripts.json scripts/gen-secret.ts",
     "rubric": "tsx --tsconfig tsconfig.scripts.json scripts/rubric-scan.ts",

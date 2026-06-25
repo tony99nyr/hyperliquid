@@ -20,6 +20,10 @@ vi.mock('@/hooks/useLeaderPositionsTable', () => ({
 vi.mock('@/hooks/useLeaderActionsFeed', () => ({
   useLeaderActionsFeed: () => ({ rows: [], loaded: true, subscribed: true, error: null }),
 }));
+// The drawer renders TraderCopyability (useTraderEvaluation → browser client, absent in jsdom).
+vi.mock('@/hooks/useTraderEvaluation', () => ({
+  useTraderEvaluation: () => ({ evaluation: null, loading: false, vetting: false, error: null, vet: async () => {} }),
+}));
 
 const toggleSpy = vi.fn(async () => {});
 vi.mock('@/hooks/useFavorites', () => ({
