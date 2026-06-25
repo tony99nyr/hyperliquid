@@ -11,7 +11,7 @@
  *   - leverage slider + Match-leader live through the ApprovalPopup (rendered by
  *     the shell, fed leader positions)
  *   - Match-leader / Leader-vs-You panel sits beside the Open Positions panel
- *   - clickable Top Traders → drawer (TopTradersRail unchanged)
+ *   - clickable Top Traders → drawer (TradersTable)
  *   - adaptive Market-Read / Trade-Health (HealthPanel) co-located with the trade
  *
  * Wired to REAL data throughout (Supabase realtime + HL ws + candle polls).

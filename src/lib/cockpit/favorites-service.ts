@@ -18,9 +18,13 @@ function normCoin(coin: string): string {
 export async function addFavorite(address: string, note?: string): Promise<void> {
   const leader_address = normalizeLeaderAddress(address);
   if (!leader_address) throw new Error('address required');
+  // Only write `note` when supplied — the optimistic toggle re-favorites without a
+  // note, and we must not clobber an existing operator note with null.
+  const payload: { leader_address: string; note?: string } = { leader_address };
+  if (note !== undefined) payload.note = note;
   const { error } = await getServiceRoleClient()
     .from('favorited_traders')
-    .upsert({ leader_address, note: note ?? null }, { onConflict: 'leader_address' });
+    .upsert(payload, { onConflict: 'leader_address' });
   if (error) throw new Error(`addFavorite failed: ${error.message}`);
 }
 

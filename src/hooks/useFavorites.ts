@@ -8,7 +8,7 @@
  * normalized lowercase to match the daemon's watch-set keying.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getBrowserClient } from '@/lib/cockpit/supabase-browser';
 
 const REFRESH_MS = 60_000;
@@ -26,6 +26,9 @@ export interface UseFavoritesState {
 export function useFavorites(): UseFavoritesState {
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  // Addresses with an in-flight toggle — ignore re-entrant clicks so a rapid
+  // double-tap can't fire two POSTs off the same stale snapshot and desync.
+  const inFlight = useRef<Set<string>>(new Set());
 
   const refetch = useCallback(async () => {
     const { data, error } = await getBrowserClient().from('favorited_traders').select('leader_address');
@@ -48,6 +51,8 @@ export function useFavorites(): UseFavoritesState {
   const toggle = useCallback(
     async (address: string) => {
       const addr = address.toLowerCase();
+      if (inFlight.current.has(addr)) return; // ignore re-entrant toggle for this address
+      inFlight.current.add(addr);
       const adding = !favorites.has(addr);
       setFavorites((prev) => {
         const s = new Set(prev);
@@ -72,6 +77,8 @@ export function useFavorites(): UseFavoritesState {
           return s;
         });
         throw err;
+      } finally {
+        inFlight.current.delete(addr);
       }
     },
     [favorites],

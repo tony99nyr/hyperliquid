@@ -60,20 +60,23 @@ const COLUMNS: { key: SortKey; label: string; title: string; fmt: Fmt; lowerBett
   { key: 'nFills', label: 'Fills', title: 'Fills sampled (sample size)', fmt: (r) => int(r.metrics.nFills) },
 ];
 
-function Chip({ label, title, active, onToggle }: { label: string; title: string; active: boolean; onToggle: () => void }) {
+function Chip({ label, title, active, disabled, onToggle }: { label: string; title: string; active: boolean; disabled?: boolean; onToggle: () => void }) {
   return (
     <button
       type="button"
       data-testid="traders-table-filter-chip"
       aria-pressed={active}
+      aria-disabled={disabled || undefined}
+      disabled={disabled}
       title={title}
-      onClick={onToggle}
-      style={active ? { borderColor: '#5b8cff', color: '#e8ebf2', background: 'rgba(91,140,255,0.14)' } : undefined}
+      onClick={disabled ? undefined : onToggle}
+      style={active && !disabled ? { borderColor: '#5b8cff', color: '#e8ebf2', background: 'rgba(91,140,255,0.14)' } : undefined}
       className={css({
         fontFamily: 'mono', fontSize: '10px', letterSpacing: '0.02em', textTransform: 'uppercase',
         color: 'github.textMuted', bg: 'github.bg', border: '1px solid token(colors.github.borderSubtle)',
-        borderRadius: '5px', padding: '3px 7px', cursor: 'pointer', whiteSpace: 'nowrap',
-        _hover: { borderColor: 'github.link', color: 'github.textBright' },
+        borderRadius: '5px', padding: '3px 7px', cursor: disabled ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap',
+        opacity: disabled ? 0.4 : 1,
+        _hover: disabled ? {} : { borderColor: 'github.link', color: 'github.textBright' },
         _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '1px' },
       })}
     >
@@ -116,7 +119,10 @@ export default function TradersTable({ traders, followedAddress, ratings }: Trad
     let rows = filterTraders(traders, { ...filter, search }, fav.isFavorite);
     if (hasPosition && leaderPositions.loaded) rows = rows.filter((r) => holding.has(r.address.toLowerCase()));
     return sortTraders(rows, sortKey, sortDir);
-  }, [traders, filter, search, fav, hasPosition, leaderPositions.loaded, holding, sortKey, sortDir]);
+    // Depend on fav.isFavorite (a useCallback keyed on the favorites Set, so its
+    // identity changes when favorites change) rather than the whole useFavorites
+    // object (a new literal each render that would defeat the memo).
+  }, [traders, filter, search, fav.isFavorite, hasPosition, leaderPositions.loaded, holding, sortKey, sortDir]);
 
   const page = shown.slice(0, visible);
 
@@ -146,7 +152,13 @@ export default function TradersTable({ traders, followedAddress, ratings }: Trad
         <Chip label="Hide risk" title="Hide wallets carrying a risk flag" active={!!filter.excludeRisk} onToggle={() => toggleFilter('excludeRisk')} />
         <Chip label="Vault" title="Only vault-backed names (the persistent copy signal)" active={!!filter.vaultOnly} onToggle={() => toggleFilter('vaultOnly')} />
         <Chip label="Hide thin" title="Hide under-sampled (< 50 fills) names" active={!!filter.excludeThin} onToggle={() => toggleFilter('excludeThin')} />
-        <Chip label="Has position" title="Only leaders currently holding a tradeable position" active={hasPosition} onToggle={() => { setHasPosition((v) => !v); setVisible(PAGE); }} />
+        <Chip
+          label={leaderPositions.loaded ? 'Has position' : 'Has position…'}
+          title={leaderPositions.loaded ? 'Only leaders currently holding a tradeable position' : 'Checking live positions…'}
+          active={hasPosition}
+          disabled={!leaderPositions.loaded}
+          onToggle={() => { setHasPosition((v) => !v); setVisible(PAGE); }}
+        />
         <input
           data-testid="traders-table-search"
           value={search}
@@ -159,14 +171,18 @@ export default function TradersTable({ traders, followedAddress, ratings }: Trad
 
       {page.length === 0 ? (
         <span data-testid="traders-table-empty" className={css({ fontSize: 'xs', color: 'github.textMuted', fontFamily: 'mono' })}>
-          {traders.length === 0 ? 'No rated wallets — run the rating pipeline.' : 'No traders match the active filters.'}
+          {traders.length === 0
+            ? 'No rated wallets — run the rating pipeline.'
+            : filter.favoritesOnly && fav.loading
+              ? 'Loading favorites…'
+              : 'No traders match the active filters.'}
         </span>
       ) : (
         <div className={css({ overflowX: 'auto', overflowY: 'auto', flex: '1 1 auto', minHeight: '0', maxHeight: { base: 'none', lg: '52vh' } })}>
           <table data-testid="traders-table-grid" className={css({ width: '100%', borderCollapse: 'collapse', fontFamily: 'mono', fontSize: '11px', minWidth: '720px' })}>
             <thead>
               <tr>
-                <th scope="col" className={css({ textAlign: 'left', position: 'sticky', top: 0, bg: 'github.bgSecondary', padding: '4px 6px', color: 'github.textMuted', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid token(colors.github.border)' })}>
+                <th scope="col" className={css({ textAlign: 'left', position: 'sticky', top: 0, left: 0, zIndex: 1, bg: 'github.bgSecondary', padding: '4px 6px', color: 'github.textMuted', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid token(colors.github.border)' })}>
                   Trader
                 </th>
                 <th scope="col" aria-label="Favorite" className={css({ position: 'sticky', top: 0, bg: 'github.bgSecondary', borderBottom: '1px solid token(colors.github.border)', width: '24px' })} />
@@ -183,6 +199,7 @@ export default function TradersTable({ traders, followedAddress, ratings }: Trad
                         type="button"
                         data-testid={`traders-sort-${c.key}`}
                         title={c.title}
+                        aria-label={`${c.label}${activeSort ? `, sorted ${sortDir === 'asc' ? 'ascending' : 'descending'}` : ''}, activate to sort`}
                         onClick={() => onSort(c.key)}
                         style={activeSort ? { color: '#e8ebf2' } : undefined}
                         className={css({
@@ -193,7 +210,8 @@ export default function TradersTable({ traders, followedAddress, ratings }: Trad
                           _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '-2px' },
                         })}
                       >
-                        {c.label}{activeSort ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                        {c.label}
+                        {activeSort && <span aria-hidden>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>}
                       </button>
                     </th>
                   );
@@ -212,15 +230,27 @@ export default function TradersTable({ traders, followedAddress, ratings }: Trad
                     onClick={() => setSelected(t)}
                     className={css({ cursor: 'pointer', borderBottom: '1px solid token(colors.github.borderSubtle)', _hover: { bg: 'github.bg' } })}
                   >
-                    <td className={css({ padding: '5px 6px', maxWidth: '180px' })}>
-                      <div className={css({ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0 })}>
-                        <span style={isFollowed ? { color: '#5b8cff' } : undefined} className={css({ color: 'github.textBright', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })}>
+                    <td className={css({ padding: '5px 6px', maxWidth: '220px', position: 'sticky', left: 0, bg: 'github.bgSecondary' })}>
+                      <div className={css({ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0, flexWrap: 'wrap' })}>
+                        {/* Name is a real button so keyboard/SR users can open the drawer
+                            (the row's mouse onClick is a convenience layer on top). */}
+                        <button
+                          type="button"
+                          data-testid="trader-open"
+                          onClick={(e) => { e.stopPropagation(); setSelected(t); }}
+                          aria-label={`Open detail for ${t.displayName ?? t.short}`}
+                          style={isFollowed ? { color: '#5b8cff' } : undefined}
+                          className={css({ bg: 'transparent', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'mono', fontSize: '11px', color: 'github.textBright', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '130px', textAlign: 'left', _hover: { textDecoration: 'underline' }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '1px' } })}
+                        >
                           {t.displayName ?? t.short}
-                        </span>
+                        </button>
                         {t.leaderboardTop && <span title="On the HL leaderboard" className={css({ color: 'github.link', fontSize: '9px' })}>★</span>}
                         {t.hasRisk && <span data-testid="badge-risk" title="Carries a risk flag" style={{ color: ZONE_COLORS.danger, borderColor: ZONE_COLORS.danger }} className={css({ fontSize: '8px', fontWeight: 'bold', border: '1px solid', borderRadius: '3px', paddingX: '3px' })}>RISK</span>}
                         {isVaultLed(t) && <span data-testid="badge-vault" title="Vault-backed — the one persistent copy signal" style={{ color: ZONE_COLORS.ok, borderColor: ZONE_COLORS.ok }} className={css({ fontSize: '8px', fontWeight: 'bold', border: '1px solid', borderRadius: '3px', paddingX: '3px' })}>VAULT</span>}
                         {isThinHistory(t) && <span data-testid="badge-thin" title="Under-sampled (< 50 fills) — low confidence" style={{ color: ZONE_COLORS.warn }} className={css({ fontSize: '8px' })}>thin</span>}
+                        {t.topCoins.slice(0, 3).map((c) => (
+                          <span key={c} title="Top traded coins" className={css({ fontFamily: 'mono', fontSize: '8px', color: 'github.textMuted' })}>{c}</span>
+                        ))}
                       </div>
                     </td>
                     <td className={css({ padding: '0', textAlign: 'center' })}>
