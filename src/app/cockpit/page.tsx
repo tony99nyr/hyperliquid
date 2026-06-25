@@ -59,7 +59,10 @@ export default async function CockpitPage() {
   // no redeploy/pull), falling back to the committed JSON when the table is
   // empty/unconfigured. The trade-watch daemon keeps reading the local JSON.
   const dbDataset = await loadRatedWalletsFromDb();
-  const topTraders = dbDataset ? rankRailTraders(dbDataset.wallets, 50) : getRailTraders(50);
+  // Wider pool (150) so the sortable/filterable TradersTable can surface
+  // high-quality-but-lower-composite names; the table's sort/filter + load-more
+  // narrow it client-side (the 2.8MB dataset never reaches the client).
+  const topTraders = dbDataset ? rankRailTraders(dbDataset.wallets, 150) : getRailTraders(150);
   const ratingsGeneratedAt = dbDataset ? dbDataset.generatedAt : getRatedMeta().generatedAt;
   // Build the rail freshness server-side (page is force-dynamic → knows "now"),
   // so the client renders it purely (no Date.now()/effect → no hydration drift).
