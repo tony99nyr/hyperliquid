@@ -130,11 +130,14 @@ export async function requireConfirmation(
  */
 function isSupabaseConfigured(): boolean {
   const url =
+    process.env.HL_TRADERS_SUPABASE_URL ??
     process.env.HL_SUPABASE_URL ??
     process.env.NEXT_PUBLIC_HL_SUPABASE_URL ??
     process.env.SUPABASE_URL ??
     process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key =
+    process.env.HL_TRADERS_SUPABASE_SERVICE_ROLE_KEY ??
+    process.env.HL_TRADERS_SUPABASE_SECRET_KEY ??
     process.env.HL_SUPABASE_SERVICE_ROLE_KEY ??
     process.env.HL_SUPABASE_SECRET_KEY ??
     process.env.SUPABASE_SERVICE_ROLE_KEY;

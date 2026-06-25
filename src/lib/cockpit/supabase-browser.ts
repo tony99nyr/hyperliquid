@@ -23,11 +23,17 @@ let client: SupabaseClient | null = null;
 export function getBrowserClient(): SupabaseClient {
   if (client) return client;
 
+  // NOTE: the new project's Vercel integration emitted these public vars with a
+  // doubled/missing-underscore prefix (`NEXT_PUBLIC_HL_TRADERS_HL_TRADERSSUPABASE_*`).
+  // We read them verbatim as they exist on Vercel rather than renaming.
   const url =
+    process.env.NEXT_PUBLIC_HL_TRADERS_HL_TRADERSSUPABASE_URL ??
     process.env.NEXT_PUBLIC_HL_SUPABASE_URL ??
     process.env.NEXT_PUBLIC_SUPABASE_URL ??
     process.env.HL_SUPABASE_URL;
   const anonKey =
+    process.env.NEXT_PUBLIC_HL_TRADERS_HL_TRADERSSUPABASE_ANON_KEY ??
+    process.env.NEXT_PUBLIC_HL_TRADERS_HL_TRADERSSUPABASE_PUBLISHABLE_KEY ??
     process.env.NEXT_PUBLIC_HL_SUPABASE_ANON_KEY ??
     process.env.NEXT_PUBLIC_HL_SUPABASE_PUBLISHABLE_KEY ??
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;

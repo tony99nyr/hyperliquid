@@ -22,6 +22,7 @@ let client: SupabaseClient | null = null;
  */
 function resolveServerUrl(): string | undefined {
   return (
+    process.env.HL_TRADERS_SUPABASE_URL ??
     process.env.HL_SUPABASE_URL ??
     process.env.NEXT_PUBLIC_HL_SUPABASE_URL ??
     process.env.SUPABASE_URL ??
@@ -36,6 +37,8 @@ function resolveServerUrl(): string | undefined {
  */
 function resolveServiceRoleKey(): string | undefined {
   return (
+    process.env.HL_TRADERS_SUPABASE_SERVICE_ROLE_KEY ??
+    process.env.HL_TRADERS_SUPABASE_SECRET_KEY ??
     process.env.HL_SUPABASE_SERVICE_ROLE_KEY ??
     process.env.HL_SUPABASE_SECRET_KEY ??
     process.env.SUPABASE_SERVICE_ROLE_KEY
