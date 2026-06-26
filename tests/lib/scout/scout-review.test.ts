@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildScorecard,
+  buildLaneScorecards,
   DEFAULT_SCORECARD_CONFIG,
+  DEFAULT_LANE,
   type ScorecardInput,
 } from '@/lib/scout/scout-review-business-logic';
 
@@ -98,5 +100,54 @@ describe('buildScorecard — GRADUATE gating', () => {
   it('does NOT graduate if DD exceeds the ceiling', () => {
     const s = buildScorecard(graduating({ maxDrawdownUsd: 2000 })); // 20% > 15%
     expect(s.verdict).toBe('continue');
+  });
+});
+
+describe('buildLaneScorecards — per-lane grouping', () => {
+  it('groups realized + wins by lane; NULL lane folds into directional; funding attributed via coin→lane', () => {
+    const cards = buildLaneScorecards({
+      positions: [
+        { lane: 'vault', coin: 'HLP', side: 'long', realizedPnlUsd: 50, feesPaidUsd: 0 },
+        { lane: 'carry', coin: 'ETH', side: 'short', realizedPnlUsd: 30, feesPaidUsd: 2 },
+        { lane: null, coin: 'BTC', side: 'flat', realizedPnlUsd: 10, feesPaidUsd: 1 }, // null → directional
+      ],
+      hypotheses: [
+        { lane: 'carry', status: 'confirmed' },
+        { lane: 'carry', status: 'invalidated' },
+        { lane: null, status: 'confirmed' }, // → directional
+      ],
+      fundingByCoin: { ETH: -8, BTC: 3 }, // ETH carry earned (−), BTC cost (+)
+      periodDays: 10,
+    });
+    const by = Object.fromEntries(cards.map((c) => [c.lane, c]));
+    expect(Object.keys(by).sort()).toEqual(['carry', DEFAULT_LANE, 'vault']);
+
+    // vault: realized 50, no funding (no perp fills), no closed trips
+    expect(by.vault.card.realizedGrossUsd).toBeCloseTo(50, 6);
+    expect(by.vault.card.netUsd).toBeCloseTo(50, 6);
+    expect(by.vault.openCount).toBe(1);
+
+    // carry: realized 30−2=28, funding ETH −8 (carry earned) → net 28−(−8)=36; 1 win / 1 loss
+    expect(by.carry.card.realizedGrossUsd).toBeCloseTo(28, 6);
+    expect(by.carry.card.netUsd).toBeCloseTo(36, 6);
+    expect(by.carry.card.winRate).toBeCloseTo(0.5, 6);
+    expect(by.carry.card.tradeCount).toBe(2);
+
+    // directional (null): realized 10−1=9, funding BTC +3 cost → net 9−3=6; 1 win
+    expect(by[DEFAULT_LANE].card.realizedGrossUsd).toBeCloseTo(9, 6);
+    expect(by[DEFAULT_LANE].card.netUsd).toBeCloseTo(6, 6);
+    expect(by[DEFAULT_LANE].card.winRate).toBeCloseTo(1, 6);
+  });
+
+  it('per-lane config override applies (e.g. a lower vault bar)', () => {
+    const cards = buildLaneScorecards({
+      positions: [{ lane: 'vault', coin: 'HLP', side: 'long', realizedPnlUsd: 200, feesPaidUsd: 0 }],
+      hypotheses: [],
+      fundingByCoin: {},
+      periodDays: 90,
+      configFor: (lane) => (lane === 'vault' ? { ...DEFAULT_SCORECARD_CONFIG, monthlyBarUsd: 100 } : DEFAULT_SCORECARD_CONFIG),
+    });
+    // 200 over 90d ≈ $67/mo — clears a $100 bar? no; but vsBar uses the override (100, not 1000)
+    expect(cards[0].card.vsBarUsd).toBeCloseTo((200 / 90) * 30 - 100, 1);
   });
 });

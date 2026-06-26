@@ -66,6 +66,13 @@ describe('insert-row builders (camelCase → snake_case)', () => {
     });
   });
 
+  it('buildHypothesisRow attaches lane only when a non-empty string is given', () => {
+    expect(buildHypothesisRow({ sessionId: 's1', statement: 'x', lane: 'carry' }).lane).toBe('carry');
+    expect(buildHypothesisRow({ sessionId: 's1', statement: 'x', lane: '  vault ' }).lane).toBe('vault'); // trimmed
+    expect('lane' in buildHypothesisRow({ sessionId: 's1', statement: 'x' })).toBe(false);
+    expect('lane' in buildHypothesisRow({ sessionId: 's1', statement: 'x', lane: '' })).toBe(false);
+  });
+
   it('buildHealthSnapshotRow maps probs + alerts', () => {
     expect(
       buildHealthSnapshotRow({

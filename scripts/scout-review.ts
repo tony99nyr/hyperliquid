@@ -17,7 +17,13 @@ import { header, line, run } from './_skill-runtime';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import { fetchMetaAndAssetCtxs } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { fundingCostUsd } from '@/lib/trading/paper-funding-business-logic';
-import { buildScorecard, type ScorecardInput } from '@/lib/scout/scout-review-business-logic';
+import {
+  buildScorecard,
+  buildLaneScorecards,
+  type ScorecardInput,
+  type LanePositionRow,
+  type LaneHypothesisRow,
+} from '@/lib/scout/scout-review-business-logic';
 
 interface FillRow {
   coin: string;
@@ -37,9 +43,11 @@ interface FillRow {
 function estimateFromFills(
   fills: FillRow[],
   fundingByCoin: Record<string, number>,
-): { fundingHaircutUsd: number; earliestMs: number } {
+): { fundingHaircutUsd: number; earliestMs: number; fundingHaircutByCoin: Record<string, number> } {
   let fundingHaircutUsd = 0;
   let earliestMs = Number.POSITIVE_INFINITY;
+  // Per-coin signed funding, so the per-lane scorecard can attribute it (coin→lane).
+  const fundingHaircutByCoin: Record<string, number> = {};
 
   const byCoin = new Map<string, FillRow[]>();
   for (const f of fills) {
@@ -58,7 +66,9 @@ function estimateFromFills(
     let openAtMs = 0;
     const accrue = (side: 'long' | 'short', closed: number, t: number) => {
       const holdingHours = Math.max(0, (t - openAtMs) / 3_600_000);
-      fundingHaircutUsd += fundingCostUsd({ side, notionalUsd: closed, fundingRateHourly: fundingRate, holdingHours });
+      const cost = fundingCostUsd({ side, notionalUsd: closed, fundingRateHourly: fundingRate, holdingHours });
+      fundingHaircutUsd += cost;
+      fundingHaircutByCoin[coin] = (fundingHaircutByCoin[coin] ?? 0) + cost;
     };
     for (const f of rows) {
       const t = new Date(f.filled_at).getTime();
@@ -87,7 +97,7 @@ function estimateFromFills(
       }
     }
   }
-  return { fundingHaircutUsd, earliestMs };
+  return { fundingHaircutUsd, earliestMs, fundingHaircutByCoin };
 }
 
 run(async () => {
@@ -110,7 +120,7 @@ run(async () => {
   // correct for a realized scorecard.
   const { data: positions } = await client
     .from('positions')
-    .select('side, realized_pnl_usd, fees_paid_usd')
+    .select('coin, side, lane, realized_pnl_usd, fees_paid_usd')
     .in('session_id', sessionIds);
   let realizedGrossUsd = 0;
   let openCount = 0;
@@ -130,11 +140,11 @@ run(async () => {
     .from('fills')
     .select('coin, side, notional_usd, reduce_only, filled_at')
     .in('session_id', sessionIds);
-  const { fundingHaircutUsd, earliestMs } = estimateFromFills((fills ?? []) as FillRow[], fundingByCoin);
+  const { fundingHaircutUsd, earliestMs, fundingHaircutByCoin } = estimateFromFills((fills ?? []) as FillRow[], fundingByCoin);
   const periodDays = Number.isFinite(earliestMs) ? Math.max(1, (Date.now() - earliestMs) / 86_400_000) : 1;
 
   // Win/loss + closed count from resolved hypotheses (confirmed = win, invalidated = loss).
-  const { data: hyps } = await client.from('hypotheses').select('status').in('session_id', sessionIds);
+  const { data: hyps } = await client.from('hypotheses').select('status, lane').in('session_id', sessionIds);
   let wins = 0;
   let losses = 0;
   let closed = 0;
@@ -164,8 +174,27 @@ run(async () => {
   line(`${card.fundingHaircutUsd >= 0 ? '−' : '+'} funding ${card.fundingHaircutUsd >= 0 ? 'cost' : 'CARRY earned'} (signed, per-coin): $${Math.abs(card.fundingHaircutUsd).toFixed(2)}`);
   line(`= NET: $${card.netUsd.toFixed(2)}`);
   line(`monthly run-rate: $${card.monthlyRunRateUsd.toFixed(0)}/mo   (bar $1000/mo; vs bar ${card.vsBarUsd >= 0 ? '+' : ''}$${card.vsBarUsd.toFixed(0)})`);
-  header(`VERDICT: ${card.verdict.toUpperCase()}`);
+  header(`VERDICT: ${card.verdict.toUpperCase()} (ALL LANES — the account-level bar)`);
   line(card.reason);
+
+  // Per-lane breakdown (informational — the account-level verdict above is the bar
+  // the circuit breaker + graduation gate on). Lets the weekly review see which lane
+  // pays and which bleeds, so a lane gets killed on its own number, not the blend.
+  const lanePositions: LanePositionRow[] = (positions ?? []).map((p) => {
+    const r = p as { coin: string; side: string; lane: string | null; realized_pnl_usd: number; fees_paid_usd: number };
+    return { lane: r.lane ?? null, coin: r.coin, side: r.side, realizedPnlUsd: Number(r.realized_pnl_usd) || 0, feesPaidUsd: Number(r.fees_paid_usd) || 0 };
+  });
+  const laneHyps: LaneHypothesisRow[] = (hyps ?? []).map((h) => {
+    const r = h as { status: string; lane: string | null };
+    return { lane: r.lane ?? null, status: r.status };
+  });
+  const laneCards = buildLaneScorecards({ positions: lanePositions, hypotheses: laneHyps, fundingByCoin: fundingHaircutByCoin, periodDays });
+  if (laneCards.length > 1 || (laneCards.length === 1 && laneCards[0].lane !== 'directional')) {
+    header('PER-LANE BREAKDOWN');
+    for (const { lane, openCount: lo, card: c } of laneCards) {
+      line(`[${lane}]  net $${c.netUsd.toFixed(2)}  (realized $${c.realizedGrossUsd.toFixed(2)}, funding ${c.fundingHaircutUsd >= 0 ? '−' : '+'}$${Math.abs(c.fundingHaircutUsd).toFixed(2)})  trades ${c.tradeCount}  win ${(c.winRate * 100).toFixed(0)}%  open ${lo}  → ${c.verdict.toUpperCase()}`);
+    }
+  }
   line('');
   line('Next: the scout-review skill (Opus) reads this + the resolved hypotheses and curates docs/scout/playbook.md.');
 });

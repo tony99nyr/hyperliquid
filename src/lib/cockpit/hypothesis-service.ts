@@ -34,7 +34,7 @@ function toHypothesis(row: HypothesisRow): Hypothesis {
 
 /** Create a new (open) hypothesis for a session. */
 export async function writeHypothesis(
-  input: { sessionId: string; statement: string; status?: HypothesisStatus },
+  input: { sessionId: string; statement: string; status?: HypothesisStatus; lane?: string },
   client: SupabaseClient = getServiceRoleClient(),
 ): Promise<Hypothesis> {
   const row = buildHypothesisRow(input);
