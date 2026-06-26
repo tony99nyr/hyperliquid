@@ -78,6 +78,12 @@ describe('position-stop route', () => {
     expect(placeStopOnHl).not.toHaveBeenCalled();
   });
 
+  it('place: 422 when the stop is too CLOSE to the mark (< 0.5% — would trigger on noise)', async () => {
+    const res = await POST(postReq({ action: 'place', coin: 'SOL', triggerPx: 99.9 })); // 0.1% below 100 ✗
+    expect(res.status).toBe(422);
+    expect(placeStopOnHl).not.toHaveBeenCalled();
+  });
+
   it('place: 409 when a stop already rests (cancel first)', async () => {
     findOpenStop.mockResolvedValue({ oid: 9, triggerPx: 90, sz: 2 });
     const res = await POST(postReq({ action: 'place', coin: 'SOL', triggerPx: 92 }));

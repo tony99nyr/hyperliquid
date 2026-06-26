@@ -28,6 +28,10 @@ export const dynamic = 'force-dynamic';
 const STOP_MAX_PER_MIN = 15;
 /** Refuse a "stop" further than this fraction from the mark (likely a fat-finger). */
 const MAX_STOP_DIST_FRAC = 0.5;
+/** Refuse a "stop" closer than this to the mark — it would trigger on noise/instantly.
+ *  Mirrors the client floor (stop-suggestion MIN_STOP_FRAC) so the UI guard is enforced
+ *  even if the client is bypassed. */
+const MIN_STOP_DIST_FRAC = 0.005;
 
 function num(v: unknown): number | null {
   const n = typeof v === 'number' ? v : typeof v === 'string' ? parseFloat(v) : NaN;
@@ -101,8 +105,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (side === 'long' ? triggerPx >= markPx : triggerPx <= markPx) {
     return NextResponse.json({ ok: false, error: `Stop must be ${side === 'long' ? 'below' : 'above'} the mark ($${markPx}) for a ${side}.` }, { status: 422 });
   }
-  if (Math.abs(markPx - triggerPx) / markPx > MAX_STOP_DIST_FRAC) {
+  const stopDistFrac = Math.abs(markPx - triggerPx) / markPx;
+  if (stopDistFrac > MAX_STOP_DIST_FRAC) {
     return NextResponse.json({ ok: false, error: `Stop is > ${MAX_STOP_DIST_FRAC * 100}% from the mark — check the price.` }, { status: 422 });
+  }
+  if (stopDistFrac < MIN_STOP_DIST_FRAC) {
+    return NextResponse.json({ ok: false, error: `Stop is < ${MIN_STOP_DIST_FRAC * 100}% from the mark — it would trigger on noise.` }, { status: 422 });
   }
 
   try {

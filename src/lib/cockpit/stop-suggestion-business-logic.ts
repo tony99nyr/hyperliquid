@@ -70,6 +70,48 @@ export function suggestStopFrac(
   return Math.min(MAX_STOP_FRAC, Math.max(MIN_STOP_FRAC, frac));
 }
 
+/** Convert a stop FRACTION (distance from ref) to an absolute stop price for a side.
+ *  long → below ref, short → above ref. Returns null on bad inputs. PURE. */
+export function stopPxFromFrac(
+  side: 'long' | 'short',
+  refPx: number | null | undefined,
+  frac: number | null | undefined,
+): number | null {
+  if (refPx == null || !(refPx > 0) || frac == null || !(frac > 0)) return null;
+  return side === 'long' ? refPx * (1 - frac) : refPx * (1 + frac);
+}
+
+export interface StopValidation {
+  ok: boolean;
+  /** Distance fraction from the reference (|ref−stop|/ref), or null when unmeasurable. */
+  frac: number | null;
+  /** Operator-facing reason it's invalid, or null when ok. */
+  reason: string | null;
+}
+
+/**
+ * Validate an operator-chosen stop PRICE against the live reference (mark). Mirrors
+ * the SERVER guards in /api/cockpit/position-stop (protective side + MIN/MAX distance)
+ * so the UI rejects exactly what the route would 422 — no place attempt that bounces.
+ * PURE.
+ */
+export function validateStopPx(
+  side: 'long' | 'short',
+  refPx: number | null | undefined,
+  stopPx: number | null | undefined,
+): StopValidation {
+  if (refPx == null || !(refPx > 0)) return { ok: false, frac: null, reason: 'No live mark to size against.' };
+  if (stopPx == null || !(stopPx > 0)) return { ok: false, frac: null, reason: 'Enter a stop price.' };
+  // A long's stop sits BELOW the mark; a short's ABOVE (else it triggers instantly).
+  if (side === 'long' ? stopPx >= refPx : stopPx <= refPx) {
+    return { ok: false, frac: null, reason: `Stop must be ${side === 'long' ? 'below' : 'above'} the mark for a ${side}.` };
+  }
+  const frac = Math.abs(refPx - stopPx) / refPx;
+  if (frac < MIN_STOP_FRAC) return { ok: false, frac, reason: `Too tight — min ${(MIN_STOP_FRAC * 100).toFixed(1)}% from the mark.` };
+  if (frac > MAX_STOP_FRAC) return { ok: false, frac, reason: `Too far — max ${MAX_STOP_FRAC * 100}% from the mark.` };
+  return { ok: true, frac, reason: null };
+}
+
 /**
  * Liquidation cushion = how many multiples of the stop distance the liquidation
  * price sits beyond the stop. >1 means the stop triggers first (good); ≤1 is the

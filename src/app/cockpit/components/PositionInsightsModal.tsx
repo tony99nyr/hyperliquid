@@ -17,13 +17,19 @@ import { css } from '@styled-system/css';
 import type { PnlSnapshot, PositionRow } from '@/hooks/realtime-row-mappers';
 import { useCandles } from '@/hooks/useCandles';
 import type { TradingMode } from '@/types/fill';
-import { HOLD_TIMEFRAMES, suggestStopFrac, liquidationCushion } from '@/lib/cockpit/stop-suggestion-business-logic';
+import { HOLD_TIMEFRAMES, suggestStopFrac, liquidationCushion, stopPxFromFrac, validateStopPx, type HoldTimeframe } from '@/lib/cockpit/stop-suggestion-business-logic';
 import { previewAdd, MAX_ADD_MULTIPLE, type AddSizeMode } from '@/lib/trading/add-to-position-business-logic';
 import PositionHistoryChart from './left-rail/PositionHistoryChart';
 import { positionHealth, uPnlPct, type RegimeDir } from './open-positions-helpers';
 import { userPositionDisplay } from './position-panel-helpers';
 import { entryLiveConfirmPhrase } from './entry-modal-helpers';
 import { GH, ZONE_COLORS, TERM, fmtPx, fmtUsd, fmtCompactUsd } from './panel-styles';
+
+/** A clean, parseable numeric seed for the stop input — 6 sig figs, trailing zeros
+ *  stripped, never lossy by a fixed decimal count (works for $63k and $0.49 alike). */
+function priceSeed(px: number): string {
+  return String(Number(px.toPrecision(6)));
+}
 
 /** "held 2d 4h" / "held 3h 12m" from the open timestamp. nowMs injected (no Date in render). */
 function heldLabel(openedAtMs: number | null | undefined, nowMs: number): string {
@@ -67,19 +73,59 @@ export default function PositionInsightsModal({
   const upnl = d.unrealizedPnlUsd;
   const upnlColor = upnl == null ? GH.text : upnl >= 0 ? ZONE_COLORS.ok : ZONE_COLORS.danger;
 
-  // Latest ATR insight: where a protective stop should sit (swing TF) + the cushion
-  // between that stop and liquidation. Reuses the entry-form stop math.
-  const swing = HOLD_TIMEFRAMES.swing;
-  const candles = useCandles(pos.coin, swing.interval);
+  // Protective-stop picker. A hold-timeframe seeds an ATR stop; the operator can
+  // WIDEN it (Position TF = wick-resistant) or type any level off the chart. Default
+  // 'position' — for a held conviction trade the wide stop is the right protection;
+  // the whole point is to NOT get wicked out on a short-term swing.
+  const [holdTf, setHoldTf] = useState<HoldTimeframe>('position');
+  // Namespace DOM ids by coin so two drill-downs could never collide label↔input.
+  const stopInputId = `insights-stop-input-${pos.coin}`;
+  const stopInvalidId = `insights-stop-invalid-${pos.coin}`;
+  const tfSpec = HOLD_TIMEFRAMES[holdTf];
+  const candles = useCandles(pos.coin, tfSpec.interval);
   const suggestedStopFrac = useMemo(
-    () => suggestStopFrac(candles.candles, swing.atrMult, swing.atrPeriod),
-    [candles.candles, swing.atrMult, swing.atrPeriod],
+    () => suggestStopFrac(candles.candles, tfSpec.atrMult, tfSpec.atrPeriod),
+    [candles.candles, tfSpec.atrMult, tfSpec.atrPeriod],
   );
   const ref = d.markPx ?? d.entryPx;
-  const suggestedStopPx = suggestedStopFrac != null && ref != null
-    ? side === 'long' ? ref * (1 - suggestedStopFrac) : ref * (1 + suggestedStopFrac)
-    : null;
-  const stopCushion = liquidationCushion(ref, suggestedStopPx, health.liqPx);
+  const suggestedStopPx = stopPxFromFrac(side, ref, suggestedStopFrac);
+
+  // Editable trigger price. Seeds from the suggestion; once the operator types, we
+  // stop clobbering it (stopTouched idiom). Switching timeframe re-seeds — picking a
+  // preset is an explicit "give me this stop." (Mirrors EntryModal.)
+  const [stopInput, setStopInput] = useState('');
+  // 'touched' must drive render (it shows the "use ATR" reset link), so it's STATE,
+  // not a ref. seededRef only gates the one-shot seed inside the effect (not in render).
+  const [stopTouched, setStopTouched] = useState(false);
+  const seededRef = useRef('');
+  const seedKey = `${pos.coin}|${holdTf}`;
+  useEffect(() => {
+    if (suggestedStopPx != null && seededRef.current !== seedKey && !stopTouched) {
+      setStopInput(priceSeed(suggestedStopPx));
+      seededRef.current = seedKey;
+    }
+  }, [suggestedStopPx, seedKey, stopTouched]);
+  function pickStopTf(tf: HoldTimeframe): void {
+    setStopTouched(false);
+    seededRef.current = ''; // force re-seed from the new TF's suggestion
+    setStopInput(''); // clear stale value while the new TF's candles load (re-seeds on arrival)
+    setHoldTf(tf);
+  }
+  function resetStopToSuggested(): void {
+    if (suggestedStopPx == null) return;
+    setStopTouched(false);
+    seededRef.current = seedKey;
+    setStopInput(priceSeed(suggestedStopPx));
+  }
+
+  const parsedStopPx = (() => { const n = parseFloat(stopInput); return Number.isFinite(n) && n > 0 ? n : null; })();
+  const effectiveStopPx = parsedStopPx ?? suggestedStopPx;
+  const stopValidation = validateStopPx(side, ref, effectiveStopPx);
+  const effectiveStopFrac = stopValidation.frac;
+  const stopCushion = liquidationCushion(ref, effectiveStopPx, health.liqPx);
+  // Dollars lost if this stop hits (from the live mark) — makes "wider = more $ at
+  // risk" explicit so a wide default can't quietly imply a bigger-than-expected loss.
+  const stopLossUsd = stopValidation.ok && effectiveStopPx != null && ref != null ? pos.sz * Math.abs(ref - effectiveStopPx) : null;
   const notionalUsd = ref != null ? ref * pos.sz : null;
   // Whether the reduce/close/adjust actions can build a target (mirrors the row card).
   const canExit = d.entryPx != null && d.markPx != null;
@@ -189,13 +235,18 @@ export default function PositionInsightsModal({
   }, [refetchStop]);
 
   async function placeStop(): Promise<void> {
-    if (suggestedStopPx == null || stopBusy) return;
+    // Place the EFFECTIVE stop (operator's custom price, or the seeded ATR suggestion).
+    // Guard on the same validation the server enforces so we never fire a 422.
+    if (effectiveStopPx == null || !stopValidation.ok || stopBusy) return;
+    // Send the raw price — submitStopOrder formats to the coin's HL tick precision.
+    // (A blanket 2-decimal round would flip a sub-dollar coin's stop to the wrong side.)
+    const triggerPx = effectiveStopPx;
     setStopBusy(true); setStopMsg(null);
     try {
-      const res = await fetch('/api/cockpit/position-stop', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ action: 'place', coin: pos.coin, triggerPx: Math.round(suggestedStopPx * 100) / 100 }) });
+      const res = await fetch('/api/cockpit/position-stop', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ action: 'place', coin: pos.coin, triggerPx }) });
       const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; pushed?: boolean };
       if (!res.ok || json.ok === false) setStopMsg({ ok: false, text: json.error ?? `Failed (${res.status})` });
-      else { setStopMsg({ ok: true, text: json.pushed ? `Stop placed @ ${fmtPx(suggestedStopPx)}.` : `Stop recorded (paper).` }); await refetchStop(); }
+      else { setStopMsg({ ok: true, text: json.pushed ? `Stop placed @ ${fmtPx(triggerPx)}.` : `Stop recorded (paper).` }); await refetchStop(); }
     } catch { setStopMsg({ ok: false, text: 'Network error — retry.' }); } finally { setStopBusy(false); }
   }
   async function cancelStop(): Promise<void> {
@@ -314,39 +365,74 @@ export default function PositionInsightsModal({
           </div>
         </div>
 
-        {/* Latest ATR insight: where a protective stop belongs + cushion to liq. */}
-        <div className={css({ display: 'flex', flexDirection: 'column', gap: '5px', bg: 'github.bg', border: '1px solid token(colors.github.borderSubtle)', borderRadius: '8px', padding: '11px 13px' })}>
-          <span className={css({ fontFamily: 'label', fontSize: '9px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.06em' })}>Suggested protective stop · ATR {swing.interval} · not placed</span>
-          {suggestedStopPx != null ? (
-            <>
-              <span className={css({ fontFamily: 'mono', fontSize: '12px', color: 'github.text' })} style={{ fontFeatureSettings: '"tnum"' }}>
-                ≈ {fmtPx(suggestedStopPx)} <span className={css({ color: 'github.textMuted' })}>({((suggestedStopFrac ?? 0) * 100).toFixed(1)}% from mark)</span>
-              </span>
-              {stopCushion != null && (
-                <span data-testid="insights-stop-cushion" style={{ color: stopCushion < 1.5 ? ZONE_COLORS.danger : stopCushion < 2.5 ? ZONE_COLORS.warn : ZONE_COLORS.ok }} className={css({ fontFamily: 'mono', fontSize: '10px' })}>
-                  liquidation sits {stopCushion.toFixed(1)}× beyond that stop
-                </span>
-              )}
-            </>
-          ) : (
-            <span className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>{candles.loading ? 'measuring volatility…' : 'ATR unavailable — judge the stop off the chart.'}</span>
-          )}
+        {/* Protective stop — ADJUSTABLE: pick a hold-timeframe preset (Position = wide,
+            wick-resistant) or type any level off the chart. Server re-validates side +
+            distance; a wider stop survives short-term swings instead of force-closing. */}
+        <div className={css({ display: 'flex', flexDirection: 'column', gap: '7px', bg: 'github.bg', border: '1px solid token(colors.github.borderSubtle)', borderRadius: '8px', padding: '11px 13px' })}>
+          <span className={css({ fontFamily: 'label', fontSize: '9px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.06em' })}>Protective stop {stop ? '· resting' : '· not placed'}</span>
 
-          {/* Place / cancel a REAL reduce-only stop on HL (rests on the exchange). */}
-          <div className={css({ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '2px' })}>
-            {stopState === 'loading' ? (
-              <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>checking for a resting stop…</span>
-            ) : stopState === 'error' ? (
-              <span className={css({ fontFamily: 'mono', fontSize: '9px' })} style={{ color: ZONE_COLORS.warn }}>couldn&apos;t verify resting stops — <button type="button" onClick={() => void refetchStop()} className={css({ color: 'github.link', bg: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline' })}>retry</button></span>
-            ) : stop ? (
-              <>
-                <span data-testid="insights-stop-placed" className={css({ fontFamily: 'mono', fontSize: '10px' })} style={{ color: ZONE_COLORS.ok }}>✓ stop resting @ {fmtPx(stop.triggerPx)} (size {stop.sz})</span>
-                <button type="button" data-testid="insights-stop-cancel" disabled={stopBusy} onClick={() => void cancelStop()} className={css({ fontFamily: 'mono', fontSize: '10px', color: 'zone.danger', bg: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 2px', textDecoration: 'underline', _disabled: { opacity: 0.5 }, _focusVisible: { outline: '2px solid token(colors.github.link)' } })}>{stopBusy ? '…' : 'cancel'}</button>
-              </>
-            ) : suggestedStopPx != null ? (
-              <button type="button" data-testid="insights-stop-place" disabled={stopBusy} onClick={() => void placeStop()} title="Places a REAL reduce-only stop order that rests on Hyperliquid" className={css({ fontFamily: 'sans', fontSize: '10px', fontWeight: 'bold', color: '#06251a', bg: 'zone.ok', border: 'none', borderRadius: '5px', paddingX: '10px', paddingY: '6px', cursor: 'pointer', _disabled: { opacity: 0.5, cursor: 'not-allowed' }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '2px' } })}>{stopBusy ? 'placing…' : `Place stop @ ${fmtPx(suggestedStopPx)} →`}</button>
-            ) : null}
-          </div>
+          {stopState === 'loading' ? (
+            <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>checking for a resting stop…</span>
+          ) : stopState === 'error' ? (
+            <span className={css({ fontFamily: 'mono', fontSize: '9px' })} style={{ color: ZONE_COLORS.warn }}>couldn&apos;t verify resting stops — <button type="button" onClick={() => void refetchStop()} className={css({ color: 'github.link', bg: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline' })}>retry</button></span>
+          ) : stop ? (
+            // A stop already rests — one stop per coin; cancel to re-place wider/tighter.
+            <div className={css({ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' })}>
+              <span data-testid="insights-stop-placed" className={css({ fontFamily: 'mono', fontSize: '11px' })} style={{ color: ZONE_COLORS.ok }}>✓ resting @ {fmtPx(stop.triggerPx)} (size {stop.sz})</span>
+              <button type="button" data-testid="insights-stop-cancel" disabled={stopBusy} onClick={() => void cancelStop()} className={css({ fontFamily: 'mono', fontSize: '10px', color: 'zone.danger', bg: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 2px', textDecoration: 'underline', _disabled: { opacity: 0.5 }, _focusVisible: { outline: '2px solid token(colors.github.link)' } })}>{stopBusy ? '…' : 'cancel / re-place'}</button>
+            </div>
+          ) : (
+            <>
+              {/* Timeframe presets — seed the ATR stop. Wider = harder to wick out. */}
+              <div role="group" aria-label="Stop timeframe" className={css({ display: 'flex', gap: '4px', borderRadius: '8px', padding: '3px' })} style={{ background: TERM.inset, border: '1px solid rgba(255,255,255,.08)' }}>
+                {(Object.keys(HOLD_TIMEFRAMES) as HoldTimeframe[]).map((tf) => {
+                  const active = tf === holdTf;
+                  return (
+                    <button key={tf} type="button" data-testid={`insights-stop-tf-${tf}`} data-active={active} aria-pressed={active} onClick={() => pickStopTf(tf)} title={HOLD_TIMEFRAMES[tf].hint} style={{ background: active ? '#1c2536' : 'transparent', color: active ? '#e8ebf2' : '#8b95a6' }} className={css({ flex: 1, fontFamily: 'mono', fontSize: '11px', fontWeight: 'semibold', paddingY: '6px', borderRadius: '6px', border: 'none', cursor: 'pointer', _focusVisible: { outline: '2px solid token(colors.github.link)' } })}>{HOLD_TIMEFRAMES[tf].label}</button>
+                  );
+                })}
+              </div>
+              <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>
+                {tfSpec.hint} · {suggestedStopPx != null ? `ATR(${tfSpec.interval}) ≈ ${fmtPx(suggestedStopPx)}` : candles.loading ? 'measuring volatility…' : `ATR(${tfSpec.interval}) unavailable — type a level`}
+              </span>
+
+              {/* Editable trigger price + live distance. */}
+              <div className={css({ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' })}>
+                <label htmlFor={stopInputId} className={css({ fontFamily: 'label', fontSize: '9px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.05em' })}>Trigger</label>
+                <input
+                  id={stopInputId}
+                  data-testid="insights-stop-input"
+                  inputMode="decimal"
+                  value={stopInput}
+                  onChange={(e) => { setStopTouched(true); setStopInput(e.target.value); }}
+                  placeholder={suggestedStopPx != null ? priceSeed(suggestedStopPx) : '—'}
+                  className={css({ fontFamily: 'mono', fontSize: '12px', color: 'github.text', bg: 'github.bgSecondary', border: '1px solid token(colors.github.border)', borderRadius: '6px', paddingX: '8px', paddingY: '7px', width: '96px', _focusVisible: { outline: '2px solid token(colors.github.link)' } })}
+                  style={{ fontFeatureSettings: '"tnum"' }}
+                />
+                {effectiveStopFrac != null && (
+                  <span className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>
+                    {(effectiveStopFrac * 100).toFixed(1)}% from mark{stopLossUsd != null ? ` · ${fmtUsd(stopLossUsd)} at risk` : ''}
+                  </span>
+                )}
+                {stopTouched && suggestedStopPx != null && (
+                  <button type="button" onClick={resetStopToSuggested} className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.link', bg: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline' })}>use ATR</button>
+                )}
+              </div>
+
+              {/* Cushion to liquidation OR the validation reason (mirrors server guards).
+                  A VALID-but-thin cushion is prefixed "⚠ thin" so its red can't be
+                  mistaken for the invalid-stop red (they're mutually exclusive here). */}
+              {!stopValidation.ok ? (
+                <span id={stopInvalidId} data-testid="insights-stop-invalid" className={css({ fontFamily: 'mono', fontSize: '10px' })} style={{ color: ZONE_COLORS.danger }}>{stopValidation.reason}</span>
+              ) : stopCushion != null ? (
+                <span data-testid="insights-stop-cushion" style={{ color: stopCushion < 1.5 ? ZONE_COLORS.danger : stopCushion < 2.5 ? ZONE_COLORS.warn : ZONE_COLORS.ok }} className={css({ fontFamily: 'mono', fontSize: '10px' })}>
+                  {stopCushion < 1.5 ? '⚠ thin — ' : ''}liquidation sits {stopCushion.toFixed(1)}× beyond this stop
+                </span>
+              ) : null}
+
+              <button type="button" data-testid="insights-stop-place" disabled={stopBusy || !stopValidation.ok} onClick={() => void placeStop()} aria-describedby={!stopValidation.ok ? stopInvalidId : undefined} title="Places a REAL reduce-only stop order that rests on Hyperliquid" className={css({ alignSelf: 'flex-start', fontFamily: 'sans', fontSize: '10px', fontWeight: 'bold', color: '#06251a', bg: 'zone.ok', border: 'none', borderRadius: '5px', paddingX: '10px', paddingY: '6px', cursor: 'pointer', marginTop: '1px', _disabled: { opacity: 0.45, cursor: 'not-allowed' }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '2px' } })}>{stopBusy ? 'placing…' : effectiveStopPx != null && stopValidation.ok ? `Place stop @ ${fmtPx(effectiveStopPx)} →` : 'Place stop'}</button>
+            </>
+          )}
           {stopMsg && <span role="status" style={{ color: stopMsg.ok ? ZONE_COLORS.ok : ZONE_COLORS.danger }} className={css({ fontFamily: 'mono', fontSize: '9px', lineHeight: 1.4 })}>{stopMsg.text}</span>}
         </div>
 
