@@ -16,6 +16,7 @@ const getActiveSession = vi.fn();
 const loadPosition = vi.fn();
 const loadPositionLeverage = vi.fn();
 const executeIntent = vi.fn();
+const writePnlSnapshot = vi.fn();
 const fetchAllMids = vi.fn();
 const getTradingMode = vi.fn();
 const writeAnalysisLog = vi.fn();
@@ -26,6 +27,7 @@ vi.mock('@/lib/cockpit/session-service', () => ({ getActiveSession: (...a: unkno
 vi.mock('@/lib/cockpit/fill-persistence-service', () => ({
   loadPosition: (...a: unknown[]) => loadPosition(...a),
   loadPositionLeverage: (...a: unknown[]) => loadPositionLeverage(...a),
+  writePnlSnapshot: (...a: unknown[]) => writePnlSnapshot(...a),
 }));
 vi.mock('@/lib/trading/fill-source', () => ({ executeIntent: (...a: unknown[]) => executeIntent(...a) }));
 vi.mock('@/lib/hyperliquid/hyperliquid-info-service', () => ({ fetchAllMids: (...a: unknown[]) => fetchAllMids(...a) }));
@@ -53,6 +55,7 @@ beforeEach(() => {
   loadPositionLeverage.mockResolvedValue(5);
   fetchAllMids.mockResolvedValue({ SOL: 110 }); // winning long (mark > entry)
   executeIntent.mockResolvedValue(fill);
+  writePnlSnapshot.mockResolvedValue(undefined);
   writeAnalysisLog.mockResolvedValue(undefined);
 });
 
@@ -89,6 +92,11 @@ describe('POST /api/cockpit/add-to-position', () => {
     expect(intent.side).toBe('buy'); // long → buy, forced from the position
     expect(intent.coin).toBe('SOL');
     expect(intent.sz).toBeCloseTo(1, 6); // 50% of 2
+    // Writes a MARKED pnl snapshot so uPnL doesn't "reset" to 0 after the fold.
+    expect(writePnlSnapshot).toHaveBeenCalledTimes(1);
+    const snap = writePnlSnapshot.mock.calls[0][0];
+    expect(snap.markPx).toBe(110);
+    expect(snap.unrealizedPnlUsd).toBeCloseTo(20, 1); // (110−100)×2 on the live mark
   });
 
   it('AVERAGING DOWN needs an ack: 409 + no execute when underwater and unacked', async () => {

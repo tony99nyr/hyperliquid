@@ -18,8 +18,9 @@ import { verifyAdminAuth, getClientIdentifier } from '@/lib/infrastructure/auth/
 import { isSameOrigin } from '@/lib/infrastructure/auth/same-origin';
 import { checkRateLimit } from '@/lib/infrastructure/rate-limiting/in-memory-rate-limit';
 import { getActiveSession } from '@/lib/cockpit/session-service';
-import { loadPosition, loadPositionLeverage } from '@/lib/cockpit/fill-persistence-service';
+import { loadPosition, loadPositionLeverage, writePnlSnapshot } from '@/lib/cockpit/fill-persistence-service';
 import { executeIntent } from '@/lib/trading/fill-source';
+import { unrealizedPnl } from '@/lib/trading/pnl-business-logic';
 import { fetchAllMids } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { validateEnv } from '@/lib/env/env';
 import { previewAdd, MAX_ADD_MULTIPLE, type AddSizeMode } from '@/lib/trading/add-to-position-business-logic';
@@ -136,6 +137,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     createdAt: Date.now(),
   };
   const fill = await executeIntent(intent);
+
+  // executeIntent's fold appends a pnl snapshot with mark=null / unrealized=0, which
+  // would briefly show the position's uPnL as 0 ("reset") until the next watch tick
+  // re-marks it. We have the live mark here, so immediately append a MARKED snapshot
+  // (realized is unchanged — an add closes nothing) so the displayed unrealized P&L
+  // stays correct. Best-effort; the watch loop re-marks regardless.
+  try {
+    const after = await loadPosition(session.id, coin);
+    if (after && after.side !== 'flat' && after.sz > 0) {
+      await writePnlSnapshot({
+        sessionId: session.id,
+        coin,
+        realizedPnlUsd: after.realizedPnlUsd,
+        unrealizedPnlUsd: unrealizedPnl(after, markPx),
+        feesPaidUsd: after.feesPaidUsd,
+        markPx,
+      });
+    }
+  } catch {
+    // non-critical — the next watch tick re-marks
+  }
 
   try {
     await writeAnalysisLog({
