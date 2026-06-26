@@ -18,7 +18,9 @@ Two independent bodies of evidence now agree the scout is pointed at the wrong e
   lumpy, one-regime (~+$68/mo on $1k, "encouraging, not proven"); the
   leaders/carry/micro pillars were never validated (DATA-BLOCKED); and the
   perp-follow study found leader-copy persistence is *negative* (IC −0.50), while
-  **vault allocation was the only copy signal that persisted (IC +0.223)**.
+  **vault allocation was the only copy signal that persisted (IC +0.223)**. *(The
+  IC −0.50 / +0.223 figures are from the iamrossi `PERP_FOLLOW_STUDY_V2` and are
+  second-hand here — verify against its primary outputs before betting on them.)*
 - **External research** (deep-research, this pass): directional momentum on liquid
   majors sits at the **weak/unproven end** of the edge spectrum; what survives
   review as durable+accessible for a small Hyperliquid operator is **(a) funding/
@@ -48,9 +50,12 @@ Build in this order; each is a **separate paper book** with its own pre-register
 bar (reuse `buildScorecard`). Run them in parallel once built; let the scorecard,
 not conviction, decide which survives.
 
-### Lane A — HLP / vault allocation (passive; build first, lowest effort)
-The highest-Sharpe, lowest-effort, most-durable option, and it corroborates our own
-+0.223 vault finding.
+### Lane A — HLP / vault allocation (passive; build first)
+The simplest *strategy* (no directional call, no setup detector, no exit guards) and
+the most durable edge — it corroborates our own +0.223 vault finding. Note: "simplest
+strategy" ≠ "no work" — it needs a **new vault data layer** (see Infrastructure gaps).
+We build it first because the *trading logic* is trivial and the risk is low, not
+because it's zero-code.
 - **Mechanics:** paper-allocate the scout's book across HLP and a shortlist of
   vetted operator vaults; track NAV/PnL over time vs just holding USDC and vs the
   scout's own trading.
@@ -61,11 +66,26 @@ The highest-Sharpe, lowest-effort, most-durable option, and it corroborates our 
 - **Risks:** not riskless — HLP took **~$5M bad debt in the Nov-2025 POPCAT attack**
   (a different event from the Oct crash it survived). Operator vaults add leader-key
   and strategy risk; prefer skin-in-the-game (≥5% leader stake) + profit-share
-  alignment.
-- **Build:** a `vaults` ingester (HLP + candidate operator vaults: NAV, drawdown,
-  age, leader stake) → a `vault_evaluations` table → the scout reads it and can
-  "allocate" in paper. Mostly read-only; near-zero execution risk.
-- **Bar:** beats hold-USDC after fees, max drawdown < 15%, over ≥60d.
+  alignment. **Liquidity:** operator vaults can lock capital / charge redemption —
+  prefer liquid vaults and bound the lock-up tail in the bar (don't allocate paper
+  capital you couldn't redeem inside the measurement window).
+- **Build (all NEW — there is no vault schema or ingester today):**
+  - **Migration:** `vault_snapshots` (vault_address, name, kind `hlp|operator`,
+    nav_usd, pnl_24h_usd, max_drawdown_pct, age_days, leader_stake_pct, fetched_at)
+    + a derived `vault_evaluations` read.
+  - **Ingester** (`pnpm vault-watch`, modeled on `trader-watch`): poll HL's info
+    `vaultDetails`, hourly; write `vault_snapshots`. **Start HLP-only** (the anchor,
+    no leader-key risk); the operator-vault shortlist is operator-maintained and added
+    later. Reuse trader-watch's retry/backoff + heartbeat; fail-soft.
+  - **Scout read:** `scout:cycle` surfaces the vault NAV series; a paper "allocation"
+    is a virtual position whose P&L tracks NAV change (NOT a perp fill — see §
+    Infrastructure gaps for the scorecard change this needs).
+  - Execution is deterministic (allocate/redeem against NAV) — no setup detector or
+    exit guards — but the data layer + the unrealized-NAV scorecard path are net-new.
+- **Bar:** beats hold-USDC net of fees by a pre-registered margin (operator sets the
+  $/mo; suggest a LOWER bar than the directional $1000 since it's passive), measured
+  on **allocated-capital drawdown** < 15%, over ≥60d, and **fails immediately if a
+  held vault takes permanent bad debt** (the POPCAT failure mode).
 
 ### Lane B — Delta-neutral funding carry (the pro bread-and-butter)
 The edge the research most strongly endorses *and* the one most prone to silent
@@ -85,12 +105,16 @@ blow-up — so the guards are the feature.
     assume the hedge is permanent.
   - **Counterparty / margin / (if staked collateral) slashing** risk — keep margin
     buffers; don't run the hedge at max leverage.
-- **Build:** the scout already reads `fundingHourly`/OI. Add a **funding-carry
-  setup detector** (extreme + stable funding, both legs liquid), a delta-neutral
-  position constructor, and the negative-funding/ADL guards. Paper P&L already
-  models signed funding (`paper-funding-business-logic`).
-- **Bar:** net-positive after fees+slippage+the funding it actually earns, across a
-  funding-regime change, over ≥45d.
+- **Build:** the scout already reads `fundingHourly`/OI (reused). NEW (see
+  Infrastructure gaps): a 2-leg/paired-perp position model, a **funding-carry setup
+  detector** (extreme + stable funding, both legs liquid), the spread-scoring path,
+  and the **funding-threshold exit trigger + ADL model**. v1 hedge is cross/paired
+  perp (no spot fill exists). Paper P&L already models signed funding
+  (`paper-funding-business-logic`).
+- **Bar:** net-positive by a pre-registered $/mo margin (operator sets it; suggest
+  LOWER than Lane A given the leverage/ADL tail), after fees+slippage+the funding it
+  actually earns, over ≥45d spanning **≥1 funding-regime flip (positive→negative)**,
+  with **zero uncovered-ADL events** (an ADL that left a leg naked = lane fails).
 
 ### Lane C — Cost-aware, vol-managed cross-sectional overlay (only if it survives a re-backtest)
 Lowest priority; the research says naive cross-sectional is a trap, but two
@@ -103,11 +127,54 @@ is the one factor that reportedly survives costs in liquid coins.
   maker/taker + funding + slippage. The academic Sharpes are in-sample, gross, and
   computed over 3,000+ uninvestable coins — **expect materially lower net edge.** If
   it doesn't clear the bar in our own harness, **don't build it.**
-- **Bar:** beats Lane A net-of-cost in our backtest before any paper capital.
+- **Bar:** must clear an **absolute** net-of-cost $/mo floor (not merely "less
+  negative than Lane A") **AND** beat Lane A's realized Sharpe over the same window in
+  our backtest, ≥90d, before any paper capital. A relative-only bar can graduate a
+  losing lane — require the absolute floor first.
 
 ### Retire — directional single-name momentum on majors
 The current scout lane. Demote it to a *context signal* (regime as a risk overlay /
 sit-out filter, as `BACKTEST_FINDINGS` already concluded), not a P&L engine.
+
+## 3b. Infrastructure gaps — what is NEW vs actually reused (read before estimating)
+
+The machinery in §6 is reused, but each lane needs **new infra the single-perp scout
+doesn't have today**. Honest accounting (verified against the code):
+
+- **Pre-work #0 — multi-lane isolation (blocks everything):** today there's one scout
+  book (`title='scout'`, single-perp positions). **Decided approach:** add a nullable
+  `lane` text tag to `fills`/`positions` (+ surface it on the scout session), NOT
+  one-session-per-lane (keeps the single paper book + one circuit-breaker account).
+  This is a **small migration + a `scout:cycle`/`scout:trade --lane` refactor + a
+  per-lane `buildScorecard` config** — not just a decision. The **circuit breaker
+  stays account-wide** (total-equity halt; a failed lane must not block the others'
+  verdicts). Bonus: Lane B's "2-leg" need is then just **two lane-tagged single-leg
+  positions bound as one unit** — no new `Position` type required.
+- **Lane A — vault data layer (entirely new):** no vault schema/ingester exists
+  (`0010_scout_observability.sql` has only `market_snapshots` + heartbeat). Needs the
+  migration + `vault-watch` ingester above, **and** a scorecard that scores an
+  **unrealized NAV track** — `buildScorecard` today only folds *realized* round-trip
+  P&L (`scout-review-business-logic.ts`). Add `unrealizedPnlUsd` to `ScorecardInput`.
+- **Lane B — delta-neutral needs a 2-leg model (new):** the `Position` type is
+  **single-leg** (`side: long|short|flat`, one coin — `src/types/position.ts`), and the
+  paper fill is **perp-only** (`fill-source-paper.ts` walks a perp L2 book; there is no
+  HL **spot** fill model). So:
+  - **v1 hedge = cross-perp or paired-perp** (e.g. long the funding-earning perp,
+    short a correlated perp), NOT long-spot/short-perp. Spot-leg is a *future*
+    refinement, not assumed.
+  - Needs a 2-leg construct (or two lane-tagged positions treated as one unit) and a
+    scorecard that scores the **spread**, not each leg's direction.
+  - The **negative-funding-exit and ADL guards are prose today** — no funding-threshold
+    trigger exists in `scout-trigger-business-logic.ts`, and ADL/naked-long is not
+    modeled in paper. Both are net-new and are the gating risk work for Lane B.
+- **Lane C** — needs the cross-sectional re-backtest harness extension (already gated
+  on that; no surprise).
+
+**Sequencing implication:** Lane A's *trading* is trivial but its *data layer* is new;
+Lane B *reuses* the funding feed (`market_snapshots.funding_hourly` already streams)
+but needs the 2-leg model + exit guards. Neither is "free reuse." We still build A
+first (lowest strategy risk, no guards to get wrong), but Pre-work #0 (lane isolation)
++ the unrealized-NAV scorecard are the true first tasks.
 
 ## 4. Open research tasks (the deep-research couldn't resolve these — they're now *our* backtests)
 1. **Live HL funding yields** — the one current-yield claim was *refuted*; instrument
@@ -118,28 +185,43 @@ sit-out filter, as `BACKTEST_FINDINGS` already concluded), not a P&L engine.
    selection for passive quotes. Unknown; study before attempting (or just use HLP).
 4. **Liquidation/flow accessibility** from public HL liquidation/OI feeds — is there
    a tradable, capacity-real signal without speed? Unresolved.
-5. **Validate the existing pillars** — leaders/carry/micro are still DATA-BLOCKED in
-   our own backtest; `market_snapshots` should now have months of history. Backtest
-   them before any pillar-driven lane trusts them.
+5. **(DEFERRED — only if we resurrect a pillar-driven lane)** the leaders/carry/micro
+   pillars are still DATA-BLOCKED; `market_snapshots` now has months of history, so
+   they *could* finally be backtested. But this roadmap **retires** the directional
+   pillar lane, so this is parked unless a future lane wants to read them.
 
 ## 5. Sequencing (stop → rebuild → relaunch)
 1. **Stop** the current directional scout (keep the daemon/scorecard/guards).
-2. **Instrument** the missing data: live funding/OI history (have it), HLP+vault NAV
-   ingester, tradable-universe candle/funding panel.
-3. **Lane A** (vault allocation) — cheapest, mostly read-only, ship first.
-4. **Lane B** (funding carry) — build the detector + delta-neutral constructor +
-   the negative-funding/ADL guards.
-5. **Re-backtest** the pillars + a CTREND-style signal; build **Lane C** only if it
-   clears its bar in-harness.
-6. **Relaunch** the scout as a multi-lane paper operator: each lane its own book +
-   pre-registered bar; `scout-review` curates per-lane; the weakest lanes get killed
-   on the scorecard, not on vibes.
+2. **Pre-work #0 — multi-lane architecture** (blocks all lanes, §3b): the lane
+   isolation decision + the `unrealizedPnlUsd` extension to `ScorecardInput`. Do this
+   before any lane, or Lane A's first NAV track has nowhere to land.
+3. **Lane A** (vault allocation) — **do not open the Lane A PR until Pre-work #0
+   ships** (the NAV track has nowhere to land otherwise). Then build the
+   `vault_snapshots` migration + `vault-watch` ingester (HLP-only first) + the trivial
+   allocation logic. Lowest *strategy* risk, ship first.
+4. **Lane B** (funding carry) — the 2-leg/paired-perp model + setup detector +
+   funding-exit trigger + ADL model. The guards are the gating work.
+5. **Re-backtest a CTREND-style cross-sectional signal** on the tradable HL subset
+   with realistic costs; build **Lane C** only if it clears its absolute+relative bar
+   in-harness. (Pillar validation is deferred — §4 task 5.)
+6. **Relaunch** the scout as a multi-lane paper operator: each lane its own
+   lane-tagged book + pre-registered bar; `scout-review` emits **one scorecard per
+   lane** (plus per-lane playbook sections); the weakest lanes get killed on the
+   scorecard, not on vibes.
 
-## 6. What we reuse (no rebuild)
-Trigger daemon, `scout:cycle` snapshot, `buildScorecard` + the kill/graduation bar,
-paper fill + signed-funding cost model, hypothesis track record, circuit breaker,
-`market_snapshots`, the rubric scan harness (re-pointed). The refactor is **new
-setup detectors + a vault ingester + per-lane books**, not a new engine.
+## 6. Reuse vs new (be honest about the line)
+**Reused as-is:** the trigger daemon, `scout:cycle` snapshot shape, the
+`buildScorecard` kill/graduate *framework* (gates + verdict), the paper fill +
+signed-funding cost model, the hypothesis track record, the circuit breaker
+(account-wide), and `market_snapshots` (funding/OI already streaming).
+
+**New (per §3b — do not under-estimate):** multi-lane isolation (lane tag +
+`--lane`); the vault data layer (`vault_snapshots` migration + `vault-watch`
+ingester) for A; a 2-leg/paired-perp position model + spread scoring + funding-exit
+trigger + ADL model for B; an **unrealized-NAV** path in `ScorecardInput` (today it
+folds realized round-trips only); per-lane scorecard config. The refactor reuses the
+*engine*, but the **data model and the books are materially extended** — it is not a
+drop-in re-point.
 
 ## 7. Caveats (read before trusting any number here)
 - **Funding yields are time-varying** — the specific 2026 yield claim was **refuted
