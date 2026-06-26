@@ -34,6 +34,28 @@ describe('reconstructRoundTrips', () => {
     expect(trips[0].holdMs).toBe(3 * HOUR);
     expect(trips[0].pnl).toBe(50);
   });
+
+  it('window-edge: a close with no prior open (position predates window) → realized leg, null hold, no phantom', () => {
+    const trips = reconstructRoundTrips([
+      fill({ side: 'sell', sz: 3, time: T0, closedPnl: 120, dir: 'Close Long' }),
+    ]);
+    expect(trips).toHaveLength(1);
+    expect(trips[0].pnl).toBe(120);
+    expect(trips[0].holdMs).toBeNull(); // entry unknown — not built as a phantom short
+  });
+
+  it('roller: opens then trims twice but never fully flattens → one flushed trip, adds counted', () => {
+    const trips = reconstructRoundTrips([
+      fill({ side: 'buy', sz: 4, time: T0, dir: 'Open Long' }),               // opener
+      fill({ side: 'buy', sz: 4, time: T0 + 1 * HOUR, dir: 'Open Long' }),    // add
+      fill({ side: 'sell', sz: 3, time: T0 + 2 * HOUR, closedPnl: 30, dir: 'Close Long' }), // trim
+      fill({ side: 'sell', sz: 2, time: T0 + 3 * HOUR, closedPnl: 25, dir: 'Close Long' }), // trim (still long 3)
+    ]);
+    expect(trips).toHaveLength(1);           // NOT zero — the open cycle is flushed
+    expect(trips[0].pnl).toBe(55);           // both trims' realized pnl
+    expect(trips[0].adds).toBe(1);           // one same-direction add
+    expect(trips[0].holdMs).toBe(3 * HOUR);  // open → last fill
+  });
 });
 
 describe('computeTraderFingerprint', () => {

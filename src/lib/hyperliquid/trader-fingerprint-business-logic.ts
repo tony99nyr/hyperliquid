@@ -71,12 +71,31 @@ function percentile(xs: number[], p: number): number {
   return s[i];
 }
 
-interface RoundTrip { coin: string; openTime: number; closeTime: number; holdMs: number; pnl: number; adds: number; }
+/** holdMs is null when the position was opened BEFORE our window (entry time unknown). */
+interface RoundTrip { coin: string; openTime: number; closeTime: number; holdMs: number | null; pnl: number; adds: number; }
+
+/** A fill is a CLOSE when HL marks it so, or it realized PnL, or it opposes our position. */
+function isClosingFill(f: HlFill, againstPosition: boolean): boolean {
+  const dir = f.dir ?? '';
+  if (/close|liquidat/i.test(dir)) return true;
+  if ((f.closedPnl ?? 0) !== 0) return true;
+  return againstPosition;
+}
 
 /**
  * Reconstruct round-trips per coin by tracking signed running size across fills. PURE.
- * `adds` counts same-direction size-increasing fills WITHIN a trip (after the opener)
- * — the averaging-down discriminator, counted per-trip (not a window-wide total).
+ * `adds` counts same-direction size-increasing fills WITHIN a cycle (after the opener)
+ * — the averaging-down discriminator, attributed PER CYCLE (one trip per open→flat), so
+ * a martingale's many adds land on ONE trip (the signal isn't diluted across partials).
+ *
+ * Two blind spots the naive "emit only on a clean zero-cross" model misses (both fixed):
+ *   1. WINDOW-EDGE: a position opened before our window is closed inside it. The opening
+ *      fills are unseen, so the first close looks like it OPENS the opposite side. We
+ *      detect it via dir/closedPnl and emit a standalone realized leg (entry unknown →
+ *      null hold) instead of building a phantom position.
+ *   2. ROLLERS: a trader who trims but never fully flattens never crosses zero, so the
+ *      naive model records ZERO trips despite huge realized PnL. We flush a still-open
+ *      cycle that had realized closes (or adds) at the end of the window.
  */
 export function reconstructRoundTrips(fills: HlFill[]): RoundTrip[] {
   const byCoin = new Map<string, HlFill[]>();
@@ -87,25 +106,40 @@ export function reconstructRoundTrips(fills: HlFill[]): RoundTrip[] {
   const trips: RoundTrip[] = [];
   for (const [coin, fs] of byCoin) {
     fs.sort((a, b) => a.time - b.time);
-    let pos = 0, openTime = 0, pnlAccum = 0, adds = 0;
+    let pos = 0, openTime = 0, pnlAccum = 0, adds = 0, realized = false;
+    const emit = (closeTime: number) => {
+      trips.push({ coin, openTime: openTime > 0 ? openTime : 0, closeTime, holdMs: openTime > 0 ? closeTime - openTime : null, pnl: pnlAccum, adds });
+      pnlAccum = 0; adds = 0; realized = false; openTime = 0;
+    };
     for (const f of fs) {
       const delta = f.side === 'buy' ? f.sz : -f.sz;
       const prev = pos;
-      if (Math.abs(prev) < EPS && Math.abs(delta) > EPS) {
+      const fromFlat = Math.abs(prev) < EPS;
+
+      // Blind spot #1: a close while we hold nothing = closing a pre-window position.
+      // Realize it as a standalone leg; do NOT apply delta (no phantom opposite side).
+      if (fromFlat && isClosingFill(f, false)) {
+        trips.push({ coin, openTime: 0, closeTime: f.time, holdMs: null, pnl: f.closedPnl ?? 0, adds: 0 });
+        continue;
+      }
+
+      if (fromFlat) {
         openTime = f.time; // opening from flat — the opener, not an add
       } else if (prev * delta > 0) {
         adds += 1; // same-direction increase = an add (averaging in/up)
       }
+      if ((f.closedPnl ?? 0) !== 0) realized = true;
       pnlAccum += f.closedPnl ?? 0;
       pos = prev + delta;
       const crossedZero = Math.abs(pos) < EPS || prev * pos < 0;
       if (crossedZero && openTime > 0) {
-        trips.push({ coin, openTime, closeTime: f.time, holdMs: f.time - openTime, pnl: pnlAccum, adds });
-        pnlAccum = 0;
-        adds = 0;
-        openTime = Math.abs(pos) > EPS ? f.time : 0; // sign-flip reopens immediately (adds reset)
+        const flipped = prev * pos < 0;
+        emit(f.time);
+        if (flipped) openTime = f.time; // sign-flip reopens immediately (adds reset)
       }
     }
+    // Blind spot #2: flush a still-open cycle that traded (realized closes or adds).
+    if (openTime > 0 && (realized || adds > 0)) emit(fs[fs.length - 1].time);
   }
   return trips;
 }
@@ -126,9 +160,10 @@ export function computeTraderFingerprint(
   const profitFactor = grossLoss > 0 ? grossWin / grossLoss : wins.length > 0 ? Infinity : null;
   const medWin = wins.length ? median(wins.map((t) => t.pnl)) : 0;
   const worstLoss = losses.length ? Math.min(...losses.map((t) => t.pnl)) : 0;
-  const holds = trips.map((t) => t.holdMs);
+  // Holds exclude legs whose entry predates our window (holdMs null — unknown entry).
+  const holds = trips.map((t) => t.holdMs).filter((h): h is number => h != null);
   const medHoldMs = median(holds);
-  const intraday = trips.filter((t) => t.holdMs < DAY).length;
+  const intraday = holds.filter((h) => h < DAY).length;
   const realizedPnlUsd = fills.reduce((s, f) => s + (f.closedPnl ?? 0), 0);
 
   // per-coin series + concentration
@@ -163,7 +198,7 @@ export function computeTraderFingerprint(
     profitFactor: profitFactor === Infinity ? 999 : profitFactor,
     realizedPnlUsd,
     medianHoldHours: holds.length ? medHoldMs / HOUR : null,
-    intradayFrac: trips.length ? intraday / trips.length : null,
+    intradayFrac: holds.length ? intraday / holds.length : null,
     worstLossVsMedianWin,
     maxDrawdownFrac,
     distinctCoins: byCoin.size,

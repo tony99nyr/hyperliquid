@@ -15,7 +15,10 @@ import { computeTraderFingerprint } from './trader-fingerprint-business-logic';
 import { normalizeLeaderAddress } from '@/lib/trader-watch/watch-set-business-logic';
 
 const DAY = 24 * 60 * 60 * 1000;
-export const DEFAULT_WINDOW_DAYS = 30;
+// 90d (was 30d): a wider window resolves window-edge "0-trip" reads (a position
+// opened just before a 30d boundary now has its open inside the window) and gives a
+// steadier round-trip sample. MAX_FILLS still caps the crawl; truncation is flagged.
+export const DEFAULT_WINDOW_DAYS = 90;
 /** Bounded so the worker fetch stays minutes, not unbounded, per address. */
 const MAX_FILLS = 12000;
 /** Retry a stale (almost always 429-under-load) clearinghouse read before erroring. */
