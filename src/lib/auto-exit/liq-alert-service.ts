@@ -12,6 +12,7 @@
 
 import 'server-only';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
+import { getActiveSession } from '@/lib/cockpit/session-service';
 import { listExitCandidates } from './auto-exit-scan';
 import { getHlAccountAddress } from './auto-exit-config';
 import { fetchAllMids, fetchClearinghouseState } from '@/lib/hyperliquid/hyperliquid-info-service';
@@ -36,10 +37,34 @@ const DEDUP_WINDOW_MS = 2 * 60 * 60 * 1000; // 2h
 
 export interface LiqAlertScanResult {
   skipped?: string;
+  /** True on the tick that sent the one-time "alerts armed" confirmation ping. */
+  armed?: boolean;
   scanned: number;
   warned: number;
   critical: number;
   paged: number;
+}
+
+/** Source tag for the one-time armed-confirmation marker row. */
+const ARMED_SOURCE = 'liq-alert-armed';
+
+/**
+ * Send the one-time "liq alerts armed ✅" confirmation, once ever, the first time a
+ * webhook works. Returns true on the tick it sends. No-op once a marker exists, or
+ * when there's no active session to record the marker against (defers a tick).
+ */
+async function maybeSendArmedPing(): Promise<boolean> {
+  const client = getServiceRoleClient();
+  const { data: existing } = await client.from('analysis_log').select('id').eq('source', ARMED_SOURCE).limit(1);
+  if (existing && existing.length > 0) return false; // already armed
+
+  const session = await getActiveSession();
+  if (!session) return false; // need a session to record the marker; try next tick
+
+  const ok = await sendDiscord('🟢 **HL liq alerts armed** — webhook OK. You’ll be paged when an open position nears liquidation (warn ≤8% / crit ≤4% by default).');
+  if (!ok) return false; // wrong webhook → don't record, retry next tick
+  await writeAnalysisLog({ sessionId: session.id, source: ARMED_SOURCE, severity: 'info', message: 'LIQ-ALERTS ARMED (webhook confirmed)' }).catch(() => {});
+  return true;
 }
 
 /** Highest tier already alerted per coin (this session) within the dedup window. */
@@ -65,14 +90,20 @@ async function priorTiersForSession(sessionId: string, sinceMs: number): Promise
  * NOTIFY-ONLY; safe to call every cron tick regardless of AUTO_EXIT_ENABLED.
  */
 export async function scanAndAlertLiqProximity(now: number = Date.now()): Promise<LiqAlertScanResult> {
+  if (!isDiscordConfigured()) return { skipped: 'no-discord-webhook', scanned: 0, warned: 0, critical: 0, paged: 0 };
+
+  // Armed-once confirmation: the FIRST tick after the webhook is set sends a single
+  // "alerts armed ✅" so the operator knows the webhook is wired — recorded only on a
+  // SUCCESSFUL send, so a wrong/typo'd webhook keeps retrying until it works.
+  const armed = await maybeSendArmedPing();
+
   // Real liq prices come from the clearinghouse (live account). No address → skip
   // (the formula-liq fallback for paper lives in the watch path, not here).
   const address = getHlAccountAddress();
-  if (!address) return { skipped: 'no-hl-address', scanned: 0, warned: 0, critical: 0, paged: 0 };
-  if (!isDiscordConfigured()) return { skipped: 'no-discord-webhook', scanned: 0, warned: 0, critical: 0, paged: 0 };
+  if (!address) return { skipped: 'no-hl-address', armed, scanned: 0, warned: 0, critical: 0, paged: 0 };
 
   const candidates = await listExitCandidates();
-  if (candidates.length === 0) return { scanned: 0, warned: 0, critical: 0, paged: 0 };
+  if (candidates.length === 0) return { armed, scanned: 0, warned: 0, critical: 0, paged: 0 };
 
   // Thresholds: env overrides (LIQ_ALERT_WARN_PCT / LIQ_ALERT_CRIT_PCT) else 8% / 4%.
   const cfg: LiqAlertConfig = {
