@@ -15,15 +15,17 @@
 
 import { header, line, run } from './_skill-runtime';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
-import { fetchMetaAndAssetCtxs } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { fetchMetaAndAssetCtxs, fetchVaultDetails, HLP_VAULT_ADDRESS } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { fundingCostUsd } from '@/lib/trading/paper-funding-business-logic';
 import {
   buildScorecard,
   buildLaneScorecards,
+  DEFAULT_SCORECARD_CONFIG,
   type ScorecardInput,
   type LanePositionRow,
   type LaneHypothesisRow,
 } from '@/lib/scout/scout-review-business-logic';
+import { vaultReturnSince } from '@/lib/scout/vault-snapshot-business-logic';
 
 interface FillRow {
   coin: string;
@@ -189,11 +191,38 @@ run(async () => {
     return { lane: r.lane ?? null, status: r.status };
   });
   const laneCards = buildLaneScorecards({ positions: lanePositions, hypotheses: laneHyps, fundingByCoin: fundingHaircutByCoin, periodDays });
-  if (laneCards.length > 1 || (laneCards.length === 1 && laneCards[0].lane !== 'directional')) {
+
+  // Lane A — passive HLP allocation, scored as a buy-and-hold over a lookback. The
+  // return is the vault's FLOW-FREE per-capital return (ΔcumPnl / AUM_at_start), NOT
+  // its opaque apr and NOT raw AUM change. Env-tunable; the bar is LOWER than the
+  // directional $1000/mo since it's a passive "beats holding cash" hurdle.
+  const vaultLookbackDays = Number(process.env.SCOUT_VAULT_LOOKBACK_DAYS) || 30;
+  const vaultNotionalUsd = Number(process.env.SCOUT_VAULT_NOTIONAL_USD) || 1000;
+  const vaultBarUsd = Number(process.env.SCOUT_VAULT_BAR_USD) || 50;
+  let vaultLine: string | null = null;
+  try {
+    const raw = await fetchVaultDetails(HLP_VAULT_ADDRESS);
+    const { returnFrac, spanDays } = vaultReturnSince(raw, Date.now() - vaultLookbackDays * 86_400_000);
+    if (returnFrac != null) {
+      const days = Math.max(1, spanDays ?? vaultLookbackDays);
+      const vcard = buildScorecard(
+        { realizedGrossUsd: 0, slippageHaircutUsd: 0, fundingHaircutUsd: 0, unrealizedPnlUsd: vaultNotionalUsd * returnFrac, tradeCount: 0, wins: 0, losses: 0, periodDays: days },
+        { ...DEFAULT_SCORECARD_CONFIG, monthlyBarUsd: vaultBarUsd },
+      );
+      vaultLine = `[vault:HLP]  $${vaultNotionalUsd} notional → ${(returnFrac * 100).toFixed(2)}% over ${days.toFixed(0)}d = net $${vcard.netUsd.toFixed(2)}  run-rate $${vcard.monthlyRunRateUsd.toFixed(0)}/mo (bar $${vaultBarUsd})  → ${vcard.verdict.toUpperCase()}`;
+    }
+  } catch {
+    vaultLine = '[vault:HLP]  (vaultDetails unavailable this cycle)';
+  }
+
+  // Show the breakdown when there's more than the lone directional lane OR a vault lane.
+  const hasPositionLanes = laneCards.length > 1 || (laneCards.length === 1 && laneCards[0].lane !== 'directional');
+  if (hasPositionLanes || vaultLine) {
     header('PER-LANE BREAKDOWN');
     for (const { lane, openCount: lo, card: c } of laneCards) {
       line(`[${lane}]  net $${c.netUsd.toFixed(2)}  (realized $${c.realizedGrossUsd.toFixed(2)}, funding ${c.fundingHaircutUsd >= 0 ? '−' : '+'}$${Math.abs(c.fundingHaircutUsd).toFixed(2)})  trades ${c.tradeCount}  win ${(c.winRate * 100).toFixed(0)}%  open ${lo}  → ${c.verdict.toUpperCase()}`);
     }
+    if (vaultLine) line(vaultLine);
   }
   line('');
   line('Next: the scout-review skill (Opus) reads this + the resolved hypotheses and curates docs/scout/playbook.md.');

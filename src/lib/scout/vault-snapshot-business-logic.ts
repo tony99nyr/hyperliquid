@@ -80,6 +80,47 @@ export function peakToTroughDrop(series: HistPoint[]): number | null {
   return drop;
 }
 
+export interface VaultReturn {
+  /** Flow-free return over [sinceMs, latest] as a fraction (0.01 = 1%), or null. */
+  returnFrac: number | null;
+  /** Latest total NAV (AUM), for context. */
+  navUsd: number | null;
+  /** Days actually spanned by the return window (≤ requested when history is short). */
+  spanDays: number | null;
+}
+
+/**
+ * A passive allocator's return on a vault over [sinceMs, latest]. PURE.
+ *
+ * The HONEST, flow-free metric: `(cumulativePnl_latest − cumulativePnl_atStart)
+ * / AUM_atStart`. We compute it from the vault's OWN pnl + account-value history
+ * (not HL's opaque `apr`, whose scaling is unverified, and not raw AUM change,
+ * which is polluted by deposits/withdrawals). Approximation: AUM ≈ its start
+ * value over the window (fine for a weeks-long paper hold). Null when history is
+ * too thin or the starting AUM is non-positive.
+ */
+export function vaultReturnSince(raw: Record<string, unknown>, sinceMs: number): VaultReturn {
+  const { accountValue, pnl } = pickWindow(raw.portfolio);
+  const navUsd = accountValue.length > 0 ? accountValue[accountValue.length - 1][1] : null;
+  if (pnl.length < 2 || accountValue.length < 1) return { returnFrac: null, navUsd, spanDays: null };
+
+  // First pnl point at/after the lookback start (fall back to the earliest point).
+  const startIdx = pnl.findIndex(([t]) => t >= sinceMs);
+  const sIdx = startIdx >= 0 ? startIdx : 0;
+  const startT = pnl[sIdx][0];
+  const pnlStart = pnl[sIdx][1];
+  const pnlNow = pnl[pnl.length - 1][1];
+  // AUM at the start time (capital base the return is earned on).
+  const aumStart = (accountValue.find(([t]) => t >= startT) ?? accountValue[0])[1];
+  if (!(aumStart > 0)) return { returnFrac: null, navUsd, spanDays: null };
+
+  return {
+    returnFrac: (pnlNow - pnlStart) / aumStart,
+    navUsd,
+    spanDays: Math.max(0, (pnl[pnl.length - 1][0] - startT) / 86_400_000),
+  };
+}
+
 /**
  * Parse a raw `vaultDetails` payload into a VaultSnapshot. PURE.
  * `kind` is supplied by the caller (HLP is a known constant address).

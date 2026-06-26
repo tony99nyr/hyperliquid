@@ -3,6 +3,7 @@ import {
   parseVaultSnapshot,
   buildVaultSnapshotRow,
   peakToTroughDrop,
+  vaultReturnSince,
 } from '@/lib/scout/vault-snapshot-business-logic';
 
 const NOW = Date.UTC(2026, 5, 26); // fixed clock
@@ -79,5 +80,38 @@ describe('peakToTroughDrop', () => {
     expect(peakToTroughDrop([[0, 100]])).toBeNull();
     expect(peakToTroughDrop([[0, 100], [1, 110], [2, 120]])).toBe(0);
     expect(peakToTroughDrop([[0, 0], [1, 200], [2, 80]])).toBe(120); // cum-PnL peak 200 → 80
+  });
+});
+
+describe('vaultReturnSince', () => {
+  const DAY2 = 86_400_000;
+  // cumPnl rises 100→150 over the window; AUM ≈ 1000 at the start → 5% return.
+  const raw = {
+    portfolio: [
+      ['allTime', {
+        accountValueHistory: [
+          [NOW - 40 * DAY2, '900'],
+          [NOW - 30 * DAY2, '1000'], // AUM at lookback start
+          [NOW, '1050'],
+        ],
+        pnlHistory: [
+          [NOW - 40 * DAY2, '80'],
+          [NOW - 30 * DAY2, '100'], // pnl at lookback start
+          [NOW, '150'],            // +50 since start
+        ],
+      }],
+    ],
+  };
+
+  it('return = ΔcumPnl / AUM_at_start, flow-free (50 / 1000 = 5%)', () => {
+    const r = vaultReturnSince(raw, NOW - 30 * DAY2);
+    expect(r.returnFrac).toBeCloseTo(50 / 1000, 6);
+    expect(r.navUsd).toBe(1050);
+    expect(r.spanDays).toBeCloseTo(30, 6);
+  });
+
+  it('null when history is too thin or AUM non-positive', () => {
+    expect(vaultReturnSince({ portfolio: [] }, NOW).returnFrac).toBeNull();
+    expect(vaultReturnSince({}, NOW).returnFrac).toBeNull();
   });
 });
