@@ -24,6 +24,8 @@ import { unrealizedPnl } from '@/lib/trading/pnl-business-logic';
 import { fetchAllMids } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { validateEnv } from '@/lib/env/env';
 import { previewAdd, MAX_ADD_MULTIPLE, type AddSizeMode } from '@/lib/trading/add-to-position-business-logic';
+import { findOpenStop } from '@/lib/trading/stop-order-service';
+import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 import { liquidationInsideStop } from '@/lib/trading/leverage-business-logic';
 import { getTradingMode } from '@/lib/env/mode';
 import { entryLiveConfirmPhrase } from '@/app/cockpit/components/entry-modal-helpers';
@@ -74,6 +76,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   const side: 'long' | 'short' = position.side === 'long' ? 'long' : 'short';
   const leverage = (await loadPositionLeverage(session.id, coin)) ?? 1;
+
+  // A resting stop is sized to the CURRENT position; adding would leave it covering
+  // only part of the new size. Require canceling it first (keeps stop ⇄ position
+  // consistent + forces you to re-set the stop at the new average entry). FAIL-CLOSED:
+  // if we can't verify, refuse the add (don't risk adding over a stale stop).
+  let existingStop: Awaited<ReturnType<typeof findOpenStop>>;
+  try {
+    existingStop = await findOpenStop(coin);
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: `Couldn't verify a resting ${coin} stop — retry. (${extractErrorMessage(e)})` }, { status: 502 });
+  }
+  if (existingStop) {
+    return NextResponse.json(
+      { ok: false, error: `Cancel your ${coin} stop (@ $${existingStop.triggerPx}) before adding — it only covers the current size. Re-place it after the add.`, hasStop: true },
+      { status: 409 },
+    );
+  }
 
   // Fresh mark (uncached — server-side, once). A bad mark can't be sized against.
   const mids = await fetchAllMids(validateEnv().HL_NETWORK, { uncached: true });

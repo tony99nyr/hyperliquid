@@ -31,6 +31,7 @@ import {
   formatHlPrice,
   aggressiveIocPrice,
   buildIocOrderAction,
+  buildStopOrderAction,
   parseOrderResponse,
 } from './hyperliquid-order-business-logic';
 
@@ -243,4 +244,56 @@ export async function submitOrder(intent: TradeIntent): Promise<HlOrderResult> {
     hlOrderId: parsed.oid != null ? String(parsed.oid) : null,
     raw,
   };
+}
+
+/**
+ * Place a reduce-only STOP-LOSS trigger order (stop-market) that RESTS on HL and
+ * fires when the mark crosses `triggerPx`. `isBuy` is the order side = OPPOSITE the
+ * position (a long's stop sells). Returns the resting order id (oid). Throws on a
+ * rejected action (fail-closed). Reduce-only — it can only CLOSE, never increase.
+ */
+export async function submitStopOrder(coin: string, triggerPx: number, size: number, isBuy: boolean): Promise<{ oid: number | null }> {
+  if (!(triggerPx > 0) || !(size > 0)) throw new Error(`submitStopOrder: triggerPx + size must be positive (got ${triggerPx}, ${size})`);
+  const testnet = isTestnet();
+  const network = testnet ? 'testnet' : 'mainnet';
+  const wallet = privateKeyToAccount(readAgentKey());
+  const universe = await fetchPerpMeta(network);
+  const { assetIndex, szDecimals } = resolveAsset(universe, coin);
+
+  const sizeStr = formatHlSize(size, szDecimals);
+  if (!(Number(sizeStr) > 0)) throw new Error(`stop size ${size} rounds below the ${coin} lot size.`);
+  const triggerPxStr = formatHlPrice(triggerPx, szDecimals);
+
+  const action = buildStopOrderAction({ assetIndex, isBuy, triggerPxStr, sizeStr });
+  const nonce = nextNonce();
+  const signature = await signL1Action({ wallet, action: action as unknown as Record<string, unknown>, nonce, isTestnet: testnet });
+  const res = await fetch(testnet ? EXCHANGE_URL.testnet : EXCHANGE_URL.mainnet, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, nonce, signature }),
+  });
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) throw new Error(`HL stop order HTTP ${res.status}: ${JSON.stringify(json)}`);
+  const parsed = parseOrderResponse(json); // throws on a per-order error; resting → oid
+  return { oid: parsed.oid };
+}
+
+/** Cancel an order by (coin, oid) via the HL `cancel` action. Throws on rejection. */
+export async function submitCancel(coin: string, oid: number): Promise<void> {
+  const testnet = isTestnet();
+  const network = testnet ? 'testnet' : 'mainnet';
+  const wallet = privateKeyToAccount(readAgentKey());
+  const universe = await fetchPerpMeta(network);
+  const { assetIndex } = resolveAsset(universe, coin);
+
+  const action = { type: 'cancel', cancels: [{ a: assetIndex, o: oid }] };
+  const nonce = nextNonce();
+  const signature = await signL1Action({ wallet, action: action as unknown as Record<string, unknown>, nonce, isTestnet: testnet });
+  const res = await fetch(testnet ? EXCHANGE_URL.testnet : EXCHANGE_URL.mainnet, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, nonce, signature }),
+  });
+  const json = (await res.json().catch(() => ({}))) as { status?: string };
+  if (!res.ok || json.status !== 'ok') throw new Error(`HL cancel(${coin} oid ${oid}) failed: ${JSON.stringify(json)}`);
 }

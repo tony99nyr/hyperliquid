@@ -12,7 +12,7 @@
  * no-auto-fire preserved. a11y mirrors the other cockpit dialogs.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { css } from '@styled-system/css';
 import type { PnlSnapshot, PositionRow } from '@/hooks/realtime-row-mappers';
 import { useCandles } from '@/hooks/useCandles';
@@ -164,6 +164,45 @@ export default function PositionInsightsModal({
     }
   }
 
+  // Resting protective stop on HL (place the ATR suggestion / cancel). Fetched on open.
+  const [stop, setStop] = useState<{ oid: number; triggerPx: number | null; sz: number } | null>(null);
+  const [stopBusy, setStopBusy] = useState(false);
+  const [stopMsg, setStopMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const refetchStop = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/cockpit/position-stop?coin=${encodeURIComponent(pos.coin)}`, { credentials: 'same-origin' });
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; stop?: { oid: number; triggerPx: number | null; sz: number } | null };
+      if (json.ok) setStop(json.stop ?? null);
+    } catch { /* leave as-is */ }
+  }, [pos.coin]);
+  useEffect(() => {
+    let active = true;
+    const run = () => { if (active) void refetchStop(); };
+    run();
+    return () => { active = false; };
+  }, [refetchStop]);
+
+  async function placeStop(): Promise<void> {
+    if (suggestedStopPx == null || stopBusy) return;
+    setStopBusy(true); setStopMsg(null);
+    try {
+      const res = await fetch('/api/cockpit/position-stop', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ action: 'place', coin: pos.coin, triggerPx: Math.round(suggestedStopPx * 100) / 100 }) });
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; pushed?: boolean };
+      if (!res.ok || json.ok === false) setStopMsg({ ok: false, text: json.error ?? `Failed (${res.status})` });
+      else { setStopMsg({ ok: true, text: json.pushed ? `Stop placed @ ${fmtPx(suggestedStopPx)}.` : `Stop recorded (paper).` }); await refetchStop(); }
+    } catch { setStopMsg({ ok: false, text: 'Network error — retry.' }); } finally { setStopBusy(false); }
+  }
+  async function cancelStop(): Promise<void> {
+    if (stopBusy) return;
+    setStopBusy(true); setStopMsg(null);
+    try {
+      const res = await fetch('/api/cockpit/position-stop', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ action: 'cancel', coin: pos.coin }) });
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || json.ok === false) setStopMsg({ ok: false, text: json.error ?? `Failed (${res.status})` });
+      else { setStopMsg({ ok: true, text: 'Stop canceled.' }); setStop(null); }
+    } catch { setStopMsg({ ok: false, text: 'Network error — retry.' }); } finally { setStopBusy(false); }
+  }
+
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -286,6 +325,19 @@ export default function PositionInsightsModal({
           ) : (
             <span className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>{candles.loading ? 'measuring volatility…' : 'ATR unavailable — judge the stop off the chart.'}</span>
           )}
+
+          {/* Place / cancel a REAL reduce-only stop on HL (rests on the exchange). */}
+          <div className={css({ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '2px' })}>
+            {stop ? (
+              <>
+                <span data-testid="insights-stop-placed" className={css({ fontFamily: 'mono', fontSize: '10px' })} style={{ color: ZONE_COLORS.ok }}>✓ stop resting @ {fmtPx(stop.triggerPx)} (size {stop.sz})</span>
+                <button type="button" data-testid="insights-stop-cancel" disabled={stopBusy} onClick={() => void cancelStop()} className={css({ fontFamily: 'mono', fontSize: '10px', color: 'zone.danger', bg: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', _disabled: { opacity: 0.5 }, _focusVisible: { outline: '2px solid token(colors.github.link)' } })}>{stopBusy ? '…' : 'cancel'}</button>
+              </>
+            ) : suggestedStopPx != null ? (
+              <button type="button" data-testid="insights-stop-place" disabled={stopBusy} onClick={() => void placeStop()} className={css({ fontFamily: 'sans', fontSize: '10px', fontWeight: 'semibold', color: 'github.bg', bg: 'github.link', border: 'none', borderRadius: '5px', paddingX: '10px', paddingY: '5px', cursor: 'pointer', _disabled: { opacity: 0.5, cursor: 'not-allowed' }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '2px' } })}>{stopBusy ? 'placing…' : `Place stop @ ${fmtPx(suggestedStopPx)}`}</button>
+            ) : null}
+          </div>
+          {stopMsg && <span role="status" style={{ color: stopMsg.ok ? ZONE_COLORS.ok : ZONE_COLORS.danger }} className={css({ fontFamily: 'mono', fontSize: '9px', lineHeight: 1.4 })}>{stopMsg.text}</span>}
         </div>
 
         {/* Add margin — the correct, non-martingale de-risk: post collateral → liq
@@ -332,6 +384,11 @@ export default function PositionInsightsModal({
           </div>
           {addOpen && (
             <>
+              {stop && (
+                <span data-testid="insights-add-blocked-stop" className={css({ fontFamily: 'mono', fontSize: '9.5px', lineHeight: 1.45, borderRadius: '6px', padding: '8px 10px' })} style={{ background: 'rgba(242,77,94,0.08)', border: '1px solid rgba(242,77,94,0.3)', color: '#ff9aa6' }}>
+                  ⚠ A stop is resting @ {fmtPx(stop.triggerPx)} (covers {stop.sz}). Cancel it above before adding — then re-place it at the new average entry.
+                </span>
+              )}
               <div className={css({ display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap' })}>
                 <div role="group" aria-label="Add size mode" className={css({ display: 'flex', gap: '2px', bg: 'github.bgSecondary', border: '1px solid token(colors.github.border)', borderRadius: '6px', padding: '2px' })}>
                   {(['pct', 'usd'] as AddSizeMode[]).map((m) => (
@@ -368,7 +425,7 @@ export default function PositionInsightsModal({
               )}
 
               <div className={css({ display: 'flex', gap: '8px', alignItems: 'center' })}>
-                <button type="button" data-testid="insights-add-submit" disabled={!addApproveOk} onClick={() => void submitAdd()} style={{ background: addApproveOk ? (isLive ? ZONE_COLORS.danger : ZONE_COLORS.ok) : undefined }} className={css({ fontFamily: 'sans', fontSize: '11px', fontWeight: 'bold', color: addApproveOk ? '#06251a' : 'github.textMuted', bg: addApproveOk ? undefined : 'github.bgSecondary', border: 'none', borderRadius: '6px', paddingX: '14px', paddingY: '7px', cursor: addApproveOk ? 'pointer' : 'not-allowed', _disabled: { opacity: 0.6, cursor: 'not-allowed' } })}>{addBusy ? 'adding…' : isLive ? 'Approve LIVE add' : `Add ${addPreview?.addSz ?? ''} ${pos.coin}`}</button>
+                <button type="button" data-testid="insights-add-submit" disabled={!addApproveOk || stop != null} onClick={() => void submitAdd()} style={{ background: addApproveOk && !stop ? (isLive ? ZONE_COLORS.danger : ZONE_COLORS.ok) : undefined }} className={css({ fontFamily: 'sans', fontSize: '11px', fontWeight: 'bold', color: addApproveOk && !stop ? '#06251a' : 'github.textMuted', bg: addApproveOk && !stop ? undefined : 'github.bgSecondary', border: 'none', borderRadius: '6px', paddingX: '14px', paddingY: '7px', cursor: addApproveOk && !stop ? 'pointer' : 'not-allowed', _disabled: { opacity: 0.6, cursor: 'not-allowed' } })}>{addBusy ? 'adding…' : isLive ? 'Approve LIVE add' : `Add ${addPreview?.addSz ?? ''} ${pos.coin}`}</button>
                 <button type="button" data-testid="insights-add-cancel" onClick={() => { setAddOpen(false); setAddValue(''); setAckDown(false); }} className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted', bg: 'transparent', border: 'none', cursor: 'pointer', padding: '6px' })}>cancel</button>
               </div>
             </>

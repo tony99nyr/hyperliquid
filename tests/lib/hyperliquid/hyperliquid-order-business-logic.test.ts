@@ -11,6 +11,7 @@ import {
   formatHlPrice,
   aggressiveIocPrice,
   buildIocOrderAction,
+  buildStopOrderAction,
   resolveAsset,
   parseOrderResponse,
 } from '@/lib/hyperliquid/hyperliquid-order-business-logic';
@@ -67,6 +68,20 @@ describe('buildIocOrderAction — exact shape + LOAD-BEARING key order', () => {
     // p and s MUST be strings (numbers would hit msgpack float encoding).
     expect(typeof o.p).toBe('string');
     expect(typeof o.s).toBe('string');
+  });
+});
+
+describe('buildStopOrderAction — reduce-only stop-market trigger shape', () => {
+  it('is a reduce-only SL trigger with the canonical key order', () => {
+    const action = buildStopOrderAction({ assetIndex: 5, isBuy: false, triggerPxStr: '1628.9', sizeStr: '2' });
+    expect(action.type).toBe('order');
+    expect(action.grouping).toBe('na');
+    const o = action.orders[0];
+    expect(Object.keys(o)).toEqual(['a', 'b', 'p', 's', 'r', 't']); // load-bearing msgpack order
+    expect(o.a).toBe(5);
+    expect(o.b).toBe(false); // a long's stop SELLS
+    expect(o.r).toBe(true); // ALWAYS reduce-only — can only close
+    expect(o.t).toEqual({ trigger: { isMarket: true, triggerPx: '1628.9', tpsl: 'sl' } });
   });
 });
 

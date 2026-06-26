@@ -580,6 +580,43 @@ export async function fetchAllMids(network: 'mainnet' | 'testnet' = 'mainnet', o
   return network === 'testnet' ? load() : cachedHlRead('allMids', ['all'], load, opts?.uncached);
 }
 
+/** A resting open order on HL (the subset the cockpit needs to find a stop). */
+export interface HlOpenOrder {
+  coin: string;
+  oid: number;
+  /** 'A' = ask/sell, 'B' = bid/buy (HL convention). */
+  side: string;
+  sz: number;
+  triggerPx: number | null;
+  isTrigger: boolean;
+  reduceOnly: boolean;
+  /** e.g. "Stop Market", "Take Profit Market", "Limit". */
+  orderType: string;
+}
+
+/**
+ * Fetch the account's resting open orders (HL `frontendOpenOrders`). Read-only.
+ * Used to find an existing protective STOP (a reduce-only trigger order) for a coin
+ * — for the place/cancel UI + the "cancel your stop before adding" guard. Throws on
+ * a hard failure; returns [] for an account with none.
+ */
+export async function fetchOpenOrders(rawAddress: string, network: 'mainnet' | 'testnet' = 'mainnet'): Promise<HlOpenOrder[]> {
+  const address = normalizeHlAddress(rawAddress);
+  if (!isValidHlAddress(address)) return [];
+  const raw = await hlInfoPost<Array<Record<string, unknown>>>({ type: 'frontendOpenOrders', user: address }, hlInfoUrlFor(network));
+  if (!Array.isArray(raw)) return [];
+  return raw.map((o) => ({
+    coin: String(o.coin ?? '').toUpperCase(),
+    oid: num(o.oid),
+    side: String(o.side ?? ''),
+    sz: num(o.sz),
+    triggerPx: o.triggerPx == null ? null : num(o.triggerPx),
+    isTrigger: o.isTrigger === true,
+    reduceOnly: o.reduceOnly === true,
+    orderType: String(o.orderType ?? ''),
+  }));
+}
+
 /** One perp asset from HL `meta.universe`. The array INDEX is the order action's
  *  `a` field; `szDecimals` drives price/size formatting. */
 export interface HlPerpAsset {

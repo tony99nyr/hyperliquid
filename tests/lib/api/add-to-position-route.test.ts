@@ -30,6 +30,8 @@ vi.mock('@/lib/cockpit/fill-persistence-service', () => ({
   writePnlSnapshot: (...a: unknown[]) => writePnlSnapshot(...a),
 }));
 vi.mock('@/lib/trading/fill-source', () => ({ executeIntent: (...a: unknown[]) => executeIntent(...a) }));
+const findOpenStop = vi.fn();
+vi.mock('@/lib/trading/stop-order-service', () => ({ findOpenStop: (...a: unknown[]) => findOpenStop(...a) }));
 vi.mock('@/lib/hyperliquid/hyperliquid-info-service', () => ({ fetchAllMids: (...a: unknown[]) => fetchAllMids(...a) }));
 vi.mock('@/lib/env/env', () => ({ validateEnv: () => ({ HL_NETWORK: 'mainnet' }) }));
 vi.mock('@/lib/env/mode', () => ({ getTradingMode: () => getTradingMode() }));
@@ -57,6 +59,7 @@ beforeEach(() => {
   executeIntent.mockResolvedValue(fill);
   writePnlSnapshot.mockResolvedValue(undefined);
   writeAnalysisLog.mockResolvedValue(undefined);
+  findOpenStop.mockResolvedValue(null); // no resting stop by default
 });
 
 const addUp = { coin: 'SOL', mode: 'pct', value: 50 };
@@ -114,6 +117,14 @@ describe('POST /api/cockpit/add-to-position', () => {
     const res = await POST(req({ ...addUp, ackAveragingDown: true }));
     expect(res.status).toBe(200);
     expect(executeIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it('BLOCKS the add when a stop is resting (cancel it first) — 409, no execute', async () => {
+    findOpenStop.mockResolvedValue({ oid: 7, triggerPx: 92, sz: 2 });
+    const res = await POST(req(addUp));
+    expect(res.status).toBe(409);
+    expect((await res.json()).hasStop).toBe(true);
+    expect(executeIntent).not.toHaveBeenCalled();
   });
 
   it('LIVE requires the exact phrase — 422 + no execute on mismatch', async () => {

@@ -21,9 +21,39 @@ export interface HlOrderAction {
     p: string; // price (formatted)
     s: string; // size (formatted, base units)
     r: boolean; // reduceOnly
-    t: { limit: { tif: HlTif } };
+    t: { limit: { tif: HlTif } } | { trigger: { isMarket: boolean; triggerPx: string; tpsl: 'tp' | 'sl' } };
   }>;
   grouping: 'na';
+}
+
+/**
+ * Build a reduce-only STOP-LOSS trigger order (stop-MARKET). Rests on HL and fires
+ * when the mark crosses `triggerPxStr`. `isBuy` is the order side (OPPOSITE the
+ * position: a long's stop SELLS → isBuy false). For a stop-market, `p` is set to the
+ * trigger price (HL fills at market on trigger; p just bounds the field). Always
+ * reduceOnly — it can only CLOSE. Field order { type, orders[a,b,p,s,r,t], grouping }
+ * is the canonical msgpack shape the signature covers.
+ */
+export function buildStopOrderAction(input: {
+  assetIndex: number;
+  isBuy: boolean;
+  triggerPxStr: string;
+  sizeStr: string;
+}): HlOrderAction {
+  return {
+    type: 'order',
+    orders: [
+      {
+        a: input.assetIndex,
+        b: input.isBuy,
+        p: input.triggerPxStr,
+        s: input.sizeStr,
+        r: true, // reduce-only — a protective stop can never increase exposure
+        t: { trigger: { isMarket: true, triggerPx: input.triggerPxStr, tpsl: 'sl' } },
+      },
+    ],
+    grouping: 'na',
+  };
 }
 
 /** Normalized parse of an HL /exchange order response (see parseOrderResponse). */
