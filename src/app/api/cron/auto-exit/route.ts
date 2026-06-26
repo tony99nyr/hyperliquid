@@ -18,6 +18,7 @@ import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 import { performRiskExit } from '@/lib/trading/risk-exit-service';
 import { listExitCandidates } from '@/lib/auto-exit/auto-exit-scan';
 import { isAutoExitEnabled, getAutoExitCronSecret, getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
+import { scanAndAlertLiqProximity } from '@/lib/auto-exit/liq-alert-service';
 import { getTradingMode } from '@/lib/env/mode';
 
 export const dynamic = 'force-dynamic';
@@ -26,11 +27,23 @@ export const dynamic = 'force-dynamic';
 const MAX_CANDIDATES_PER_TICK = 40;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!isAutoExitEnabled()) {
-    return NextResponse.json({ ok: true, skipped: 'disabled' });
-  }
+  // Auth FIRST — the liq-alert scan reads the account, so it must be gated too.
   if (!verifyCronBearer(request, getAutoExitCronSecret())) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // NOTIFY-ONLY liquidation-proximity alert. Runs EVERY tick, INDEPENDENT of the
+  // gated auto-CLOSE below — so the operator gets paged (Discord) to Add margin even
+  // when AUTO_EXIT_ENABLED is off. Never trades; a failure must not break the cron.
+  let liqAlert: Awaited<ReturnType<typeof scanAndAlertLiqProximity>> | { error: string };
+  try {
+    liqAlert = await scanAndAlertLiqProximity(Date.now());
+  } catch (e) {
+    liqAlert = { error: extractErrorMessage(e) };
+  }
+
+  if (!isAutoExitEnabled()) {
+    return NextResponse.json({ ok: true, skipped: 'auto-close disabled', liqAlert });
   }
 
   const all = await listExitCandidates();
@@ -59,6 +72,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     dropped, // surfaced, never silently truncated
     fired: results.filter((r) => r.fired).length,
     coverage: { liqMarginTriggers },
+    liqAlert,
     results,
   });
 }

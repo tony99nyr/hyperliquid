@@ -18,7 +18,10 @@ vi.mock('@/lib/auto-exit/auto-exit-scan', () => ({ listExitCandidates: (...a: un
 vi.mock('@/lib/auto-exit/auto-exit-config', () => ({
   isAutoExitEnabled: () => isAutoExitEnabled(),
   getAutoExitCronSecret: () => getAutoExitCronSecret(),
+  getHlAccountAddress: () => null,
 }));
+const scanAndAlertLiqProximity = vi.fn();
+vi.mock('@/lib/auto-exit/liq-alert-service', () => ({ scanAndAlertLiqProximity: (...a: unknown[]) => scanAndAlertLiqProximity(...a) }));
 
 import { GET } from '@/app/api/cron/auto-exit/route';
 import type { NextRequest } from 'next/server';
@@ -33,21 +36,26 @@ beforeEach(() => {
   getAutoExitCronSecret.mockReturnValue('sek');
   verifyCronBearer.mockReturnValue(true);
   listExitCandidates.mockResolvedValue([]);
+  scanAndAlertLiqProximity.mockResolvedValue({ scanned: 0, warned: 0, critical: 0, paged: 0 });
 });
 
 describe('GET /api/cron/auto-exit', () => {
-  it('no-ops with skipped:disabled when the kill-switch is off', async () => {
+  it('skips the auto-CLOSE when the kill-switch is off — but still ran the liq alert', async () => {
     isAutoExitEnabled.mockReturnValue(false);
     const res = await GET(req());
     expect(res.status).toBe(200);
-    expect((await res.json()).skipped).toBe('disabled');
+    expect((await res.json()).skipped).toBe('auto-close disabled');
+    // notify-only liq alert runs independent of the auto-close gate...
+    expect(scanAndAlertLiqProximity).toHaveBeenCalled();
+    // ...but the CLOSE scan does not.
     expect(listExitCandidates).not.toHaveBeenCalled();
   });
 
-  it('401s on a bad cron token and never scans', async () => {
+  it('401s on a bad cron token and never scans OR alerts', async () => {
     verifyCronBearer.mockReturnValue(false);
     const res = await GET(req());
     expect(res.status).toBe(401);
+    expect(scanAndAlertLiqProximity).not.toHaveBeenCalled();
     expect(listExitCandidates).not.toHaveBeenCalled();
   });
 
