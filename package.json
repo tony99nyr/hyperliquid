@@ -32,6 +32,7 @@
     "smoke:data": "tsx --tsconfig tsconfig.scripts.json scripts/_smoke.ts",
     "watch": "tsx --tsconfig tsconfig.scripts.json scripts/watch.ts",
     "trader-watch": "tsx --tsconfig tsconfig.scripts.json scripts/trader-watch.ts",
+    "vault-watch": "tsx --tsconfig tsconfig.scripts.json scripts/vault-watch.ts",
     "research-trader-worker": "tsx --tsconfig tsconfig.scripts.json scripts/research-trader-worker.ts",
     "review-trader": "tsx --tsconfig tsconfig.scripts.json scripts/review-trader.ts",
     "enqueue-all-vets": "tsx --tsconfig tsconfig.scripts.json scripts/enqueue-all-vets.ts",

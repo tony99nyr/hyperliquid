@@ -666,3 +666,27 @@ export async function fetchMetaAndAssetCtxs(
   };
   return network === 'testnet' ? load() : cachedHlRead('assetCtxs', ['all'], load);
 }
+
+/**
+ * The canonical Hyperliquid Provider (HLP) protocol-vault address (mainnet).
+ * Overridable via env so testnet / a corrected address needs no code change.
+ * VERIFY against HL docs before relying on it for a live allocation.
+ */
+export const HLP_VAULT_ADDRESS = (
+  process.env.HLP_VAULT_ADDRESS ?? '0xdfc24b077bc1425ad1dea75bcb6f8158e10df303'
+).toLowerCase();
+
+/**
+ * Fetch a vault's `vaultDetails` (NAV history, apr, leader fraction, …). Read-only.
+ * Returns the RAW payload; the PURE `parseVaultSnapshot` turns it into a snapshot.
+ * Throws on a transport error (the caller is a daemon — it logs + retries).
+ */
+export async function fetchVaultDetails(
+  vaultAddress: string,
+  network: 'mainnet' | 'testnet' = 'mainnet',
+): Promise<Record<string, unknown>> {
+  return hlInfoPost<Record<string, unknown>>(
+    { type: 'vaultDetails', vaultAddress: vaultAddress.toLowerCase() },
+    hlInfoUrlFor(network),
+  );
+}
