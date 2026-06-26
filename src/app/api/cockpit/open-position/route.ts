@@ -36,6 +36,7 @@ import {
   liquidationInsideStop,
 } from '@/lib/trading/leverage-business-logic';
 import { getTradingMode } from '@/lib/env/mode';
+import { HOLD_TIMEFRAMES, type HoldTimeframe } from '@/lib/cockpit/stop-suggestion-business-logic';
 import { entryLiveConfirmPhrase } from '@/app/cockpit/components/entry-modal-helpers';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 import { randomUUID } from 'node:crypto';
@@ -56,6 +57,8 @@ const MIN_STOP_FRAC = 0.005; // 0.5%
 interface OpenBody {
   coin?: unknown;
   side?: unknown;
+  /** Intended hold timeframe — drives the server-side leverage ceiling. */
+  timeframe?: unknown;
   riskUsd?: unknown;
   stopFrac?: unknown;
   entryPx?: unknown;
@@ -123,9 +126,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // SERVER-VALIDATE leverage to [1, coinMax] (don't trust the client). The
-  // coin max is resolved server-side; the entry form's slider ceiling is advisory.
-  const coinMax = resolveCoinMaxLeverage(coin, null);
+  // Validate the optional hold timeframe (allowlist) — it tightens the leverage cap.
+  const timeframe = typeof body.timeframe === 'string' ? body.timeframe : null;
+  if (timeframe !== null && !(timeframe in HOLD_TIMEFRAMES)) {
+    return NextResponse.json({ ok: false, error: 'invalid timeframe' }, { status: 400 });
+  }
+  const tfCeiling = timeframe ? HOLD_TIMEFRAMES[timeframe as HoldTimeframe].maxLeverage : Infinity;
+
+  // SERVER-VALIDATE leverage to [1, min(coinMax, tfCeiling)] (don't trust the client).
+  // The coin max + the hold-timeframe ceiling are resolved server-side; the entry
+  // form's slider ceiling is advisory.
+  const coinMax = Math.min(resolveCoinMaxLeverage(coin, null), tfCeiling);
   const leverage = serverValidateLeverage(body.leverage, coinMax, 1);
 
   // Resolve the session: reuse the active one, else open a fresh paper/live

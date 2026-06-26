@@ -20,15 +20,22 @@
  * role=dialog, focus trap, Esc cancels, background inert.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { css } from '@styled-system/css';
 import type { OrderSide, TradingMode } from '@/types/fill';
 import type { HlPosition } from '@/lib/hyperliquid/hyperliquid-info-service';
 import type { RegimeDir } from './open-positions-helpers';
+import { useCandles } from '@/hooks/useCandles';
 import {
   resolveCoinMaxLeverage,
   halfLeaderLeverage,
 } from '@/lib/trading/leverage-business-logic';
+import {
+  HOLD_TIMEFRAMES,
+  suggestStopFrac,
+  liquidationCushion,
+  type HoldTimeframe,
+} from '@/lib/cockpit/stop-suggestion-business-logic';
 import { leaderPositionForCoin } from './leader-alignment-helpers';
 import { LeverageControl, SideSegment, SummaryRow } from './approval-popup-parts';
 import {
@@ -95,11 +102,34 @@ export default function EntryModal({
   }, [leaderPositions, form.coin]);
   const halfLev = halfLeaderLeverage(leaderLev);
 
-  // Keep leverage within the coin's band. The slider already clamps on drag; the
-  // only way it can exceed the band is right after a coin switch to a lower-max
-  // coin, which setCoin() re-clamps. Clamp the READ here too so the preview never
-  // reflects an out-of-band value even for the one render before setCoin lands.
-  const effectiveLev = clampLeverage(form.leverage, coinMax);
+  // Holding timeframe → ATR-based stop suggestion + a leverage CEILING (longer holds
+  // use lower leverage). The effective max is the tighter of the coin cap and the TF
+  // cap; the server independently re-clamps the same way.
+  const tfSpec = HOLD_TIMEFRAMES[form.timeframe];
+  const tfCoinMax = Math.min(coinMax, tfSpec.maxLeverage);
+  const tfCandles = useCandles(form.coin, tfSpec.interval);
+  const suggestedStop = useMemo(
+    () => suggestStopFrac(tfCandles.candles, tfSpec.atrMult, tfSpec.atrPeriod),
+    [tfCandles.candles, tfSpec.atrMult, tfSpec.atrPeriod],
+  );
+
+  // Seed the stop from ATR ONCE per (coin, timeframe) when candles land — replacing
+  // the old flat 4% default that wicked out. setState lives in a useCallback the
+  // effect CALLS (keeps it out of the effect body; mirrors useTraderEvaluation).
+  // The operator can override afterward; a new coin/TF re-seeds.
+  const seedKey = `${form.coin}:${form.timeframe}`;
+  const seededRef = useRef<string | null>(null);
+  const applySeed = useCallback(() => {
+    if (suggestedStop != null && seededRef.current !== seedKey) {
+      seededRef.current = seedKey;
+      setForm((f) => ({ ...f, stopFrac: suggestedStop }));
+    }
+  }, [suggestedStop, seedKey]);
+  useEffect(() => { applySeed(); }, [applySeed]);
+
+  // Keep leverage within the EFFECTIVE band (coin ∧ timeframe). The slider clamps on
+  // drag; clamp the READ too so the preview never reflects an out-of-band value.
+  const effectiveLev = clampLeverage(form.leverage, tfCoinMax);
   const formForPreview = effectiveLev === form.leverage ? form : { ...form, leverage: effectiveLev };
 
   const proposal = buildEntryPreview(formForPreview, entryPx);
@@ -167,13 +197,21 @@ export default function EntryModal({
 
   function setCoin(c: string): void {
     const norm = c.trim().toUpperCase();
-    // Re-clamp leverage into the NEW coin's band (BTC 40x → HYPE 5x must drop).
+    // Re-clamp leverage into the NEW coin's band, also honoring the TF ceiling.
     const nextLeaderPos = leaderPositionForCoin(leaderPositions, norm);
-    const nextMax = resolveCoinMaxLeverage(norm, nextLeaderPos?.maxLeverage ?? null);
+    const nextMax = Math.min(resolveCoinMaxLeverage(norm, nextLeaderPos?.maxLeverage ?? null), tfSpec.maxLeverage);
     patch({ coin: norm, leverage: clampLeverage(form.leverage, nextMax) });
     setTyped('');
     setAckLiqInsideStop(false);
     onCoinChange?.(norm);
+  }
+
+  function setTimeframe(tf: HoldTimeframe): void {
+    // Switching hold timeframe re-clamps leverage to the new ceiling and lets the
+    // ATR stop re-seed (clear the seed latch so applySeed runs for the new TF).
+    const nextMax = Math.min(coinMax, HOLD_TIMEFRAMES[tf].maxLeverage);
+    seededRef.current = null;
+    patch({ timeframe: tf, leverage: clampLeverage(form.leverage, nextMax) });
   }
 
   async function submit(): Promise<void> {
@@ -187,6 +225,7 @@ export default function EntryModal({
         body: JSON.stringify({
           coin: form.coin,
           side: form.side,
+          timeframe: form.timeframe,
           riskUsd: form.riskUsd,
           stopFrac: form.stopFrac,
           entryPx,
@@ -213,6 +252,7 @@ export default function EntryModal({
   const notionalUsd = read?.notionalUsd ?? 0;
   const liqPx = read?.liqPx ?? null;
   const stopPx = proposal?.stopPx ?? null;
+  const cushion = liquidationCushion(entryPx, stopPx, liqPx);
   const dollarRisk = proposal?.dollarRisk ?? null;
   const takerFeeUsd = notionalUsd > 0 ? notionalUsd * 0.00035 : null;
   const szStr = proposal ? proposal.intent.sz.toLocaleString('en-US', { maximumFractionDigits: 6 }) : '—';
@@ -311,6 +351,33 @@ export default function EntryModal({
             </button>
           </div>
 
+          {/* Hold timeframe — drives the ATR stop + leverage ceiling (fixes wick-outs). */}
+          <div className={css({ marginBottom: '16px' })}>
+            <span className={css({ fontFamily: 'sans', fontSize: '10.5px', fontWeight: 'semibold', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: '7px' })} style={{ color: '#9aa4b5' }}>Hold timeframe</span>
+            <div role="group" aria-label="Hold timeframe" className={css({ display: 'flex', gap: '4px', borderRadius: '9px', padding: '4px' })} style={{ background: TERM.inset, border: '1px solid rgba(255,255,255,.08)' }}>
+              {(Object.keys(HOLD_TIMEFRAMES) as HoldTimeframe[]).map((tf) => {
+                const active = tf === form.timeframe;
+                return (
+                  <button
+                    key={tf}
+                    type="button"
+                    data-testid={`entry-tf-${tf}`}
+                    data-active={active}
+                    onClick={() => setTimeframe(tf)}
+                    title={HOLD_TIMEFRAMES[tf].hint}
+                    style={{ background: active ? '#1c2536' : 'transparent', color: active ? '#e8ebf2' : '#8b95a6' }}
+                    className={css({ flex: 1, fontFamily: 'mono', fontSize: '12px', fontWeight: 'semibold', paddingY: '7px', borderRadius: '6px', border: 'none', cursor: 'pointer' })}
+                  >
+                    {HOLD_TIMEFRAMES[tf].label}
+                  </button>
+                );
+              })}
+            </div>
+            <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted', display: 'block', marginTop: '5px' })}>
+              {tfSpec.hint} · stop ≈ {tfSpec.atrMult}× ATR({tfSpec.interval}) · max {tfSpec.maxLeverage}x
+            </span>
+          </div>
+
           {/* Advisory regime bias */}
           {bias && (
             <div data-testid="entry-bias" className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: 'mono', fontSize: 'xs', borderRadius: '9px', padding: '8px 14px', marginBottom: '16px' })} style={{ background: TERM.inset, border: '1px solid token(colors.github.border)' }}>
@@ -341,6 +408,28 @@ export default function EntryModal({
             />
           </div>
 
+          {/* ATR stop hint — the stop seeds from ATR at the hold timeframe; show the
+              suggestion + a one-click re-apply if the operator drifted off it. */}
+          <div data-testid="entry-atr-hint" className={css({ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '-8px', marginBottom: '18px', fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>
+            {suggestedStop != null ? (
+              <>
+                <span>ATR({tfSpec.interval}) suggests <strong style={{ color: GH.text }}>{(suggestedStop * 100).toFixed(1)}%</strong> — beyond typical noise</span>
+                {Math.abs(suggestedStop - form.stopFrac) > 0.002 && (
+                  <button
+                    type="button"
+                    data-testid="entry-atr-apply"
+                    onClick={() => patch({ stopFrac: suggestedStop })}
+                    className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.link', bg: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', _focusVisible: { outline: '2px solid token(colors.github.link)' } })}
+                  >
+                    use
+                  </button>
+                )}
+              </>
+            ) : (
+              <span>{tfCandles.loading ? 'measuring volatility…' : 'ATR unavailable — set the stop at a structural level (beyond the recent swing).'}</span>
+            )}
+          </div>
+
           {/* Computed size readout */}
           <div className={css({ marginBottom: '18px' })}>
             <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '9px' })}>
@@ -357,9 +446,9 @@ export default function EntryModal({
           {read && proposal && (
             <LeverageControl
               coin={form.coin}
-              coinMax={coinMax}
+              coinMax={tfCoinMax}
               leverage={effectiveLev}
-              setLeverage={(v) => patch({ leverage: clampLeverage(v, coinMax) })}
+              setLeverage={(v) => patch({ leverage: clampLeverage(v, tfCoinMax) })}
               marginUsd={read.marginUsd}
               liqPx={read.liqPx}
               roeAtStopPct={read.roeAtStopPct}
@@ -391,6 +480,11 @@ export default function EntryModal({
             <SummaryRow label="Notional" value={notionalUsd > 0 ? fmtCompactUsd(notionalUsd) : '—'} color={GH.textBright} />
             <SummaryRow label="Margin required" value={read ? fmtUsd(read.marginUsd).replace('+', '') : '—'} color={GH.textBright} />
             <SummaryRow label="Liquidation price" value={liqPx == null ? '—' : fmtPx(liqPx)} color={liqInsideStop ? ZONE_COLORS.danger : GH.text} />
+            <SummaryRow
+              label="Liq cushion"
+              value={cushion == null ? '—' : `${cushion.toFixed(1)}× stop`}
+              color={cushion == null ? GH.textMuted : cushion < 2 ? ZONE_COLORS.danger : cushion < 3 ? ZONE_COLORS.warn : ZONE_COLORS.ok}
+            />
             <SummaryRow label="Stop" value={fmtPx(stopPx)} color={ZONE_COLORS.warn} />
             <SummaryRow label="Risk at stop" value={dollarRisk == null ? '—' : fmtUsd(-Math.abs(dollarRisk))} color={ZONE_COLORS.danger} />
             <SummaryRow label="ROE @ stop" value={read?.roeAtStopPct == null ? '—' : fmtPctSigned(read.roeAtStopPct)} color={ZONE_COLORS.danger} />

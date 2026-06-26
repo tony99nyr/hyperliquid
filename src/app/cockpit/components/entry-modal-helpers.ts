@@ -16,6 +16,7 @@ import type { OrderSide, TradingMode } from '@/types/fill';
 import { buildOpenProposal, type OpenProposal } from '@/lib/skills/open-position-business-logic';
 import { clampLeverage, deriveLeverageRead, liquidationInsideStop } from '@/lib/trading/leverage-business-logic';
 import { TRADEABLE_COINS } from './left-rail/top-traders-filter-helpers';
+import type { HoldTimeframe } from '@/lib/cockpit/stop-suggestion-business-logic';
 
 /** The coins the self-service entry form offers — derived from the canonical
  *  TRADEABLE_COINS so the entry form, coin tabs, and tradeable filter never drift. */
@@ -26,6 +27,8 @@ export type EntryCoin = (typeof ENTRY_COINS)[number];
 export interface EntryFormState {
   coin: string;
   side: OrderSide;
+  /** Intended holding timeframe — drives the ATR-based stop suggestion + lev ceiling. */
+  timeframe: HoldTimeframe;
   /** Account/risk budget for this trade (USD). */
   riskUsd: number;
   /** Stop distance as a fraction of entry (e.g. 0.04 = 4%). */
@@ -36,11 +39,13 @@ export interface EntryFormState {
   thesis: string;
 }
 
-/** Sensible defaults the modal opens with. */
+/** Sensible defaults the modal opens with. Default hold = swing (the ATR stop then
+ *  seeds off 1h candles, replacing the old flat 4% that caused noise wick-outs). */
 export function defaultEntryForm(coin: string, side: OrderSide = 'buy'): EntryFormState {
   return {
     coin: coin.trim().toUpperCase() || 'ETH',
     side,
+    timeframe: 'swing',
     riskUsd: 50,
     stopFrac: 0.04,
     leverage: 3,

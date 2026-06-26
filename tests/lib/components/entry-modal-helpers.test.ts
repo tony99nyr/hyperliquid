@@ -23,6 +23,7 @@ import {
 const baseForm: EntryFormState = {
   coin: 'ETH',
   side: 'sell',
+  timeframe: 'swing',
   riskUsd: 50,
   stopFrac: 0.04,
   leverage: 5,
