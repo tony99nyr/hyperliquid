@@ -12,7 +12,19 @@ import { useState } from 'react';
 import { css } from '@styled-system/css';
 import { useFavoritePlays } from '@/hooks/useFavoritePlays';
 import { isOverExtended, type FavoritePlay } from '@/lib/cockpit/favorite-plays-business-logic';
+import { TRADEABLE_COINS, normalizeCoin } from '../left-rail/top-traders-filter-helpers';
+import FavoritePlayDetail from './FavoritePlayDetail';
 import { GH, ZONE_COLORS, panelSurface, fmtUsd, fmtPx } from '../panel-styles';
+
+const TRADEABLE_SET = new Set<string>(TRADEABLE_COINS);
+function isTradeable(coin: string): boolean {
+  return TRADEABLE_SET.has(normalizeCoin(coin));
+}
+
+export interface FavoritePlaysBoardProps {
+  /** Stage a discretionary entry seeded with this play's coin + side (no-auto-fire). */
+  onStagePlay?: (coin: string, side: 'long' | 'short') => void;
+}
 
 function shortAddr(a: string): string {
   return a.length > 10 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
@@ -26,11 +38,18 @@ function ago(ms: number | null, nowMs: number): string {
   return `${Math.floor(m / 60)}h ago`;
 }
 
-function PlayCard({ play, nowMs }: { play: FavoritePlay; nowMs: number }) {
+function PlayCard({ play, nowMs, onSelect }: { play: FavoritePlay; nowMs: number; onSelect: () => void }) {
   const sideColor = play.side === 'long' ? ZONE_COLORS.ok : ZONE_COLORS.danger;
   const extended = isOverExtended(play);
   return (
-    <li data-testid="favorite-play" className={css({ listStyle: 'none', bg: 'github.bg', border: '1px solid token(colors.github.borderSubtle)', borderRadius: '6px', padding: '7px 9px', display: 'flex', flexDirection: 'column', gap: '3px' })}>
+    <li data-testid="favorite-play" className={css({ listStyle: 'none' })}>
+      <button
+        type="button"
+        data-testid="favorite-play-open"
+        onClick={onSelect}
+        aria-label={`${play.side} ${play.coin} — see entry and run`}
+        className={css({ width: '100%', textAlign: 'left', cursor: 'pointer', bg: 'github.bg', border: '1px solid token(colors.github.borderSubtle)', borderRadius: '6px', padding: '7px 9px', display: 'flex', flexDirection: 'column', gap: '3px', _hover: { borderColor: 'github.link' }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '1px' } })}
+      >
       <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px' })}>
         <span className={css({ display: 'flex', alignItems: 'baseline', gap: '6px', minWidth: 0 })}>
           <span style={{ color: sideColor }} className={css({ fontFamily: 'label', fontSize: '10px', fontWeight: 'bold', letterSpacing: '0.04em' })}>{play.side.toUpperCase()}</span>
@@ -57,13 +76,15 @@ function PlayCard({ play, nowMs }: { play: FavoritePlay; nowMs: number }) {
           </span>
         )}
       </div>
+      </button>
     </li>
   );
 }
 
-export default function FavoritePlaysBoard() {
+export default function FavoritePlaysBoard({ onStagePlay }: FavoritePlaysBoardProps = {}) {
   const { newPlays, profitablePlays, nowMs, loading, noFavorites } = useFavoritePlays();
   const [showExtended, setShowExtended] = useState(false);
+  const [selected, setSelected] = useState<FavoritePlay | null>(null);
 
   const shownProfitable = showExtended ? profitablePlays : profitablePlays.filter((p) => !isOverExtended(p));
   const hiddenExtended = profitablePlays.length - shownProfitable.length;
@@ -90,7 +111,7 @@ export default function FavoritePlaysBoard() {
             <span className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>none in the last 6h</span>
           ) : (
             <ul className={css({ display: 'flex', flexDirection: 'column', gap: '6px', margin: 0, padding: 0 })}>
-              {newPlays.map((p) => <PlayCard key={`new-${p.id}`} play={p} nowMs={nowMs} />)}
+              {newPlays.map((p) => <PlayCard key={`new-${p.id}`} play={p} nowMs={nowMs} onSelect={() => setSelected(p)} />)}
             </ul>
           )}
 
@@ -99,7 +120,7 @@ export default function FavoritePlaysBoard() {
             <span className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>none{hiddenExtended > 0 ? ` — all ${hiddenExtended} are extended (chase-risk)` : ''}</span>
           ) : (
             <ul className={css({ display: 'flex', flexDirection: 'column', gap: '6px', margin: 0, padding: 0 })}>
-              {shownProfitable.map((p) => <PlayCard key={`prof-${p.id}`} play={p} nowMs={nowMs} />)}
+              {shownProfitable.map((p) => <PlayCard key={`prof-${p.id}`} play={p} nowMs={nowMs} onSelect={() => setSelected(p)} />)}
             </ul>
           )}
           {hiddenExtended > 0 && (
@@ -114,6 +135,19 @@ export default function FavoritePlaysBoard() {
             </button>
           )}
         </>
+      )}
+
+      {selected && (
+        <FavoritePlayDetail
+          play={selected}
+          nowMs={nowMs}
+          tradeable={isTradeable(selected.coin)}
+          onStage={() => {
+            onStagePlay?.(selected.coin, selected.side);
+            setSelected(null);
+          }}
+          onClose={() => setSelected(null)}
+        />
       )}
     </section>
   );

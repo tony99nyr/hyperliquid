@@ -15,9 +15,11 @@
 import type { OrderSide, TradingMode } from '@/types/fill';
 import { buildOpenProposal, type OpenProposal } from '@/lib/skills/open-position-business-logic';
 import { clampLeverage, deriveLeverageRead, liquidationInsideStop } from '@/lib/trading/leverage-business-logic';
+import { TRADEABLE_COINS } from './left-rail/top-traders-filter-helpers';
 
-/** The coins the self-service entry form offers. */
-export const ENTRY_COINS = ['ETH', 'BTC', 'HYPE'] as const;
+/** The coins the self-service entry form offers — derived from the canonical
+ *  TRADEABLE_COINS so the entry form, coin tabs, and tradeable filter never drift. */
+export const ENTRY_COINS = TRADEABLE_COINS;
 export type EntryCoin = (typeof ENTRY_COINS)[number];
 
 /** The mutable form state the modal owns. */

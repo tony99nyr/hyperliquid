@@ -40,11 +40,12 @@ describe('normalizeCoin', () => {
 });
 
 describe('coinsIntersectTradeable', () => {
-  it('matches when any coin is in the tradeable set (ETH/BTC/HYPE/SOL)', () => {
-    expect(TRADEABLE_COINS).toEqual(['ETH', 'BTC', 'HYPE', 'SOL']);
+  it('matches when any coin is in the tradeable set (majors)', () => {
+    expect(TRADEABLE_COINS).toEqual(['ETH', 'BTC', 'HYPE', 'SOL', 'XRP', 'DOGE', 'SUI', 'AVAX', 'LINK']);
     expect(coinsIntersectTradeable(['HYPE', 'PUMP'])).toBe(true);
     expect(coinsIntersectTradeable(['btc'])).toBe(true);
-    expect(coinsIntersectTradeable(['FARTCOIN', 'WIF'])).toBe(false);
+    expect(coinsIntersectTradeable(['xrp'])).toBe(true);
+    expect(coinsIntersectTradeable(['FARTCOIN', 'POPCAT'])).toBe(false);
     expect(coinsIntersectTradeable([])).toBe(false);
   });
 });

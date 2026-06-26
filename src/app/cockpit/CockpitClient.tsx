@@ -37,6 +37,7 @@ import { useFollowedPositionAlerts } from '@/hooks/useFollowedPositionAlerts';
 import { useRealtimeChannel } from '@/hooks/useRealtimeChannel';
 import { useUrlParamState } from '@/hooks/useUrlParamState';
 import { mapAnalysisLogRow, byCreatedAtDesc } from '@/hooks/realtime-row-mappers';
+import { TRADEABLE_COINS } from './components/left-rail/top-traders-filter-helpers';
 import TopBar, { type CockpitView as ViewKey } from './components/shell/TopBar';
 import BottomStatusBar from './components/shell/BottomStatusBar';
 import BottomTabBar from './components/shell/BottomTabBar';
@@ -70,7 +71,7 @@ export default function CockpitClient({
   leaderPositions,
   topTraders = [],
   ratings = null,
-  coins = ['ETH', 'BTC', 'HYPE', 'SOL'],
+  coins = [...TRADEABLE_COINS],
 }: CockpitClientProps) {
   // The selected surface (Cockpit / Traders / Performance / Scout). The desktop
   // top-bar nav and the mobile bottom tab are two controls for the SAME selection,

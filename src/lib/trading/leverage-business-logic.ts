@@ -157,7 +157,10 @@ export function resolveCoinMaxLeverage(
   // more volatile token and this is a manual-copy cockpit, so we keep the
   // fallback conservative until a leader cap is observed.
   const norm = coin.trim().toUpperCase();
-  const DEFAULTS: Record<string, number> = { BTC: 40, ETH: 25, SOL: 20, HYPE: 5 };
+  // Conservative ceilings for the majors added 2026-06 (real HL caps are higher;
+  // these are deliberately low for a manual-copy cockpit — a leader's observed cap
+  // overrides, and the server re-clamps).
+  const DEFAULTS: Record<string, number> = { BTC: 40, ETH: 25, SOL: 20, HYPE: 5, XRP: 20, DOGE: 10, SUI: 10, AVAX: 10, LINK: 10 };
   return DEFAULTS[norm] ?? 10;
 }
 

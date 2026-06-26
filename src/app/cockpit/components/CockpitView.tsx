@@ -80,6 +80,19 @@ export default function CockpitView({
     setShowEntry(true);
   }, []);
 
+  // Stage a discretionary entry from a favorite's play: repoint the cockpit to that
+  // coin (so the entry form + price feed seed on it) and open the EntryModal with the
+  // leader's SIDE. Batched with the coin switch so the modal mounts on the new coin.
+  // NO-AUTO-FIRE: only the operator's explicit Approve in the modal executes.
+  const onStagePlay = useCallback(
+    (playCoin: string, side: 'long' | 'short') => {
+      if (playCoin !== coin) onCoinChange(playCoin);
+      setEntrySide(side === 'long' ? 'buy' : 'sell');
+      setShowEntry(true);
+    },
+    [coin, onCoinChange],
+  );
+
   // Live mark for the selected coin (the entry modal's sizing needs a price).
   const book = useHlOrderbook(coin);
   const entryPx = book.lastPx ?? book.book.mid ?? null;
@@ -124,7 +137,7 @@ export default function CockpitView({
           currentEquityUsd={currentEquityUsd}
           onNewPosition={onNewPosition}
         />
-        <FavoritePlaysBoard />
+        <FavoritePlaysBoard onStagePlay={onStagePlay} />
         <HealthPanel sessionId={sessionId} coin={coin} onCoinChange={onCoinChange} />
         <MarketRegimePanel coin={coin} onNetBias={onNetBias} />
         <WhalePosture coins={coins} />

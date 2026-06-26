@@ -23,6 +23,7 @@ import {
 import { getRailTraders, getRatedMeta, rankRailTraders } from '@/lib/hyperliquid/top-traders-service';
 import { loadRatedWalletsFromDb } from '@/lib/hyperliquid/rated-wallets-db-service';
 import { buildRatingsFreshness } from './components/left-rail/ratings-freshness-helpers';
+import { TRADEABLE_COINS } from './components/left-rail/top-traders-filter-helpers';
 import PinGate from './components/PinGate';
 import CockpitClient from './CockpitClient';
 
@@ -76,7 +77,7 @@ export default async function CockpitPage() {
       leaderPositions={leaderPositions}
       topTraders={topTraders}
       ratings={ratings}
-      coins={['ETH', 'BTC', 'HYPE', 'SOL']}
+      coins={[...TRADEABLE_COINS]}
     />
   );
 }
