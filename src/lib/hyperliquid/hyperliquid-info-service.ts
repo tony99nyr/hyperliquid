@@ -239,7 +239,7 @@ function parseClearinghouseState(address: string, raw: RawClearinghouseState): H
  * Cached for 15s. Fails soft: on error returns the last cached snapshot
  * (marked stale) or an empty snapshot with an `error` field.
  */
-export async function fetchClearinghouseState(rawAddress: string): Promise<HlClearinghouseState> {
+export async function fetchClearinghouseState(rawAddress: string, opts?: { uncached?: boolean }): Promise<HlClearinghouseState> {
   const address = normalizeHlAddress(rawAddress);
   if (!isValidHlAddress(address)) {
     return {
@@ -279,7 +279,7 @@ export async function fetchClearinghouseState(rawAddress: string): Promise<HlCle
         throw new Error('clearinghouseState empty: soft failure (no marginSummary)');
       }
       return body;
-    });
+    }, opts?.uncached);
     const state = parseClearinghouseState(address, raw);
     positionCache.set(address, { value: state, expiresAt: Date.now() + POSITION_CACHE_TTL_MS });
     return state;
@@ -556,7 +556,7 @@ export async function fetchL2Book(coin: string): Promise<L2Book> {
  * mark-to-market open positions for the Performance view. Returns an
  * upper-cased coin → number map; throws on failure so the caller can fail-soft.
  */
-export async function fetchAllMids(network: 'mainnet' | 'testnet' = 'mainnet'): Promise<Record<string, number>> {
+export async function fetchAllMids(network: 'mainnet' | 'testnet' = 'mainnet', opts?: { uncached?: boolean }): Promise<Record<string, number>> {
   // Single shared key, cross-instance Data-Cached ~10s + coalesced: every
   // Performance-view mark-to-market across all instances rides one HL fetch per
   // 10s window. Throws on failure so callers can fail-soft (posture unchanged).
@@ -577,7 +577,7 @@ export async function fetchAllMids(network: 'mainnet' | 'testnet' = 'mainnet'): 
     return mids;
   };
   // Mainnet = the hot shared path (cached); testnet = rare rehearsal (direct).
-  return network === 'testnet' ? load() : cachedHlRead('allMids', ['all'], load);
+  return network === 'testnet' ? load() : cachedHlRead('allMids', ['all'], load, opts?.uncached);
 }
 
 /** One perp asset from HL `meta.universe`. The array INDEX is the order action's

@@ -112,7 +112,12 @@ export async function scanAndAlertLiqProximity(now: number = Date.now()): Promis
   };
 
   const network = validateEnv().HL_NETWORK;
-  const [ch, mids] = await Promise.all([fetchClearinghouseState(address), fetchAllMids(network)]);
+  // Uncached — this runs once per cron tick; the Blob-backed Data Cache adds Blob
+  // ops with no cross-instance benefit for a single server-side reader.
+  const [ch, mids] = await Promise.all([
+    fetchClearinghouseState(address, { uncached: true }),
+    fetchAllMids(network, { uncached: true }),
+  ]);
   // coin → { liqPx, side } from the real account book.
   const byCoin = new Map<string, { liqPx: number | null; side: 'long' | 'short' }>();
   for (const p of ch.positions) byCoin.set(p.coin.toUpperCase(), { liqPx: p.liquidationPx, side: p.side });

@@ -39,7 +39,7 @@ export async function reconcileLivePositions(client: SupabaseClient = getService
   // must NOT be allowed to flatten real positions. Bail out instead.
   let hl: HlPos[];
   try {
-    const ch = await fetchClearinghouseState(addr);
+    const ch = await fetchClearinghouseState(addr, { uncached: true }); // cron: once per tick, skip the Blob-backed Data Cache
     if (ch.stale) return { skipped: true, reason: 'HL read stale — refusing to reconcile', checked: 0, flattened: 0, resynced: 0 };
     hl = ch.positions.map((p) => ({ coin: p.coin, szi: p.szi, entryPx: p.entryPx, leverage: p.leverage }));
   } catch (err) {

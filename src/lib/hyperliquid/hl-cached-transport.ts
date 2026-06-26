@@ -42,21 +42,25 @@ export const HL_CACHE_TAGS = {
 } as const;
 
 /** Revalidate windows (seconds). Tuned to keep the UI live while cutting HL hard. */
+// Revalidate windows = how often a cache MISS re-fetches AND re-writes the Next Data
+// Cache (Blob-backed on Vercel). Longer windows → fewer Blob writes. Tuned up for a
+// human-paced cockpit (marks/positions a touch staler is imperceptible) to stay under
+// the Blob free tier; the cron paths additionally bypass this cache entirely.
 export const HL_REVALIDATE_S = {
-  /** Match the 30s window grid the candle routes already snap to. */
-  candles: 30,
-  /** Regime is multi-TF + slow-moving; a touch longer than candles. */
-  regime: 45,
-  /** Marks must feel live for the Performance view. */
-  allMids: 10,
-  /** Positions change less often than marks but should stay fresh. */
-  clearinghouse: 25,
-  /** Spot balances move only when funds are transferred — 25s is plenty. */
-  spot: 25,
+  /** Candle grid; 60s is fine for a chart you read, not scalp. */
+  candles: 60,
+  /** Regime is multi-TF + slow-moving. */
+  regime: 120,
+  /** Marks for the Performance view — 30s still feels live for a human. */
+  allMids: 30,
+  /** Positions/liq — 60s; the liq monitor cron reads uncached anyway. */
+  clearinghouse: 60,
+  /** Spot balances move only when funds are transferred. */
+  spot: 60,
   /** The perp universe (asset indices + szDecimals) changes very rarely. */
-  perpMeta: 300,
-  /** Funding/OI context for the rubric scan (~20min cadence) — 60s is ample. */
-  assetCtxs: 60,
+  perpMeta: 600,
+  /** Funding/OI context for the rubric scan (~20min cadence). */
+  assetCtxs: 120,
 } as const;
 
 // --- Layer 2: in-flight coalescing (per-instance) ---
@@ -129,10 +133,16 @@ export function cachedHlRead<T>(
   type: keyof typeof HL_CACHE_TAGS,
   keyParts: string[],
   fn: () => Promise<T>,
+  /** Skip the Next Data Cache (no Blob write). For server-side callers that read
+   *  ONCE per tick (crons) — caching across ticks just burns Blob ops for no
+   *  cross-instance benefit. In-flight coalescing is still applied. */
+  bypassDataCache = false,
 ): Promise<T> {
   const tag = HL_CACHE_TAGS[type];
   const revalidate = HL_REVALIDATE_S[type];
   const coalesceKey = `${type}:${keyParts.join('|')}`;
+
+  if (bypassDataCache) return coalesce(coalesceKey, fn);
 
   return coalesce(coalesceKey, async () => {
     const cached = unstable_cache(fn, [type, ...keyParts, `g${cacheGeneration}`], {

@@ -71,7 +71,8 @@ export async function performRiskExit(args: {
   }
 
   // 2) Fresh mark. A bad mark is itself a risk signal — alert, don't silently pass.
-  const mids = await fetchAllMids(validateEnv().HL_NETWORK);
+  // Uncached: the cron reads once per tick; the Data Cache (Blob) gives no benefit here.
+  const mids = await fetchAllMids(validateEnv().HL_NETWORK, { uncached: true });
   const markPx = mids[coin];
   if (!Number.isFinite(markPx) || markPx <= 0) {
     await alert(sessionId, `AUTO-EXIT could not read a valid mark for ${coin} — skipping this cycle (feed issue).`);
@@ -83,7 +84,7 @@ export async function performRiskExit(args: {
   const address = getHlAccountAddress();
   if (getTradingMode() === 'live' && address) {
     try {
-      const ch = await fetchClearinghouseState(address);
+      const ch = await fetchClearinghouseState(address, { uncached: true });
       if (!ch.stale) {
         hlPosition = ch.positions.find((p) => p.coin.toUpperCase() === coin) ?? null;
         // Ledger says open but the VENUE shows this coin flat (e.g. a manual HL
