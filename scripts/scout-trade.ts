@@ -101,7 +101,7 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   if (fill.source !== 'paper') throw new Error(`expected a paper fill, got source=${fill.source}`);
   line(`Filled (paper): ${fill.sz} ${fill.coin} @ $${fill.px} (fee=$${fill.feeUsd.toFixed(4)})`);
 
-  const hypothesis = await writeHypothesis({ sessionId, statement: thesis });
+  const hypothesis = await writeHypothesis({ sessionId, statement: thesis, lane });
   await writeAnalysisLog({
     sessionId,
     source: 'scout',

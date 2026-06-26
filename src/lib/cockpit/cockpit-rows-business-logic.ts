@@ -85,18 +85,26 @@ export interface HypothesisInsertRow {
   session_id: string;
   statement: string;
   status: HypothesisStatus;
+  /** Strategy lane (scout multi-lane) — so per-lane win/loss can be attributed.
+   * Omitted when undefined (a hypothesis has no coin to map a lane from). */
+  lane?: string;
 }
 
 export function buildHypothesisRow(input: {
   sessionId: string;
   statement: string;
   status?: HypothesisStatus;
+  lane?: string;
 }): HypothesisInsertRow {
-  return {
+  const row: HypothesisInsertRow = {
     session_id: input.sessionId,
     statement: input.statement,
     status: input.status ?? 'open',
   };
+  if (typeof input.lane === 'string' && input.lane.trim() !== '') {
+    row.lane = input.lane.trim();
+  }
+  return row;
 }
 
 export interface HealthSnapshotInsertRow {

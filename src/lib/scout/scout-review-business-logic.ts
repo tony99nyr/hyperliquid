@@ -138,3 +138,105 @@ export function buildScorecard(input: ScorecardInput, cfg: ScorecardConfig = DEF
     reason,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Per-lane scorecards (scout multi-lane refactor) — PURE.
+// ---------------------------------------------------------------------------
+
+/** A NULL/empty lane folds into the legacy directional book. */
+export const DEFAULT_LANE = 'directional';
+
+export interface LanePositionRow {
+  lane: string | null;
+  coin: string;
+  side: string; // 'long' | 'short' | 'flat'
+  realizedPnlUsd: number;
+  feesPaidUsd: number;
+}
+
+export interface LaneHypothesisRow {
+  lane: string | null;
+  status: string; // 'open' | 'confirmed' | 'invalidated' | 'resolved'
+}
+
+export interface LaneScorecard {
+  lane: string;
+  openCount: number;
+  card: Scorecard;
+}
+
+const normLane = (l: string | null | undefined): string =>
+  typeof l === 'string' && l.trim() !== '' ? l.trim() : DEFAULT_LANE;
+
+/**
+ * Build ONE scorecard per lane from the scout's lane-tagged ledger. PURE.
+ *
+ * Realized P&L + open counts group by `positions.lane`; win/loss by
+ * `hypotheses.lane`; funding is attributed per lane via a coin→lane map derived
+ * from the positions (each coin's signed funding haircut is charged to the lane
+ * that holds it). ASSUMPTION (documented): a coin is traded in at most ONE lane
+ * at a time — true for the early multi-lane setup (lanes trade distinct
+ * instruments; the vault lane does no perp fills at all). If a coin ever spans
+ * lanes, its funding lands in whichever lane the coin→lane map resolves last.
+ *
+ * The account-level verdict (the pre-registered bar + circuit breaker) stays a
+ * SEPARATE aggregate scorecard — these per-lane cards are the breakdown the
+ * weekly review reads to decide which lane lives or dies.
+ */
+export function buildLaneScorecards(args: {
+  positions: LanePositionRow[];
+  hypotheses: LaneHypothesisRow[];
+  /** Signed funding haircut per coin (+ = cost, − = carry earned). */
+  fundingByCoin: Record<string, number>;
+  periodDays: number;
+  /** Optional per-lane config override (e.g. a lower bar for the passive vault lane). */
+  configFor?: (lane: string) => ScorecardConfig;
+}): LaneScorecard[] {
+  const lanes = new Set<string>();
+  const realized = new Map<string, number>();
+  const openCount = new Map<string, number>();
+  const coinToLane = new Map<string, string>();
+  const wins = new Map<string, number>();
+  const losses = new Map<string, number>();
+  const closed = new Map<string, number>();
+
+  const bump = (m: Map<string, number>, k: string, by = 1) => m.set(k, (m.get(k) ?? 0) + by);
+
+  for (const p of args.positions) {
+    const lane = normLane(p.lane);
+    lanes.add(lane);
+    bump(realized, lane, (Number(p.realizedPnlUsd) || 0) - (Number(p.feesPaidUsd) || 0));
+    if (p.side !== 'flat') bump(openCount, lane);
+    if (p.coin) coinToLane.set(p.coin.toUpperCase(), lane);
+  }
+
+  // Attribute each coin's signed funding to the lane that holds it.
+  const fundingByLane = new Map<string, number>();
+  for (const [coin, amt] of Object.entries(args.fundingByCoin)) {
+    const lane = coinToLane.get(coin.toUpperCase()) ?? DEFAULT_LANE;
+    lanes.add(lane);
+    bump(fundingByLane, lane, Number(amt) || 0);
+  }
+
+  for (const h of args.hypotheses) {
+    const lane = normLane(h.lane);
+    lanes.add(lane);
+    if (h.status === 'confirmed') { bump(wins, lane); bump(closed, lane); }
+    else if (h.status === 'invalidated') { bump(losses, lane); bump(closed, lane); }
+    else if (h.status === 'resolved') bump(closed, lane);
+  }
+
+  return [...lanes].sort().map((lane) => {
+    const input: ScorecardInput = {
+      realizedGrossUsd: realized.get(lane) ?? 0,
+      slippageHaircutUsd: 0, // slippage is embedded in the fill price (paper-fill-realism)
+      fundingHaircutUsd: fundingByLane.get(lane) ?? 0,
+      tradeCount: closed.get(lane) ?? 0,
+      wins: wins.get(lane) ?? 0,
+      losses: losses.get(lane) ?? 0,
+      periodDays: args.periodDays,
+    };
+    const cfg = args.configFor?.(lane) ?? DEFAULT_SCORECARD_CONFIG;
+    return { lane, openCount: openCount.get(lane) ?? 0, card: buildScorecard(input, cfg) };
+  });
+}
