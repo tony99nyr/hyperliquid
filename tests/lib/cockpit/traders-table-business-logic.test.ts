@@ -5,6 +5,8 @@ import {
   isThinHistory,
   isVaultLed,
   type SortKey,
+  type GetEval,
+  type TraderEvalLite,
 } from '@/lib/cockpit/traders-table-business-logic';
 import type { TopTraderRow, TopTraderMetrics } from '@/lib/hyperliquid/top-traders-service';
 
@@ -77,6 +79,41 @@ describe('filterTraders', () => {
   it('minWinRate + maxMedianHold gate', () => {
     const out = filterTraders(rows, { minWinRate: 0.75, maxMedianHoldHours: 10 }, noFav);
     expect(out.map((r) => r.address)).toEqual(['thin']); // winRate 0.9, hold 2
+  });
+});
+
+describe('copyability eval sort + filter', () => {
+  const evals: Record<string, TraderEvalLite> = {
+    fol: { verdict: 'follow', addsPerTrip: 2, roundTrips: 12 },
+    cau: { verdict: 'caution', addsPerTrip: 1, roundTrips: 8 },
+    avo: { verdict: 'avoid', addsPerTrip: 50, roundTrips: 4 },
+    noev: { verdict: 'follow', addsPerTrip: null, roundTrips: 0 }, // vacuous follow
+  };
+  const getEval: GetEval = (a) => evals[a] ?? null;
+  const evalRows = [
+    row({ address: 'fol' }), row({ address: 'cau' }), row({ address: 'avo' }),
+    row({ address: 'noev' }), row({ address: 'unvetted' }),
+  ];
+
+  it("sortTraders 'copyability' ranks follow > caution > avoid, unvetted last", () => {
+    const out = sortTraders(evalRows, 'copyability', 'desc', getEval).map((r) => r.address);
+    expect(out.slice(0, 3)).toEqual(expect.arrayContaining(['fol', 'noev'])); // both follow rank highest
+    expect(out[out.length - 1]).toBe('unvetted'); // null verdict sorts last
+    expect(out.indexOf('avo')).toBeGreaterThan(out.indexOf('cau')); // avoid below caution
+  });
+  it('followableOnly keeps only verdict=follow', () => {
+    expect(filterTraders(evalRows, { followableOnly: true }, noFav, getEval).map((r) => r.address)).toEqual(['fol', 'noev']);
+  });
+  it('hideAvoid drops verdict=avoid', () => {
+    expect(filterTraders(evalRows, { hideAvoid: true }, noFav, getEval).some((r) => r.address === 'avo')).toBe(false);
+  });
+  it('hideNoEvidence drops vetted 0-trip names but keeps unvetted', () => {
+    const out = filterTraders(evalRows, { hideNoEvidence: true }, noFav, getEval).map((r) => r.address);
+    expect(out).not.toContain('noev');
+    expect(out).toContain('unvetted'); // unvetted has no eval → not a "no-evidence" cut
+  });
+  it('vettedOnly keeps only traders with an evaluation', () => {
+    expect(filterTraders(evalRows, { vettedOnly: true }, noFav, getEval).some((r) => r.address === 'unvetted')).toBe(false);
   });
 });
 

@@ -13,11 +13,12 @@
  * are reused.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { css } from '@styled-system/css';
 import type { TopTraderRow } from '@/lib/hyperliquid/top-traders-service';
 import { useLeaderPositionsTable } from '@/hooks/useLeaderPositionsTable';
 import { useFavorites } from '@/hooks/useFavorites';
+import { useTraderEvaluations } from '@/hooks/useTraderEvaluations';
 import {
   sortTraders,
   filterTraders,
@@ -26,6 +27,7 @@ import {
   type SortKey,
   type SortDir,
   type TraderFilter,
+  type GetEval,
 } from '@/lib/cockpit/traders-table-business-logic';
 import { buildHasTradeablePositionSet } from './top-traders-filter-helpers';
 import { GH, ZONE_COLORS, panelSurface } from '../panel-styles';
@@ -47,9 +49,32 @@ const num = (v: number | null | undefined): string => (v == null ? '—' : v.toF
 const hrs = (v: number | null | undefined): string => (v == null ? '—' : v < 1 ? `${(v * 60).toFixed(0)}m` : `${v.toFixed(0)}h`);
 const int = (v: number | null | undefined): string => (v == null ? '—' : v.toLocaleString('en-US'));
 
+const VERDICT_STYLE: Record<string, { bg: string; label: string }> = {
+  follow: { bg: ZONE_COLORS.ok, label: 'FOLLOW' },
+  caution: { bg: ZONE_COLORS.warn, label: 'CAUTION' },
+  avoid: { bg: ZONE_COLORS.danger, label: 'AVOID' },
+};
+
+/** Copyability cell: the on-demand vet verdict + closed-trip count (0 trips = no evidence). */
+function CopyabilityCell({ row, getEval }: { row: TopTraderRow; getEval: GetEval }) {
+  const ev = getEval(row.address);
+  if (!ev) return <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>—</span>;
+  const st = VERDICT_STYLE[ev.verdict] ?? VERDICT_STYLE.caution;
+  const noEvidence = (ev.roundTrips ?? 0) === 0;
+  return (
+    <span className={css({ display: 'inline-flex', alignItems: 'center', gap: '4px', justifyContent: 'flex-end' })}>
+      <span style={{ color: st.bg, borderColor: st.bg }} className={css({ fontFamily: 'label', fontSize: '8px', fontWeight: 'bold', border: '1px solid', borderRadius: '3px', paddingX: '3px', letterSpacing: '0.04em' })}>{st.label}</span>
+      {noEvidence
+        ? <span title="0 closed round-trips — verdict passed vacuously (no evidence)" className={css({ fontFamily: 'mono', fontSize: '8px', color: 'github.textMuted' })}>0tr⚠</span>
+        : <span title={`${ev.roundTrips} closed round-trips${ev.addsPerTrip != null ? ` · ${ev.addsPerTrip.toFixed(1)} adds/trip` : ''}`} className={css({ fontFamily: 'mono', fontSize: '8px', color: 'github.textMuted' })}>{ev.roundTrips}tr</span>}
+    </span>
+  );
+}
+
 /** Column set — the trade/profit/risk story. `lowerBetter` flips the default sort dir. */
-const COLUMNS: { key: SortKey; label: string; title: string; fmt: Fmt; lowerBetter?: boolean }[] = [
+const COLUMNS: { key: SortKey; label: string; title: string; fmt: Fmt; lowerBetter?: boolean; cell?: (r: TopTraderRow, getEval: GetEval) => ReactNode }[] = [
   { key: 'composite', label: 'Score', title: 'Composite rating (0–10)', fmt: (r) => (r.composite == null ? '—' : r.composite.toFixed(0)) },
+  { key: 'copyability', label: 'Copy', title: 'On-demand copyability verdict (follow/caution/avoid) + closed round-trips. Vet from a trader’s drawer.', fmt: () => '', cell: (r, getEval) => <CopyabilityCell row={r} getEval={getEval} /> },
   { key: 'totalReturn', label: 'Net Ret', title: 'Net-of-cost return', fmt: (r) => pct(r.metrics.totalReturn) },
   { key: 'winRate', label: 'Win%', title: 'Win rate', fmt: (r) => pct(r.metrics.winRate) },
   { key: 'medianHoldHours', label: 'Hold', title: 'Median round-trip hold (rough — see drawer)', fmt: (r) => hrs(r.metrics.medianHoldHours) },
@@ -88,6 +113,7 @@ function Chip({ label, title, active, disabled, onToggle }: { label: string; tit
 export default function TradersTable({ traders, followedAddress, ratings }: TradersTableProps) {
   const followed = followedAddress?.toLowerCase() ?? null;
   const fav = useFavorites();
+  const { getEval } = useTraderEvaluations();
   const [selected, setSelected] = useState<TopTraderRow | null>(null);
   // The last trader whose drawer was opened — kept after close so the operator can
   // see which row they were just looking at (the "I can't remember which I opened"
@@ -121,13 +147,14 @@ export default function TradersTable({ traders, followedAddress, ratings }: Trad
   };
 
   const shown = useMemo(() => {
-    let rows = filterTraders(traders, { ...filter, search }, fav.isFavorite);
+    let rows = filterTraders(traders, { ...filter, search }, fav.isFavorite, getEval);
     if (hasPosition && leaderPositions.loaded) rows = rows.filter((r) => holding.has(r.address.toLowerCase()));
-    return sortTraders(rows, sortKey, sortDir);
+    return sortTraders(rows, sortKey, sortDir, getEval);
     // Depend on fav.isFavorite (a useCallback keyed on the favorites Set, so its
     // identity changes when favorites change) rather than the whole useFavorites
-    // object (a new literal each render that would defeat the memo).
-  }, [traders, filter, search, fav.isFavorite, hasPosition, leaderPositions.loaded, holding, sortKey, sortDir]);
+    // object (a new literal each render that would defeat the memo). getEval is
+    // likewise a useCallback keyed on the evals map.
+  }, [traders, filter, search, fav.isFavorite, getEval, hasPosition, leaderPositions.loaded, holding, sortKey, sortDir]);
 
   const page = shown.slice(0, visible);
 
@@ -153,10 +180,13 @@ export default function TradersTable({ traders, followedAddress, ratings }: Trad
       {/* Filter bar */}
       <div data-testid="traders-table-filters" role="group" aria-label="Trader filters" className={css({ display: 'flex', flexWrap: 'wrap', gap: '5px', alignItems: 'center' })}>
         <Chip label="★ Favorites" title="Only favorited traders (the live watch set)" active={!!filter.favoritesOnly} onToggle={() => toggleFilter('favoritesOnly')} />
-        <Chip label="Tradeable" title="Only traders touching ETH / BTC / HYPE" active={!!filter.tradeableOnly} onToggle={() => toggleFilter('tradeableOnly')} />
+        <Chip label="Tradeable" title="Only traders touching a tradeable market" active={!!filter.tradeableOnly} onToggle={() => toggleFilter('tradeableOnly')} />
         <Chip label="Hide risk" title="Hide wallets carrying a risk flag" active={!!filter.excludeRisk} onToggle={() => toggleFilter('excludeRisk')} />
         <Chip label="Vault" title="Only vault-backed names (the persistent copy signal)" active={!!filter.vaultOnly} onToggle={() => toggleFilter('vaultOnly')} />
         <Chip label="Hide thin" title="Hide under-sampled (< 50 fills) names" active={!!filter.excludeThin} onToggle={() => toggleFilter('excludeThin')} />
+        <Chip label="Followable" title="Only vetted traders with verdict = FOLLOW (the copyable shortlist)" active={!!filter.followableOnly} onToggle={() => toggleFilter('followableOnly')} />
+        <Chip label="Hide avoid" title="Hide vetted-AVOID names (averagers / blow-up shapes)" active={!!filter.hideAvoid} onToggle={() => toggleFilter('hideAvoid')} />
+        <Chip label="Hide no-ev" title="Hide vetted names with 0 closed round-trips (verdict passed vacuously)" active={!!filter.hideNoEvidence} onToggle={() => toggleFilter('hideNoEvidence')} />
         <Chip
           label={leaderPositions.loaded ? 'Has position' : 'Has position…'}
           title={leaderPositions.loaded ? 'Only leaders currently holding a tradeable position' : 'Checking live positions…'}
@@ -276,7 +306,7 @@ export default function TradersTable({ traders, followedAddress, ratings }: Trad
                     </td>
                     {COLUMNS.map((c) => (
                       <td key={c.key} style={{ fontFeatureSettings: '"tnum"' }} className={css({ textAlign: 'right', padding: '5px 6px', color: 'github.text', whiteSpace: 'nowrap' })}>
-                        {c.fmt(t)}
+                        {c.cell ? c.cell(t, getEval) : c.fmt(t)}
                       </td>
                     ))}
                   </tr>
