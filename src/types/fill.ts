@@ -48,6 +48,14 @@ export interface TradeIntent {
    */
   origin?: 'scout' | 'operator';
   /**
+   * Strategy lane this intent belongs to (scout multi-lane refactor — e.g.
+   * 'vault' | 'carry' | 'directional'). METADATA only, exactly like `leverage`:
+   * it does NOT enter the leverage-agnostic P&L fold (ADR-0001); it is persisted
+   * onto the positions row so the per-lane scorecard can group a single paper book
+   * by lane. Omit for operator/live intents (they are not lane-scoped).
+   */
+  lane?: string;
+  /**
    * Mark price at the moment the decision was made. Paper fills clamp the fill
    * price to no-better-than this (kills favorable-selection: a fresh book that
    * drifted your way between decision and fill can't hand you a better price).

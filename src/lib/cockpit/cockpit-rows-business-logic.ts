@@ -253,6 +253,12 @@ export interface PositionUpsertRow {
   leverage?: number | null;
   /** When the current open run started (ISO), or null when flat. Drives "held". */
   opened_at?: string | null;
+  /**
+   * Strategy lane (scout multi-lane refactor). METADATA like `leverage` — omitted
+   * when undefined so a lane-unaware re-fold (e.g. a reduce-only exit) preserves
+   * the lane set at entry rather than nulling it. Null for non-lane-scoped books.
+   */
+  lane?: string | null;
 }
 
 /**
@@ -270,6 +276,7 @@ export function buildPositionRow(
   updatedAtIso: string,
   leverage?: number | null,
   openedAtIso?: string | null,
+  lane?: string | null,
 ): PositionUpsertRow {
   const row: PositionUpsertRow = {
     session_id: sessionId,
@@ -287,6 +294,11 @@ export function buildPositionRow(
     row.leverage = leverage;
   }
   if (openedAtIso !== undefined) row.opened_at = openedAtIso;
+  // Lane metadata: attach only a non-empty string; undefined/null/'' leaves the
+  // column untouched on upsert so a reduce-only re-fold preserves the entry lane.
+  if (typeof lane === 'string' && lane.trim() !== '') {
+    row.lane = lane.trim();
+  }
   return row;
 }
 

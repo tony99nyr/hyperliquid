@@ -165,6 +165,18 @@ describe('fill / position / pnl rows', () => {
     expect('leverage' in buildPositionRow('s1', pos, iso, NaN)).toBe(false);
   });
 
+  it('buildPositionRow attaches lane only when a non-empty string is given (else omitted → preserved on re-fold)', () => {
+    const pos: Position = { coin: 'ETH', side: 'long', sz: 1, avgEntryPx: 2000, realizedPnlUsd: 0, feesPaidUsd: 0 };
+    const iso = '2026-01-01T00:00:00.000Z';
+    expect(buildPositionRow('s1', pos, iso, undefined, undefined, 'vault').lane).toBe('vault');
+    expect(buildPositionRow('s1', pos, iso, 5, iso, '  carry  ').lane).toBe('carry'); // trimmed
+    // Absent / null / empty leave the column out entirely (don't clobber stored lane).
+    expect('lane' in buildPositionRow('s1', pos, iso)).toBe(false);
+    expect('lane' in buildPositionRow('s1', pos, iso, undefined, undefined, null)).toBe(false);
+    expect('lane' in buildPositionRow('s1', pos, iso, undefined, undefined, '')).toBe(false);
+    expect('lane' in buildPositionRow('s1', pos, iso, undefined, undefined, '   ')).toBe(false);
+  });
+
   it('buildPnlRow defaults unrealized to 0 + mark to null', () => {
     const pos: Position = {
       coin: 'ETH',
