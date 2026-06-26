@@ -27,4 +27,6 @@ create index if not exists idx_vault_snapshots_vault_time
 -- NOT added to the realtime publication (hourly cadence, low value; the scout +
 -- cockpit read on demand) — consistent with the 0014 egress trim.
 alter table public.vault_snapshots enable row level security;
+-- drop-then-create so a re-run / fresh-DB apply is idempotent (CREATE POLICY is not).
+drop policy if exists "anon read vault_snapshots" on public.vault_snapshots;
 create policy "anon read vault_snapshots" on public.vault_snapshots for select using (true);
