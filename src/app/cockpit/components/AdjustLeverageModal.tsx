@@ -107,6 +107,10 @@ export default function AdjustLeverageModal({ target, onClose, onExecuted }: Adj
 
   const blockedByAck = plan.dangerNearMark && !ack;
   const noChange = !plan.changed;
+  // Lowering leverage on an isolated position = posting more margin; HL rejects when
+  // free collateral is short. "Add margin" does the same de-risk without that
+  // restriction, so nudge toward it when the operator drags leverage DOWN.
+  const isLowering = target.currentLeverage != null && plan.leverage < Math.round(target.currentLeverage);
 
   async function fire(): Promise<void> {
     setBusy(true);
@@ -213,6 +217,12 @@ export default function AdjustLeverageModal({ target, onClose, onExecuted }: Adj
               last
             />
           </div>
+
+          {isLowering && (
+            <p data-testid="adjust-lev-derisk-nudge" className={css({ fontSize: '11px', lineHeight: '1.5', borderRadius: '9px', padding: '10px 13px' })} style={{ background: 'rgba(91,140,255,0.08)', border: '1px solid rgba(91,140,255,0.28)', color: '#9ab4ff' }}>
+              De-risking? Lowering leverage posts margin, and HL rejects it if your free collateral is short. <strong>Add margin</strong> (in a position&apos;s insights) pushes liquidation away the same way without that restriction.
+            </p>
+          )}
 
           {plan.dangerNearMark && (
             <label data-testid="adjust-lev-ack" className={css({ display: 'flex', alignItems: 'flex-start', gap: '9px', padding: '11px 13px', borderRadius: '9px', cursor: 'pointer' })} style={{ background: 'rgba(242,77,94,0.08)', border: '1px solid rgba(242,77,94,0.32)' }}>
