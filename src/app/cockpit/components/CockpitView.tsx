@@ -113,7 +113,11 @@ export default function CockpitView({
       {/* RIGHT — the decision column: what you ACT on (positions + opportunities)
           on top, then the reads (health / regime / leader posture / leader-vs-you).
           On mobile this stacks directly under the chart. */}
-      <aside className={css({ order: { base: 2, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0, minHeight: { base: 'auto', lg: '0' }, overflowY: { base: 'visible', lg: 'auto' } })}>
+      {/* '& > *': flexShrink 0 — without it, a flex COLUMN with overflowY:auto squeezes
+          its panels below their content height when the column overflows, and the
+          spilled content (default overflow:visible) overlaps the next panel
+          ("jumbled / on top of each other"). Pinning shrink → the aside SCROLLS instead. */}
+      <aside className={css({ order: { base: 2, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0, minHeight: { base: 'auto', lg: '0' }, overflowY: { base: 'visible', lg: 'auto' }, '& > *': { flexShrink: 0 } })}>
         <OpenPositionsPanel
           sessionId={sessionId}
           regimeByCoin={regimeByCoin}
