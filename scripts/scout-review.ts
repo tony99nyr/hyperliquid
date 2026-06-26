@@ -16,7 +16,9 @@
 import { header, line, run } from './_skill-runtime';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import { fetchMetaAndAssetCtxs, fetchVaultDetails, HLP_VAULT_ADDRESS } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { fetchFundingHistory } from '@/lib/hyperliquid/candle-service';
 import { fundingCostUsd } from '@/lib/trading/paper-funding-business-logic';
+import { fundingCarryBenchmark } from '@/lib/scout/funding-carry-business-logic';
 import {
   buildScorecard,
   buildLaneScorecards,
@@ -215,14 +217,44 @@ run(async () => {
     vaultLine = '[vault:HLP]  (vaultDetails unavailable this cycle)';
   }
 
-  // Show the breakdown when there's more than the lone directional lane OR a vault lane.
+  // Lane B — DELTA-NEUTRAL funding carry, scored as a benchmark over the best liquid
+  // major. Carry = the funding you'd EARN holding the funding-earning side hedged,
+  // with the negative-funding exit guard (a flip stops the carry). Price is hedged →
+  // the return IS the carry, minus the round-trip cost of putting a 2-leg pair on/off.
+  // ADL (the hedge being force-closed → naked) is a documented tail, not modeled here.
+  const carryLookbackDays = Number(process.env.SCOUT_CARRY_LOOKBACK_DAYS) || 30;
+  const carryNotionalUsd = Number(process.env.SCOUT_CARRY_NOTIONAL_USD) || 1000;
+  const carryBarUsd = Number(process.env.SCOUT_CARRY_BAR_USD) || 50;
+  const CARRY_ROUNDTRIP_FRAC = 0.003; // ~30 bps to put on + take off a delta-neutral pair (2 legs × in/out)
+  let carryLine: string | null = null;
+  try {
+    const since = Date.now() - carryLookbackDays * 86_400_000;
+    const benches = await Promise.all(
+      ['ETH', 'BTC', 'SOL', 'HYPE'].map(async (coin) => ({ coin, b: fundingCarryBenchmark(await fetchFundingHistory(coin, since).catch(() => [])) })),
+    );
+    const best = benches.filter((x) => x.b.heldHours > 0).sort((a, b) => b.b.carryReturnFrac - a.b.carryReturnFrac)[0];
+    if (best) {
+      const netFrac = best.b.carryReturnFrac - CARRY_ROUNDTRIP_FRAC;
+      const days = Math.max(1, best.b.heldHours / 24);
+      const ccard = buildScorecard(
+        { realizedGrossUsd: 0, slippageHaircutUsd: 0, fundingHaircutUsd: 0, unrealizedPnlUsd: carryNotionalUsd * netFrac, tradeCount: 0, wins: 0, losses: 0, periodDays: days },
+        { ...DEFAULT_SCORECARD_CONFIG, monthlyBarUsd: carryBarUsd },
+      );
+      carryLine = `[carry:${best.coin}]  ${best.b.side} $${carryNotionalUsd} Δ-neutral → ${(best.b.carryReturnFrac * 100).toFixed(2)}% carry − ${(CARRY_ROUNDTRIP_FRAC * 100).toFixed(1)}% cost over ${days.toFixed(0)}d = net $${ccard.netUsd.toFixed(2)}  run-rate $${ccard.monthlyRunRateUsd.toFixed(0)}/mo (bar $${carryBarUsd})${best.b.exitedEarly ? ' [funding flipped → exited]' : ''}  → ${ccard.verdict.toUpperCase()}`;
+    }
+  } catch {
+    carryLine = '[carry]  (funding history unavailable this cycle)';
+  }
+
+  // Show the breakdown when there's more than the lone directional lane OR a benchmark lane.
   const hasPositionLanes = laneCards.length > 1 || (laneCards.length === 1 && laneCards[0].lane !== 'directional');
-  if (hasPositionLanes || vaultLine) {
+  if (hasPositionLanes || vaultLine || carryLine) {
     header('PER-LANE BREAKDOWN');
     for (const { lane, openCount: lo, card: c } of laneCards) {
       line(`[${lane}]  net $${c.netUsd.toFixed(2)}  (realized $${c.realizedGrossUsd.toFixed(2)}, funding ${c.fundingHaircutUsd >= 0 ? '−' : '+'}$${Math.abs(c.fundingHaircutUsd).toFixed(2)})  trades ${c.tradeCount}  win ${(c.winRate * 100).toFixed(0)}%  open ${lo}  → ${c.verdict.toUpperCase()}`);
     }
     if (vaultLine) line(vaultLine);
+    if (carryLine) line(carryLine);
   }
   line('');
   line('Next: the scout-review skill (Opus) reads this + the resolved hypotheses and curates docs/scout/playbook.md.');
