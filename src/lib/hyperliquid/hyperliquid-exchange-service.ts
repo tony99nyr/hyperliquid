@@ -125,6 +125,40 @@ export async function submitUpdateLeverage(coin: string, leverage: number, isCro
 }
 
 /**
+ * Add (or remove) ISOLATED margin on an open position via HL's `updateIsolatedMargin`
+ * L1 action — the correct primitive to push an isolated position's liquidation price
+ * AWAY without changing size (NOT a martingale add: it posts collateral, it doesn't
+ * increase exposure). `amountUsd > 0` adds margin; the action is signed exactly like
+ * an order. `isBuy` is the POSITION'S side (true=long, false=short). `ntli` = USD×1e6
+ * (HL's integer scaling). Throws on a rejected action (fail-closed). Field order
+ * { type, asset, isBuy, ntli } is the canonical msgpack shape the signature covers.
+ */
+export async function submitUpdateIsolatedMargin(coin: string, amountUsd: number, isBuy: boolean): Promise<void> {
+  if (!(amountUsd > 0) || !Number.isFinite(amountUsd)) {
+    throw new Error(`submitUpdateIsolatedMargin: amountUsd must be a positive number (got ${amountUsd})`);
+  }
+  const ntli = Math.round(amountUsd * 1e6);
+  const testnet = isTestnet();
+  const network = testnet ? 'testnet' : 'mainnet';
+  const wallet = privateKeyToAccount(readAgentKey());
+  const universe = await fetchPerpMeta(network);
+  const { assetIndex } = resolveAsset(universe, coin);
+
+  const action = { type: 'updateIsolatedMargin', asset: assetIndex, isBuy, ntli };
+  const nonce = nextNonce();
+  const signature = await signL1Action({ wallet, action: action as unknown as Record<string, unknown>, nonce, isTestnet: testnet });
+  const res = await fetch(testnet ? EXCHANGE_URL.testnet : EXCHANGE_URL.mainnet, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, nonce, signature }),
+  });
+  const json = (await res.json().catch(() => ({}))) as { status?: string };
+  if (!res.ok || json.status !== 'ok') {
+    throw new Error(`HL updateIsolatedMargin(${coin} +$${amountUsd}) failed: ${JSON.stringify(json)}`);
+  }
+}
+
+/**
  * Sign + submit `intent` to HL as an aggressive IOC order, returning the
  * normalized {@link HlOrderResult}. Throws on a rejected order / top-level error
  * (surfaced to the operator); a non-crossing IOC returns filledSz 0 (no fill).

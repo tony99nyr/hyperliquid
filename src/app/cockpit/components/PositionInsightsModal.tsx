@@ -12,7 +12,7 @@
  * no-auto-fire preserved. a11y mirrors the other cockpit dialogs.
  */
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { css } from '@styled-system/css';
 import type { PnlSnapshot, PositionRow } from '@/hooks/realtime-row-mappers';
 import { useCandles } from '@/hooks/useCandles';
@@ -79,6 +79,40 @@ export default function PositionInsightsModal({
   // Whether the reduce/close/adjust actions can build a target (mirrors the row card).
   const canExit = d.entryPx != null && d.markPx != null;
   const canAdjust = d.entryPx != null;
+
+  // Add-margin (de-risk): post collateral to push liquidation away without changing
+  // size. Inline reveal → amount → confirm → POST /api/cockpit/add-margin.
+  const [marginOpen, setMarginOpen] = useState(false);
+  const [marginAmt, setMarginAmt] = useState('');
+  const [marginBusy, setMarginBusy] = useState(false);
+  const [marginMsg, setMarginMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const amt = parseFloat(marginAmt);
+  const amtValid = Number.isFinite(amt) && amt > 0;
+  // Projected effective leverage after the add (notional / (oldMargin + amt)).
+  const projectedLev = amtValid && d.leverage != null && d.leverage > 0 && d.entryPx != null
+    ? (() => { const notional = d.entryPx * pos.sz; const m = notional / d.leverage + amt; return m > 0 ? Math.max(1, notional / m) : null; })()
+    : null;
+
+  async function submitAddMargin(): Promise<void> {
+    if (!amtValid || marginBusy) return;
+    setMarginBusy(true);
+    setMarginMsg(null);
+    try {
+      const res = await fetch('/api/cockpit/add-margin', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ coin: pos.coin, amountUsd: amt }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; pushed?: boolean };
+      if (!res.ok || json.ok === false) setMarginMsg({ ok: false, text: json.error ?? `Failed (${res.status})` });
+      else { setMarginMsg({ ok: true, text: json.pushed ? `Added $${amt} margin — liquidation moves away.` : `Recorded $${amt} (paper).` }); setMarginAmt(''); setMarginOpen(false); }
+    } catch {
+      setMarginMsg({ ok: false, text: 'Network error — retry.' });
+    } finally {
+      setMarginBusy(false);
+    }
+  }
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
@@ -201,6 +235,39 @@ export default function PositionInsightsModal({
             </>
           ) : (
             <span className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>{candles.loading ? 'measuring volatility…' : 'ATR unavailable — judge the stop off the chart.'}</span>
+          )}
+        </div>
+
+        {/* Add margin — the correct, non-martingale de-risk: post collateral → liq
+            moves away, size unchanged. (Lowering leverage hits HL's margin restriction;
+            this posts margin directly.) */}
+        <div className={css({ display: 'flex', flexDirection: 'column', gap: '7px', bg: 'github.bg', border: '1px solid token(colors.github.borderSubtle)', borderRadius: '8px', padding: '11px 13px' })}>
+          <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' })}>
+            <span className={css({ fontFamily: 'label', fontSize: '9px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.06em' })}>Add margin · de-risk (liq moves away, size unchanged)</span>
+            {!marginOpen && (
+              <button type="button" data-testid="insights-add-margin-open" onClick={() => { setMarginOpen(true); setMarginMsg(null); }} className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.link', bg: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', _focusVisible: { outline: '2px solid token(colors.github.link)' } })}>+ add</button>
+            )}
+          </div>
+          {marginOpen && (
+            <div className={css({ display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap' })}>
+              <span className={css({ fontFamily: 'mono', fontSize: '12px', color: 'github.textMuted' })}>$</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                data-testid="insights-add-margin-amount"
+                value={marginAmt}
+                onChange={(e) => setMarginAmt(e.target.value)}
+                placeholder="amount"
+                min={1}
+                className={css({ width: '90px', bg: 'github.bgSecondary', border: '1px solid token(colors.github.border)', borderRadius: '6px', color: 'github.textBright', fontFamily: 'mono', fontSize: '13px', padding: '6px 8px', outline: 'none', _focusVisible: { borderColor: 'github.link' } })}
+              />
+              {projectedLev != null && <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>→ ≈ {projectedLev.toFixed(1)}× eff lev</span>}
+              <button type="button" data-testid="insights-add-margin-submit" disabled={!amtValid || marginBusy} onClick={() => void submitAddMargin()} className={css({ fontFamily: 'sans', fontSize: '11px', fontWeight: 'semibold', color: 'github.bg', bg: 'github.link', border: 'none', borderRadius: '6px', paddingX: '12px', paddingY: '6px', cursor: 'pointer', _disabled: { opacity: 0.5, cursor: 'not-allowed' }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '2px' } })}>{marginBusy ? 'adding…' : 'Add margin'}</button>
+              <button type="button" data-testid="insights-add-margin-cancel" onClick={() => { setMarginOpen(false); setMarginAmt(''); }} className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted', bg: 'transparent', border: 'none', cursor: 'pointer', padding: '6px' })}>cancel</button>
+            </div>
+          )}
+          {marginMsg && (
+            <span role="status" style={{ color: marginMsg.ok ? ZONE_COLORS.ok : ZONE_COLORS.danger }} className={css({ fontFamily: 'mono', fontSize: '9.5px', lineHeight: 1.4 })}>{marginMsg.text}</span>
           )}
         </div>
 
