@@ -35,6 +35,24 @@ export const dynamic = 'force-dynamic';
 /** Leverage changes are deliberate, not spammy: 10/min per client is ample. */
 const ADJUST_MAX_PER_MIN = 10;
 
+/**
+ * Pull HL's OWN rejection string out of the thrown message (which ends in the HL
+ * `/exchange` JSON, e.g. `{"status":"err","response":"Insufficient margin..."}`).
+ * Bounded to a short clause; null when no readable reason is present. Surfacing HL's
+ * reason (not the raw body) is what lets the operator pick the right fix.
+ */
+function hlRejectReason(raw: string): string | null {
+  const i = raw.indexOf('{');
+  if (i < 0) return null;
+  try {
+    const j = JSON.parse(raw.slice(i)) as { response?: unknown };
+    const r = typeof j.response === 'string' ? j.response : null;
+    return r ? r.replace(/\s+/g, ' ').trim().slice(0, 140) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!(await verifyAdminAuth(request))) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
@@ -133,11 +151,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const res = await applyLeverageOnHl(coin, appliedLev);
     pushed = res.pushed;
   } catch (err) {
-    // Log the raw upstream detail server-side only; surface a clean, generic
-    // message to the operator (don't echo the raw HL /exchange response body).
-    console.error('[adjust-leverage] HL updateLeverage rejected:', extractErrorMessage(err));
+    const raw = extractErrorMessage(err);
+    console.error('[adjust-leverage] HL updateLeverage rejected:', raw);
+    // Surface HL's OWN rejection reason (bounded) — it's the operator-facing detail
+    // they need to act ("insufficient margin" vs "cannot switch leverage type with
+    // open position" mean different fixes). Lowering ISOLATED leverage posts more
+    // margin to the position, so a short-margin / open-position state is the usual
+    // cause; the dependable de-risk is adding margin in the HL app, or Reduce/Close.
     return NextResponse.json(
-      { ok: false, error: 'HL rejected the leverage update — check margin/position and retry, or adjust in the HL app.' },
+      {
+        ok: false,
+        error: `HL rejected the leverage change${hlRejectReason(raw) ? `: ${hlRejectReason(raw)}` : ''}. To de-risk now: add margin in the HL app, or Reduce/Close here.`,
+      },
       { status: 502 },
     );
   }
