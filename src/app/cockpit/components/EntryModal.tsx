@@ -119,13 +119,18 @@ export default function EntryModal({
   // The operator can override afterward; a new coin/TF re-seeds.
   const seedKey = `${form.coin}:${form.timeframe}`;
   const seededRef = useRef<string | null>(null);
+  // True once the operator has hand-edited the stop for the CURRENT (coin,TF) — then
+  // the auto-seed must not clobber it (covers the race where they type while candles
+  // are still loading). Reset on a coin/TF change so the new TF can re-seed.
+  const stopTouchedRef = useRef(false);
   const applySeed = useCallback(() => {
-    if (suggestedStop != null && seededRef.current !== seedKey) {
+    if (suggestedStop != null && seededRef.current !== seedKey && !stopTouchedRef.current) {
       seededRef.current = seedKey;
       setForm((f) => ({ ...f, stopFrac: suggestedStop }));
     }
   }, [suggestedStop, seedKey]);
   useEffect(() => { applySeed(); }, [applySeed]);
+  const onStopEdit = (frac: number) => { stopTouchedRef.current = true; patch({ stopFrac: frac }); };
 
   // Keep leverage within the EFFECTIVE band (coin ∧ timeframe). The slider clamps on
   // drag; clamp the READ too so the preview never reflects an out-of-band value.
@@ -200,6 +205,7 @@ export default function EntryModal({
     // Re-clamp leverage into the NEW coin's band, also honoring the TF ceiling.
     const nextLeaderPos = leaderPositionForCoin(leaderPositions, norm);
     const nextMax = Math.min(resolveCoinMaxLeverage(norm, nextLeaderPos?.maxLeverage ?? null), tfSpec.maxLeverage);
+    stopTouchedRef.current = false; // new key → allow the ATR stop to re-seed
     patch({ coin: norm, leverage: clampLeverage(form.leverage, nextMax) });
     setTyped('');
     setAckLiqInsideStop(false);
@@ -207,10 +213,10 @@ export default function EntryModal({
   }
 
   function setTimeframe(tf: HoldTimeframe): void {
-    // Switching hold timeframe re-clamps leverage to the new ceiling and lets the
-    // ATR stop re-seed (clear the seed latch so applySeed runs for the new TF).
+    // Switching hold timeframe re-clamps leverage to the new ceiling and re-seeds the
+    // ATR stop for the new TF (clear the latch + the manual-edit flag).
     const nextMax = Math.min(coinMax, HOLD_TIMEFRAMES[tf].maxLeverage);
-    seededRef.current = null;
+    stopTouchedRef.current = false;
     patch({ timeframe: tf, leverage: clampLeverage(form.leverage, nextMax) });
   }
 
@@ -363,6 +369,7 @@ export default function EntryModal({
                     type="button"
                     data-testid={`entry-tf-${tf}`}
                     data-active={active}
+                    aria-pressed={active}
                     onClick={() => setTimeframe(tf)}
                     title={HOLD_TIMEFRAMES[tf].hint}
                     style={{ background: active ? '#1c2536' : 'transparent', color: active ? '#e8ebf2' : '#8b95a6' }}
@@ -374,7 +381,7 @@ export default function EntryModal({
               })}
             </div>
             <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted', display: 'block', marginTop: '5px' })}>
-              {tfSpec.hint} · stop ≈ {tfSpec.atrMult}× ATR({tfSpec.interval}) · max {tfSpec.maxLeverage}x
+              {tfSpec.hint} · stop ≈ {tfSpec.atrMult}× ATR({tfSpec.interval}) · max {tfSpec.maxLeverage}×
             </span>
           </div>
 
@@ -404,27 +411,37 @@ export default function EntryModal({
               min={0.1}
               max={99}
               suffix="%"
-              onChange={(v) => patch({ stopFrac: v / 100 })}
+              onChange={(v) => onStopEdit(v / 100)}
             />
           </div>
 
           {/* ATR stop hint — the stop seeds from ATR at the hold timeframe; show the
               suggestion + a one-click re-apply if the operator drifted off it. */}
-          <div data-testid="entry-atr-hint" className={css({ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '-8px', marginBottom: '18px', fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>
+          <div data-testid="entry-atr-hint" className={css({ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '-8px', marginBottom: '18px', fontFamily: 'mono', fontSize: '9.5px', color: 'github.textMuted' })}>
             {suggestedStop != null ? (
-              <>
-                <span>ATR({tfSpec.interval}) suggests <strong style={{ color: GH.text }}>{(suggestedStop * 100).toFixed(1)}%</strong> — beyond typical noise</span>
-                {Math.abs(suggestedStop - form.stopFrac) > 0.002 && (
-                  <button
-                    type="button"
-                    data-testid="entry-atr-apply"
-                    onClick={() => patch({ stopFrac: suggestedStop })}
-                    className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.link', bg: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', _focusVisible: { outline: '2px solid token(colors.github.link)' } })}
-                  >
-                    use
-                  </button>
-                )}
-              </>
+              (() => {
+                const drifted = Math.abs(suggestedStop - form.stopFrac) > 0.002;
+                return (
+                  <>
+                    <span>
+                      {drifted
+                        ? <>ATR({tfSpec.interval}) suggests <strong style={{ color: GH.text }}>{(suggestedStop * 100).toFixed(1)}%</strong> — beyond typical noise</>
+                        : <>stop set from ATR({tfSpec.interval}) <span style={{ color: ZONE_COLORS.ok }}>✓</span> — beyond typical noise</>}
+                    </span>
+                    {/* Mounted-but-disabled (not conditionally removed) so focus never
+                        falls out of the trap when the operator edits back onto it. */}
+                    <button
+                      type="button"
+                      data-testid="entry-atr-apply"
+                      disabled={!drifted}
+                      onClick={() => patch({ stopFrac: suggestedStop })}
+                      className={css({ fontFamily: 'mono', fontSize: '9.5px', color: 'github.link', bg: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', _disabled: { opacity: 0, pointerEvents: 'none' }, _focusVisible: { outline: '2px solid token(colors.github.link)' } })}
+                    >
+                      use
+                    </button>
+                  </>
+                );
+              })()
             ) : (
               <span>{tfCandles.loading ? 'measuring volatility…' : 'ATR unavailable — set the stop at a structural level (beyond the recent swing).'}</span>
             )}
@@ -483,9 +500,11 @@ export default function EntryModal({
             <SummaryRow
               label="Liq cushion"
               value={cushion == null ? '—' : `${cushion.toFixed(1)}× stop`}
-              color={cushion == null ? GH.textMuted : cushion < 2 ? ZONE_COLORS.danger : cushion < 3 ? ZONE_COLORS.warn : ZONE_COLORS.ok}
+              // danger <1.5× aligns with the liq-inside-stop gate (which acks at ≤1×):
+              // red means "near the gate," not a benign 2×. warn 1.5–2.5×, ok ≥2.5×.
+              color={cushion == null ? GH.textMuted : cushion < 1.5 ? ZONE_COLORS.danger : cushion < 2.5 ? ZONE_COLORS.warn : ZONE_COLORS.ok}
             />
-            <SummaryRow label="Stop" value={fmtPx(stopPx)} color={ZONE_COLORS.warn} />
+            <SummaryRow label="Stop price" value={fmtPx(stopPx)} color={ZONE_COLORS.warn} />
             <SummaryRow label="Risk at stop" value={dollarRisk == null ? '—' : fmtUsd(-Math.abs(dollarRisk))} color={ZONE_COLORS.danger} />
             <SummaryRow label="ROE @ stop" value={read?.roeAtStopPct == null ? '—' : fmtPctSigned(read.roeAtStopPct)} color={ZONE_COLORS.danger} />
             {takerFeeUsd != null && <SummaryRow label="Est. taker fee" value={fmtUsd(takerFeeUsd).replace('+', '')} color={GH.textMuted} last />}
