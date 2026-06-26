@@ -112,9 +112,12 @@ run(async () => {
   const { data: sessions } = await client.from('sessions').select('id').eq('title', 'scout');
   const sessionIds = (sessions ?? []).map((s) => (s as { id: string }).id);
   if (sessionIds.length === 0) {
-    line('No scout sessions yet — nothing to score. Launch the scout and let it trade (paper).');
-    return;
+    line('No active scout sessions — the directional lane is empty (fresh book). The');
+    line('vault + carry BENCHMARK lanes below still score (they are passive, not traded).');
   }
+  // A non-matching sentinel keeps the session-scoped queries valid (and empty) on a
+  // fresh book, so the benchmark lanes always render rather than early-returning.
+  const queryIds = sessionIds.length > 0 ? sessionIds : ['00000000-0000-0000-0000-000000000000'];
 
   // Realized P&L net of taker fees, summed over ALL positions. `realized_pnl_usd`
   // is CUMULATIVE closed P&L per (session,coin), so a coin that closed a round-trip
@@ -125,7 +128,7 @@ run(async () => {
   const { data: positions } = await client
     .from('positions')
     .select('coin, side, lane, realized_pnl_usd, fees_paid_usd')
-    .in('session_id', sessionIds);
+    .in('session_id', queryIds);
   let realizedGrossUsd = 0;
   let openCount = 0;
   for (const p of positions ?? []) {
@@ -143,12 +146,12 @@ run(async () => {
   const { data: fills } = await client
     .from('fills')
     .select('coin, side, notional_usd, reduce_only, filled_at')
-    .in('session_id', sessionIds);
+    .in('session_id', queryIds);
   const { fundingHaircutUsd, earliestMs, fundingHaircutByCoin } = estimateFromFills((fills ?? []) as FillRow[], fundingByCoin);
   const periodDays = Number.isFinite(earliestMs) ? Math.max(1, (Date.now() - earliestMs) / 86_400_000) : 1;
 
   // Win/loss + closed count from resolved hypotheses (confirmed = win, invalidated = loss).
-  const { data: hyps } = await client.from('hypotheses').select('status, lane').in('session_id', sessionIds);
+  const { data: hyps } = await client.from('hypotheses').select('status, lane').in('session_id', queryIds);
   let wins = 0;
   let losses = 0;
   let closed = 0;
