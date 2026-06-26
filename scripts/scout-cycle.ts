@@ -65,6 +65,25 @@ run(async () => {
     line(`${m.coin}  funding ${(c.fundingHourly * 100).toFixed(4)}%/h (~${apr}% APR; ${who})  OI=${Math.round(c.openInterest)}  premium=${(c.premium * 100).toFixed(3)}%`);
   }
 
+  // Lane A — vault allocation candidates. The vault-watch ingester writes NAV here.
+  // NOTE: nav_usd is the vault's TOTAL AUM, not a per-share price — allocate on the
+  // RETURN (apr / per-share), not raw AUM change. See SCOUT_ALPHA_ROADMAP.md.
+  const vaultClient = getServiceRoleClient();
+  const { data: vaultRows } = await vaultClient
+    .from('vault_snapshots')
+    .select('vault_address, name, kind, nav_usd, apr_annual, max_drawdown_pct, age_days, leader_fraction, fetched_at')
+    .order('fetched_at', { ascending: false })
+    .limit(50);
+  type VaultRow = { vault_address: string; name: string; kind: string; nav_usd: number | null; apr_annual: number | null; max_drawdown_pct: number | null; age_days: number | null; leader_fraction: number | null };
+  const latestByVault = new Map<string, VaultRow>();
+  for (const v of (vaultRows ?? []) as VaultRow[]) if (!latestByVault.has(v.vault_address)) latestByVault.set(v.vault_address, v);
+  header('VAULTS (Lane A — allocation candidates; nav = total AUM, judge on apr/return)');
+  if (latestByVault.size === 0) line('(no vault snapshots yet — wait for the nas-watch tick / run pnpm vault-watch --once)');
+  else for (const v of latestByVault.values()) {
+    const pct = (x: number | null, d = 2) => (x != null ? `${(x * 100).toFixed(d)}%` : '?');
+    line(`${v.name} [${v.kind}]  NAV $${v.nav_usd != null ? Math.round(v.nav_usd).toLocaleString('en-US') : '?'}  apr ${pct(v.apr_annual)}  dd ${pct(v.max_drawdown_pct, 1)}  age ${v.age_days != null ? Math.round(v.age_days) + 'd' : '?'}  leaderStake ${pct(v.leader_fraction)}`);
+  }
+
   header('OPEN PAPER POSITIONS');
   if (inputs.positions.length === 0) line('(flat — no open positions)');
   else inputs.positions.forEach((p) => line(`${p.coin} ${p.side} health=${p.healthScore ?? '—'} mark=${p.markPx}`));
