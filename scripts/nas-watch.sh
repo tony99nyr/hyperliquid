@@ -91,6 +91,11 @@ run_step "health watch (pnpm watch --once)" "$PNPM" watch --once
 # trader-watch daemon. NEVER trades.
 run_step "rubric scan (pnpm rubric --once)" "$PNPM" rubric --once
 
+# Vault NAV snapshots for the scout's Lane A (vault allocation): HLP NAV / apr /
+# flow-free drawdown -> vault_snapshots. Read-only HL + Supabase-write; NEVER
+# trades. Rides this tick (no separate cron) — NAV moves slowly so 5-min is ample.
+run_step "vault watch (pnpm vault-watch --once)" "$PNPM" vault-watch --once
+
 # --- Vercel pokes (same CRON_SECRET, kept OUT of git) ---
 SECRET="${AUTO_EXIT_CRON_SECRET:-}"
 [ -z "$SECRET" ] && [ -f "$REPO/.auto-exit-secret" ] && SECRET="$(cat "$REPO/.auto-exit-secret" 2>/dev/null | tr -d '\r\n')"
