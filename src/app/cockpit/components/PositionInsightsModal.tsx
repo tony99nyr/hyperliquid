@@ -16,10 +16,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { css } from '@styled-system/css';
 import type { PnlSnapshot, PositionRow } from '@/hooks/realtime-row-mappers';
 import { useCandles } from '@/hooks/useCandles';
+import type { TradingMode } from '@/types/fill';
 import { HOLD_TIMEFRAMES, suggestStopFrac, liquidationCushion } from '@/lib/cockpit/stop-suggestion-business-logic';
+import { previewAdd, MAX_ADD_MULTIPLE, type AddSizeMode } from '@/lib/trading/add-to-position-business-logic';
 import PositionHistoryChart from './left-rail/PositionHistoryChart';
 import { positionHealth, uPnlPct, type RegimeDir } from './open-positions-helpers';
 import { userPositionDisplay } from './position-panel-helpers';
+import { entryLiveConfirmPhrase } from './entry-modal-helpers';
 import { GH, ZONE_COLORS, TERM, fmtPx, fmtUsd, fmtCompactUsd } from './panel-styles';
 
 /** "held 2d 4h" / "held 3h 12m" from the open timestamp. nowMs injected (no Date in render). */
@@ -36,6 +39,8 @@ export interface PositionInsightsModalProps {
   pos: PositionRow;
   pnl: PnlSnapshot | undefined;
   regime: RegimeDir;
+  /** Trading mode — drives the LIVE confirm gate on Add-to-position. */
+  mode?: TradingMode;
   /** Injected clock (parent ticks it) so "held" updates without a Date() in render. */
   nowMs: number;
   onReduce: () => void;
@@ -45,7 +50,7 @@ export interface PositionInsightsModalProps {
 }
 
 export default function PositionInsightsModal({
-  pos, pnl, regime, nowMs, onReduce, onClose, onAdjust, onDismiss,
+  pos, pnl, regime, mode = 'paper', nowMs, onReduce, onClose, onAdjust, onDismiss,
 }: PositionInsightsModalProps) {
   const d = userPositionDisplay(pos, pnl);
   const side = d.side;
@@ -111,6 +116,51 @@ export default function PositionInsightsModal({
       setMarginMsg({ ok: false, text: 'Network error — retry.' });
     } finally {
       setMarginBusy(false);
+    }
+  }
+
+  // Add to position (pyramid): increase SIZE into the same side. Real-money OPEN —
+  // full safety preview + averaging-down ack + LIVE confirm + explicit Approve.
+  const isLive = mode === 'live';
+  const [addOpen, setAddOpen] = useState(false);
+  const [addMode, setAddMode] = useState<AddSizeMode>('pct');
+  const [addValue, setAddValue] = useState('');
+  const [ackDown, setAckDown] = useState(false);
+  const [addPhrase, setAddPhrase] = useState('');
+  const [addBusy, setAddBusy] = useState(false);
+  const [addMsg, setAddMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const addVal = parseFloat(addValue);
+  const addPreview = d.entryPx != null && d.markPx != null && Number.isFinite(addVal) && addVal > 0
+    ? previewAdd({ side, currentSz: pos.sz, currentEntryPx: d.entryPx, markPx: d.markPx, leverage: d.leverage ?? 1, mode: addMode, value: addVal, maxAddMultiple: MAX_ADD_MULTIPLE })
+    : null;
+  const requiredAddPhrase = entryLiveConfirmPhrase(side === 'long' ? 'buy' : 'sell', pos.coin);
+  const addApproveOk = !addBusy && addPreview != null && addPreview.addSz > 0 && addPreview.warnings.length === 0
+    && (!addPreview.isAveragingDown || ackDown)
+    && (!isLive || addPhrase.trim().toLowerCase() === requiredAddPhrase);
+
+  async function submitAdd(): Promise<void> {
+    if (!addApproveOk || addPreview == null) return;
+    setAddBusy(true);
+    setAddMsg(null);
+    try {
+      const res = await fetch('/api/cockpit/add-to-position', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ coin: pos.coin, mode: addMode, value: addVal, ackAveragingDown: ackDown, confirmPhrase: isLive ? addPhrase : undefined }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; requiresAck?: boolean };
+      if (!res.ok || json.ok === false) {
+        if (json.requiresAck) setAckDown(false);
+        setAddMsg({ ok: false, text: json.error ?? `Failed (${res.status})` });
+      } else {
+        setAddMsg({ ok: true, text: `Added ${addPreview.addSz} ${pos.coin} — new size ${addPreview.newSz}.` });
+        setAddValue(''); setAddOpen(false); setAckDown(false); setAddPhrase('');
+      }
+    } catch {
+      setAddMsg({ ok: false, text: 'Network error — retry.' });
+    } finally {
+      setAddBusy(false);
     }
   }
 
@@ -268,6 +318,63 @@ export default function PositionInsightsModal({
           )}
           {marginMsg && (
             <span role="status" style={{ color: marginMsg.ok ? ZONE_COLORS.ok : ZONE_COLORS.danger }} className={css({ fontFamily: 'mono', fontSize: '9.5px', lineHeight: 1.4 })}>{marginMsg.text}</span>
+          )}
+        </div>
+
+        {/* Add to position — increases SIZE (pyramid). Real-money OPEN with the full
+            safety preview: new size/avg/liq, $-at-risk growth, averaging-down gate. */}
+        <div className={css({ display: 'flex', flexDirection: 'column', gap: '8px', bg: 'github.bg', border: '1px solid token(colors.github.borderSubtle)', borderRadius: '8px', padding: '11px 13px' })}>
+          <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' })}>
+            <span className={css({ fontFamily: 'label', fontSize: '9px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.06em' })}>Add to position · pyramid (increases size + risk)</span>
+            {!addOpen && (
+              <button type="button" data-testid="insights-add-pos-open" onClick={() => { setAddOpen(true); setAddMsg(null); }} className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.link', bg: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', _focusVisible: { outline: '2px solid token(colors.github.link)' } })}>+ add</button>
+            )}
+          </div>
+          {addOpen && (
+            <>
+              <div className={css({ display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap' })}>
+                <div role="group" aria-label="Add size mode" className={css({ display: 'flex', gap: '2px', bg: 'github.bgSecondary', border: '1px solid token(colors.github.border)', borderRadius: '6px', padding: '2px' })}>
+                  {(['pct', 'usd'] as AddSizeMode[]).map((m) => (
+                    <button key={m} type="button" data-testid={`insights-add-mode-${m}`} aria-pressed={addMode === m} onClick={() => setAddMode(m)} style={{ background: addMode === m ? '#1c2536' : 'transparent', color: addMode === m ? '#e8ebf2' : '#8b95a6' }} className={css({ fontFamily: 'mono', fontSize: '10px', fontWeight: 'semibold', paddingX: '8px', paddingY: '4px', borderRadius: '4px', border: 'none', cursor: 'pointer' })}>{m === 'pct' ? '% of size' : '$ notional'}</button>
+                  ))}
+                </div>
+                <input type="number" inputMode="decimal" data-testid="insights-add-value" value={addValue} onChange={(e) => setAddValue(e.target.value)} placeholder={addMode === 'pct' ? '%' : '$'} min={0} className={css({ width: '80px', bg: 'github.bgSecondary', border: '1px solid token(colors.github.border)', borderRadius: '6px', color: 'github.textBright', fontFamily: 'mono', fontSize: '13px', padding: '6px 8px', outline: 'none', _focusVisible: { borderColor: 'github.link' } })} />
+                {addMode === 'pct' && [25, 50, 100].map((p) => (
+                  <button key={p} type="button" onClick={() => setAddValue(String(p))} className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted', bg: 'transparent', border: '1px solid token(colors.github.borderSubtle)', borderRadius: '4px', paddingX: '5px', paddingY: '3px', cursor: 'pointer', _hover: { borderColor: 'github.link' } })}>{p}%</button>
+                ))}
+              </div>
+
+              {addPreview && addPreview.addSz > 0 && (
+                <div className={css({ display: 'flex', flexDirection: 'column', gap: '3px', fontFamily: 'mono', fontSize: '10px', color: 'github.text', bg: 'github.bgSecondary', borderRadius: '6px', padding: '8px 10px' })} style={{ fontFeatureSettings: '"tnum"' }}>
+                  <div className={css({ display: 'flex', justifyContent: 'space-between' })}><span className={css({ color: 'github.textMuted' })}>add</span><span>+{addPreview.addSz} {pos.coin} · ≈{fmtCompactUsd(addPreview.addNotionalUsd)} · margin {fmtCompactUsd(addPreview.addMarginUsd)}</span></div>
+                  <div className={css({ display: 'flex', justifyContent: 'space-between' })}><span className={css({ color: 'github.textMuted' })}>size → / avg →</span><span>{pos.sz} → <strong>{addPreview.newSz}</strong> · avg {fmtPx(addPreview.newAvgEntryPx)}</span></div>
+                  <div className={css({ display: 'flex', justifyContent: 'space-between' })}><span className={css({ color: 'github.textMuted' })}>new liq</span><span>{fmtPx(addPreview.newLiqPx)} {addPreview.newLiqDistPct != null ? `(${addPreview.newLiqDistPct.toFixed(1)}% away)` : ''}</span></div>
+                  <div className={css({ display: 'flex', justifyContent: 'space-between' })}><span className={css({ color: 'github.textMuted' })}>$ at risk →</span><span style={{ color: ZONE_COLORS.warn }}>{fmtCompactUsd(addPreview.riskAtLiqUsd)} (was {fmtCompactUsd((d.entryPx ?? 0) * pos.sz / (d.leverage ?? 1))})</span></div>
+                </div>
+              )}
+
+              {addPreview?.isAveragingDown && (
+                <label data-testid="insights-add-avgdown-ack" className={css({ display: 'flex', alignItems: 'flex-start', gap: '8px', padding: '9px 11px', borderRadius: '7px', cursor: 'pointer' })} style={{ background: 'rgba(242,77,94,0.08)', border: '1px solid rgba(242,77,94,0.32)' }}>
+                  <input type="checkbox" checked={ackDown} onChange={(e) => setAckDown(e.target.checked)} className={css({ marginTop: '2px', accentColor: '#f24d5e', cursor: 'pointer' })} />
+                  <span style={{ color: ZONE_COLORS.danger }} className={css({ fontFamily: 'mono', fontSize: '9.5px', lineHeight: 1.45 })}>⚠ This adds to a <strong>LOSING</strong> position (averaging down) — the martingale pattern that blows up accounts. I understand and want to proceed.</span>
+                </label>
+              )}
+
+              {isLive && (
+                <label className={css({ display: 'flex', flexDirection: 'column', gap: '4px' })}>
+                  <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'zone.danger' })}>LIVE — type <code style={{ color: GH.textBright }}>{requiredAddPhrase}</code> to enable</span>
+                  <input data-testid="insights-add-phrase" value={addPhrase} onChange={(e) => setAddPhrase(e.target.value)} autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder={requiredAddPhrase} className={css({ bg: 'github.bgSecondary', border: '1px solid token(colors.github.border)', borderRadius: '6px', color: 'github.textBright', fontFamily: 'mono', fontSize: '12px', padding: '6px 8px', outline: 'none' })} />
+                </label>
+              )}
+
+              <div className={css({ display: 'flex', gap: '8px', alignItems: 'center' })}>
+                <button type="button" data-testid="insights-add-submit" disabled={!addApproveOk} onClick={() => void submitAdd()} style={{ background: addApproveOk ? (isLive ? ZONE_COLORS.danger : ZONE_COLORS.ok) : undefined }} className={css({ fontFamily: 'sans', fontSize: '11px', fontWeight: 'bold', color: addApproveOk ? '#06251a' : 'github.textMuted', bg: addApproveOk ? undefined : 'github.bgSecondary', border: 'none', borderRadius: '6px', paddingX: '14px', paddingY: '7px', cursor: addApproveOk ? 'pointer' : 'not-allowed', _disabled: { opacity: 0.6, cursor: 'not-allowed' } })}>{addBusy ? 'adding…' : isLive ? 'Approve LIVE add' : `Add ${addPreview?.addSz ?? ''} ${pos.coin}`}</button>
+                <button type="button" data-testid="insights-add-cancel" onClick={() => { setAddOpen(false); setAddValue(''); setAckDown(false); }} className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted', bg: 'transparent', border: 'none', cursor: 'pointer', padding: '6px' })}>cancel</button>
+              </div>
+            </>
+          )}
+          {addMsg && (
+            <span role="status" style={{ color: addMsg.ok ? ZONE_COLORS.ok : ZONE_COLORS.danger }} className={css({ fontFamily: 'mono', fontSize: '9.5px', lineHeight: 1.4 })}>{addMsg.text}</span>
           )}
         </div>
 

@@ -133,6 +133,7 @@ export default function CockpitView({
       <aside className={css({ order: { base: 2, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0, minHeight: { base: 'auto', lg: '0' }, overflowY: { base: 'visible', lg: 'auto' }, '& > *': { flexShrink: 0 } })}>
         <OpenPositionsPanel
           sessionId={sessionId}
+          mode={mode}
           regimeByCoin={regimeByCoin}
           currentEquityUsd={currentEquityUsd}
           onNewPosition={onNewPosition}

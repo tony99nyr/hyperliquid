@@ -23,6 +23,7 @@
 import { useEffect, useState } from 'react';
 import { css } from '@styled-system/css';
 import { usePositionPnl } from '@/hooks/usePositionPnl';
+import type { TradingMode } from '@/types/fill';
 import type { PnlSnapshot, PositionRow } from '@/hooks/realtime-row-mappers';
 import { ZONE_COLORS, TERM, GH, fmtUsd, fmtPx } from './panel-styles';
 import { positionHealth, uPnlPct, type RegimeDir } from './open-positions-helpers';
@@ -42,6 +43,8 @@ function heldShort(openedAtMs: number | null | undefined, nowMs: number): string
 
 export interface OpenPositionsPanelProps {
   sessionId: string | null;
+  /** Trading mode — drives the LIVE confirm gate on Add-to-position. */
+  mode?: TradingMode;
   /** Map of coin → regime direction (bullish/bearish/neutral) for alignment. */
   regimeByCoin?: Record<string, RegimeDir>;
   /** Current account equity (cash + unrealized) for exit-modal math. */
@@ -59,6 +62,7 @@ interface ExitRequest {
 
 export default function OpenPositionsPanel({
   sessionId,
+  mode = 'paper',
   regimeByCoin = {},
   currentEquityUsd = 0,
   onNewPosition,
@@ -216,6 +220,7 @@ export default function OpenPositionsPanel({
             pos={ip}
             pnl={pnlByCoin[ip.coin]}
             regime={regimeByCoin[ip.coin] ?? 'neutral'}
+            mode={mode}
             nowMs={nowMs}
             onReduce={() => { if (t) { setInsightsCoin(null); setExitReq({ target: t, initialPct: 25 }); } }}
             onClose={() => { if (t) { setInsightsCoin(null); setExitReq({ target: t, initialPct: 100 }); } }}
