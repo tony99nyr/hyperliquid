@@ -13,6 +13,9 @@ const eslintConfig = defineConfig([
     '**/styled-system/**',
     '**/coverage/**',
     '**/.vercel/**',
+    // Agent git worktrees (e.g. .claude/worktrees/*) are gitignored scratch trees —
+    // never lint another session's isolated worktree from the main repo root.
+    '**/.claude/**',
     // Vendored wallet-rating pipeline (study scripts + scorers): standalone batch
     // scripts run via tsx/python3, NOT part of the app build/lint.
     'scripts/analysis/**',
