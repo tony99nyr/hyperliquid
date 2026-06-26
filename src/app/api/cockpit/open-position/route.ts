@@ -32,6 +32,8 @@ import { buildOpenProposal } from '@/lib/skills/open-position-business-logic';
 import {
   resolveCoinMaxLeverage,
   serverValidateLeverage,
+  liquidationPx,
+  liquidationInsideStop,
 } from '@/lib/trading/leverage-business-logic';
 import { getTradingMode } from '@/lib/env/mode';
 import { entryLiveConfirmPhrase } from '@/app/cockpit/components/entry-modal-helpers';
@@ -42,6 +44,14 @@ export const dynamic = 'force-dynamic';
 
 /** Opening orders are deliberate + rare: 10/min per client is ample. */
 const OPEN_POSITION_MAX_PER_MIN = 10;
+
+/**
+ * Server-side floor on the stop distance. A risk-based size is `riskUsd /
+ * (entry*stopFrac)`, so a degenerate near-zero stopFrac (e.g. a client ATR helper
+ * fed a stale/empty candle series) would EXPLODE size → instant liquidation. The
+ * client may go tighter visually, but the server refuses anything below this floor.
+ */
+const MIN_STOP_FRAC = 0.005; // 0.5%
 
 interface OpenBody {
   coin?: unknown;
@@ -101,8 +111,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (riskUsd == null || riskUsd <= 0) {
     return NextResponse.json({ ok: false, error: 'riskUsd must be positive' }, { status: 400 });
   }
-  if (stopFrac == null || stopFrac <= 0 || stopFrac >= 1) {
+  if (stopFrac == null || stopFrac >= 1) {
     return NextResponse.json({ ok: false, error: 'stopFrac must be in (0, 1)' }, { status: 400 });
+  }
+  // Server-side stop floor: never honor a near-zero stop that would explode size,
+  // regardless of how the client derived it (ATR helper, manual, replayed POST).
+  if (stopFrac < MIN_STOP_FRAC) {
+    return NextResponse.json(
+      { ok: false, error: `stopFrac too tight — min ${(MIN_STOP_FRAC * 100).toFixed(1)}% (a tighter stop would oversize the position into liquidation)` },
+      { status: 422 },
+    );
   }
 
   // SERVER-VALIDATE leverage to [1, coinMax] (don't trust the client). The
@@ -138,6 +156,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (proposal.warnings.length > 0) {
     return NextResponse.json(
       { ok: false, error: `Unsafe setup: ${proposal.warnings.join(' ')}` },
+      { status: 422 },
+    );
+  }
+
+  // SERVER-SIDE liquidation-inside-stop guard. This invariant ("liquidation must
+  // not sit at/inside the protective stop") was previously enforced ONLY client-side
+  // (isEntryApproveEnabled) — a crafted/replayed POST with high leverage + a tight
+  // stop bypassed it entirely. Re-derive liq from the SERVER-clamped leverage and
+  // refuse the open if the position would liquidate before the stop could trigger.
+  const liqPx = liquidationPx(side, entryPx, leverage);
+  if (liquidationInsideStop(side, liqPx, proposal.stopPx)) {
+    return NextResponse.json(
+      { ok: false, error: `Unsafe setup: liquidation ($${liqPx?.toFixed(2)}) is at/inside your stop ($${proposal.stopPx.toFixed(2)}) at ${leverage}x — reduce leverage or widen the stop.` },
       { status: 422 },
     );
   }

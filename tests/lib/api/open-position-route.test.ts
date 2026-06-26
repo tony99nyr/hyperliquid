@@ -146,7 +146,9 @@ describe('POST /api/cockpit/open-position', () => {
   });
 
   it('SERVER-CLAMPS leverage above the coin max (ETH=25) — does not trust the client', async () => {
-    const res = await POST(req({ ...validBody, leverage: 999 }));
+    // stopFrac 0.03 keeps the stop tighter than 1/25 so the liq-inside-stop guard
+    // (below) doesn't fire — this test is about the leverage clamp specifically.
+    const res = await POST(req({ ...validBody, leverage: 999, stopFrac: 0.03 }));
     const json = await res.json();
     expect(json.leverage).toBe(25); // ETH default coin max
     expect(executeIntent.mock.calls[0][0].leverage).toBe(25);
@@ -173,6 +175,22 @@ describe('POST /api/cockpit/open-position', () => {
   it('400s on a stopFrac outside (0,1)', async () => {
     const res = await POST(req({ ...validBody, stopFrac: 1.5 }));
     expect(res.status).toBe(400);
+    expect(executeIntent).not.toHaveBeenCalled();
+  });
+
+  it('422s on a stopFrac below the server floor (0.5%) — never oversizes (no execute)', async () => {
+    const res = await POST(req({ ...validBody, stopFrac: 0.001 }));
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toMatch(/too tight/i);
+    expect(executeIntent).not.toHaveBeenCalled();
+  });
+
+  it('422s when liquidation would sit at/inside the stop — SERVER-side guard, no execute', async () => {
+    // Long ETH, 25x, 5% stop: stop=$1900 but liq≈$1920 (1−1/25) → liquidates BEFORE
+    // the stop. Previously this was only blocked client-side; now the route refuses it.
+    const res = await POST(req({ ...validBody, side: 'buy', leverage: 25, stopFrac: 0.05 }));
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toMatch(/liquidation.*inside your stop/i);
     expect(executeIntent).not.toHaveBeenCalled();
   });
 
