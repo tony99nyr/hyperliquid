@@ -9,7 +9,8 @@
  * (the popup) — NEVER this script.
  *
  * Entry:  pnpm scout:trade --coin ETH --side sell --risk 200 --stop-frac 0.02 \
- *           --thesis "…" [--entry 1720] [--limit 1719] [--leverage 3] [--session <id>]
+ *           --thesis "…" [--entry 1720] [--limit 1719] [--leverage 3] [--session <id>] \
+ *           [--lane vault|carry|directional]   (default 'directional')
  * Exit:   pnpm scout:trade --exit --session <id> --coin ETH [--hypothesis <id>] \
  *           [--fraction 0.5] [--note "target hit"]
  */
@@ -53,6 +54,9 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   const stopDistanceFrac = optionalNumber(args, 'stop-frac', NaN);
   const limitPx = typeof args['limit'] === 'string' ? Number(args['limit']) : undefined;
   const leverage = typeof args['leverage'] === 'string' ? Number(args['leverage']) : undefined;
+  // Strategy lane (scout multi-lane): tags the positions row so the per-lane
+  // scorecard groups one paper book. Default 'directional' (the legacy lane).
+  const lane = typeof args['lane'] === 'string' && args['lane'].trim() !== '' ? args['lane'].trim() : 'directional';
 
   // Reuse the scout session or open one (dedicated, paper).
   let sessionId: string;
@@ -91,6 +95,7 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   const fill = await executeIntent({
     ...proposal.intent,
     origin: 'scout',
+    lane,
     decisionPx: Number.isFinite(entryPx) ? entryPx : undefined, // favorable-selection clamp
   });
   if (fill.source !== 'paper') throw new Error(`expected a paper fill, got source=${fill.source}`);

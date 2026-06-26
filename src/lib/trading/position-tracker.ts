@@ -39,6 +39,9 @@ export function nextPosition(prior: Position | undefined, fill: CanonicalFill): 
 export async function applyFillToPosition(
   fill: CanonicalFill,
   leverage?: number,
+  lane?: string,
 ): Promise<Position> {
-  return applyFillToPositionRows(fill, leverage);
+  // `lane` is OPTIONAL strategy-lane metadata (scout multi-lane), threaded exactly
+  // like leverage and likewise never folded. `undefined` client → service-role.
+  return applyFillToPositionRows(fill, leverage, undefined, lane);
 }
