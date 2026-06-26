@@ -111,7 +111,7 @@ export default function PositionInsightsModal({
       });
       const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; pushed?: boolean };
       if (!res.ok || json.ok === false) setMarginMsg({ ok: false, text: json.error ?? `Failed (${res.status})` });
-      else { setMarginMsg({ ok: true, text: json.pushed ? `Added $${amt} margin — liquidation moves away.` : `Recorded $${amt} (paper).` }); setMarginAmt(''); setMarginOpen(false); }
+      else { setMarginMsg({ ok: true, text: json.pushed ? `Added $${amt} margin — liquidation moves away.` : `Recorded $${amt} (paper).` }); setMarginAmt(''); setMarginOpen(false); closeRef.current?.focus(); }
     } catch {
       setMarginMsg({ ok: false, text: 'Network error — retry.' });
     } finally {
@@ -149,13 +149,15 @@ export default function PositionInsightsModal({
         credentials: 'same-origin',
         body: JSON.stringify({ coin: pos.coin, mode: addMode, value: addVal, ackAveragingDown: ackDown, confirmPhrase: isLive ? addPhrase : undefined }),
       });
-      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; requiresAck?: boolean };
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; requiresAck?: boolean; hasStop?: boolean };
       if (!res.ok || json.ok === false) {
         if (json.requiresAck) setAckDown(false);
+        if (json.hasStop) void refetchStop(); // a stop appeared (placed elsewhere) — surface it
         setAddMsg({ ok: false, text: json.error ?? `Failed (${res.status})` });
       } else {
         setAddMsg({ ok: true, text: `Added ${addPreview.addSz} ${pos.coin} — new size ${addPreview.newSz}.` });
         setAddValue(''); setAddOpen(false); setAckDown(false); setAddPhrase('');
+        closeRef.current?.focus(); // the reveal collapsed — keep focus in the dialog
       }
     } catch {
       setAddMsg({ ok: false, text: 'Network error — retry.' });
@@ -168,12 +170,16 @@ export default function PositionInsightsModal({
   const [stop, setStop] = useState<{ oid: number; triggerPx: number | null; sz: number } | null>(null);
   const [stopBusy, setStopBusy] = useState(false);
   const [stopMsg, setStopMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // Status of the resting-stop lookup: until it loads we must NOT offer "Place stop"
+  // (we can't know one isn't already resting on HL — a real-money inconsistency).
+  const [stopState, setStopState] = useState<'loading' | 'loaded' | 'error'>('loading');
   const refetchStop = useCallback(async () => {
     try {
       const res = await fetch(`/api/cockpit/position-stop?coin=${encodeURIComponent(pos.coin)}`, { credentials: 'same-origin' });
       const json = (await res.json().catch(() => ({}))) as { ok?: boolean; stop?: { oid: number; triggerPx: number | null; sz: number } | null };
-      if (json.ok) setStop(json.stop ?? null);
-    } catch { /* leave as-is */ }
+      if (json.ok) { setStop(json.stop ?? null); setStopState('loaded'); }
+      else setStopState('error');
+    } catch { setStopState('error'); }
   }, [pos.coin]);
   useEffect(() => {
     let active = true;
@@ -328,13 +334,17 @@ export default function PositionInsightsModal({
 
           {/* Place / cancel a REAL reduce-only stop on HL (rests on the exchange). */}
           <div className={css({ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '2px' })}>
-            {stop ? (
+            {stopState === 'loading' ? (
+              <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>checking for a resting stop…</span>
+            ) : stopState === 'error' ? (
+              <span className={css({ fontFamily: 'mono', fontSize: '9px' })} style={{ color: ZONE_COLORS.warn }}>couldn&apos;t verify resting stops — <button type="button" onClick={() => void refetchStop()} className={css({ color: 'github.link', bg: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline' })}>retry</button></span>
+            ) : stop ? (
               <>
                 <span data-testid="insights-stop-placed" className={css({ fontFamily: 'mono', fontSize: '10px' })} style={{ color: ZONE_COLORS.ok }}>✓ stop resting @ {fmtPx(stop.triggerPx)} (size {stop.sz})</span>
-                <button type="button" data-testid="insights-stop-cancel" disabled={stopBusy} onClick={() => void cancelStop()} className={css({ fontFamily: 'mono', fontSize: '10px', color: 'zone.danger', bg: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', _disabled: { opacity: 0.5 }, _focusVisible: { outline: '2px solid token(colors.github.link)' } })}>{stopBusy ? '…' : 'cancel'}</button>
+                <button type="button" data-testid="insights-stop-cancel" disabled={stopBusy} onClick={() => void cancelStop()} className={css({ fontFamily: 'mono', fontSize: '10px', color: 'zone.danger', bg: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 2px', textDecoration: 'underline', _disabled: { opacity: 0.5 }, _focusVisible: { outline: '2px solid token(colors.github.link)' } })}>{stopBusy ? '…' : 'cancel'}</button>
               </>
             ) : suggestedStopPx != null ? (
-              <button type="button" data-testid="insights-stop-place" disabled={stopBusy} onClick={() => void placeStop()} className={css({ fontFamily: 'sans', fontSize: '10px', fontWeight: 'semibold', color: 'github.bg', bg: 'github.link', border: 'none', borderRadius: '5px', paddingX: '10px', paddingY: '5px', cursor: 'pointer', _disabled: { opacity: 0.5, cursor: 'not-allowed' }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '2px' } })}>{stopBusy ? 'placing…' : `Place stop @ ${fmtPx(suggestedStopPx)}`}</button>
+              <button type="button" data-testid="insights-stop-place" disabled={stopBusy} onClick={() => void placeStop()} title="Places a REAL reduce-only stop order that rests on Hyperliquid" className={css({ fontFamily: 'sans', fontSize: '10px', fontWeight: 'bold', color: '#06251a', bg: 'zone.ok', border: 'none', borderRadius: '5px', paddingX: '10px', paddingY: '6px', cursor: 'pointer', _disabled: { opacity: 0.5, cursor: 'not-allowed' }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '2px' } })}>{stopBusy ? 'placing…' : `Place stop @ ${fmtPx(suggestedStopPx)} →`}</button>
             ) : null}
           </div>
           {stopMsg && <span role="status" style={{ color: stopMsg.ok ? ZONE_COLORS.ok : ZONE_COLORS.danger }} className={css({ fontFamily: 'mono', fontSize: '9px', lineHeight: 1.4 })}>{stopMsg.text}</span>}
@@ -356,7 +366,7 @@ export default function PositionInsightsModal({
               <input
                 type="number"
                 inputMode="decimal"
-                data-testid="insights-add-margin-amount"
+                data-testid="insights-add-margin-amount" aria-label="Margin amount (USD)"
                 value={marginAmt}
                 onChange={(e) => setMarginAmt(e.target.value)}
                 placeholder="amount"
@@ -365,7 +375,7 @@ export default function PositionInsightsModal({
               />
               {projectedLev != null && <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>→ ≈ {projectedLev.toFixed(1)}× eff lev</span>}
               <button type="button" data-testid="insights-add-margin-submit" disabled={!amtValid || marginBusy} onClick={() => void submitAddMargin()} className={css({ fontFamily: 'sans', fontSize: '11px', fontWeight: 'semibold', color: 'github.bg', bg: 'github.link', border: 'none', borderRadius: '6px', paddingX: '12px', paddingY: '6px', cursor: 'pointer', _disabled: { opacity: 0.5, cursor: 'not-allowed' }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '2px' } })}>{marginBusy ? 'adding…' : 'Add margin'}</button>
-              <button type="button" data-testid="insights-add-margin-cancel" onClick={() => { setMarginOpen(false); setMarginAmt(''); }} className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted', bg: 'transparent', border: 'none', cursor: 'pointer', padding: '6px' })}>cancel</button>
+              <button type="button" data-testid="insights-add-margin-cancel" onClick={() => { setMarginOpen(false); setMarginAmt(''); closeRef.current?.focus(); }} className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted', bg: 'transparent', border: 'none', cursor: 'pointer', padding: '6px' })}>cancel</button>
             </div>
           )}
           {marginMsg && (
@@ -395,7 +405,7 @@ export default function PositionInsightsModal({
                     <button key={m} type="button" data-testid={`insights-add-mode-${m}`} aria-pressed={addMode === m} onClick={() => setAddMode(m)} style={{ background: addMode === m ? '#1c2536' : 'transparent', color: addMode === m ? '#e8ebf2' : '#8b95a6' }} className={css({ fontFamily: 'mono', fontSize: '10px', fontWeight: 'semibold', paddingX: '8px', paddingY: '4px', borderRadius: '4px', border: 'none', cursor: 'pointer' })}>{m === 'pct' ? '% of size' : '$ notional'}</button>
                   ))}
                 </div>
-                <input type="number" inputMode="decimal" data-testid="insights-add-value" value={addValue} onChange={(e) => setAddValue(e.target.value)} placeholder={addMode === 'pct' ? '%' : '$'} min={0} className={css({ width: '80px', bg: 'github.bgSecondary', border: '1px solid token(colors.github.border)', borderRadius: '6px', color: 'github.textBright', fontFamily: 'mono', fontSize: '13px', padding: '6px 8px', outline: 'none', _focusVisible: { borderColor: 'github.link' } })} />
+                <input type="number" inputMode="decimal" data-testid="insights-add-value" aria-label="Add size" value={addValue} onChange={(e) => setAddValue(e.target.value)} placeholder={addMode === 'pct' ? '%' : '$'} min={0} className={css({ width: '80px', bg: 'github.bgSecondary', border: '1px solid token(colors.github.border)', borderRadius: '6px', color: 'github.textBright', fontFamily: 'mono', fontSize: '13px', padding: '6px 8px', outline: 'none', _focusVisible: { borderColor: 'github.link' } })} />
                 {addMode === 'pct' && [25, 50, 100].map((p) => (
                   <button key={p} type="button" onClick={() => setAddValue(String(p))} className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted', bg: 'transparent', border: '1px solid token(colors.github.borderSubtle)', borderRadius: '4px', paddingX: '5px', paddingY: '3px', cursor: 'pointer', _hover: { borderColor: 'github.link' } })}>{p}%</button>
                 ))}
@@ -406,7 +416,7 @@ export default function PositionInsightsModal({
                   <div className={css({ display: 'flex', justifyContent: 'space-between' })}><span className={css({ color: 'github.textMuted' })}>add</span><span>+{addPreview.addSz} {pos.coin} · ≈{fmtCompactUsd(addPreview.addNotionalUsd)} · margin {fmtCompactUsd(addPreview.addMarginUsd)}</span></div>
                   <div className={css({ display: 'flex', justifyContent: 'space-between' })}><span className={css({ color: 'github.textMuted' })}>size → / avg →</span><span>{pos.sz} → <strong>{addPreview.newSz}</strong> · avg {fmtPx(addPreview.newAvgEntryPx)}</span></div>
                   <div className={css({ display: 'flex', justifyContent: 'space-between' })}><span className={css({ color: 'github.textMuted' })}>new liq</span><span>{fmtPx(addPreview.newLiqPx)} {addPreview.newLiqDistPct != null ? `(${addPreview.newLiqDistPct.toFixed(1)}% away)` : ''}</span></div>
-                  <div className={css({ display: 'flex', justifyContent: 'space-between' })}><span className={css({ color: 'github.textMuted' })}>$ at risk →</span><span style={{ color: ZONE_COLORS.warn }}>{fmtCompactUsd(addPreview.riskAtLiqUsd)} (was {fmtCompactUsd((d.entryPx ?? 0) * pos.sz / (d.leverage ?? 1))})</span></div>
+                  <div className={css({ display: 'flex', justifyContent: 'space-between' })}><span className={css({ color: 'github.textMuted' })}>$ at risk (at liq)</span><span style={{ color: ZONE_COLORS.warn }}>{fmtCompactUsd(addPreview.riskAtLiqUsd)} (was {fmtCompactUsd((d.entryPx ?? 0) * pos.sz / Math.max(1, d.leverage ?? 1))})</span></div>
                 </div>
               )}
 
@@ -424,9 +434,10 @@ export default function PositionInsightsModal({
                 </label>
               )}
 
-              <div className={css({ display: 'flex', gap: '8px', alignItems: 'center' })}>
+              <div className={css({ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' })}>
                 <button type="button" data-testid="insights-add-submit" disabled={!addApproveOk || stop != null} onClick={() => void submitAdd()} style={{ background: addApproveOk && !stop ? (isLive ? ZONE_COLORS.danger : ZONE_COLORS.ok) : undefined }} className={css({ fontFamily: 'sans', fontSize: '11px', fontWeight: 'bold', color: addApproveOk && !stop ? '#06251a' : 'github.textMuted', bg: addApproveOk && !stop ? undefined : 'github.bgSecondary', border: 'none', borderRadius: '6px', paddingX: '14px', paddingY: '7px', cursor: addApproveOk && !stop ? 'pointer' : 'not-allowed', _disabled: { opacity: 0.6, cursor: 'not-allowed' } })}>{addBusy ? 'adding…' : isLive ? 'Approve LIVE add' : `Add ${addPreview?.addSz ?? ''} ${pos.coin}`}</button>
-                <button type="button" data-testid="insights-add-cancel" onClick={() => { setAddOpen(false); setAddValue(''); setAckDown(false); }} className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted', bg: 'transparent', border: 'none', cursor: 'pointer', padding: '6px' })}>cancel</button>
+                <button type="button" data-testid="insights-add-cancel" onClick={() => { setAddOpen(false); setAddValue(''); setAckDown(false); closeRef.current?.focus(); }} className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted', bg: 'transparent', border: 'none', cursor: 'pointer', padding: '6px' })}>cancel</button>
+                {stop && <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'zone.danger' })}>cancel the resting stop first ↑</span>}
               </div>
             </>
           )}

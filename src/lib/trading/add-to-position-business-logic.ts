@@ -10,9 +10,17 @@
  *     entry) — the martingale pattern; adding to a WINNER is the intended use.
  */
 
-import { liquidationPx } from './leverage-business-logic';
-
 export type PositionSideLabel = 'long' | 'short';
+
+/** Maintenance-margin rate — MUST match open-positions-helpers so the add preview's
+ *  "new liq" agrees with the position panel's displayed liq (no two-formula drift). */
+const MMR = 0.004;
+
+/** MMR-aware liquidation price (mirrors open-positions-helpers.liquidationPrice). PURE. */
+function liqPriceFor(side: PositionSideLabel, entryPx: number, leverage: number): number | null {
+  if (!Number.isFinite(entryPx) || entryPx <= 0 || !Number.isFinite(leverage) || leverage <= 0) return null;
+  return side === 'long' ? entryPx * (1 - 1 / leverage + MMR) : entryPx * (1 + 1 / leverage - MMR);
+}
 export type AddSizeMode = 'pct' | 'usd';
 
 /** Hard cap: a single add can be at most this multiple of the current size.
@@ -38,8 +46,6 @@ export interface AddPreview {
   isAveragingDown: boolean;
   warnings: string[];
 }
-
-const sideToBuySell = (s: PositionSideLabel): 'buy' | 'sell' => (s === 'long' ? 'buy' : 'sell');
 
 /** Resolve the add size (coins) from the operator's input. PURE. */
 export function computeAddSize(currentSz: number, mode: AddSizeMode, value: number, markPx: number): number {
@@ -84,8 +90,8 @@ export function previewAdd(input: {
   const addMarginUsd = addNotionalUsd / lev;
   const newNotionalUsd = newSz * markPx;
 
-  const prevLiqPx = liquidationPx(sideToBuySell(side), currentEntryPx, lev);
-  const newLiqPx = liquidationPx(sideToBuySell(side), newAvgEntryPx, lev);
+  const prevLiqPx = liqPriceFor(side, currentEntryPx, lev);
+  const newLiqPx = liqPriceFor(side, newAvgEntryPx, lev);
   const newLiqDistPct = distPct(markPx, newLiqPx);
 
   // Averaging DOWN = adding while the position is in a loss (mark worse than entry).
