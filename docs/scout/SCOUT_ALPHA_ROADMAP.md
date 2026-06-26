@@ -116,7 +116,23 @@ blow-up — so the guards are the feature.
   actually earns, over ≥45d spanning **≥1 funding-regime flip (positive→negative)**,
   with **zero uncovered-ADL events** (an ADL that left a leg naked = lane fails).
 
-### Lane C — Cost-aware, vol-managed cross-sectional overlay (only if it survives a re-backtest)
+### Lane C — Cost-aware cross-sectional overlay — ❌ GATE-CHECK FAILED (2026-06-26), NOT built
+**Verdict: REJECTED at the gate; not built.** The gate-check
+(`scripts/_gate-check-cross-sectional.ts`) ran daily cross-sectional momentum
+long-short over ETH/BTC/SOL/HYPE, net of ~19bps round-trip costs, with a
+pre-registered bar (annRet > 0, Sharpe > 0.5, **robust across 7/14/30d lookbacks**):
+- 4-coin: 7d **−22%/Sharpe −0.24** (fails), 14d +43%/0.51, 30d +59%/0.70 → NOT
+  robust (7d negative) → fails the pre-registered bar.
+- **Ex-HYPE (ETH/BTC/SOL, full 2y): loses at EVERY lookback** (−40%/−29%/+10%, all
+  fail). So the 4-coin "edge" was **entirely HYPE single-name** (longing it through
+  its run) — the exact single-coin fragility the research flagged, in one bull
+  regime, in-sample.
+
+Per the roadmap's own rule ("if it doesn't clear the bar, don't build it"), Lane C
+is not built. Revisit only with out-of-sample / ex-single-name robustness or the
+CTREND factor on a broader (still-liquid) universe. The original design notes are
+kept below for that future revisit.
+
 Lowest priority; the research says naive cross-sectional is a trap, but two
 transferable lessons survive: **vol-scaling helps** (Sharpe 1.12→1.42) and **CTREND**
 is the one factor that reportedly survives costs in liquid coins.
