@@ -29,7 +29,7 @@ import {
   type FillSelectRow,
 } from './cockpit-rows-business-logic';
 import type { PnlInsertRow } from './cockpit-rows-business-logic';
-import { applyFills } from '@/lib/trading/pnl-business-logic';
+import { applyFills, computeOpenedAtMs } from '@/lib/trading/pnl-business-logic';
 import type { CanonicalFill } from '@/types/fill';
 import type { Position } from '@/types/position';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -225,12 +225,16 @@ export async function applyFillToPositionRows(
   // 2. Pure fold of the entire ledger — identical math regardless of source.
   const ledger = ((fillRows ?? []) as FillSelectRow[]).map(fillFromRow);
   const next = applyFills(coin, ledger);
+  // When the CURRENT open run started (fold-derived; null when flat) — the row is
+  // reused across reopens so this can't be a created_at. Drives the "held" insight.
+  const openedAtMs = computeOpenedAtMs(ledger);
+  const openedAtIso = openedAtMs == null ? null : new Date(openedAtMs).toISOString();
 
   // 3. Upsert the positions row (unique on session_id+coin). Leverage is METADATA
   //    from the opening intent (not folded — ADR-0001); when known it's written so
   //    the UI derives ROE, when undefined the column is left out so a reduce-only
   //    re-fold preserves the entry leverage rather than nulling it.
-  const positionRow = buildPositionRow(sessionId, next, new Date().toISOString(), leverage);
+  const positionRow = buildPositionRow(sessionId, next, new Date().toISOString(), leverage, openedAtIso);
   const { error: upsertError } = await client
     .from('positions')
     .upsert(positionRow, { onConflict: 'session_id,coin' });

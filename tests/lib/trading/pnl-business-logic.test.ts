@@ -3,6 +3,7 @@ import {
   emptyPosition,
   applyFill,
   applyFills,
+  computeOpenedAtMs,
   unrealizedPnl,
   avgEntry,
   totalPnl,
@@ -191,6 +192,37 @@ describe('pnl-business-logic', () => {
       const short = applyFill(emptyPosition('ETH'), fill({ side: 'sell', px: 3000, sz: 2, feeUsd: 1 }));
       expect(unrealizedPnl(short, 2800)).toBe(400); // (3000-2800)*2
       expect(totalPnl(short, 2800)).toBe(400 - 1);
+    });
+  });
+
+  describe('computeOpenedAtMs', () => {
+    it('returns the flat→open fill time', () => {
+      expect(computeOpenedAtMs([
+        fill({ side: 'buy', px: 2000, sz: 1, filledAt: 1000 }),
+        fill({ side: 'buy', px: 2010, sz: 1, filledAt: 2000 }), // add — open time unchanged
+      ])).toBe(1000);
+    });
+    it('null when the position is flat (fully closed)', () => {
+      expect(computeOpenedAtMs([
+        fill({ side: 'buy', px: 2000, sz: 2, filledAt: 1000 }),
+        fill({ side: 'sell', px: 2100, sz: 2, filledAt: 3000 }), // back to flat
+      ])).toBeNull();
+    });
+    it('resets to the latest open after a close→reopen', () => {
+      expect(computeOpenedAtMs([
+        fill({ side: 'buy', px: 2000, sz: 1, filledAt: 1000 }),
+        fill({ side: 'sell', px: 2100, sz: 1, filledAt: 2000 }), // flat
+        fill({ side: 'buy', px: 2050, sz: 1, filledAt: 5000 }), // reopened
+      ])).toBe(5000);
+    });
+    it('resets on a flip', () => {
+      expect(computeOpenedAtMs([
+        fill({ side: 'buy', px: 2000, sz: 1, filledAt: 1000 }),
+        fill({ side: 'sell', px: 2100, sz: 3, filledAt: 4000 }), // long 1 → short 2 (flip)
+      ])).toBe(4000);
+    });
+    it('null for an empty ledger', () => {
+      expect(computeOpenedAtMs([])).toBeNull();
     });
   });
 

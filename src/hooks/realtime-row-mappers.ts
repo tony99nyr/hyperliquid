@@ -135,9 +135,9 @@ export interface PositionRow {
   feesPaidUsd: number;
   /** Position leverage (e.g. 5 = 5x), or null when unknown. Drives ROE. */
   leverage: number | null;
-  /** When the position row was created (≈ when opened) — drives the "held" label.
-   *  Optional so older fixtures/callers omit it; the mapper always populates it. */
-  createdAt?: number | null;
+  /** When the CURRENT open run started (fold-derived `opened_at`) — drives "held".
+   *  Optional so older fixtures/callers omit it; the mapper populates it. */
+  openedAt?: number | null;
   updatedAt: number;
 }
 
@@ -153,7 +153,7 @@ export function mapPositionRow(row: RealtimeRow): PositionRow {
     realizedPnlUsd: num(row.realized_pnl_usd),
     feesPaidUsd: num(row.fees_paid_usd),
     leverage: row.leverage == null ? null : num(row.leverage),
-    createdAt: row.created_at == null ? null : toMs(row.created_at),
+    openedAt: row.opened_at == null ? null : toMs(row.opened_at),
     updatedAt: toMs(row.updated_at),
   };
 }

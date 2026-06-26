@@ -291,7 +291,7 @@ function PositionRowCard({
           data-testid="position-open-insights"
           onClick={onOpenInsights}
           aria-label={`Open ${pos.coin} position insights`}
-          className={css({ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '7px', bg: 'transparent', border: 'none', padding: 0, cursor: 'pointer', _hover: { '& > span:first-child': { textDecoration: 'underline' } }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '2px', borderRadius: '4px' } })}
+          className={css({ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '7px', minHeight: '32px', bg: 'transparent', border: 'none', paddingY: '4px', paddingX: 0, cursor: 'pointer', _hover: { '& > span:first-child': { textDecoration: 'underline' } }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '2px', borderRadius: '4px' } })}
         >
           <span className={css({ fontFamily: 'mono', fontSize: '14px', fontWeight: 'semibold', color: 'github.textBright' })}>{pos.coin}-PERP</span>
           <span aria-hidden className={css({ fontFamily: 'mono', fontSize: '11px', color: 'cockpit.accent' })}>insights ›</span>
@@ -303,8 +303,8 @@ function PositionRowCard({
           <span className={css({ fontFamily: 'mono', fontSize: '11px', color: 'github.textMuted' })}>
             {pos.sz.toLocaleString('en-US', { maximumFractionDigits: 4 })}{d.leverage != null ? ` · ${d.leverage}×` : ''}
           </span>
-          {pos.createdAt != null && (
-            <span data-testid="position-held" className={css({ fontFamily: 'mono', fontSize: '10px', color: 'cockpit.faint' })}>· held {heldShort(pos.createdAt, nowMs)}</span>
+          {pos.openedAt != null && (
+            <span data-testid="position-held" className={css({ fontFamily: 'mono', fontSize: '10px', color: 'cockpit.faint' })}>· held {heldShort(pos.openedAt, nowMs)}</span>
           )}
         </span>
       </div>

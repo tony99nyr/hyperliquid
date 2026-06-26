@@ -251,6 +251,8 @@ export interface PositionUpsertRow {
    * clobber a previously-stored value to NULL — see buildPositionRow.
    */
   leverage?: number | null;
+  /** When the current open run started (ISO), or null when flat. Drives "held". */
+  opened_at?: string | null;
 }
 
 /**
@@ -259,12 +261,15 @@ export interface PositionUpsertRow {
  * the column is left OUT of the payload entirely so a subsequent leverage-unaware
  * upsert (a reduce-only re-fold) preserves the leverage set at entry rather than
  * nulling it. The position size/pnl always recompute from fills (leverage-agnostic).
+ * `openedAtIso` is fold-derived (computeOpenedAtMs) — always written (incl. null on
+ * flat) since it recomputes deterministically from the full ledger.
  */
 export function buildPositionRow(
   sessionId: string,
   pos: Position,
   updatedAtIso: string,
   leverage?: number | null,
+  openedAtIso?: string | null,
 ): PositionUpsertRow {
   const row: PositionUpsertRow = {
     session_id: sessionId,
@@ -281,6 +286,7 @@ export function buildPositionRow(
   if (leverage !== undefined && leverage !== null && Number.isFinite(leverage) && leverage > 0) {
     row.leverage = leverage;
   }
+  if (openedAtIso !== undefined) row.opened_at = openedAtIso;
   return row;
 }
 

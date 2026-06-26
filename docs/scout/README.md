@@ -17,6 +17,39 @@ worth running?** — measured on a pre-registered bar before any real money.
    ambiguous, high-stakes calls. Opus is otherwise your Tier-1 manual session +
    the weekly review.
 
+## What the scout trades today (decision model)
+
+The honest current baseline — so the roadmap refactors from reality, not the
+runbook's aspiration. All values from `data/rubric/rubric-v0.1.0.json`.
+
+- **Universe:** ETH, BTC, SOL, HYPE only.
+- **Edge hypothesis (directional):** Claude reasons over the deterministic
+  per-coin×side **rubric** score = `regimeMultiplier × (0.45·leaders +
+  0.20·carry + 0.35·micro)`:
+  - **regime** — multiplier (floor 0.15), multi-TF trend (1d/8h/1h/15m weighted
+    0.4/0.3/0.2/0.1), "confirmed" at ≥0.6 confidence.
+  - **leaders (45%)** — net signed consensus of the top-10 tracked leaders'
+    positions, freshness-decayed (τ=12h), dirty books ×0.4.
+  - **carry (20%)** — funding APR on the side, saturates at ±15%.
+  - **micro (35%)** — L2 imbalance within ±0.1% of mark, spread-penalized.
+- **Kill-gates (any → NO-EDGE):** depth < $50k, reward:risk < 1.5, vol-contraction
+  (ATR & BB both < 25th pctile = chop), room-too-tight.
+- **Badges:** ≥70 GO (may act), 55–70 WATCH, < 55 or gated NO-EDGE (stand down);
+  margin < 12 between sides → NO-EDGE.
+- **Wake triggers (free daemon):** rubric NO-EDGE→GO crossing, score jump ≥15,
+  price ≥0.6%/cycle or ≥1% vs a 4h anchor, and risk events (health < 35 or −15,
+  within 0.4% of stop).
+- **Levels / horizon:** entry ±0.25·ATR, **stop 1.5·ATR, target 3.0·ATR** (1h
+  ATR) → multi-hour-to-intraday holds. Sized by `--risk`/`--stop-frac`.
+- **Cost model in the track record:** 4.5 bps taker/leg + 5 bps slippage/leg
+  (10 bps round-trip) + **signed** hourly funding over the hold.
+- **Known weaknesses (the roadmap targets these):** the leader pillar is
+  45%-weighted yet stale/lagged; funding is modeled static (no mean-reversion);
+  the leaders/carry/micro pillars were never backtested (DATA-BLOCKED in
+  `BACKTEST_FINDINGS.md`); the regime detector is unvalidated on HL perps; there
+  is no thesis-invalidation exit. **Net: a directional bet on liquid majors —
+  the lowest-edge corner — on signals our own backtests rate weak/unproven.**
+
 ## Launch (home PC, both run continuously)
 
 ```bash
@@ -40,6 +73,10 @@ It runs `pnpm scout:cycle` each wake to gather the snapshot, decides per
 - **No real money, ever, from the scout.** `pnpm scout:trade` is hard-guarded by
   `assertScoutPaperMode` — it throws in live mode. Real trades go through the
   human approval popup (Tier-1), never the autonomous path.
+- **Account circuit breaker.** Every cycle `scout:cycle` checks the scout's
+  equity against a daily-loss / drawdown halt (`circuit-breaker`, migration
+  0012). On a trip it sets `blockNewEntries` and `scout:trade` refuses new opens
+  (exits still allowed); the breaker recommends but never auto-fires a flatten.
 - **Open paper positions are covered by these layers:** (a) the scout reviews
   every open position on every wake (risk before opportunity); (b) the crash-safe
   `pnpm watch` daemon monitors + writes health/alerts even if the scout session

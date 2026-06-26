@@ -155,6 +155,25 @@ export function applyFills(coin: string, fills: CanonicalFill[]): Position {
 }
 
 /**
+ * When the CURRENT open run started (ms), from the time-ordered fills ledger — the
+ * filled_at of the fill that took the position flat→open (or flipped it), reset to
+ * null whenever it returns to flat. PURE. Drives the position's "held" duration.
+ * (The positions row is reused across reopens, so this can't be a created_at.)
+ */
+export function computeOpenedAtMs(fills: CanonicalFill[]): number | null {
+  const EPS = 1e-9;
+  let pos = 0;
+  let openedAt: number | null = null;
+  for (const f of fills) {
+    const prev = pos;
+    pos += f.side === 'buy' ? f.sz : -f.sz;
+    if (Math.abs(pos) < EPS) openedAt = null; // back to flat
+    else if (Math.abs(prev) < EPS || prev * pos < 0) openedAt = f.filledAt; // opened or flipped
+  }
+  return openedAt;
+}
+
+/**
  * Mark-to-market unrealized P&L (USD) for the open size at a mark price.
  * Long gains when mark > entry; short gains when mark < entry. Flat ⇒ 0.
  */
