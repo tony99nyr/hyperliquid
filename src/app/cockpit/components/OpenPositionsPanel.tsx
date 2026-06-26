@@ -20,7 +20,7 @@
  * is opened here — "＋ New Position" surfaces the operator's intent to the parent.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { css } from '@styled-system/css';
 import { usePositionPnl } from '@/hooks/usePositionPnl';
 import type { PnlSnapshot, PositionRow } from '@/hooks/realtime-row-mappers';
@@ -29,6 +29,16 @@ import { positionHealth, uPnlPct, type RegimeDir } from './open-positions-helper
 import { userPositionDisplay } from './position-panel-helpers';
 import ExitModal, { type ExitTarget } from './ExitModal';
 import AdjustLeverageModal, { type AdjustLeverageTarget } from './AdjustLeverageModal';
+import PositionInsightsModal from './PositionInsightsModal';
+
+/** "held 3h" inline label from the open timestamp + the ticking clock. */
+function heldShort(openedAtMs: number | null | undefined, nowMs: number): string {
+  if (openedAtMs == null) return '';
+  const m = Math.max(0, Math.floor((nowMs - openedAtMs) / 60_000));
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d ${h % 24}h`;
+}
 
 export interface OpenPositionsPanelProps {
   sessionId: string | null;
@@ -61,6 +71,14 @@ export default function OpenPositionsPanel({
   const [exitReq, setExitReq] = useState<ExitRequest | null>(null);
   const [adjustReq, setAdjustReq] = useState<AdjustLeverageTarget | null>(null);
   const [closeAll, setCloseAll] = useState(false);
+  // Coin of the open position whose insights drill-down is showing (click a row).
+  const [insightsCoin, setInsightsCoin] = useState<string | null>(null);
+  // Ticking clock for the "held" labels (lazy init keeps Date out of render purity).
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   const open = positions.filter((p) => p.side !== 'flat');
   const totalUpnl = open.reduce((s, p) => {
@@ -127,6 +145,8 @@ export default function OpenPositionsPanel({
               pos={p}
               pnl={pnlByCoin[p.coin]}
               regime={regimeByCoin[p.coin] ?? 'neutral'}
+              nowMs={nowMs}
+              onOpenInsights={() => setInsightsCoin(p.coin)}
               onReduce={(t) => setExitReq({ target: t, initialPct: 25 })}
               onClose={(t) => setExitReq({ target: t, initialPct: 100 })}
               onAdjust={(t) => setAdjustReq(t)}
@@ -183,6 +203,27 @@ export default function OpenPositionsPanel({
           onClose={() => setAdjustReq(null)}
         />
       )}
+      {(() => {
+        const ip = insightsCoin ? open.find((p) => p.coin === insightsCoin) : null;
+        if (!ip) return null;
+        const d = userPositionDisplay(ip, pnlByCoin[ip.coin]);
+        const t: ExitTarget | null = d.entryPx != null && d.markPx != null
+          ? { coin: ip.coin, side: d.side, size: ip.sz, entryPx: d.entryPx, markPx: d.markPx } : null;
+        const at: AdjustLeverageTarget | null = d.entryPx != null
+          ? { coin: ip.coin, side: d.side, entryPx: d.entryPx, markPx: d.markPx, currentLeverage: d.leverage } : null;
+        return (
+          <PositionInsightsModal
+            pos={ip}
+            pnl={pnlByCoin[ip.coin]}
+            regime={regimeByCoin[ip.coin] ?? 'neutral'}
+            nowMs={nowMs}
+            onReduce={() => { if (t) { setInsightsCoin(null); setExitReq({ target: t, initialPct: 25 }); } }}
+            onClose={() => { if (t) { setInsightsCoin(null); setExitReq({ target: t, initialPct: 100 }); } }}
+            onAdjust={() => { if (at) { setInsightsCoin(null); setAdjustReq(at); } }}
+            onDismiss={() => setInsightsCoin(null)}
+          />
+        );
+      })()}
     </section>
   );
 }
@@ -191,6 +232,8 @@ function PositionRowCard({
   pos,
   pnl,
   regime,
+  nowMs,
+  onOpenInsights,
   onReduce,
   onClose,
   onAdjust,
@@ -198,6 +241,8 @@ function PositionRowCard({
   pos: PositionRow;
   pnl: PnlSnapshot | undefined;
   regime: RegimeDir;
+  nowMs: number;
+  onOpenInsights: () => void;
   onReduce: (t: ExitTarget) => void;
   onClose: (t: ExitTarget) => void;
   onAdjust: (t: AdjustLeverageTarget) => void;
@@ -237,16 +282,30 @@ function PositionRowCard({
       data-coin={pos.coin}
       className={css({ display: 'flex', flexDirection: 'column', gap: '10px', padding: '13px 14px', bg: 'cockpit.row', border: '1px solid token(colors.github.borderSubtle)', borderRadius: '10px' })}
     >
-      {/* Col 1 — market + side + size·lev */}
+      {/* Col 1 — market + side + size·lev. The market header is a button that opens
+          the insights drill-down (chart + health + ATR stop); action buttons below
+          are separate so this isn't a nested-interactive trap. */}
       <div className={css({ display: 'flex', flexDirection: 'column', gap: '6px' })}>
-        <span className={css({ fontFamily: 'mono', fontSize: '14px', fontWeight: 'semibold', color: 'github.textBright' })}>{pos.coin}-PERP</span>
-        <span className={css({ display: 'flex', alignItems: 'center', gap: '8px' })}>
+        <button
+          type="button"
+          data-testid="position-open-insights"
+          onClick={onOpenInsights}
+          aria-label={`Open ${pos.coin} position insights`}
+          className={css({ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '7px', bg: 'transparent', border: 'none', padding: 0, cursor: 'pointer', _hover: { '& > span:first-child': { textDecoration: 'underline' } }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '2px', borderRadius: '4px' } })}
+        >
+          <span className={css({ fontFamily: 'mono', fontSize: '14px', fontWeight: 'semibold', color: 'github.textBright' })}>{pos.coin}-PERP</span>
+          <span aria-hidden className={css({ fontFamily: 'mono', fontSize: '11px', color: 'cockpit.accent' })}>insights ›</span>
+        </button>
+        <span className={css({ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' })}>
           <span data-testid="position-side" style={{ color: sideColor, background: sideBg }} className={css({ fontFamily: 'mono', fontSize: '10px', fontWeight: 'semibold', letterSpacing: '0.08em', paddingX: '7px', paddingY: '2px', borderRadius: '5px' })}>
             {side.toUpperCase()}
           </span>
           <span className={css({ fontFamily: 'mono', fontSize: '11px', color: 'github.textMuted' })}>
             {pos.sz.toLocaleString('en-US', { maximumFractionDigits: 4 })}{d.leverage != null ? ` · ${d.leverage}×` : ''}
           </span>
+          {pos.createdAt != null && (
+            <span data-testid="position-held" className={css({ fontFamily: 'mono', fontSize: '10px', color: 'cockpit.faint' })}>· held {heldShort(pos.createdAt, nowMs)}</span>
+          )}
         </span>
       </div>
 
