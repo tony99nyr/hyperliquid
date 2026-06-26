@@ -24,6 +24,15 @@ export interface ScorecardInput {
   slippageHaircutUsd: number;
   /** Pre-computed funding haircut, SIGNED: + = net cost, − = net carry earned. */
   fundingHaircutUsd: number;
+  /**
+   * Open mark-to-market P&L, SIGNED (+ = unrealized gain). Default/omitted = 0, so
+   * the existing realized-only (single-leg perp) lanes are unchanged. The
+   * vault-allocation lane (Lane A) has NO closed round-trips — its edge IS the open
+   * NAV track — so it feeds the NAV change here. Folded into `netUsd` below.
+   * (Lane-specific gates — vault bad-debt kill, allocated-capital drawdown — are
+   * layered by the lane, not here; this only makes the headline number honest.)
+   */
+  unrealizedPnlUsd?: number;
   /** Closed round-trips. */
   tradeCount: number;
   wins: number;
@@ -62,7 +71,7 @@ export interface Scorecard {
   realizedGrossUsd: number;
   slippageHaircutUsd: number;
   fundingHaircutUsd: number; // signed
-  netUsd: number; // honest: gross − slippage − funding
+  netUsd: number; // honest: realized gross − slippage − funding + open mark-to-market
   monthlyRunRateUsd: number; // net projected to 30 days
   vsBarUsd: number; // monthlyRunRate − bar
   maxDrawdownPct: number | null;
@@ -71,7 +80,8 @@ export interface Scorecard {
 }
 
 export function buildScorecard(input: ScorecardInput, cfg: ScorecardConfig = DEFAULT_SCORECARD_CONFIG): Scorecard {
-  const netUsd = input.realizedGrossUsd - input.slippageHaircutUsd - input.fundingHaircutUsd;
+  const netUsd =
+    input.realizedGrossUsd - input.slippageHaircutUsd - input.fundingHaircutUsd + (input.unrealizedPnlUsd ?? 0);
 
   const decided = input.wins + input.losses;
   const winRate = decided > 0 ? input.wins / decided : 0;

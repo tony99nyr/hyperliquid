@@ -32,6 +32,24 @@ describe('buildScorecard — net', () => {
   it('win rate from decided trades only', () => {
     expect(buildScorecard(input({ wins: 3, losses: 1 })).winRate).toBeCloseTo(0.75, 6);
   });
+
+  it('omitted unrealizedPnlUsd leaves realized-only net unchanged (backward-compatible)', () => {
+    const s = buildScorecard(input({ realizedGrossUsd: 100, slippageHaircutUsd: 10, fundingHaircutUsd: 6 }));
+    expect(s.netUsd).toBeCloseTo(84, 6); // no unrealized field → same as before
+  });
+
+  it('open mark-to-market (Lane A vault NAV) folds into net, signed', () => {
+    // a vault lane: no closed round-trips, edge IS the open NAV track
+    const up = buildScorecard(input({ realizedGrossUsd: 0, unrealizedPnlUsd: 120 }));
+    expect(up.netUsd).toBeCloseTo(120, 6);
+    const down = buildScorecard(input({ realizedGrossUsd: 0, unrealizedPnlUsd: -75 }));
+    expect(down.netUsd).toBeCloseTo(-75, 6);
+  });
+
+  it('unrealized adds to realized + cost haircuts', () => {
+    const s = buildScorecard(input({ realizedGrossUsd: 100, slippageHaircutUsd: 10, fundingHaircutUsd: 6, unrealizedPnlUsd: 20 }));
+    expect(s.netUsd).toBeCloseTo(104, 6); // 100 − 10 − 6 + 20
+  });
 });
 
 describe('buildScorecard — KILL', () => {
