@@ -44,12 +44,13 @@ import BottomTabBar from './components/shell/BottomTabBar';
 import CockpitView from './components/CockpitView';
 import PerformanceView from './components/performance/PerformanceView';
 import TradersTable from './components/left-rail/TradersTable';
+import LaddersView from './components/ladders/LaddersView';
 import ScoutPanel from './components/ScoutPanel';
 import type { RatingsFreshness } from './components/left-rail/ratings-freshness-helpers';
 import ApprovalPopup from './components/ApprovalPopup';
 
 /** The selectable surfaces — the allow-list for the `?tab=` URL param (junk → 'cockpit'). */
-const TAB_KEYS: readonly ViewKey[] = ['cockpit', 'traders', 'performance', 'scout'];
+const TAB_KEYS: readonly ViewKey[] = ['cockpit', 'traders', 'ladders', 'performance', 'scout'];
 
 export interface CockpitClientProps {
   mode: TradingMode;
@@ -189,6 +190,12 @@ export default function CockpitClient({
             </div>
             <ScoutPanel />
           </div>
+        </section>
+      ) : surface === 'ladders' ? (
+        // LADDERS surface — author + preview + arm pre-authorized multi-rung plans.
+        // Arming authorizes; autonomous firing stays behind LADDER_AUTOFIRE_ENABLED.
+        <section data-testid="ladders-view" className={css({ flex: 1, overflowY: 'auto' })}>
+          <LaddersView coin={coin} />
         </section>
       ) : surface === 'performance' ? (
         <PerformanceView sessionId={sessionId} />

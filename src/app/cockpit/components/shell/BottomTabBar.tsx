@@ -13,7 +13,7 @@
 
 import { css } from '@styled-system/css';
 
-export type MobileTab = 'cockpit' | 'traders' | 'performance' | 'scout';
+export type MobileTab = 'cockpit' | 'traders' | 'ladders' | 'performance' | 'scout';
 
 export interface BottomTabBarProps {
   tab: MobileTab;
@@ -23,9 +23,22 @@ export interface BottomTabBarProps {
 const TABS: { key: MobileTab; label: string; icon: React.ReactNode }[] = [
   { key: 'cockpit', label: 'Cockpit', icon: <BarsIcon /> },
   { key: 'traders', label: 'Traders', icon: <ListIcon /> },
+  { key: 'ladders', label: 'Ladders', icon: <LadderIcon /> },
   { key: 'performance', label: 'Performance', icon: <TrendIcon /> },
   { key: 'scout', label: 'Scout', icon: <BotIcon /> },
 ];
+
+function LadderIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+      <line x1="6" y1="2" x2="6" y2="16" />
+      <line x1="12" y1="2" x2="12" y2="16" />
+      <line x1="6" y1="5" x2="12" y2="5" />
+      <line x1="6" y1="9" x2="12" y2="9" />
+      <line x1="6" y1="13" x2="12" y2="13" />
+    </svg>
+  );
+}
 
 export default function BottomTabBar({ tab, onTabChange }: BottomTabBarProps) {
   return (

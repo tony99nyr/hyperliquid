@@ -13,7 +13,7 @@ import { css } from '@styled-system/css';
 import type { TradingMode } from '@/types/fill';
 import { TERM, fmtUsd } from '../panel-styles';
 
-export type CockpitView = 'cockpit' | 'traders' | 'performance' | 'scout';
+export type CockpitView = 'cockpit' | 'traders' | 'ladders' | 'performance' | 'scout';
 
 export interface TopBarProps {
   view: CockpitView;
@@ -34,6 +34,7 @@ export interface TopBarProps {
 const NAV: { key: CockpitView; label: string }[] = [
   { key: 'cockpit', label: 'Cockpit' },
   { key: 'traders', label: 'Traders' },
+  { key: 'ladders', label: 'Ladders' },
   { key: 'performance', label: 'Performance' },
   { key: 'scout', label: 'Scout' }, // PAPER — autonomous scout, kept separate from the LIVE cockpit
 ];
