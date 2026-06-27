@@ -29,6 +29,31 @@ export async function findOpenStop(coin: string): Promise<HlOpenOrder | null> {
   return orders.find((o) => o.coin === c && isStopOrder(o)) ?? null;
 }
 
+/** A resting protective stop, trimmed to what the UI needs. */
+export interface RestingStop {
+  oid: number;
+  triggerPx: number | null;
+  sz: number;
+}
+
+/**
+ * ALL resting reduce-only protective stops, keyed by coin — in ONE HL call (so the
+ * positions panel can flag every coin's protection without N per-row fetches). Empty
+ * when no account address (paper has no resting exchange stops). One-per-coin is
+ * enforced on place, so a coin maps to at most one stop (first wins defensively).
+ */
+export async function findAllStops(): Promise<Record<string, RestingStop>> {
+  const address = getHlAccountAddress();
+  if (!address) return {};
+  const orders = await fetchOpenOrders(address, validateEnv().HL_NETWORK);
+  const out: Record<string, RestingStop> = {};
+  for (const o of orders) {
+    if (!isStopOrder(o) || out[o.coin]) continue;
+    out[o.coin] = { oid: o.oid, triggerPx: o.triggerPx, sz: o.sz };
+  }
+  return out;
+}
+
 /**
  * Place a reduce-only stop-market for `coin` at `triggerPx`, `size`, sized to the
  * position. `side` is the POSITION side; the stop order is the opposite (a long's

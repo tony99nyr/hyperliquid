@@ -5,6 +5,7 @@ import {
   liqBarWidth,
   isAligned,
   positionHealth,
+  stopStatus,
   uPnlPct,
   quoteExit,
 } from '@/app/cockpit/components/open-positions-helpers';
@@ -117,6 +118,28 @@ describe('open-positions-helpers', () => {
     it('clamps the fraction to [0,1]', () => {
       const q = quoteExit({ side: 'long', size: 2, entryPx: 100, markPx: 110, frac: 2, currentEquityUsd: 0 });
       expect(q.closeSize).toBeCloseTo(2);
+    });
+  });
+
+  describe('stopStatus', () => {
+    it('PROTECTED when a resting stop exists, with % distance from the mark', () => {
+      const s = stopStatus({ triggerPx: 1672 }, 1616, 'live');
+      expect(s.state).toBe('protected');
+      expect(s.triggerPx).toBe(1672);
+      expect(s.distPct).toBeCloseTo((Math.abs(1616 - 1672) / 1616) * 100, 6);
+    });
+    it('protected with null distance when the mark is unknown', () => {
+      const s = stopStatus({ triggerPx: 1672 }, null, 'live');
+      expect(s.state).toBe('protected');
+      expect(s.distPct).toBeNull();
+    });
+    it('UNPROTECTED in live when no stop rests (real exposure)', () => {
+      expect(stopStatus(null, 1616, 'live').state).toBe('unprotected');
+      expect(stopStatus({ triggerPx: null }, 1616, 'live').state).toBe('unprotected');
+    });
+    it('N/A in paper when no stop rests (paper has no exchange stops — not a warning)', () => {
+      expect(stopStatus(null, 1616, 'paper').state).toBe('na');
+      expect(stopStatus(undefined, 1616, 'paper').state).toBe('na');
     });
   });
 });

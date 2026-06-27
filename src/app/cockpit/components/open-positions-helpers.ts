@@ -114,6 +114,36 @@ export function positionHealth(input: PositionHealthInput): PositionHealth {
   };
 }
 
+/** Protection state of a position: a resting exchange stop, none (live = exposed),
+ *  or N/A (paper has no resting HL stops). */
+export type StopProtection = 'protected' | 'unprotected' | 'na';
+
+export interface StopStatus {
+  state: StopProtection;
+  /** The resting stop's trigger price when protected, else null. */
+  triggerPx: number | null;
+  /** Percent distance from the mark to the stop (≥ 0) when computable, else null. */
+  distPct: number | null;
+}
+
+/**
+ * Classify a position's protection from its resting stop + live mark. A resting stop
+ * with a trigger price → 'protected'. No stop → 'unprotected' in LIVE (real exposure
+ * worth flagging) but 'na' in PAPER (the paper book has no resting exchange stops, so
+ * "no stop" there is not a warning). PURE.
+ */
+export function stopStatus(
+  stop: { triggerPx: number | null } | null | undefined,
+  markPx: number | null | undefined,
+  mode: 'paper' | 'live',
+): StopStatus {
+  if (stop && stop.triggerPx != null && stop.triggerPx > 0) {
+    const distPct = markPx != null && markPx > 0 ? (Math.abs(markPx - stop.triggerPx) / markPx) * 100 : null;
+    return { state: 'protected', triggerPx: stop.triggerPx, distPct };
+  }
+  return { state: mode === 'live' ? 'unprotected' : 'na', triggerPx: null, distPct: null };
+}
+
 /** Unrealized PnL percent off entry notional (sign = direction). PURE. */
 export function uPnlPct(
   side: 'long' | 'short',

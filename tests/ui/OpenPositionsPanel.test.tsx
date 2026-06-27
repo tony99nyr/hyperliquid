@@ -59,6 +59,47 @@ describe('OpenPositionsPanel', () => {
     expect(screen.getByTestId('safe-exit-all')).toBeTruthy();
   });
 
+  it('shows ✓ PROTECTED when a resting stop covers the position', () => {
+    render(
+      <OpenPositionsPanel
+        sessionId={null}
+        mode="live"
+        positionsOverride={{ positions: [position({ side: 'short' })], latestPnlByCoin: { ETH: pnl('ETH', 1700, 0) } }}
+        stopsOverride={{ ETH: { oid: 1, triggerPx: 1751, sz: 2.5 } }}
+      />,
+    );
+    const s = screen.getByTestId('stop-status');
+    expect(s.getAttribute('data-state')).toBe('protected');
+    expect(s.textContent).toContain('stop');
+    expect(s.textContent).toContain('away');
+  });
+
+  it('flags ⚠ NO STOP (clickable) in live when the position is unprotected', () => {
+    render(
+      <OpenPositionsPanel
+        sessionId={null}
+        mode="live"
+        positionsOverride={{ positions: [position({ side: 'short' })], latestPnlByCoin: { ETH: pnl('ETH', 1700, 0) } }}
+        stopsOverride={{}}
+      />,
+    );
+    const s = screen.getByTestId('stop-status');
+    expect(s.getAttribute('data-state')).toBe('unprotected');
+    expect(s.tagName).toBe('BUTTON'); // clickable → opens insights to set one
+  });
+
+  it('shows N/A protection in paper (no exchange stops there)', () => {
+    render(
+      <OpenPositionsPanel
+        sessionId={null}
+        mode="paper"
+        positionsOverride={{ positions: [position({ side: 'short' })], latestPnlByCoin: { ETH: pnl('ETH', 1700, 0) } }}
+        stopsOverride={{}}
+      />,
+    );
+    expect(screen.getByTestId('stop-status').getAttribute('data-state')).toBe('na');
+  });
+
   it('flags a FIGHTING long against a bearish regime', () => {
     render(
       <OpenPositionsPanel

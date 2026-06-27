@@ -23,10 +23,12 @@
 import { useEffect, useState } from 'react';
 import { css } from '@styled-system/css';
 import { usePositionPnl } from '@/hooks/usePositionPnl';
+import { useStops } from '@/hooks/useStops';
+import type { RestingStop } from '@/lib/trading/stop-order-service';
 import type { TradingMode } from '@/types/fill';
 import type { PnlSnapshot, PositionRow } from '@/hooks/realtime-row-mappers';
 import { ZONE_COLORS, TERM, GH, fmtUsd, fmtPx } from './panel-styles';
-import { positionHealth, uPnlPct, type RegimeDir } from './open-positions-helpers';
+import { positionHealth, stopStatus, uPnlPct, type RegimeDir } from './open-positions-helpers';
 import { userPositionDisplay } from './position-panel-helpers';
 import ExitModal, { type ExitTarget } from './ExitModal';
 import AdjustLeverageModal, { type AdjustLeverageTarget } from './AdjustLeverageModal';
@@ -53,6 +55,8 @@ export interface OpenPositionsPanelProps {
   onNewPosition?: () => void;
   /** Test/RSC seed: render fixed positions instead of subscribing. */
   positionsOverride?: { positions: PositionRow[]; latestPnlByCoin: Record<string, PnlSnapshot> };
+  /** Test/RSC seed for resting stops (only used alongside positionsOverride). */
+  stopsOverride?: Record<string, RestingStop>;
 }
 
 interface ExitRequest {
@@ -67,10 +71,18 @@ export default function OpenPositionsPanel({
   currentEquityUsd = 0,
   onNewPosition,
   positionsOverride,
+  stopsOverride,
 }: OpenPositionsPanelProps) {
   const live = usePositionPnl(positionsOverride ? null : sessionId);
   const positions = positionsOverride ? positionsOverride.positions : live.positions;
   const pnlByCoin = positionsOverride ? positionsOverride.latestPnlByCoin : live.latestPnlByCoin;
+
+  // Resting protective stops (one HL call for the whole panel). Skip polling when a
+  // test/RSC seed is supplied; until the first fetch resolves, rows show "checking…"
+  // rather than falsely claiming "no stop".
+  const liveStops = useStops(!positionsOverride);
+  const stopsByCoin = positionsOverride ? (stopsOverride ?? {}) : liveStops.stopsByCoin;
+  const stopsLoaded = positionsOverride ? true : liveStops.loaded;
 
   const [exitReq, setExitReq] = useState<ExitRequest | null>(null);
   const [adjustReq, setAdjustReq] = useState<AdjustLeverageTarget | null>(null);
@@ -149,6 +161,9 @@ export default function OpenPositionsPanel({
               pos={p}
               pnl={pnlByCoin[p.coin]}
               regime={regimeByCoin[p.coin] ?? 'neutral'}
+              mode={mode}
+              stop={stopsByCoin[p.coin]}
+              stopsLoaded={stopsLoaded}
               nowMs={nowMs}
               onOpenInsights={() => setInsightsCoin(p.coin)}
               onReduce={(t) => setExitReq({ target: t, initialPct: 25 })}
@@ -237,6 +252,9 @@ function PositionRowCard({
   pos,
   pnl,
   regime,
+  mode,
+  stop,
+  stopsLoaded,
   nowMs,
   onOpenInsights,
   onReduce,
@@ -246,6 +264,9 @@ function PositionRowCard({
   pos: PositionRow;
   pnl: PnlSnapshot | undefined;
   regime: RegimeDir;
+  mode: TradingMode;
+  stop: RestingStop | undefined;
+  stopsLoaded: boolean;
   nowMs: number;
   onOpenInsights: () => void;
   onReduce: (t: ExitTarget) => void;
@@ -265,6 +286,7 @@ function PositionRowCard({
     liqPxOverride: d.liqPx,
     regime,
   });
+  const stopState = stopStatus(stop, d.markPx, mode);
   const pct = uPnlPct(side, d.entryPx, d.markPx);
   const upnl = d.unrealizedPnlUsd;
   const upnlColor = upnl == null ? GH.text : upnl >= 0 ? ZONE_COLORS.ok : ZONE_COLORS.danger;
@@ -329,6 +351,29 @@ function PositionRowCard({
 
       {/* Col 3 — health block */}
       <div className={css({ display: 'flex', flexDirection: 'column', gap: '7px' })}>
+        {/* Protection — is a resting stop guarding this position? The headline health
+            signal: ✓ protected / ⚠ no stop (live, clickable → set one) / n/a (paper). */}
+        {!stopsLoaded ? (
+          <span data-testid="stop-status" data-state="loading" className={css({ fontFamily: 'mono', fontSize: '10px', color: 'cockpit.faint' })}>stop · checking…</span>
+        ) : stopState.state === 'protected' ? (
+          <span data-testid="stop-status" data-state="protected" style={{ color: ZONE_COLORS.ok }} className={css({ fontFamily: 'mono', fontSize: '10px', fontWeight: 'semibold' })}>
+            ✓ stop {fmtPx(stopState.triggerPx)}{stopState.distPct != null ? ` · ${stopState.distPct.toFixed(1)}% away` : ''}
+          </span>
+        ) : stopState.state === 'unprotected' ? (
+          <button
+            type="button"
+            data-testid="stop-status"
+            data-state="unprotected"
+            onClick={onOpenInsights}
+            aria-label={`${pos.coin} has no protective stop — open insights to set one`}
+            style={{ color: ZONE_COLORS.warn, background: 'rgba(217,164,65,0.10)', borderColor: 'rgba(217,164,65,0.34)' }}
+            className={css({ alignSelf: 'flex-start', fontFamily: 'mono', fontSize: '10px', fontWeight: 'semibold', border: '1px solid', borderRadius: '5px', paddingX: '7px', paddingY: '3px', cursor: 'pointer', _hover: { textDecoration: 'underline' }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '2px' } })}
+          >
+            ⚠ no stop — set one ›
+          </button>
+        ) : (
+          <span data-testid="stop-status" data-state="na" title="Paper trading has no resting exchange stops" className={css({ fontFamily: 'mono', fontSize: '10px', color: 'cockpit.faint' })}>stop n/a · paper</span>
+        )}
         <span className={css({ display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap' })}>
           <span data-testid="alignment-badge" data-aligned={health.aligned} style={{ color: health.alignColor, background: `${health.alignColor}1f` }} className={css({ fontFamily: 'mono', fontSize: '10px', fontWeight: 'semibold', letterSpacing: '0.06em', paddingX: '7px', paddingY: '2px', borderRadius: '5px' })}>
             {health.alignLabel}
