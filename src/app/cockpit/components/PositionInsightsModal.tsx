@@ -317,10 +317,12 @@ export default function PositionInsightsModal({
         role="dialog"
         aria-modal="true"
         aria-label={`${pos.coin} position insights`}
-        className={css({ width: '100%', maxWidth: { base: '100%', md: '560px' }, maxHeight: '92vh', overflowY: 'auto', bg: 'github.bgSecondary', border: '1px solid token(colors.github.border)', borderRadius: { base: '14px 14px 0 0', md: '14px' }, padding: '18px', display: 'flex', flexDirection: 'column', gap: '14px', boxShadow: '0 16px 48px rgba(0,0,0,0.6)', animation: 'popupIn 0.22s cubic-bezier(0.16,1,0.3,1)' })}
+        className={css({ width: '100%', maxWidth: { base: '100%', md: '560px' }, maxHeight: { base: '90dvh', md: '92vh' }, overflow: 'hidden', bg: 'github.bgSecondary', border: '1px solid token(colors.github.border)', borderRadius: { base: '14px 14px 0 0', md: '14px' }, padding: 0, display: 'flex', flexDirection: 'column', boxShadow: '0 16px 48px rgba(0,0,0,0.6)', animation: 'popupIn 0.22s cubic-bezier(0.16,1,0.3,1)' })}
       >
-        {/* Header */}
-        <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' })}>
+        {/* Header — a FIXED (non-scrolling) bar so the ✕ is always reachable; the body
+            below scrolls under it (mobile bottom-sheet: you couldn't scroll back up to
+            dismiss). flexShrink:0 keeps it from collapsing when the body overflows. */}
+        <div className={css({ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px', bg: 'github.bgSecondary', padding: '16px 18px', borderBottom: '1px solid token(colors.github.borderSubtle)' })}>
           <div className={css({ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 })}>
             <span className={css({ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' })}>
               <span className={css({ fontFamily: 'mono', fontSize: 'md', fontWeight: 'bold', color: 'github.textBright' })}>{pos.coin}-PERP</span>
@@ -339,6 +341,8 @@ export default function PositionInsightsModal({
           >✕</button>
         </div>
 
+        {/* Scrolling body — the only scroll region; the header stays fixed above it. */}
+        <div className={css({ overflowY: 'auto', overscrollBehavior: 'contain', minHeight: 0, display: 'flex', flexDirection: 'column', gap: '14px', padding: '14px 18px 18px' })}>
         {/* The run: entry line vs candles since open. */}
         <PositionHistoryChart coin={pos.coin} side={side} entryPx={d.entryPx} liquidationPx={health.liqPx} openedAtMs={pos.openedAt ?? null} />
 
@@ -541,6 +545,7 @@ export default function PositionInsightsModal({
           <button type="button" data-testid="insights-close-position" disabled={!canExit} onClick={onClose} style={{ color: ZONE_COLORS.danger, background: 'rgba(242,77,94,0.08)', borderColor: 'rgba(242,77,94,0.32)' }} className={css({ fontFamily: 'sans', fontSize: '12px', fontWeight: 'semibold', border: '1px solid', borderRadius: '7px', paddingX: '16px', paddingY: '9px', cursor: 'pointer', _disabled: { opacity: 0.5, cursor: 'not-allowed' } })}>Close</button>
         </div>
         <span className={css({ fontFamily: 'mono', fontSize: '8px', color: 'github.textMuted' })} style={{ color: TERM.faint }}>Insights are read-only; Reduce/Close still run through the approved reduce-only seam.</span>
+        </div>
       </section>
     </div>
   );
