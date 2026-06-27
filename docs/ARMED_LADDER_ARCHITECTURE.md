@@ -92,11 +92,15 @@ exchange-level double-fire rejection.
 
 ## 4. Phased roadmap (research-revised)
 
-- **P0 — native bracket, no watcher, no rule change.**
+- **P0 — native bracket, no watcher, no rule change. ✅ COMPLETE (live paths testnet-gated).**
   - ✅ Resting stop (existed) · ✅ Resting take-profit (shipped).
-  - ▶ **Native OCO bracket** (`positionTpsl`): stop+target as one mutually-cancelling unit
-    — the foundational primitive. *(building now; live path testnet-gated.)*
-  - ⬜ Native **stop-entry** leg (breakout open) + bracket orchestration on entry.
+  - ✅ **Native OCO bracket** (`positionTpsl`): stop+target as one mutually-cancelling unit
+    — the foundational primitive (commit a2fe082).
+  - ✅ Native **stop-entry** leg (breakout/breakdown open, `reduceOnly:false` trigger) +
+    EntryModal "Entry type" toggle; sizes server-side off the trigger level; opens WITHOUT
+    a stop (loud UI disclosure — operator brackets after fill) (commit 869190e).
+  - ⚠ Both new live signing paths (bracket `positionTpsl`, stop-entry `reduceOnly:false`
+    trigger) are gated behind the §4b testnet rehearsal — NOT yet exercised on a live key.
 - **P1 — single-coin armed ladder + watcher** (migration 0023 with the §3.6 DB
   constraint; `/ladder/arm` typed-phrase; `/ladder/fire-rung` cron-bearer + claim/dedupe
   + `assertLadderArmed` + precondition-snapshot re-check; NAS watcher tick; preview modal).
