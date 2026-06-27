@@ -13,13 +13,8 @@
  *   pnpm vault-watch --interval 900 # every 15 min
  */
 
-import { loadEnvLocal } from './_skill-runtime';
+import { run } from './_skill-runtime';
 import { runVaultWatchCycle, DEFAULT_VAULT_TARGETS } from '@/lib/scout/vault-watch-service';
-
-// Load .env.local (CWD-independent) so the Supabase service-role client configures
-// under the NAS cron — the same bootstrap the run()-wrapped skills get. Without it
-// getServiceRoleClient throws "Supabase service-role client not configured".
-loadEnvLocal();
 
 const DEFAULT_INTERVAL_SEC = 3600; // hourly
 const MIN_INTERVAL_SEC = 60;
@@ -66,7 +61,7 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((e) => {
-  console.error('vault-watch fatal:', e instanceof Error ? e.message : e);
-  process.exit(1);
-});
+// run() loads .env.local AND installs the `ws` WebSocket polyfill (Node < 22 has no
+// native global one, which the Supabase createClient needs) — the same bootstrap the
+// NAS daemons use — then runs main with error handling.
+run(main);

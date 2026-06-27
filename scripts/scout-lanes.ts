@@ -5,12 +5,8 @@
  * NEVER trades.
  */
 
-import { loadEnvLocal } from './_skill-runtime';
+import { run } from './_skill-runtime';
 import { computeScoutLaneCards, persistScoutLaneCards } from '@/lib/scout/lane-scorecard-service';
-
-// Load .env.local (CWD-independent) so Supabase + HL config is set under the NAS
-// cron — the same bootstrap the run()-wrapped skills get.
-loadEnvLocal();
 
 async function main(): Promise<void> {
   const now = Date.now();
@@ -21,7 +17,7 @@ async function main(): Promise<void> {
   );
 }
 
-main().catch((e) => {
-  console.error('scout-lanes failed:', e instanceof Error ? e.message : e);
-  process.exit(1);
-});
+// run() loads .env.local AND installs the `ws` WebSocket polyfill (Node < 22 has no
+// native global one, which Supabase createClient needs) — the same bootstrap the NAS
+// daemons use — then runs main with error handling.
+run(main);
