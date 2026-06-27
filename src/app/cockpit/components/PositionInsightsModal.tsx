@@ -19,11 +19,10 @@ import { useCandles } from '@/hooks/useCandles';
 import type { TradingMode } from '@/types/fill';
 import { HOLD_TIMEFRAMES, suggestStopFrac, liquidationCushion, stopPxFromFrac, validateStopPx, type HoldTimeframe } from '@/lib/cockpit/stop-suggestion-business-logic';
 import { isOverMargined } from '@/lib/trading/leverage-business-logic';
-import { previewAdd, MAX_ADD_MULTIPLE, type AddSizeMode } from '@/lib/trading/add-to-position-business-logic';
 import PositionHistoryChart from './left-rail/PositionHistoryChart';
+import PositionAdjustActions from './PositionAdjustActions';
 import { positionHealth, uPnlPct, type RegimeDir } from './open-positions-helpers';
 import { userPositionDisplay } from './position-panel-helpers';
-import { entryLiveConfirmPhrase } from './entry-modal-helpers';
 import { GH, ZONE_COLORS, TERM, fmtPx, fmtUsd, fmtCompactUsd } from './panel-styles';
 
 /** A clean, parseable numeric seed for the stop input — 6 sig figs, trailing zeros
@@ -161,97 +160,6 @@ export default function PositionInsightsModal({
   const canExit = d.entryPx != null && d.markPx != null;
   const canAdjust = d.entryPx != null;
 
-  // Add-margin (de-risk): post collateral to push liquidation away without changing
-  // size. Inline reveal → amount → confirm → POST /api/cockpit/add-margin.
-  const [marginOpen, setMarginOpen] = useState(false);
-  const [marginAmt, setMarginAmt] = useState('');
-  const [marginBusy, setMarginBusy] = useState(false);
-  const [marginMsg, setMarginMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const amt = parseFloat(marginAmt);
-  const amtValid = Number.isFinite(amt) && amt > 0;
-  // Projected effective leverage after the add (notional / (oldMargin + amt)).
-  // Projected effective leverage after posting `amt` more margin. Use the REAL current
-  // margin (marginUsed) so it reflects margin you've already added; fall back to the
-  // leverage-setting estimate (notional / lev) only when there's no live read.
-  const projectedLev = amtValid && d.markPx != null
-    ? (() => {
-        const notional = d.markPx * pos.sz;
-        const baseMargin = currentMarginUsd != null && currentMarginUsd > 0
-          ? currentMarginUsd
-          : d.leverage != null && d.leverage > 0 ? notional / d.leverage : null;
-        if (baseMargin == null) return null;
-        const m = baseMargin + amt;
-        return m > 0 ? Math.max(1, notional / m) : null;
-      })()
-    : null;
-
-  async function submitAddMargin(): Promise<void> {
-    if (!amtValid || marginBusy) return;
-    setMarginBusy(true);
-    setMarginMsg(null);
-    try {
-      const res = await fetch('/api/cockpit/add-margin', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ coin: pos.coin, amountUsd: amt }),
-      });
-      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; pushed?: boolean };
-      if (!res.ok || json.ok === false) setMarginMsg({ ok: false, text: json.error ?? `Failed (${res.status})` });
-      else { setMarginMsg({ ok: true, text: json.pushed ? `Added $${amt} margin — liquidation moves away.` : `Recorded $${amt} (paper).` }); setMarginAmt(''); setMarginOpen(false); closeRef.current?.focus(); }
-    } catch {
-      setMarginMsg({ ok: false, text: 'Network error — retry.' });
-    } finally {
-      setMarginBusy(false);
-    }
-  }
-
-  // Add to position (pyramid): increase SIZE into the same side. Real-money OPEN —
-  // full safety preview + averaging-down ack + LIVE confirm + explicit Approve.
-  const isLive = mode === 'live';
-  const [addOpen, setAddOpen] = useState(false);
-  const [addMode, setAddMode] = useState<AddSizeMode>('pct');
-  const [addValue, setAddValue] = useState('');
-  const [ackDown, setAckDown] = useState(false);
-  const [addPhrase, setAddPhrase] = useState('');
-  const [addBusy, setAddBusy] = useState(false);
-  const [addMsg, setAddMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const addVal = parseFloat(addValue);
-  const addPreview = d.entryPx != null && d.markPx != null && Number.isFinite(addVal) && addVal > 0
-    ? previewAdd({ side, currentSz: pos.sz, currentEntryPx: d.entryPx, markPx: d.markPx, leverage: d.leverage ?? 1, mode: addMode, value: addVal, maxAddMultiple: MAX_ADD_MULTIPLE, currentMarginUsd: currentMarginUsd ?? undefined })
-    : null;
-  const requiredAddPhrase = entryLiveConfirmPhrase(side === 'long' ? 'buy' : 'sell', pos.coin);
-  const addApproveOk = !addBusy && addPreview != null && addPreview.addSz > 0 && addPreview.warnings.length === 0
-    && (!addPreview.isAveragingDown || ackDown)
-    && (!isLive || addPhrase.trim().toLowerCase() === requiredAddPhrase);
-
-  async function submitAdd(): Promise<void> {
-    if (!addApproveOk || addPreview == null) return;
-    setAddBusy(true);
-    setAddMsg(null);
-    try {
-      const res = await fetch('/api/cockpit/add-to-position', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ coin: pos.coin, mode: addMode, value: addVal, ackAveragingDown: ackDown, confirmPhrase: isLive ? addPhrase : undefined }),
-      });
-      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; requiresAck?: boolean; hasStop?: boolean };
-      if (!res.ok || json.ok === false) {
-        if (json.requiresAck) setAckDown(false);
-        if (json.hasStop) void refetchStop(); // a stop appeared (placed elsewhere) — surface it
-        setAddMsg({ ok: false, text: json.error ?? `Failed (${res.status})` });
-      } else {
-        setAddMsg({ ok: true, text: `Added ${addPreview.addSz} ${pos.coin} — new size ${addPreview.newSz}.` });
-        setAddValue(''); setAddOpen(false); setAckDown(false); setAddPhrase('');
-        closeRef.current?.focus(); // the reveal collapsed — keep focus in the dialog
-      }
-    } catch {
-      setAddMsg({ ok: false, text: 'Network error — retry.' });
-    } finally {
-      setAddBusy(false);
-    }
-  }
 
   // Resting protective stop on HL (place the ATR suggestion / cancel). Fetched on open.
   const [stop, setStop] = useState<{ oid: number; triggerPx: number | null; sz: number } | null>(null);
@@ -341,6 +249,23 @@ export default function PositionInsightsModal({
       if (!res.ok || json.ok === false) setTpMsg({ ok: false, text: json.error ?? `Failed (${res.status})` });
       else { setTpMsg({ ok: true, text: 'Take-profit canceled.' }); setTp(null); }
     } catch { setTpMsg({ ok: false, text: 'Network error — retry.' }); } finally { setTpBusy(false); }
+  }
+
+  // Native OCO bracket: place the chosen stop AND target as one mutually-cancelling
+  // unit (HL positionTpsl). Available only when both are valid and neither rests yet.
+  const [bracketBusy, setBracketBusy] = useState(false);
+  const [bracketMsg, setBracketMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const bracketReady = stopState === 'loaded' && tpStateStatus === 'loaded' && !stop && !tp
+    && stopValidation.ok && effectiveStopPx != null && tpValid && effectiveTpPx != null;
+  async function placeBracket(): Promise<void> {
+    if (!bracketReady || effectiveStopPx == null || effectiveTpPx == null || bracketBusy) return;
+    setBracketBusy(true); setBracketMsg(null);
+    try {
+      const res = await fetch('/api/cockpit/position-bracket', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ coin: pos.coin, stopPx: effectiveStopPx, tpPx: effectiveTpPx }) });
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; pushed?: boolean };
+      if (!res.ok || json.ok === false) setBracketMsg({ ok: false, text: json.error ?? `Failed (${res.status})` });
+      else { setBracketMsg({ ok: true, text: json.pushed ? `Bracket placed — stop ${fmtPx(effectiveStopPx)} / target ${fmtPx(effectiveTpPx)} (OCO).` : 'Bracket recorded (paper).' }); await refetchStop(); await refetchTp(); }
+    } catch { setBracketMsg({ ok: false, text: 'Network error — retry.' }); } finally { setBracketBusy(false); }
   }
 
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -571,101 +496,41 @@ export default function PositionInsightsModal({
           {tpMsg && <span role="status" style={{ color: tpMsg.ok ? ZONE_COLORS.ok : ZONE_COLORS.danger }} className={css({ fontFamily: 'mono', fontSize: '9px', lineHeight: 1.4 })}>{tpMsg.text}</span>}
         </div>
 
-        {/* Add margin — the correct, non-martingale de-risk: post collateral → liq
-            moves away, size unchanged. (Lowering leverage hits HL's margin restriction;
-            this posts margin directly.) */}
-        <div className={css({ display: 'flex', flexDirection: 'column', gap: '7px', bg: 'github.bg', border: '1px solid token(colors.github.borderSubtle)', borderRadius: '8px', padding: '11px 13px' })}>
-          <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' })}>
-            <span className={css({ fontFamily: 'label', fontSize: '9px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.06em' })}>Add margin · de-risk (liq moves away, size unchanged)</span>
-            {!marginOpen && (
-              <button type="button" data-testid="insights-add-margin-open" onClick={() => { setMarginOpen(true); setMarginMsg(null); }} className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.link', bg: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', _focusVisible: { outline: '2px solid token(colors.github.link)' } })}>+ add</button>
-            )}
+        {/* OCO bracket — the RECOMMENDED protective path: place the stop + target as ONE
+            mutually-cancelling unit (HL positionTpsl) so hitting one cancels the other +
+            both auto-cancel when the position closes (no orphan). ALWAYS mounted (no
+            keystroke flicker / focus loss / lost success message); the button enables
+            only when both legs are valid and neither already rests. The single-leg
+            buttons above are the escape hatch. */}
+        {stopState === 'loaded' && tpStateStatus === 'loaded' && (
+          <div className={css({ display: 'flex', flexDirection: 'column', gap: '6px', bg: 'github.bg', border: '1px solid', borderColor: 'rgba(91,140,255,0.28)', borderRadius: '8px', padding: '10px 13px' })}>
+            <span className={css({ fontFamily: 'label', fontSize: '9px', color: 'cockpit.accent', textTransform: 'uppercase', letterSpacing: '0.06em' })}>Protective bracket · recommended</span>
+            <span className={css({ fontFamily: 'mono', fontSize: '9.5px', color: 'github.textMuted', lineHeight: 1.45 })}>
+              {bracketReady
+                ? <>⛓ Place stop {fmtPx(effectiveStopPx)} + target {fmtPx(effectiveTpPx)} as one <strong>OCO unit</strong> — hitting one cancels the other; both auto-cancel when the position closes. (The single-leg buttons above place just that leg.)</>
+                : (stop || tp) ? 'Cancel the resting order above to place a fresh OCO bracket (stop + target together).'
+                : 'Set a valid stop and target above, then place them together here as one mutually-cancelling OCO bracket.'}
+            </span>
+            <button type="button" data-testid="insights-bracket-place" disabled={bracketBusy || !bracketReady} onClick={() => void placeBracket()} className={css({ alignSelf: 'flex-start', fontFamily: 'sans', fontSize: '10px', fontWeight: 'bold', color: '#cfe0ff', bg: 'rgba(91,140,255,0.16)', border: '1px solid', borderColor: 'rgba(91,140,255,0.45)', borderRadius: '5px', paddingX: '10px', paddingY: '6px', cursor: 'pointer', _disabled: { opacity: 0.45, cursor: 'not-allowed' }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '2px' } })}>{bracketBusy ? 'placing…' : 'Place both (OCO) →'}</button>
+            {bracketMsg && <span role="status" style={{ color: bracketMsg.ok ? ZONE_COLORS.ok : ZONE_COLORS.danger }} className={css({ fontFamily: 'mono', fontSize: '9px', lineHeight: 1.4 })}>{bracketMsg.text}</span>}
           </div>
-          {marginOpen && (
-            <div className={css({ display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap' })}>
-              <span className={css({ fontFamily: 'mono', fontSize: '12px', color: 'github.textMuted' })}>$</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                data-testid="insights-add-margin-amount" aria-label="Margin amount (USD)"
-                value={marginAmt}
-                onChange={(e) => setMarginAmt(e.target.value)}
-                placeholder="amount"
-                min={1}
-                className={css({ width: '90px', bg: 'github.bgSecondary', border: '1px solid token(colors.github.border)', borderRadius: '6px', color: 'github.textBright', fontFamily: 'mono', fontSize: '13px', padding: '6px 8px', outline: 'none', _focusVisible: { borderColor: 'github.link' } })}
-              />
-              {projectedLev != null && <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>→ ≈ {projectedLev.toFixed(1)}× eff lev</span>}
-              <button type="button" data-testid="insights-add-margin-submit" disabled={!amtValid || marginBusy} onClick={() => void submitAddMargin()} className={css({ fontFamily: 'sans', fontSize: '11px', fontWeight: 'semibold', color: 'github.bg', bg: 'github.link', border: 'none', borderRadius: '6px', paddingX: '12px', paddingY: '6px', cursor: 'pointer', _disabled: { opacity: 0.5, cursor: 'not-allowed' }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '2px' } })}>{marginBusy ? 'adding…' : 'Add margin'}</button>
-              <button type="button" data-testid="insights-add-margin-cancel" onClick={() => { setMarginOpen(false); setMarginAmt(''); closeRef.current?.focus(); }} className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted', bg: 'transparent', border: 'none', cursor: 'pointer', padding: '6px' })}>cancel</button>
-            </div>
-          )}
-          {marginMsg && (
-            <span role="status" style={{ color: marginMsg.ok ? ZONE_COLORS.ok : ZONE_COLORS.danger }} className={css({ fontFamily: 'mono', fontSize: '9.5px', lineHeight: 1.4 })}>{marginMsg.text}</span>
-          )}
-        </div>
+        )}
 
-        {/* Add to position — increases SIZE (pyramid). Real-money OPEN with the full
-            safety preview: new size/avg/liq, $-at-risk growth, averaging-down gate. */}
-        <div className={css({ display: 'flex', flexDirection: 'column', gap: '8px', bg: 'github.bg', border: '1px solid token(colors.github.borderSubtle)', borderRadius: '8px', padding: '11px 13px' })}>
-          <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' })}>
-            <span className={css({ fontFamily: 'label', fontSize: '9px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.06em' })}>Add to position · pyramid (increases size + risk)</span>
-            {!addOpen && (
-              <button type="button" data-testid="insights-add-pos-open" onClick={() => { setAddOpen(true); setAddMsg(null); }} className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.link', bg: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', _focusVisible: { outline: '2px solid token(colors.github.link)' } })}>+ add</button>
-            )}
-          </div>
-          {addOpen && (
-            <>
-              {stop && (
-                <span data-testid="insights-add-blocked-stop" className={css({ fontFamily: 'mono', fontSize: '9.5px', lineHeight: 1.45, borderRadius: '6px', padding: '8px 10px' })} style={{ background: 'rgba(242,77,94,0.08)', border: '1px solid rgba(242,77,94,0.3)', color: '#ff9aa6' }}>
-                  ⚠ A stop is resting @ {fmtPx(stop.triggerPx)} (covers {stop.sz}). Cancel it above before adding — then re-place it at the new average entry.
-                </span>
-              )}
-              <div className={css({ display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap' })}>
-                <div role="group" aria-label="Add size mode" className={css({ display: 'flex', gap: '2px', bg: 'github.bgSecondary', border: '1px solid token(colors.github.border)', borderRadius: '6px', padding: '2px' })}>
-                  {(['pct', 'usd'] as AddSizeMode[]).map((m) => (
-                    <button key={m} type="button" data-testid={`insights-add-mode-${m}`} aria-pressed={addMode === m} onClick={() => setAddMode(m)} style={{ background: addMode === m ? '#1c2536' : 'transparent', color: addMode === m ? '#e8ebf2' : '#8b95a6' }} className={css({ fontFamily: 'mono', fontSize: '10px', fontWeight: 'semibold', paddingX: '8px', paddingY: '4px', borderRadius: '4px', border: 'none', cursor: 'pointer' })}>{m === 'pct' ? '% of size' : '$ notional'}</button>
-                  ))}
-                </div>
-                <input type="number" inputMode="decimal" data-testid="insights-add-value" aria-label="Add size" value={addValue} onChange={(e) => setAddValue(e.target.value)} placeholder={addMode === 'pct' ? '%' : '$'} min={0} className={css({ width: '80px', bg: 'github.bgSecondary', border: '1px solid token(colors.github.border)', borderRadius: '6px', color: 'github.textBright', fontFamily: 'mono', fontSize: '13px', padding: '6px 8px', outline: 'none', _focusVisible: { borderColor: 'github.link' } })} />
-                {addMode === 'pct' && [25, 50, 100].map((p) => (
-                  <button key={p} type="button" onClick={() => setAddValue(String(p))} className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted', bg: 'transparent', border: '1px solid token(colors.github.borderSubtle)', borderRadius: '4px', paddingX: '5px', paddingY: '3px', cursor: 'pointer', _hover: { borderColor: 'github.link' } })}>{p}%</button>
-                ))}
-              </div>
-
-              {addPreview && addPreview.addSz > 0 && (
-                <div className={css({ display: 'flex', flexDirection: 'column', gap: '3px', fontFamily: 'mono', fontSize: '10px', color: 'github.text', bg: 'github.bgSecondary', borderRadius: '6px', padding: '8px 10px' })} style={{ fontFeatureSettings: '"tnum"' }}>
-                  <div className={css({ display: 'flex', justifyContent: 'space-between' })}><span className={css({ color: 'github.textMuted' })}>add</span><span>+{addPreview.addSz} {pos.coin} · ≈{fmtCompactUsd(addPreview.addNotionalUsd)} · margin {fmtCompactUsd(addPreview.addMarginUsd)}</span></div>
-                  <div className={css({ display: 'flex', justifyContent: 'space-between' })}><span className={css({ color: 'github.textMuted' })}>size → / avg →</span><span>{pos.sz} → <strong>{addPreview.newSz}</strong> · avg {fmtPx(addPreview.newAvgEntryPx)}</span></div>
-                  <div className={css({ display: 'flex', justifyContent: 'space-between' })}><span className={css({ color: 'github.textMuted' })}>new liq</span><span>{fmtPx(addPreview.newLiqPx)} {addPreview.newLiqDistPct != null ? `(${addPreview.newLiqDistPct.toFixed(1)}% away)` : ''} · {addPreview.newEffLeverage.toFixed(1)}× eff</span></div>
-                  <div className={css({ display: 'flex', justifyContent: 'space-between' })}><span className={css({ color: 'github.textMuted' })}>$ at risk (at liq)</span><span style={{ color: ZONE_COLORS.warn }}>{fmtCompactUsd(addPreview.riskAtLiqUsd)}{currentMarginUsd != null && currentMarginUsd > 0 ? ` (was ${fmtCompactUsd(currentMarginUsd)})` : ''}</span></div>
-                </div>
-              )}
-
-              {addPreview?.isAveragingDown && (
-                <label data-testid="insights-add-avgdown-ack" className={css({ display: 'flex', alignItems: 'flex-start', gap: '8px', padding: '9px 11px', borderRadius: '7px', cursor: 'pointer' })} style={{ background: 'rgba(242,77,94,0.08)', border: '1px solid rgba(242,77,94,0.32)' }}>
-                  <input type="checkbox" checked={ackDown} onChange={(e) => setAckDown(e.target.checked)} className={css({ marginTop: '2px', accentColor: '#f24d5e', cursor: 'pointer' })} />
-                  <span style={{ color: ZONE_COLORS.danger }} className={css({ fontFamily: 'mono', fontSize: '9.5px', lineHeight: 1.45 })}>⚠ This adds to a <strong>LOSING</strong> position (averaging down) — the martingale pattern that blows up accounts. I understand and want to proceed.</span>
-                </label>
-              )}
-
-              {isLive && (
-                <label className={css({ display: 'flex', flexDirection: 'column', gap: '4px' })}>
-                  <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'zone.danger' })}>LIVE — type <code style={{ color: GH.textBright }}>{requiredAddPhrase}</code> to enable</span>
-                  <input data-testid="insights-add-phrase" value={addPhrase} onChange={(e) => setAddPhrase(e.target.value)} autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder={requiredAddPhrase} className={css({ bg: 'github.bgSecondary', border: '1px solid token(colors.github.border)', borderRadius: '6px', color: 'github.textBright', fontFamily: 'mono', fontSize: '12px', padding: '6px 8px', outline: 'none' })} />
-                </label>
-              )}
-
-              <div className={css({ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' })}>
-                <button type="button" data-testid="insights-add-submit" disabled={!addApproveOk || stop != null} onClick={() => void submitAdd()} style={{ background: addApproveOk && !stop ? (isLive ? ZONE_COLORS.danger : ZONE_COLORS.ok) : undefined }} className={css({ fontFamily: 'sans', fontSize: '11px', fontWeight: 'bold', color: addApproveOk && !stop ? '#06251a' : 'github.textMuted', bg: addApproveOk && !stop ? undefined : 'github.bgSecondary', border: 'none', borderRadius: '6px', paddingX: '14px', paddingY: '7px', cursor: addApproveOk && !stop ? 'pointer' : 'not-allowed', _disabled: { opacity: 0.6, cursor: 'not-allowed' } })}>{addBusy ? 'adding…' : isLive ? 'Approve LIVE add' : `Add ${addPreview?.addSz ?? ''} ${pos.coin}`}</button>
-                <button type="button" data-testid="insights-add-cancel" onClick={() => { setAddOpen(false); setAddValue(''); setAckDown(false); closeRef.current?.focus(); }} className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted', bg: 'transparent', border: 'none', cursor: 'pointer', padding: '6px' })}>cancel</button>
-                {stop && <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'zone.danger' })}>cancel the resting stop first ↑</span>}
-              </div>
-            </>
-          )}
-          {addMsg && (
-            <span role="status" style={{ color: addMsg.ok ? ZONE_COLORS.ok : ZONE_COLORS.danger }} className={css({ fontFamily: 'mono', fontSize: '9.5px', lineHeight: 1.4 })}>{addMsg.text}</span>
-          )}
-        </div>
+        <PositionAdjustActions
+          coin={pos.coin}
+          sz={pos.sz}
+          side={side}
+          markPx={d.markPx}
+          entryPx={d.entryPx}
+          leverage={d.leverage}
+          mode={mode}
+          currentMarginUsd={currentMarginUsd}
+          hasStop={stop != null}
+          stopTriggerPx={stop?.triggerPx ?? null}
+          stopSz={stop?.sz ?? null}
+          onStopAppeared={refetchStop}
+          onCollapse={() => closeRef.current?.focus()}
+        />
 
         {/* Actions — reuse the panel's existing reduce-only / leverage seams. */}
         <div className={css({ display: 'flex', gap: '8px', flexWrap: 'wrap' })}>

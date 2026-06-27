@@ -71,7 +71,19 @@ IS the authorization; the watcher has ZERO discretion. Generalizes the existing
    phantom price; IOC no-fills vs chasing; triggers on completed candles only.
 5. **Preview modal fully informed** — worst-case loss if ALL stops hit at once (no
    netting), liq at max aggregate exposure per coin, total notional/margin vs caps,
-   expiry — else the typed-phrase consent isn't genuine.
+   expiry — else the typed-phrase consent isn't genuine. Worst-case uses the
+   slippage-bounded fill (HL stop = market-on-trigger, 10% tol), not the stop price.
+6. **DB-enforced scout/live boundary** — a migration CHECK/trigger pins
+   `author='scout' ⇒ mode='paper' AND status≠'armed'`; only the operator **arm route**
+   (admin + typed-phrase) may flip `status→armed`/`mode→live`. App-layer alone is not
+   enough — a bug or shared upsert must be stopped at Postgres. `/ladder/fire-rung`
+   re-reads `mode`/`author` **server-side from the persisted row** (never the request)
+   and refuses any `author='scout'` ladder.
+7. **Arm-time precondition snapshot** — a rung fires only if live position state still
+   matches what was approved (side; existence-for-adds; per-coin leverage). Persist a
+   precondition hash at arm; re-check server-side at fire. Any drift (operator closed/
+   flipped the position, or changed leverage after arming) → **auto-disarm + alert**,
+   never fire against a changed position.
 
 **HL mechanics baked in:** stop-ENTRY uses the native Stop-Market trigger (testnet-rehearse
 `tpsl` direction); leverage is per-COIN (all same-coin rungs share one, enforced at arm);
@@ -85,14 +97,43 @@ exchange-level double-fire rejection.
   - ▶ **Native OCO bracket** (`positionTpsl`): stop+target as one mutually-cancelling unit
     — the foundational primitive. *(building now; live path testnet-gated.)*
   - ⬜ Native **stop-entry** leg (breakout open) + bracket orchestration on entry.
-- **P1 — single-coin armed ladder + watcher** (migration 0023; `/ladder/arm` typed-phrase;
-  `/ladder/fire-rung` cron-bearer + claim/dedupe + `assertLadderArmed`; NAS watcher tick;
-  preview modal). Surfaces native **Scale + TWAP**. Watcher owns volume/funding/indicator
-  triggers. Behind `LADDER_LIVE_ENABLED`, gated OFF, paper-first.
+- **P1 — single-coin armed ladder + watcher** (migration 0023 with the §3.6 DB
+  constraint; `/ladder/arm` typed-phrase; `/ladder/fire-rung` cron-bearer + claim/dedupe
+  + `assertLadderArmed` + precondition-snapshot re-check; NAS watcher tick; preview modal).
+  Surfaces native **Scale + TWAP**. Watcher owns volume/funding/indicator triggers.
+  **MUST also include (moved up from P2 — P1 already adds to a live position):** the
+  pyramiding-guardrail enforcement (a rung that *increases* exposure fires only if its
+  risk is covered by existing unrealized profit, and only if the aggregate stop ends up
+  *tighter*) and the **atomic add→re-bracket** (the enlarged position is bracketed at the
+  new full size *before the lock releases*; a re-bracket reject is a hard fault → flatten).
+  Partial fills: caps measured against *actual filled* notional; the remainder is dropped,
+  not chased. Behind `LADDER_LIVE_ENABLED`, gated OFF, paper-first.
 - **P2 — multi-asset / portfolio / sequencing** (per-coin leverage; portfolio worst-case;
-  rung N arms after N-1 fills) + **trailing stops** (watcher) + pyramiding guardrails.
+  rung N arms after N-1 fills) + **trailing stops** (watcher).
 - **P3 — multi-leg / delta-neutral** (coupled legs, leg-risk sequencing, funding/basis
   triggers) — what makes it genuinely "holistic" beyond single-asset ladders.
+
+## 4b. Live-enablement gate (before `LADDER_LIVE_ENABLED` flips on)
+
+**Testnet rehearsal checklist — ALL green on `HL_NETWORK=testnet`, long AND short:**
+1. Bracket fires the correct leg long and short (stop-entry `tpsl` direction correct).
+2. OCO actually one-cancels-other on testnet.
+3. Bracket auto-cancels on position close (no orphan).
+4. Deterministic `cloid` (= `ladderId:rungId`) rejects a double-submit at the exchange.
+5. Leverage is set before the open on a fresh coin (no silent re-rate).
+6. Stop-reject → auto-flatten path exercised (the "filled-but-unstopped" fault).
+7. Kill-switch: `LADDER_LIVE_ENABLED` off refuses a fire mid-armed.
+
+**Observability — the symmetric risk to a false fire is a SILENT one:**
+- **Single enforcement point** = the Vercel fire route. A flipped kill-switch takes
+  effect there; an in-flight watcher POST is harmless if the route refuses (worst case =
+  one POST). The watcher holds no authority.
+- **Armed-but-silent heartbeat:** an armed ladder + no watcher tick in N minutes →
+  page the operator. A dead watcher overnight = silent non-protection (rungs AND
+  trailing stops don't fire); alert on it as loudly as on a fire.
+- **Caps re-validated against the ROUNDED size/price** (formatHlSize floors, formatHlPrice
+  clamps) at fire time, not the intended values — a rounded stop can push worst-case loss
+  over the previewed number.
 
 ## 5. Scout synergy — the ladder grammar is a shared execution language
 
@@ -100,10 +141,15 @@ The Armed Ladder is not just a manual tool; it's an **execution grammar** (rungs
 `{deterministic trigger → pre-authorized order}`, brackets, multi-leg) that the
 autonomous **scout** can also speak. Two structural overlaps make this natural:
 
-- **Shared trigger engine.** The scout IS an "inverted-loop free deterministic trigger
-  daemon"; the ladder watcher is the same pattern. They should share ONE deterministic
-  condition evaluator (price / volume / funding / indicator on completed candles) serving
-  both the scout's lane triggers and the ladder's rung triggers. Build it once.
+- **Shared trigger engine — but PURE, with split sinks.** The scout IS an "inverted-loop
+  free deterministic trigger daemon"; the ladder watcher is the same pattern. They share
+  ONE deterministic condition evaluator — *which is a PURE function emitting only
+  `{rungId/laneId, conditionMet}`, holding ZERO execution authority*. The paper sink
+  (scout) and the live sink (`/ladder/fire-rung`) are **physically separate**; a routing
+  bug in the evaluator can never fire money because the evaluator never executes. The
+  live sink re-validates `mode='live'` + `author≠'scout'` + `assertLadderArmed` +
+  precondition snapshot server-side before any fill. Build the evaluator once; keep it
+  authority-free.
 - **Shared execution + risk primitives.** Native brackets/Scale/TWAP, liq-aware sizing,
   and the pyramiding guardrails (decreasing size, risk-covered-by-profit, tightening
   stop) apply identically to scout positions and operator ladders.
