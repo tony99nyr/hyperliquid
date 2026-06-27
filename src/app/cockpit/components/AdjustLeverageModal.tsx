@@ -3,12 +3,14 @@
 /**
  * AdjustLeverageModal — change the leverage on an OPEN position.
  *
- * Changing leverage on an open isolated position does NOT change size; it moves
- * the LIQUIDATION price (raising releases margin → liq toward mark; lowering posts
- * margin → liq away). The modal shows the before/after liquidation price live as
- * you drag, and REQUIRES an ack when a raise pushes liq within the danger band of
- * the current mark. Posts to /api/cockpit/adjust-leverage (server re-validates the
- * band + the danger gate; LIVE pushes the updateLeverage action to HL fail-closed).
+ * Changing leverage on an open isolated position does NOT change size; it adjusts the
+ * required margin. At the margin floor (margin == notional/leverage) raising moves liq
+ * toward the mark and lowering moves it away. But when EXTRA margin has been posted
+ * (over-margined), liquidation is set by that margin, not the setting: raising/holding
+ * leaves liq UNCHANGED, and only lowering below the effective leverage posts more
+ * margin (liq further out) — you can't move liq toward the mark from here. The modal
+ * shows the before/after live and gates a danger-band raise behind an ack. Posts to
+ * /api/cockpit/adjust-leverage (server re-validates; LIVE pushes updateLeverage to HL).
  *
  * A11y: role=dialog, focus trap, Esc cancels (mirrors ExitModal).
  */
@@ -109,25 +111,28 @@ export default function AdjustLeverageModal({ target, onClose, onExecuted }: Adj
     [target.side, target.entryPx, target.markPx, target.currentLeverage, lev, coinMax],
   );
 
-  const blockedByAck = plan.dangerNearMark && !ack;
   const noChange = !plan.changed;
   // The REAL current liquidation (reflects margin you've posted) — the formula
   // plan.currentLiqPx ignores it. Prefer the real value when we have it.
   const realCurrentLiq = target.realLiqPx ?? plan.currentLiqPx;
   const realCurrentLiqDistPct = realCurrentLiq != null && target.markPx != null && target.markPx > 0
     ? (Math.abs(realCurrentLiq - target.markPx) / target.markPx) * 100 : null;
-  // Over-margined = you've added margin so effective leverage is well below the
-  // setting. Changing the leverage SETTING may rebalance that margin and move liq —
-  // the formula "new liq" below assumes margin realigns to the setting.
   const overMargined = isOverMargined(target.effLeverage, target.currentLeverage);
-  // For an over-margined position, "no change" must READ as no change: show the REAL
-  // liq for the new-liq rows when the slider hasn't moved (otherwise the setting-based
-  // formula contradicts the real current liq — "5× → 5×" but liq jumps). On an actual
-  // change we show the formula estimate, which is always ≤ the real distance for an
-  // over-margined position (conservative) and is flagged "(est.)" + the warning.
-  const showRealForNew = overMargined && noChange;
-  const displayNewLiqPx = showRealForNew ? realCurrentLiq : plan.liqPx;
-  const displayNewLiqDistPct = showRealForNew ? realCurrentLiqDistPct : plan.liqDistFromMarkPct;
+
+  // CORRECT model for an over-margined isolated position: liquidation is set by the
+  // MARGIN you've posted, not the leverage setting. Raising or holding leverage leaves
+  // your margin untouched → liq UNCHANGED (the setting just lowers the required-margin
+  // floor, which you're already above). Only LOWERING leverage below your effective
+  // leverage forces HL to post more margin → liq moves FURTHER from the mark (safer).
+  // You can never move liq TOWARD the mark via the leverage setting — so the formula
+  // danger guard doesn't apply here.
+  const eff = target.effLeverage;
+  const postsMoreMargin = overMargined && eff != null && plan.leverage < eff;
+  const displayNewLiqPx = !overMargined ? plan.liqPx : postsMoreMargin ? plan.liqPx : realCurrentLiq;
+  const displayNewLiqDistPct = !overMargined ? plan.liqDistFromMarkPct : postsMoreMargin ? plan.liqDistFromMarkPct : realCurrentLiqDistPct;
+  // Over-margined → leverage can't push liq toward the mark, so no danger-ack ever.
+  const dangerNearMark = overMargined ? false : plan.dangerNearMark;
+  const blockedByAck = dangerNearMark && !ack;
   // Lowering leverage on an isolated position = posting more margin; HL rejects when
   // free collateral is short. "Add margin" does the same de-risk without that
   // restriction, so nudge toward it when the operator drags leverage DOWN.
@@ -226,32 +231,32 @@ export default function AdjustLeverageModal({ target, onClose, onExecuted }: Adj
             <SummaryRow label="New leverage" value={`${plan.leverage}×`} />
             <SummaryRow label="Current liq" value={`${fmtPx(realCurrentLiq)}${realCurrentLiqDistPct != null ? ` (${realCurrentLiqDistPct.toFixed(1)}%)` : ''}`} color={GH.textMuted} />
             <SummaryRow
-              label={overMargined && !noChange ? 'New liq (est.)' : 'New liq'}
+              label="New liq"
               value={fmtPx(displayNewLiqPx)}
-              color={plan.dangerNearMark ? ZONE_COLORS.danger : GH.text}
+              color={dangerNearMark ? ZONE_COLORS.danger : GH.text}
               testid="adjust-lev-newliq"
             />
             <SummaryRow
               label="Liq vs mark"
               value={displayNewLiqDistPct == null ? '—' : `${displayNewLiqDistPct.toFixed(1)}% away`}
-              color={plan.dangerNearMark ? ZONE_COLORS.danger : GH.textMuted}
+              color={dangerNearMark ? ZONE_COLORS.danger : GH.textMuted}
               last
             />
           </div>
 
           {overMargined && (
             <p data-testid="adjust-lev-overmargined" className={css({ fontSize: '11px', lineHeight: '1.5', borderRadius: '9px', padding: '10px 13px' })} style={{ background: 'rgba(217,164,65,0.1)', border: '1px solid rgba(217,164,65,0.34)', color: '#e6c478' }}>
-              ⚠ You&apos;ve posted extra margin here (effective {target.effLeverage?.toFixed(1)}× vs the {target.currentLeverage != null ? Math.round(target.currentLeverage) : '—'}× setting), so your real liquidation is far out at {fmtPx(realCurrentLiq)}. Changing the leverage setting can <strong>release that margin and pull liquidation back in</strong> — the &quot;new liq&quot; above is an estimate assuming margin realigns to the setting. To de-risk, use <strong>Add margin</strong> instead; you don&apos;t need to touch leverage.
+              ℹ Your liquidation here is set by the margin you&apos;ve posted (effective {target.effLeverage?.toFixed(1)}×), not the leverage setting — it sits far out at {fmtPx(realCurrentLiq)}. Raising or holding leverage <strong>won&apos;t move it</strong>; lowering below {target.effLeverage?.toFixed(1)}× posts more margin (liq further out). You can&apos;t bring liquidation closer from here — to free up margin, remove it; to de-risk, use <strong>Add margin</strong>.
             </p>
           )}
 
-          {isLowering && (
+          {isLowering && !overMargined && (
             <p data-testid="adjust-lev-derisk-nudge" className={css({ fontSize: '11px', lineHeight: '1.5', borderRadius: '9px', padding: '10px 13px' })} style={{ background: 'rgba(91,140,255,0.08)', border: '1px solid rgba(91,140,255,0.28)', color: '#9ab4ff' }}>
               De-risking? Lowering leverage posts margin, and HL rejects it if your free collateral is short. <strong>Add margin</strong> (in a position&apos;s insights) pushes liquidation away the same way without that restriction.
             </p>
           )}
 
-          {plan.dangerNearMark && (
+          {dangerNearMark && (
             <label data-testid="adjust-lev-ack" className={css({ display: 'flex', alignItems: 'flex-start', gap: '9px', padding: '11px 13px', borderRadius: '9px', cursor: 'pointer' })} style={{ background: 'rgba(242,77,94,0.08)', border: '1px solid rgba(242,77,94,0.32)' }}>
               <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className={css({ marginTop: '2px', accentColor: '#f24d5e', cursor: 'pointer' })} />
               <span className={css({ fontSize: '11.5px', lineHeight: '1.5', color: 'zone.danger' })}>

@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import AdjustLeverageModal, { type AdjustLeverageTarget } from '@/app/cockpit/components/AdjustLeverageModal';
 
 function target(over: Partial<AdjustLeverageTarget> = {}): AdjustLeverageTarget {
@@ -23,6 +23,15 @@ describe('AdjustLeverageModal margin-aware display', () => {
     // ~1880) — both current and new show 2,658, so "5× → 5×" doesn't fake a liq jump.
     expect(screen.getByTestId('adjust-lev-newliq').textContent).toMatch(/2,658/);
     expect(screen.queryByText(/1,880/)).toBeNull();
+  });
+
+  it('RAISING leverage on an over-margined position leaves liq UNCHANGED (margin not released)', () => {
+    render(<AdjustLeverageModal target={target({ currentLeverage: 3, realLiqPx: 2658.36, effLeverage: 1.4 })} onClose={() => {}} />);
+    // Drag 3× → 10× (a raise). Real liq must NOT move (you keep your posted margin).
+    fireEvent.change(screen.getByTestId('adjust-lev-slider'), { target: { value: '10' } });
+    expect(screen.getByTestId('adjust-lev-newliq').textContent).toMatch(/2,658/);
+    // No phantom danger ack (leverage can't push liq toward the mark here).
+    expect(screen.queryByTestId('adjust-lev-ack')).toBeNull();
   });
 
   it('no over-margined warning when effective leverage ≈ the setting', () => {
