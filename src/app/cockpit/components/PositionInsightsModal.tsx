@@ -89,6 +89,7 @@ export default function PositionInsightsModal({
   const [holdTf, setHoldTf] = useState<HoldTimeframe>('position');
   // Namespace DOM ids by coin so two drill-downs could never collide label↔input.
   const stopInputId = `insights-stop-input-${pos.coin}`;
+  const tpInputId = `insights-tp-input-${pos.coin}`;
   const stopInvalidId = `insights-stop-invalid-${pos.coin}`;
   const tfSpec = HOLD_TIMEFRAMES[holdTf];
   const candles = useCandles(pos.coin, tfSpec.interval);
@@ -135,6 +136,26 @@ export default function PositionInsightsModal({
   // Dollars lost if this stop hits (from the live mark) — makes "wider = more $ at
   // risk" explicit so a wide default can't quietly imply a bigger-than-expected loss.
   const stopLossUsd = stopValidation.ok && effectiveStopPx != null && ref != null ? pos.sz * Math.abs(ref - effectiveStopPx) : null;
+
+  // Take-profit (the profit-side sibling of the stop). Suggest a 2R target off the
+  // chosen stop (entry ∓ 2×stop-distance, on the profit side); the operator can type
+  // any target. Seeds once from the suggestion (tpTouched idiom); profit-side validated.
+  const [tpInput, setTpInput] = useState('');
+  const [tpTouched, setTpTouched] = useState(false);
+  const suggestedTpPx = effectiveStopPx != null && d.entryPx != null && stopValidation.ok
+    ? (() => { const r = Math.abs(d.entryPx - effectiveStopPx); return side === 'long' ? d.entryPx + 2 * r : d.entryPx - 2 * r; })()
+    : null;
+  // No seeding effect — the suggestion is the input PLACEHOLDER and the fallback
+  // (effectiveTpPx below), so an empty field already means "use the 2R target".
+  const parsedTpPx = (() => { const n = parseFloat(tpInput); return Number.isFinite(n) && n > 0 ? n : null; })();
+  const effectiveTpPx = parsedTpPx ?? suggestedTpPx;
+  const tpDistFrac = effectiveTpPx != null && ref != null && ref > 0 ? Math.abs(ref - effectiveTpPx) / ref : null;
+  // A long's TP sits ABOVE the mark, a short's BELOW (profit side) — mirrors the route.
+  const tpValid = effectiveTpPx != null && ref != null
+    && (side === 'long' ? effectiveTpPx > ref : effectiveTpPx < ref)
+    && tpDistFrac != null && tpDistFrac >= 0.005 && tpDistFrac <= 0.5;
+  const tpProfitUsd = tpValid && effectiveTpPx != null && ref != null ? pos.sz * Math.abs(effectiveTpPx - ref) : null;
+
   const notionalUsd = ref != null ? ref * pos.sz : null;
   // Whether the reduce/close/adjust actions can build a target (mirrors the row card).
   const canExit = d.entryPx != null && d.markPx != null;
@@ -278,6 +299,48 @@ export default function PositionInsightsModal({
       if (!res.ok || json.ok === false) setStopMsg({ ok: false, text: json.error ?? `Failed (${res.status})` });
       else { setStopMsg({ ok: true, text: 'Stop canceled.' }); setStop(null); }
     } catch { setStopMsg({ ok: false, text: 'Network error — retry.' }); } finally { setStopBusy(false); }
+  }
+
+  // Resting take-profit on HL (mirrors the stop's fetch/place/cancel).
+  const [tp, setTp] = useState<{ oid: number; triggerPx: number | null; sz: number } | null>(null);
+  const [tpBusy, setTpBusy] = useState(false);
+  const [tpMsg, setTpMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [tpStateStatus, setTpStateStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
+  const refetchTp = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/cockpit/position-tp?coin=${encodeURIComponent(pos.coin)}`, { credentials: 'same-origin' });
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; tp?: { oid: number; triggerPx: number | null; sz: number } | null };
+      if (json.ok) { setTp(json.tp ?? null); setTpStateStatus('loaded'); }
+      else setTpStateStatus('error');
+    } catch { setTpStateStatus('error'); }
+  }, [pos.coin]);
+  useEffect(() => {
+    let active = true;
+    const run = () => { if (active) void refetchTp(); };
+    run();
+    return () => { active = false; };
+  }, [refetchTp]);
+
+  async function placeTp(): Promise<void> {
+    if (effectiveTpPx == null || !tpValid || tpBusy) return;
+    const triggerPx = effectiveTpPx;
+    setTpBusy(true); setTpMsg(null);
+    try {
+      const res = await fetch('/api/cockpit/position-tp', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ action: 'place', coin: pos.coin, triggerPx }) });
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; pushed?: boolean };
+      if (!res.ok || json.ok === false) setTpMsg({ ok: false, text: json.error ?? `Failed (${res.status})` });
+      else { setTpMsg({ ok: true, text: json.pushed ? `Take-profit placed @ ${fmtPx(triggerPx)}.` : `TP recorded (paper).` }); await refetchTp(); }
+    } catch { setTpMsg({ ok: false, text: 'Network error — retry.' }); } finally { setTpBusy(false); }
+  }
+  async function cancelTp(): Promise<void> {
+    if (tpBusy) return;
+    setTpBusy(true); setTpMsg(null);
+    try {
+      const res = await fetch('/api/cockpit/position-tp', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ action: 'cancel', coin: pos.coin }) });
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || json.ok === false) setTpMsg({ ok: false, text: json.error ?? `Failed (${res.status})` });
+      else { setTpMsg({ ok: true, text: 'Take-profit canceled.' }); setTp(null); }
+    } catch { setTpMsg({ ok: false, text: 'Network error — retry.' }); } finally { setTpBusy(false); }
   }
 
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -458,6 +521,54 @@ export default function PositionInsightsModal({
             </>
           )}
           {stopMsg && <span role="status" style={{ color: stopMsg.ok ? ZONE_COLORS.ok : ZONE_COLORS.danger }} className={css({ fontFamily: 'mono', fontSize: '9px', lineHeight: 1.4 })}>{stopMsg.text}</span>}
+        </div>
+
+        {/* Take-profit — a resting reduce-only target on HL (the profit-side sibling of
+            the stop). Suggested at 2R off the stop; the operator can type any target. */}
+        <div className={css({ display: 'flex', flexDirection: 'column', gap: '7px', bg: 'github.bg', border: '1px solid token(colors.github.borderSubtle)', borderRadius: '8px', padding: '11px 13px' })}>
+          <span className={css({ fontFamily: 'label', fontSize: '9px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.06em' })}>Take-profit {tp ? '· resting' : '· not placed'}</span>
+
+          {tpStateStatus === 'loading' ? (
+            <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>checking for a resting target…</span>
+          ) : tpStateStatus === 'error' ? (
+            <span className={css({ fontFamily: 'mono', fontSize: '9px' })} style={{ color: ZONE_COLORS.warn }}>couldn&apos;t verify resting targets — <button type="button" onClick={() => void refetchTp()} className={css({ color: 'github.link', bg: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline' })}>retry</button></span>
+          ) : tp ? (
+            <div className={css({ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' })}>
+              <span data-testid="insights-tp-placed" className={css({ fontFamily: 'mono', fontSize: '11px' })} style={{ color: ZONE_COLORS.ok }}>✓ target @ {fmtPx(tp.triggerPx)} (size {tp.sz})</span>
+              <button type="button" data-testid="insights-tp-cancel" disabled={tpBusy} onClick={() => void cancelTp()} className={css({ fontFamily: 'mono', fontSize: '10px', color: 'zone.danger', bg: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 2px', textDecoration: 'underline', _disabled: { opacity: 0.5 }, _focusVisible: { outline: '2px solid token(colors.github.link)' } })}>{tpBusy ? '…' : 'cancel / re-place'}</button>
+            </div>
+          ) : (
+            <>
+              <div className={css({ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' })}>
+                <label htmlFor={tpInputId} className={css({ fontFamily: 'label', fontSize: '9px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.05em' })}>Target</label>
+                <input
+                  id={tpInputId}
+                  data-testid="insights-tp-input"
+                  inputMode="decimal"
+                  value={tpInput}
+                  onChange={(e) => { setTpTouched(true); setTpInput(e.target.value); }}
+                  placeholder={suggestedTpPx != null && suggestedTpPx > 0 ? priceSeed(suggestedTpPx) : '—'}
+                  className={css({ fontFamily: 'mono', fontSize: '12px', color: 'github.text', bg: 'github.bgSecondary', border: '1px solid token(colors.github.border)', borderRadius: '6px', paddingX: '8px', paddingY: '7px', width: '96px', _focusVisible: { outline: '2px solid token(colors.github.link)' } })}
+                  style={{ fontFeatureSettings: '"tnum"' }}
+                />
+                {tpDistFrac != null && (
+                  <span className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>
+                    {(tpDistFrac * 100).toFixed(1)}% from mark{tpProfitUsd != null ? ` · +${fmtUsd(tpProfitUsd)} profit` : ''}
+                  </span>
+                )}
+                {suggestedTpPx != null && suggestedTpPx > 0 && tpTouched && (
+                  <button type="button" onClick={() => { setTpTouched(false); setTpInput(''); }} className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.link', bg: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline' })}>use 2R</button>
+                )}
+              </div>
+              {!tpValid && tpInput !== '' && (
+                <span data-testid="insights-tp-invalid" className={css({ fontFamily: 'mono', fontSize: '10px' })} style={{ color: ZONE_COLORS.danger }}>
+                  Target must be {side === 'long' ? 'above' : 'below'} the mark (profit side), 0.5–50% away.
+                </span>
+              )}
+              <button type="button" data-testid="insights-tp-place" disabled={tpBusy || !tpValid} onClick={() => void placeTp()} title="Places a REAL reduce-only take-profit order that rests on Hyperliquid" className={css({ alignSelf: 'flex-start', fontFamily: 'sans', fontSize: '10px', fontWeight: 'bold', color: '#06251a', bg: 'zone.ok', border: 'none', borderRadius: '5px', paddingX: '10px', paddingY: '6px', cursor: 'pointer', marginTop: '1px', _disabled: { opacity: 0.45, cursor: 'not-allowed' }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '2px' } })}>{tpBusy ? 'placing…' : effectiveTpPx != null && tpValid ? `Place target @ ${fmtPx(effectiveTpPx)} →` : 'Place target'}</button>
+            </>
+          )}
+          {tpMsg && <span role="status" style={{ color: tpMsg.ok ? ZONE_COLORS.ok : ZONE_COLORS.danger }} className={css({ fontFamily: 'mono', fontSize: '9px', lineHeight: 1.4 })}>{tpMsg.text}</span>}
         </div>
 
         {/* Add margin — the correct, non-martingale de-risk: post collateral → liq

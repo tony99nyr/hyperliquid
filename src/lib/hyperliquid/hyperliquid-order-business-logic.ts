@@ -27,18 +27,21 @@ export interface HlOrderAction {
 }
 
 /**
- * Build a reduce-only STOP-LOSS trigger order (stop-MARKET). Rests on HL and fires
- * when the mark crosses `triggerPxStr`. `isBuy` is the order side (OPPOSITE the
- * position: a long's stop SELLS → isBuy false). For a stop-market, `p` is set to the
- * trigger price (HL fills at market on trigger; p just bounds the field). Always
- * reduceOnly — it can only CLOSE. Field order { type, orders[a,b,p,s,r,t], grouping }
- * is the canonical msgpack shape the signature covers.
+ * Build a reduce-only protective trigger order (market-on-trigger). Rests on HL and
+ * fires when the mark crosses `triggerPxStr`. `isBuy` is the order side (OPPOSITE the
+ * position: a long's protective order SELLS → isBuy false). `tpsl` picks the kind:
+ * 'sl' = STOP-LOSS (fires on an ADVERSE move, trigger on the loss side), 'tp' =
+ * TAKE-PROFIT (fires on a FAVOURABLE move, trigger on the profit side). Both are
+ * ALWAYS reduceOnly — they can only CLOSE. For a market trigger `p` is the trigger
+ * price (HL fills at market; p just bounds the field). Field order
+ * { type, orders[a,b,p,s,r,t], grouping } is the canonical msgpack shape signed.
  */
 export function buildStopOrderAction(input: {
   assetIndex: number;
   isBuy: boolean;
   triggerPxStr: string;
   sizeStr: string;
+  tpsl?: 'sl' | 'tp';
 }): HlOrderAction {
   return {
     type: 'order',
@@ -48,8 +51,8 @@ export function buildStopOrderAction(input: {
         b: input.isBuy,
         p: input.triggerPxStr,
         s: input.sizeStr,
-        r: true, // reduce-only — a protective stop can never increase exposure
-        t: { trigger: { isMarket: true, triggerPx: input.triggerPxStr, tpsl: 'sl' } },
+        r: true, // reduce-only — a protective order can never increase exposure
+        t: { trigger: { isMarket: true, triggerPx: input.triggerPxStr, tpsl: input.tpsl ?? 'sl' } },
       },
     ],
     grouping: 'na',

@@ -83,6 +83,12 @@ describe('buildStopOrderAction — reduce-only stop-market trigger shape', () =>
     expect(o.r).toBe(true); // ALWAYS reduce-only — can only close
     expect(o.t).toEqual({ trigger: { isMarket: true, triggerPx: '1628.9', tpsl: 'sl' } });
   });
+  it('builds a TAKE-PROFIT trigger when tpsl="tp" (still reduce-only)', () => {
+    const action = buildStopOrderAction({ assetIndex: 5, isBuy: false, triggerPxStr: '1750', sizeStr: '2', tpsl: 'tp' });
+    const o = action.orders[0];
+    expect(o.r).toBe(true); // reduce-only either way
+    expect(o.t).toEqual({ trigger: { isMarket: true, triggerPx: '1750', tpsl: 'tp' } });
+  });
 });
 
 describe('resolveAsset', () => {

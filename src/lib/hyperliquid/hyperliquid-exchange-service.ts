@@ -247,12 +247,13 @@ export async function submitOrder(intent: TradeIntent): Promise<HlOrderResult> {
 }
 
 /**
- * Place a reduce-only STOP-LOSS trigger order (stop-market) that RESTS on HL and
- * fires when the mark crosses `triggerPx`. `isBuy` is the order side = OPPOSITE the
- * position (a long's stop sells). Returns the resting order id (oid). Throws on a
+ * Place a reduce-only protective trigger order (market-on-trigger) that RESTS on HL
+ * and fires when the mark crosses `triggerPx`. `isBuy` is the order side = OPPOSITE
+ * the position (a long's protective order sells). `tpsl` picks stop-loss ('sl',
+ * default) or take-profit ('tp'). Returns the resting order id (oid). Throws on a
  * rejected action (fail-closed). Reduce-only — it can only CLOSE, never increase.
  */
-export async function submitStopOrder(coin: string, triggerPx: number, size: number, isBuy: boolean): Promise<{ oid: number | null }> {
+export async function submitStopOrder(coin: string, triggerPx: number, size: number, isBuy: boolean, tpsl: 'sl' | 'tp' = 'sl'): Promise<{ oid: number | null }> {
   if (!(triggerPx > 0) || !(size > 0)) throw new Error(`submitStopOrder: triggerPx + size must be positive (got ${triggerPx}, ${size})`);
   const testnet = isTestnet();
   const network = testnet ? 'testnet' : 'mainnet';
@@ -261,10 +262,10 @@ export async function submitStopOrder(coin: string, triggerPx: number, size: num
   const { assetIndex, szDecimals } = resolveAsset(universe, coin);
 
   const sizeStr = formatHlSize(size, szDecimals);
-  if (!(Number(sizeStr) > 0)) throw new Error(`stop size ${size} rounds below the ${coin} lot size.`);
+  if (!(Number(sizeStr) > 0)) throw new Error(`order size ${size} rounds below the ${coin} lot size.`);
   const triggerPxStr = formatHlPrice(triggerPx, szDecimals);
 
-  const action = buildStopOrderAction({ assetIndex, isBuy, triggerPxStr, sizeStr });
+  const action = buildStopOrderAction({ assetIndex, isBuy, triggerPxStr, sizeStr, tpsl });
   const nonce = nextNonce();
   const signature = await signL1Action({ wallet, action: action as unknown as Record<string, unknown>, nonce, isTestnet: testnet });
   const res = await fetch(testnet ? EXCHANGE_URL.testnet : EXCHANGE_URL.mainnet, {

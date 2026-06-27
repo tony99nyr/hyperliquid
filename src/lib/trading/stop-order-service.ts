@@ -71,3 +71,35 @@ export async function cancelStopOnHl(coin: string, oid: number): Promise<{ pushe
   await submitCancel(coin, oid);
   return { pushed: true };
 }
+
+// ─── Take-profit: the profit-side sibling of the protective stop ───────────────
+// Same reduce-only trigger mechanism, fires on a FAVOURABLE move ('tp'). Distinct
+// HL orderType ("Take Profit Market") so it never collides with the stop matcher.
+
+/** A reduce-only Take-Profit trigger order. */
+function isTpOrder(o: HlOpenOrder): boolean {
+  return o.isTrigger && o.reduceOnly && /take[\s-]?profit/i.test(o.orderType);
+}
+
+/** The resting take-profit for `coin`, or null. Reads the live account orders. */
+export async function findOpenTp(coin: string): Promise<HlOpenOrder | null> {
+  const address = getHlAccountAddress();
+  if (!address) return null;
+  const orders = await fetchOpenOrders(address, validateEnv().HL_NETWORK);
+  const c = coin.trim().toUpperCase();
+  return orders.find((o) => o.coin === c && isTpOrder(o)) ?? null;
+}
+
+/**
+ * Place a reduce-only TAKE-PROFIT for `coin` — same order side as a stop (opposite
+ * the position: a long's TP SELLS) but fires on the PROFIT side. LIVE only; PAPER
+ * no-op. Throws on HL rejection (fail-closed).
+ */
+export async function placeTpOnHl(coin: string, triggerPx: number, size: number, side: 'long' | 'short'): Promise<{ pushed: boolean; oid: number | null }> {
+  if (getTradingMode() !== 'live') return { pushed: false, oid: null };
+  const { oid } = await submitStopOrder(coin, triggerPx, size, side === 'short', 'tp');
+  return { pushed: true, oid };
+}
+
+/** Cancel a resting take-profit by (coin, oid) — same mechanism as a stop cancel. */
+export const cancelTpOnHl = cancelStopOnHl;
