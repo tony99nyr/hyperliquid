@@ -25,6 +25,10 @@ export interface AdjustLeverageTarget {
   entryPx: number;
   markPx: number | null;
   currentLeverage: number | null;
+  /** REAL HL liquidation now (reflects posted margin) — the honest "current liq". */
+  realLiqPx?: number | null;
+  /** Effective leverage = notional / margin used (reflects added margin). */
+  effLeverage?: number | null;
 }
 
 export interface AdjustLeverageModalProps {
@@ -107,6 +111,16 @@ export default function AdjustLeverageModal({ target, onClose, onExecuted }: Adj
 
   const blockedByAck = plan.dangerNearMark && !ack;
   const noChange = !plan.changed;
+  // The REAL current liquidation (reflects margin you've posted) — the formula
+  // plan.currentLiqPx ignores it. Prefer the real value when we have it.
+  const realCurrentLiq = target.realLiqPx ?? plan.currentLiqPx;
+  const realCurrentLiqDistPct = realCurrentLiq != null && target.markPx != null && target.markPx > 0
+    ? (Math.abs(realCurrentLiq - target.markPx) / target.markPx) * 100 : null;
+  // Over-margined = you've added margin so effective leverage is well below the
+  // setting. Changing the leverage SETTING may rebalance that margin and move liq —
+  // the formula "new liq" below assumes margin realigns to the setting.
+  const overMargined = target.effLeverage != null && target.currentLeverage != null
+    && target.effLeverage < target.currentLeverage * 0.9;
   // Lowering leverage on an isolated position = posting more margin; HL rejects when
   // free collateral is short. "Add margin" does the same de-risk without that
   // restriction, so nudge toward it when the operator drags leverage DOWN.
@@ -201,11 +215,11 @@ export default function AdjustLeverageModal({ target, onClose, onExecuted }: Adj
 
           {/* Before / after summary */}
           <div className={css({ bg: 'cockpit.inset', border: '1px solid token(colors.github.border)', borderRadius: '11px', paddingX: '16px' })}>
-            <SummaryRow label="Current leverage" value={target.currentLeverage != null ? `${Math.round(target.currentLeverage)}×` : '—'} color={GH.textMuted} />
+            <SummaryRow label="Current leverage" value={target.currentLeverage != null ? `${Math.round(target.currentLeverage)}×${overMargined && target.effLeverage != null ? ` · ${target.effLeverage.toFixed(1)}× eff` : ''}` : '—'} color={GH.textMuted} />
             <SummaryRow label="New leverage" value={`${plan.leverage}×`} />
-            <SummaryRow label="Current liq" value={fmtPx(plan.currentLiqPx)} color={GH.textMuted} />
+            <SummaryRow label="Current liq" value={`${fmtPx(realCurrentLiq)}${realCurrentLiqDistPct != null ? ` (${realCurrentLiqDistPct.toFixed(1)}%)` : ''}`} color={GH.textMuted} />
             <SummaryRow
-              label="New liq"
+              label={overMargined ? 'New liq (est.)' : 'New liq'}
               value={fmtPx(plan.liqPx)}
               color={plan.dangerNearMark ? ZONE_COLORS.danger : GH.text}
               testid="adjust-lev-newliq"
@@ -217,6 +231,12 @@ export default function AdjustLeverageModal({ target, onClose, onExecuted }: Adj
               last
             />
           </div>
+
+          {overMargined && (
+            <p data-testid="adjust-lev-overmargined" className={css({ fontSize: '11px', lineHeight: '1.5', borderRadius: '9px', padding: '10px 13px' })} style={{ background: 'rgba(217,164,65,0.1)', border: '1px solid rgba(217,164,65,0.34)', color: '#e6c478' }}>
+              ⚠ You&apos;ve posted extra margin here (effective {target.effLeverage?.toFixed(1)}× vs the {target.currentLeverage != null ? Math.round(target.currentLeverage) : '—'}× setting), so your real liquidation is far out at {fmtPx(realCurrentLiq)}. Changing the leverage setting can <strong>release that margin and pull liquidation back in</strong> — the &quot;new liq&quot; above is an estimate assuming margin realigns to the setting. To de-risk, use <strong>Add margin</strong> instead; you don&apos;t need to touch leverage.
+            </p>
+          )}
 
           {isLowering && (
             <p data-testid="adjust-lev-derisk-nudge" className={css({ fontSize: '11px', lineHeight: '1.5', borderRadius: '9px', padding: '10px 13px' })} style={{ background: 'rgba(91,140,255,0.08)', border: '1px solid rgba(91,140,255,0.28)', color: '#9ab4ff' }}>

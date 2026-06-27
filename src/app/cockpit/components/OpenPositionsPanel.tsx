@@ -242,7 +242,7 @@ export default function OpenPositionsPanel({
         const t: ExitTarget | null = d.entryPx != null && d.markPx != null
           ? { coin: ip.coin, side: d.side, size: ip.sz, entryPx: d.entryPx, markPx: d.markPx } : null;
         const at: AdjustLeverageTarget | null = d.entryPx != null
-          ? { coin: ip.coin, side: d.side, entryPx: d.entryPx, markPx: d.markPx, currentLeverage: d.leverage } : null;
+          ? { coin: ip.coin, side: d.side, entryPx: d.entryPx, markPx: d.markPx, currentLeverage: d.leverage, realLiqPx: riskByCoin[ip.coin]?.liqPx ?? null, effLeverage: riskByCoin[ip.coin]?.effLeverage ?? null } : null;
         return (
           <PositionInsightsModal
             pos={ip}
@@ -320,7 +320,7 @@ function PositionRowCard({
   // just disables the mark-relative danger guard, not the action.
   const adjustTarget: AdjustLeverageTarget | null =
     d.entryPx != null
-      ? { coin: pos.coin, side, entryPx: d.entryPx, markPx: d.markPx, currentLeverage: d.leverage }
+      ? { coin: pos.coin, side, entryPx: d.entryPx, markPx: d.markPx, currentLeverage: d.leverage, realLiqPx: risk?.liqPx ?? null, effLeverage: risk?.effLeverage ?? null }
       : null;
 
   return (
