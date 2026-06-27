@@ -16,10 +16,11 @@ import { ResponsiveContainer, AreaChart, Area, YAxis } from 'recharts';
 import { useScoutHypotheses } from '@/hooks/useScoutHypotheses';
 import { useScoutHeartbeat } from '@/hooks/useScoutHeartbeat';
 import { useScoutSessionIds } from '@/hooks/useScoutSessionIds';
-import { useScoutPerformance } from '@/hooks/useScoutPerformance';
+import { useScoutPerformance, type ScoutLanes } from '@/hooks/useScoutPerformance';
 import { usePositionPnl } from '@/hooks/usePositionPnl';
 import type { PositionRow, PnlSnapshot } from '@/hooks/realtime-row-mappers';
 import type { PerformanceSummary } from '@/lib/cockpit/performance-service';
+import type { LaneCard } from '@/types/scout';
 import type { Hypothesis } from '@/types/cockpit';
 import { panelSurface, GH, ZONE_COLORS, fmtUsd, fmtPx } from './panel-styles';
 import { userPositionDisplay } from './position-panel-helpers';
@@ -36,9 +37,11 @@ export interface ScoutPanelProps {
   positionsOverride?: { positions: PositionRow[]; latestPnlByCoin: Record<string, PnlSnapshot> };
   /** Test/RSC seed: render this scout track record instead of fetching. */
   perfOverride?: PerformanceSummary | null;
+  /** Test/RSC seed: render this per-lane breakdown instead of fetching. */
+  lanesOverride?: ScoutLanes | null;
 }
 
-export default function ScoutPanel({ hypsOverride, positionsOverride, perfOverride }: ScoutPanelProps) {
+export default function ScoutPanel({ hypsOverride, positionsOverride, perfOverride, lanesOverride }: ScoutPanelProps) {
   const controlled = hypsOverride !== undefined;
   const live = useScoutHypotheses({ enabled: !controlled });
   const hyps = hypsOverride ?? live.rows;
@@ -52,6 +55,11 @@ export default function ScoutPanel({ hypsOverride, positionsOverride, perfOverri
   const k = perf?.kpis;
   const tradeWinPct = k && k.closedCount > 0 ? `${k.winRatePct.toFixed(0)}%` : '—';
   const curve = perf?.equity ?? [];
+
+  // Per-lane breakdown (directional + vault/carry BENCHMARKS), persisted by the
+  // nas-watch tick into lane_scorecards and served by the scout-performance route.
+  const lanesData = lanesOverride !== undefined ? lanesOverride : perfState.lanes;
+  const laneCards = lanesData?.lanes ?? [];
 
   // The scout's OWN open positions: the active scout session (latestId) → its
   // folded positions + latest pnl snapshots. Read-only (the scout trades itself);
@@ -143,6 +151,19 @@ export default function ScoutPanel({ hypsOverride, positionsOverride, perfOverri
         })()}
       </div>
 
+      {/* per-lane breakdown — directional (traded) vs vault/carry (benchmarks) */}
+      {laneCards.length > 0 && (
+        <div data-testid="scout-lanes" className={css({ display: 'flex', flexDirection: 'column', gap: '5px', borderTop: '1px solid token(colors.github.borderSubtle)', paddingTop: '9px' })}>
+          <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' })}>
+            <span className={css({ fontFamily: 'label', fontSize: '9px', fontWeight: 'bold', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'github.textMuted' })}>
+              Lanes <span style={{ color: GH.textBright }}>· {laneCards.length}</span>
+            </span>
+            <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'cockpit.faint' })}>traded + benchmarks</span>
+          </div>
+          {laneCards.map((l) => <ScoutLaneRow key={l.lane} lane={l} />)}
+        </div>
+      )}
+
       {/* open positions the scout is holding right now */}
       <div data-testid="scout-positions" className={css({ display: 'flex', flexDirection: 'column', gap: '6px', borderTop: '1px solid token(colors.github.borderSubtle)', paddingTop: '9px' })}>
         <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' })}>
@@ -197,6 +218,24 @@ export default function ScoutPanel({ hypsOverride, positionsOverride, perfOverri
         )}
       </div>
     </section>
+  );
+}
+
+/** One compact, read-only row for a scored lane: name · net$ · run-rate · label ·
+ *  verdict. 'directional' is the traded lane; vault/carry are passive benchmarks. */
+function ScoutLaneRow({ lane }: { lane: LaneCard }) {
+  const verdictColor = lane.verdict === 'graduate' ? ZONE_COLORS.ok : lane.verdict === 'kill' ? ZONE_COLORS.danger : GH.textMuted;
+  const netColor = lane.netUsd > 0 ? ZONE_COLORS.ok : lane.netUsd < 0 ? ZONE_COLORS.danger : GH.textMuted;
+  const coin = typeof lane.detail?.coin === 'string' ? lane.detail.coin : '';
+  const name = lane.lane === 'vault:HLP' ? 'vault·HLP' : lane.lane === 'carry' ? `carry${coin ? `·${coin}` : ''}` : lane.lane;
+  return (
+    <div data-testid="scout-lane-row" data-lane={lane.lane} className={css({ display: 'flex', alignItems: 'baseline', gap: '8px', fontFamily: 'mono', fontSize: '10px' })}>
+      <span className={css({ color: 'github.textBright', fontWeight: 'semibold', width: '74px', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })}>{name}</span>
+      <span data-testid="scout-lane-net" style={{ color: netColor, fontFeatureSettings: '"tnum"', width: '58px', flexShrink: 0 }}>{fmtUsd(lane.netUsd)}</span>
+      <span className={css({ color: 'github.textMuted', flexShrink: 0 })} style={{ fontFeatureSettings: '"tnum"' }}>{fmtUsd(lane.monthlyRunRateUsd)}/mo</span>
+      <span title={lane.label} className={css({ color: 'cockpit.faint', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })}>{lane.label}</span>
+      <span style={{ color: verdictColor }} className={css({ fontFamily: 'label', fontSize: '8.5px', fontWeight: 'bold', letterSpacing: '0.04em', flexShrink: 0 })}>{lane.verdict.toUpperCase()}</span>
+    </div>
   );
 }
 

@@ -11,6 +11,7 @@ import { verifyAdminAuth, getClientIdentifier } from '@/lib/infrastructure/auth/
 import { isSameOrigin } from '@/lib/infrastructure/auth/same-origin';
 import { checkRateLimit } from '@/lib/infrastructure/rate-limiting/in-memory-rate-limit';
 import { getScoutPerformanceSummary } from '@/lib/cockpit/performance-service';
+import { readScoutLaneCards } from '@/lib/scout/lane-scorecard-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +27,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!checkRateLimit(`scout-perf:${getClientIdentifier(request)}`, MAX_PER_MIN, 60_000).allowed) {
     return NextResponse.json({ ok: false, error: 'Too many requests' }, { status: 429 });
   }
-  const summary = await getScoutPerformanceSummary();
-  return NextResponse.json({ ok: true, summary });
+  const [summary, laneCards] = await Promise.all([
+    getScoutPerformanceSummary(),
+    readScoutLaneCards().catch(() => ({ account: null, lanes: [], updatedAt: null })),
+  ]);
+  return NextResponse.json({ ok: true, summary, lanes: laneCards });
 }
