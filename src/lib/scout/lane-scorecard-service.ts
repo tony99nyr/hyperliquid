@@ -229,10 +229,12 @@ export async function persistScoutLaneCards(
     period_days: c.periodDays, verdict: c.verdict, label: c.label, open_count: c.openCount, detail: c.detail,
     updated_at: new Date(now).toISOString(),
   }));
-  // Replace-all (one writer): clear then insert so stale lanes can't linger.
-  await client.from('lane_scorecards').delete().neq('lane', ' ');
+  // Upsert on the lane PK (single writer). Update-in-place beats delete-then-insert:
+  // no empty-table window if a write fails, no duplicate-key hazard, and a transient HL
+  // outage that drops a benchmark this tick leaves the LAST-GOOD row (stale, not blank —
+  // updated_at shows its age). Lanes are a stable set, so no orphan rows accrue.
   if (rows.length) {
-    const { error } = await client.from('lane_scorecards').insert(rows);
+    const { error } = await client.from('lane_scorecards').upsert(rows, { onConflict: 'lane' });
     if (error) throw new Error(`persistScoutLaneCards failed: ${error.message}`);
   }
 }

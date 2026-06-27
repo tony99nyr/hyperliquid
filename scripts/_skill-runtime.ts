@@ -248,7 +248,7 @@ export async function requireApproval(input: RequireApprovalInput): Promise<Appr
  * environment — a missing file must not throw, and loadEnvFile does NOT clobber
  * vars already set. Mirrors scripts/_smoke.ts.
  */
-function loadEnvLocal(): void {
+export function loadEnvLocal(): void {
   const candidates: string[] = [];
   // Repo-root-relative (deterministic, cwd-independent). `__dirname` is available
   // under tsx's CommonJS mode (package.json has no "type":"module"); guard anyway

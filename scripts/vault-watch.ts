@@ -13,7 +13,13 @@
  *   pnpm vault-watch --interval 900 # every 15 min
  */
 
+import { loadEnvLocal } from './_skill-runtime';
 import { runVaultWatchCycle, DEFAULT_VAULT_TARGETS } from '@/lib/scout/vault-watch-service';
+
+// Load .env.local (CWD-independent) so the Supabase service-role client configures
+// under the NAS cron — the same bootstrap the run()-wrapped skills get. Without it
+// getServiceRoleClient throws "Supabase service-role client not configured".
+loadEnvLocal();
 
 const DEFAULT_INTERVAL_SEC = 3600; // hourly
 const MIN_INTERVAL_SEC = 60;
