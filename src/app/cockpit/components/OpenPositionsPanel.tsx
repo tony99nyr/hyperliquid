@@ -24,7 +24,9 @@ import { useEffect, useState } from 'react';
 import { css } from '@styled-system/css';
 import { usePositionPnl } from '@/hooks/usePositionPnl';
 import { useStops } from '@/hooks/useStops';
+import { useAccountRisk } from '@/hooks/useAccountRisk';
 import type { RestingStop } from '@/lib/trading/stop-order-service';
+import type { AccountRisk } from '@/lib/trading/account-risk-service';
 import type { TradingMode } from '@/types/fill';
 import type { PnlSnapshot, PositionRow } from '@/hooks/realtime-row-mappers';
 import { ZONE_COLORS, TERM, GH, fmtUsd, fmtPx } from './panel-styles';
@@ -57,6 +59,8 @@ export interface OpenPositionsPanelProps {
   positionsOverride?: { positions: PositionRow[]; latestPnlByCoin: Record<string, PnlSnapshot> };
   /** Test/RSC seed for resting stops (only used alongside positionsOverride). */
   stopsOverride?: Record<string, RestingStop>;
+  /** Test/RSC seed for real account risk (only used alongside positionsOverride). */
+  riskOverride?: Record<string, AccountRisk>;
 }
 
 interface ExitRequest {
@@ -72,6 +76,7 @@ export default function OpenPositionsPanel({
   onNewPosition,
   positionsOverride,
   stopsOverride,
+  riskOverride,
 }: OpenPositionsPanelProps) {
   const live = usePositionPnl(positionsOverride ? null : sessionId);
   const positions = positionsOverride ? positionsOverride.positions : live.positions;
@@ -83,6 +88,13 @@ export default function OpenPositionsPanel({
   const liveStops = useStops(!positionsOverride);
   const stopsByCoin = positionsOverride ? (stopsOverride ?? {}) : liveStops.stopsByCoin;
   const stopsLoaded = positionsOverride ? true : liveStops.loaded;
+
+  // REAL liquidation + effective leverage from HL (reflects posted margin). The fold's
+  // liq formula (entry×lev-setting) ignores margin you add, so it shows a static,
+  // pessimistic distance; this overrides it with the true number. Test seed via
+  // riskOverride. Falls back to the formula per-coin when there's no real read.
+  const liveRisk = useAccountRisk(!positionsOverride);
+  const riskByCoin = positionsOverride ? (riskOverride ?? {}) : liveRisk.riskByCoin;
 
   const [exitReq, setExitReq] = useState<ExitRequest | null>(null);
   const [adjustReq, setAdjustReq] = useState<AdjustLeverageTarget | null>(null);
@@ -164,6 +176,7 @@ export default function OpenPositionsPanel({
               mode={mode}
               stop={stopsByCoin[p.coin]}
               stopsLoaded={stopsLoaded}
+              risk={riskByCoin[p.coin]}
               nowMs={nowMs}
               onOpenInsights={() => setInsightsCoin(p.coin)}
               onReduce={(t) => setExitReq({ target: t, initialPct: 25 })}
@@ -236,6 +249,8 @@ export default function OpenPositionsPanel({
             pnl={pnlByCoin[ip.coin]}
             regime={regimeByCoin[ip.coin] ?? 'neutral'}
             mode={mode}
+            realLiqPx={riskByCoin[ip.coin]?.liqPx ?? null}
+            effLeverage={riskByCoin[ip.coin]?.effLeverage ?? null}
             nowMs={nowMs}
             onReduce={() => { if (t) { setInsightsCoin(null); setExitReq({ target: t, initialPct: 25 }); } }}
             onClose={() => { if (t) { setInsightsCoin(null); setExitReq({ target: t, initialPct: 100 }); } }}
@@ -255,6 +270,7 @@ function PositionRowCard({
   mode,
   stop,
   stopsLoaded,
+  risk,
   nowMs,
   onOpenInsights,
   onReduce,
@@ -267,6 +283,7 @@ function PositionRowCard({
   mode: TradingMode;
   stop: RestingStop | undefined;
   stopsLoaded: boolean;
+  risk: AccountRisk | undefined;
   nowMs: number;
   onOpenInsights: () => void;
   onReduce: (t: ExitTarget) => void;
@@ -283,7 +300,9 @@ function PositionRowCard({
     entryPx: d.entryPx,
     markPx: d.markPx,
     leverage: d.leverage,
-    liqPxOverride: d.liqPx,
+    // Prefer the REAL HL liquidation (reflects posted margin); fall back to the fold's
+    // formula only when there's no live account read (paper / no address).
+    liqPxOverride: risk?.liqPx ?? d.liqPx,
     regime,
   });
   const stopState = stopStatus(stop, d.markPx, mode);
@@ -329,6 +348,11 @@ function PositionRowCard({
           </span>
           <span className={css({ fontFamily: 'mono', fontSize: '11px', color: 'github.textMuted' })}>
             {pos.sz.toLocaleString('en-US', { maximumFractionDigits: 4 })}{d.leverage != null ? ` · ${d.leverage}×` : ''}
+            {/* Effective leverage when posted margin pulls it meaningfully below the
+                setting (≥10% lower) — shows the de-risk that the lev-setting hides. */}
+            {risk?.effLeverage != null && d.leverage != null && risk.effLeverage < d.leverage * 0.9 && (
+              <span data-testid="position-eff-lev" style={{ color: ZONE_COLORS.ok }}> · {risk.effLeverage.toFixed(1)}× eff</span>
+            )}
           </span>
           {pos.openedAt != null && (
             <span data-testid="position-held" className={css({ fontFamily: 'mono', fontSize: '10px', color: 'cockpit.faint' })}>· held {heldShort(pos.openedAt, nowMs)}</span>

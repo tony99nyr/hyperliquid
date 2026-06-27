@@ -47,6 +47,10 @@ export interface PositionInsightsModalProps {
   regime: RegimeDir;
   /** Trading mode — drives the LIVE confirm gate on Add-to-position. */
   mode?: TradingMode;
+  /** REAL HL liquidation (reflects posted margin); overrides the margin-blind formula. */
+  realLiqPx?: number | null;
+  /** Effective leverage = notional / margin used (reflects added margin). */
+  effLeverage?: number | null;
   /** Injected clock (parent ticks it) so "held" updates without a Date() in render. */
   nowMs: number;
   onReduce: () => void;
@@ -56,13 +60,14 @@ export interface PositionInsightsModalProps {
 }
 
 export default function PositionInsightsModal({
-  pos, pnl, regime, mode = 'paper', nowMs, onReduce, onClose, onAdjust, onDismiss,
+  pos, pnl, regime, mode = 'paper', realLiqPx = null, effLeverage = null, nowMs, onReduce, onClose, onAdjust, onDismiss,
 }: PositionInsightsModalProps) {
   const d = userPositionDisplay(pos, pnl);
   const side = d.side;
   const sideColor = side === 'long' ? ZONE_COLORS.ok : ZONE_COLORS.danger;
 
-  const health = positionHealth({ side, entryPx: d.entryPx, markPx: d.markPx, leverage: d.leverage, liqPxOverride: d.liqPx, regime });
+  // Prefer the REAL HL liquidation (reflects posted margin) over the fold's formula.
+  const health = positionHealth({ side, entryPx: d.entryPx, markPx: d.markPx, leverage: d.leverage, liqPxOverride: realLiqPx ?? d.liqPx, regime });
   // Drive the health pill off the SAME liq-distance zones as the bar below it
   // (positionHealth.liqColor) so label + bar never disagree on the same number.
   const liqLabel = health.liqDistPct == null ? 'UNKNOWN'
@@ -327,7 +332,7 @@ export default function PositionInsightsModal({
             <span className={css({ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' })}>
               <span className={css({ fontFamily: 'mono', fontSize: 'md', fontWeight: 'bold', color: 'github.textBright' })}>{pos.coin}-PERP</span>
               <span style={{ color: sideColor, background: `${sideColor}1f` }} className={css({ fontFamily: 'mono', fontSize: '10px', fontWeight: 'bold', letterSpacing: '0.06em', paddingX: '7px', paddingY: '2px', borderRadius: '5px' })}>{side.toUpperCase()}</span>
-              <span className={css({ fontFamily: 'mono', fontSize: '11px', color: 'github.textMuted' })}>{pos.sz.toLocaleString('en-US', { maximumFractionDigits: 4 })}{d.leverage != null ? ` · ${d.leverage}×` : ''}</span>
+              <span className={css({ fontFamily: 'mono', fontSize: '11px', color: 'github.textMuted' })}>{pos.sz.toLocaleString('en-US', { maximumFractionDigits: 4 })}{d.leverage != null ? ` · ${d.leverage}×` : ''}{effLeverage != null && d.leverage != null && effLeverage < d.leverage * 0.9 && (<span style={{ color: ZONE_COLORS.ok }}> · {effLeverage.toFixed(1)}× eff</span>)}</span>
             </span>
             <span className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>{heldLabel(pos.openedAt, nowMs)}{notionalUsd != null ? ` · ≈ ${fmtCompactUsd(notionalUsd)} notional` : ''}</span>
           </div>

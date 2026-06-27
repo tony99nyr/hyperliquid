@@ -100,6 +100,21 @@ describe('OpenPositionsPanel', () => {
     expect(screen.getByTestId('stop-status').getAttribute('data-state')).toBe('na');
   });
 
+  it('uses the REAL HL liquidation + effective leverage (reflects posted margin), not the formula', () => {
+    render(
+      <OpenPositionsPanel
+        sessionId={null}
+        mode="live"
+        positionsOverride={{ positions: [position({ side: 'short', leverage: 10 })], latestPnlByCoin: { ETH: pnl('ETH', 1739.5, 0) } }}
+        riskOverride={{ ETH: { liqPx: 2500, effLeverage: 1.5, marginUsed: 800 } }}
+      />,
+    );
+    // Real liq 2500 vs mark 1739.5 ≈ 43% away — NOT the ~9.8% the 10x formula would give.
+    expect(parseFloat(screen.getByTestId('liq-dist').textContent!)).toBeGreaterThan(30);
+    // Effective leverage surfaced (1.5x, far below the 10x setting).
+    expect(screen.getByTestId('position-eff-lev').textContent).toMatch(/1\.5× eff/);
+  });
+
   it('flags a FIGHTING long against a bearish regime', () => {
     render(
       <OpenPositionsPanel
