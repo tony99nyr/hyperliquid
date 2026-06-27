@@ -251,6 +251,7 @@ export default function OpenPositionsPanel({
             mode={mode}
             realLiqPx={riskByCoin[ip.coin]?.liqPx ?? null}
             effLeverage={riskByCoin[ip.coin]?.effLeverage ?? null}
+            currentMarginUsd={riskByCoin[ip.coin]?.marginUsed ?? null}
             nowMs={nowMs}
             onReduce={() => { if (t) { setInsightsCoin(null); setExitReq({ target: t, initialPct: 25 }); } }}
             onClose={() => { if (t) { setInsightsCoin(null); setExitReq({ target: t, initialPct: 100 }); } }}

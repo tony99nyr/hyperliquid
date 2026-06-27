@@ -51,6 +51,9 @@ export interface PositionInsightsModalProps {
   realLiqPx?: number | null;
   /** Effective leverage = notional / margin used (reflects added margin). */
   effLeverage?: number | null;
+  /** REAL isolated margin backing the position (HL marginUsed) — makes the add/margin
+   *  previews margin-aware (accurate new-liq) instead of the leverage-setting formula. */
+  currentMarginUsd?: number | null;
   /** Injected clock (parent ticks it) so "held" updates without a Date() in render. */
   nowMs: number;
   onReduce: () => void;
@@ -60,7 +63,7 @@ export interface PositionInsightsModalProps {
 }
 
 export default function PositionInsightsModal({
-  pos, pnl, regime, mode = 'paper', realLiqPx = null, effLeverage = null, nowMs, onReduce, onClose, onAdjust, onDismiss,
+  pos, pnl, regime, mode = 'paper', realLiqPx = null, effLeverage = null, currentMarginUsd = null, nowMs, onReduce, onClose, onAdjust, onDismiss,
 }: PositionInsightsModalProps) {
   const d = userPositionDisplay(pos, pnl);
   const side = d.side;
@@ -145,8 +148,19 @@ export default function PositionInsightsModal({
   const amt = parseFloat(marginAmt);
   const amtValid = Number.isFinite(amt) && amt > 0;
   // Projected effective leverage after the add (notional / (oldMargin + amt)).
-  const projectedLev = amtValid && d.leverage != null && d.leverage > 0 && d.entryPx != null
-    ? (() => { const notional = d.entryPx * pos.sz; const m = notional / d.leverage + amt; return m > 0 ? Math.max(1, notional / m) : null; })()
+  // Projected effective leverage after posting `amt` more margin. Use the REAL current
+  // margin (marginUsed) so it reflects margin you've already added; fall back to the
+  // leverage-setting estimate (notional / lev) only when there's no live read.
+  const projectedLev = amtValid && d.markPx != null
+    ? (() => {
+        const notional = d.markPx * pos.sz;
+        const baseMargin = currentMarginUsd != null && currentMarginUsd > 0
+          ? currentMarginUsd
+          : d.leverage != null && d.leverage > 0 ? notional / d.leverage : null;
+        if (baseMargin == null) return null;
+        const m = baseMargin + amt;
+        return m > 0 ? Math.max(1, notional / m) : null;
+      })()
     : null;
 
   async function submitAddMargin(): Promise<void> {
@@ -182,7 +196,7 @@ export default function PositionInsightsModal({
   const [addMsg, setAddMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const addVal = parseFloat(addValue);
   const addPreview = d.entryPx != null && d.markPx != null && Number.isFinite(addVal) && addVal > 0
-    ? previewAdd({ side, currentSz: pos.sz, currentEntryPx: d.entryPx, markPx: d.markPx, leverage: d.leverage ?? 1, mode: addMode, value: addVal, maxAddMultiple: MAX_ADD_MULTIPLE })
+    ? previewAdd({ side, currentSz: pos.sz, currentEntryPx: d.entryPx, markPx: d.markPx, leverage: d.leverage ?? 1, mode: addMode, value: addVal, maxAddMultiple: MAX_ADD_MULTIPLE, currentMarginUsd: currentMarginUsd ?? undefined })
     : null;
   const requiredAddPhrase = entryLiveConfirmPhrase(side === 'long' ? 'buy' : 'sell', pos.coin);
   const addApproveOk = !addBusy && addPreview != null && addPreview.addSz > 0 && addPreview.warnings.length === 0
@@ -510,8 +524,8 @@ export default function PositionInsightsModal({
                 <div className={css({ display: 'flex', flexDirection: 'column', gap: '3px', fontFamily: 'mono', fontSize: '10px', color: 'github.text', bg: 'github.bgSecondary', borderRadius: '6px', padding: '8px 10px' })} style={{ fontFeatureSettings: '"tnum"' }}>
                   <div className={css({ display: 'flex', justifyContent: 'space-between' })}><span className={css({ color: 'github.textMuted' })}>add</span><span>+{addPreview.addSz} {pos.coin} · ≈{fmtCompactUsd(addPreview.addNotionalUsd)} · margin {fmtCompactUsd(addPreview.addMarginUsd)}</span></div>
                   <div className={css({ display: 'flex', justifyContent: 'space-between' })}><span className={css({ color: 'github.textMuted' })}>size → / avg →</span><span>{pos.sz} → <strong>{addPreview.newSz}</strong> · avg {fmtPx(addPreview.newAvgEntryPx)}</span></div>
-                  <div className={css({ display: 'flex', justifyContent: 'space-between' })}><span className={css({ color: 'github.textMuted' })}>new liq</span><span>{fmtPx(addPreview.newLiqPx)} {addPreview.newLiqDistPct != null ? `(${addPreview.newLiqDistPct.toFixed(1)}% away)` : ''}</span></div>
-                  <div className={css({ display: 'flex', justifyContent: 'space-between' })}><span className={css({ color: 'github.textMuted' })}>$ at risk (at liq)</span><span style={{ color: ZONE_COLORS.warn }}>{fmtCompactUsd(addPreview.riskAtLiqUsd)} (was {fmtCompactUsd((d.entryPx ?? 0) * pos.sz / Math.max(1, d.leverage ?? 1))})</span></div>
+                  <div className={css({ display: 'flex', justifyContent: 'space-between' })}><span className={css({ color: 'github.textMuted' })}>new liq</span><span>{fmtPx(addPreview.newLiqPx)} {addPreview.newLiqDistPct != null ? `(${addPreview.newLiqDistPct.toFixed(1)}% away)` : ''} · {addPreview.newEffLeverage.toFixed(1)}× eff</span></div>
+                  <div className={css({ display: 'flex', justifyContent: 'space-between' })}><span className={css({ color: 'github.textMuted' })}>$ at risk (at liq)</span><span style={{ color: ZONE_COLORS.warn }}>{fmtCompactUsd(addPreview.riskAtLiqUsd)}{currentMarginUsd != null && currentMarginUsd > 0 ? ` (was ${fmtCompactUsd(currentMarginUsd)})` : ''}</span></div>
                 </div>
               )}
 

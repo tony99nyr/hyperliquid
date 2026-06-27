@@ -46,9 +46,23 @@ describe('previewAdd', () => {
     expect(p.warnings.some((w) => /exceeds/i.test(w))).toBe(true);
   });
 
-  it('$-at-risk grows with the larger position', () => {
+  it('$-at-risk grows with the larger position (formula path, no real margin)', () => {
     const p = previewAdd({ side: 'long', currentSz: 2, currentEntryPx: 100, markPx: 100, leverage: 5, mode: 'pct', value: 100 });
     // new notional = 4*100 = 400; risk ≈ 400/5 = 80 (vs 40 before).
     expect(p.riskAtLiqUsd).toBeCloseTo(80, 1);
+    expect(p.newEffLeverage).toBeCloseTo(5, 1); // no real margin → effective == setting
+  });
+
+  it('margin-aware: posted margin keeps liq FAR after an add (not the lev-setting liq)', () => {
+    // ETH short with lots of isolated margin posted → effective lev ~1.4x, real liq far.
+    const base = { side: 'short' as const, currentSz: 0.76, currentEntryPx: 1572, markPx: 1576, leverage: 5, mode: 'usd' as const, value: 200 };
+    const formula = previewAdd(base); // margin-blind (5x setting)
+    const aware = previewAdd({ ...base, currentMarginUsd: 857 }); // real margin
+    // A short's liq is ABOVE the mark; farther = higher. Margin-aware liq sits much
+    // higher (safer) than the 5x-setting formula liq.
+    expect(aware.newLiqPx!).toBeGreaterThan(formula.newLiqPx!);
+    expect(aware.newEffLeverage).toBeLessThan(2); // ~1.5x, not 5x
+    // $ at risk = the REAL new isolated margin (>> notional/lev).
+    expect(aware.riskAtLiqUsd).toBeGreaterThan(formula.riskAtLiqUsd);
   });
 });

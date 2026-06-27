@@ -42,6 +42,8 @@ export interface AddPreview {
   prevLiqDistPct: number | null;
   /** Dollar loss if the (new, larger) position were liquidated ≈ new margin. */
   riskAtLiqUsd: number;
+  /** Effective leverage after the add (new notional / new margin). */
+  newEffLeverage: number;
   /** True when adding while underwater (mark worse than avg entry) — averaging DOWN. */
   isAveragingDown: boolean;
   warnings: string[];
@@ -70,6 +72,10 @@ export function previewAdd(input: {
   value: number;
   /** Cap: max add as a multiple of current size (server enforces too). */
   maxAddMultiple?: number;
+  /** REAL isolated margin currently backing the position (HL marginUsed). When given,
+   *  liq + $-at-risk are computed margin-aware (reflecting margin you've posted) instead
+   *  of the leverage-SETTING formula (which ignores it and shows a too-close liq). */
+  currentMarginUsd?: number;
 }): AddPreview {
   const { side, currentSz, currentEntryPx, markPx, leverage } = input;
   const lev = leverage > 0 ? leverage : 1;
@@ -87,19 +93,30 @@ export function previewAdd(input: {
   const newAvgEntryPx = newSz > 0 ? (currentSz * currentEntryPx + addSz * markPx) / newSz : currentEntryPx;
 
   const addNotionalUsd = addSz * markPx;
-  const addMarginUsd = addNotionalUsd / lev;
+  const addMarginUsd = addNotionalUsd / lev; // HL posts this margin for the added size
   const newNotionalUsd = newSz * markPx;
 
-  const prevLiqPx = liqPriceFor(side, currentEntryPx, lev);
-  const newLiqPx = liqPriceFor(side, newAvgEntryPx, lev);
+  // Margin-aware path: when we know the REAL isolated margin, derive liq from the
+  // effective leverage (notional / margin) so posted margin pushes liq away — the
+  // accurate picture. Without it, fall back to the leverage-SETTING formula (which
+  // ignores posted margin and shows a too-close liq). Effective-leverage liq matches
+  // HL's isolated liq within ~1%.
+  const curMargin = input.currentMarginUsd;
+  const marginAware = curMargin != null && curMargin > 0;
+  const newMarginUsd = marginAware ? curMargin + addMarginUsd : newNotionalUsd / lev;
+  const prevEffLev = marginAware && curMargin > 0 ? (currentSz * markPx) / curMargin : lev;
+  const newEffLeverage = newMarginUsd > 0 ? newNotionalUsd / newMarginUsd : lev;
+
+  const prevLiqPx = liqPriceFor(side, currentEntryPx, marginAware ? prevEffLev : lev);
+  const newLiqPx = liqPriceFor(side, newAvgEntryPx, marginAware ? newEffLeverage : lev);
   const newLiqDistPct = distPct(markPx, newLiqPx);
 
   // Averaging DOWN = adding while the position is in a loss (mark worse than entry).
   const isAveragingDown = side === 'long' ? markPx < currentEntryPx : markPx > currentEntryPx;
 
-  // Dollar at risk to a liquidation ≈ the new isolated margin (isolated caps loss
-  // to the posted margin). This is the number that GREW — the real cost of adding.
-  const riskAtLiqUsd = newNotionalUsd / lev;
+  // Dollar at risk to a liquidation ≈ the new isolated margin (isolated caps loss to
+  // the posted margin) — the number that GREW. Margin-aware: the real new margin.
+  const riskAtLiqUsd = newMarginUsd;
 
   return {
     addSz: round(addSz, 6),
@@ -110,6 +127,7 @@ export function previewAdd(input: {
     newNotionalUsd: round(newNotionalUsd, 2),
     newLiqPx,
     newLiqDistPct,
+    newEffLeverage: round(newEffLeverage, 2),
     prevLiqPx,
     prevLiqDistPct: distPct(markPx, prevLiqPx),
     riskAtLiqUsd: round(riskAtLiqUsd, 2),
