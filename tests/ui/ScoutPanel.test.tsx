@@ -3,6 +3,14 @@ import { render, screen, within } from '@testing-library/react';
 import ScoutPanel from '@/app/cockpit/components/ScoutPanel';
 import type { PnlSnapshot, PositionRow } from '@/hooks/realtime-row-mappers';
 import type { PerformanceSummary } from '@/lib/cockpit/performance-service';
+import type { LaneCard } from '@/types/scout';
+
+function lane(over: Partial<LaneCard> = {}): LaneCard {
+  return {
+    lane: 'directional', kind: 'positions', netUsd: 0, realizedUsd: 0, fundingUsd: 0, unrealizedUsd: 0,
+    tradeCount: 0, winRate: 0, monthlyRunRateUsd: 0, periodDays: 1, verdict: 'continue', label: '', openCount: 0, detail: {}, ...over,
+  };
+}
 
 function perf(over: Partial<PerformanceSummary['kpis']> = {}): PerformanceSummary {
   return {
@@ -110,5 +118,31 @@ describe('ScoutPanel — track record', () => {
     render(<ScoutPanel hypsOverride={[]} positionsOverride={{ positions: [], latestPnlByCoin: {} }} perfOverride={null} />);
     expect(screen.getByTestId('scout-net-pnl').textContent).toBe('—');
     expect(screen.queryByTestId('scout-sparkline')).toBeNull();
+  });
+});
+
+describe('ScoutPanel — lanes', () => {
+  const base = { hypsOverride: [] as never[], positionsOverride: { positions: [], latestPnlByCoin: {} }, perfOverride: null };
+
+  it('renders the per-lane breakdown (directional + vault + carry) with verdicts', () => {
+    const lanes = {
+      account: null, updatedAt: '2026-06-26',
+      lanes: [
+        lane({ lane: 'directional', netUsd: -5, monthlyRunRateUsd: -10, verdict: 'continue' }),
+        lane({ lane: 'vault:HLP', kind: 'vault', netUsd: 3, monthlyRunRateUsd: 5, verdict: 'continue', label: 'HLP buy-hold' }),
+        lane({ lane: 'carry', kind: 'carry', netUsd: 8, monthlyRunRateUsd: 50, verdict: 'graduate', detail: { coin: 'BTC' }, label: 'short BTC' }),
+      ],
+    };
+    render(<ScoutPanel {...base} lanesOverride={lanes} />);
+    const section = screen.getByTestId('scout-lanes');
+    expect(within(section).getAllByTestId('scout-lane-row')).toHaveLength(3);
+    expect(within(section).getByText(/vault·HLP/)).toBeTruthy();
+    expect(within(section).getByText(/carry·BTC/)).toBeTruthy();
+    expect(within(section).getByText('GRADUATE')).toBeTruthy();
+  });
+
+  it('hides the lanes section when there are no lane cards', () => {
+    render(<ScoutPanel {...base} lanesOverride={{ account: null, lanes: [], updatedAt: null }} />);
+    expect(screen.queryByTestId('scout-lanes')).toBeNull();
   });
 });

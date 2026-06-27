@@ -10,18 +10,27 @@
 
 import { useEffect, useState } from 'react';
 import type { PerformanceSummary } from '@/lib/cockpit/performance-service';
+import type { LaneCard } from '@/types/scout';
 
 const POLL_MS = 60_000;
 
+export interface ScoutLanes {
+  account: LaneCard | null;
+  lanes: LaneCard[];
+  updatedAt: string | null;
+}
+
 export interface ScoutPerformanceState {
   summary: PerformanceSummary | null;
+  /** Per-lane scorecard breakdown (directional + vault/carry benchmarks). */
+  lanes: ScoutLanes | null;
   loading: boolean;
   error: string | null;
 }
 
 export function useScoutPerformance(opts: { enabled?: boolean } = {}): ScoutPerformanceState {
   const enabled = opts.enabled ?? true;
-  const [state, setState] = useState<ScoutPerformanceState>({ summary: null, loading: enabled, error: null });
+  const [state, setState] = useState<ScoutPerformanceState>({ summary: null, lanes: null, loading: enabled, error: null });
 
   useEffect(() => {
     if (!enabled) return;
@@ -37,8 +46,8 @@ export function useScoutPerformance(opts: { enabled?: boolean } = {}): ScoutPerf
         const res = await fetch('/api/cockpit/scout-performance', { headers: { accept: 'application/json' } });
         if (!active) return;
         if (res.ok) {
-          const json = (await res.json()) as { ok: boolean; summary?: PerformanceSummary };
-          if (json.summary) setState({ summary: json.summary, loading: false, error: null });
+          const json = (await res.json()) as { ok: boolean; summary?: PerformanceSummary; lanes?: ScoutLanes };
+          if (json.summary) setState({ summary: json.summary, lanes: json.lanes ?? null, loading: false, error: null });
         } else {
           setState((s) => ({ ...s, loading: false, error: `scout perf fetch failed (${res.status})` }));
         }

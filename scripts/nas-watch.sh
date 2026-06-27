@@ -96,6 +96,10 @@ run_step "rubric scan (pnpm rubric --once)" "$PNPM" rubric --once
 # trades. Rides this tick (no separate cron) — NAV moves slowly so 5-min is ample.
 run_step "vault watch (pnpm vault-watch --once)" "$PNPM" vault-watch --once
 
+# Per-lane scorecard snapshot for the cockpit Scout tab (directional + vault + carry
+# benchmarks -> lane_scorecards). Read-only HL + Supabase-write; NEVER trades.
+run_step "scout lanes (pnpm scout:lanes)" "$PNPM" scout:lanes
+
 # --- Vercel pokes (same CRON_SECRET, kept OUT of git) ---
 SECRET="${AUTO_EXIT_CRON_SECRET:-}"
 [ -z "$SECRET" ] && [ -f "$REPO/.auto-exit-secret" ] && SECRET="$(cat "$REPO/.auto-exit-secret" 2>/dev/null | tr -d '\r\n')"
