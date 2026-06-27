@@ -18,6 +18,7 @@ import type { PnlSnapshot, PositionRow } from '@/hooks/realtime-row-mappers';
 import { useCandles } from '@/hooks/useCandles';
 import type { TradingMode } from '@/types/fill';
 import { HOLD_TIMEFRAMES, suggestStopFrac, liquidationCushion, stopPxFromFrac, validateStopPx, type HoldTimeframe } from '@/lib/cockpit/stop-suggestion-business-logic';
+import { isOverMargined } from '@/lib/trading/leverage-business-logic';
 import { previewAdd, MAX_ADD_MULTIPLE, type AddSizeMode } from '@/lib/trading/add-to-position-business-logic';
 import PositionHistoryChart from './left-rail/PositionHistoryChart';
 import { positionHealth, uPnlPct, type RegimeDir } from './open-positions-helpers';
@@ -346,7 +347,7 @@ export default function PositionInsightsModal({
             <span className={css({ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' })}>
               <span className={css({ fontFamily: 'mono', fontSize: 'md', fontWeight: 'bold', color: 'github.textBright' })}>{pos.coin}-PERP</span>
               <span style={{ color: sideColor, background: `${sideColor}1f` }} className={css({ fontFamily: 'mono', fontSize: '10px', fontWeight: 'bold', letterSpacing: '0.06em', paddingX: '7px', paddingY: '2px', borderRadius: '5px' })}>{side.toUpperCase()}</span>
-              <span className={css({ fontFamily: 'mono', fontSize: '11px', color: 'github.textMuted' })}>{pos.sz.toLocaleString('en-US', { maximumFractionDigits: 4 })}{d.leverage != null ? ` · ${d.leverage}×` : ''}{effLeverage != null && d.leverage != null && effLeverage < d.leverage * 0.9 && (<span style={{ color: ZONE_COLORS.ok }}> · {effLeverage.toFixed(1)}× eff</span>)}</span>
+              <span className={css({ fontFamily: 'mono', fontSize: '11px', color: 'github.textMuted' })}>{pos.sz.toLocaleString('en-US', { maximumFractionDigits: 4 })}{d.leverage != null ? ` · ${d.leverage}×` : ''}{isOverMargined(effLeverage, d.leverage) && effLeverage != null && (<span style={{ color: ZONE_COLORS.ok }}> · {effLeverage.toFixed(1)}× eff</span>)}</span>
             </span>
             <span className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>{heldLabel(pos.openedAt, nowMs)}{notionalUsd != null ? ` · ≈ ${fmtCompactUsd(notionalUsd)} notional` : ''}</span>
           </div>

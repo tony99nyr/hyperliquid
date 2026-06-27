@@ -16,7 +16,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { css } from '@styled-system/css';
 import { ZONE_COLORS, GH, fmtPx } from './panel-styles';
-import { resolveCoinMaxLeverage } from '@/lib/trading/leverage-business-logic';
+import { resolveCoinMaxLeverage, isOverMargined } from '@/lib/trading/leverage-business-logic';
 import { adjustLeveragePlan, ADJUST_LIQ_DANGER_PCT } from '@/lib/trading/adjust-leverage-business-logic';
 
 export interface AdjustLeverageTarget {
@@ -119,8 +119,7 @@ export default function AdjustLeverageModal({ target, onClose, onExecuted }: Adj
   // Over-margined = you've added margin so effective leverage is well below the
   // setting. Changing the leverage SETTING may rebalance that margin and move liq —
   // the formula "new liq" below assumes margin realigns to the setting.
-  const overMargined = target.effLeverage != null && target.currentLeverage != null
-    && target.effLeverage < target.currentLeverage * 0.9;
+  const overMargined = isOverMargined(target.effLeverage, target.currentLeverage);
   // Lowering leverage on an isolated position = posting more margin; HL rejects when
   // free collateral is short. "Add margin" does the same de-risk without that
   // restriction, so nudge toward it when the operator drags leverage DOWN.

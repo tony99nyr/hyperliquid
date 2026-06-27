@@ -10,6 +10,9 @@ import {
   clampLeverage,
   serverValidateLeverage,
   liquidationPx,
+  isolatedLiqPx,
+  isOverMargined,
+  MMR,
   roeAtPx,
   deriveLeverageRead,
   liquidationInsideStop,
@@ -57,6 +60,34 @@ describe('liquidationPx', () => {
   it('returns null for degenerate inputs', () => {
     expect(liquidationPx('buy', 0, 10)).toBeNull();
     expect(liquidationPx('buy', 2000, 0)).toBeNull();
+  });
+});
+
+describe('isolatedLiqPx (canonical liq formula)', () => {
+  it('mmr-aware by default: long below entry, short above (pulled toward mark by MMR)', () => {
+    expect(isolatedLiqPx('long', 2000, 10)).toBeCloseTo(2000 * (1 - 0.1 + MMR), 6);
+    expect(isolatedLiqPx('short', 2000, 10)).toBeCloseTo(2000 * (1 + 0.1 - MMR), 6);
+  });
+  it('mmr=0 reproduces the margin-only liquidationPx (so liquidationPx delegates cleanly)', () => {
+    expect(isolatedLiqPx('long', 2000, 10, 0)).toBeCloseTo(liquidationPx('buy', 2000, 10)!, 9);
+    expect(isolatedLiqPx('short', 2000, 10, 0)).toBeCloseTo(liquidationPx('sell', 2000, 10)!, 9);
+  });
+  it('null on degenerate inputs', () => {
+    expect(isolatedLiqPx('long', 0, 10)).toBeNull();
+    expect(isolatedLiqPx('long', 2000, 0)).toBeNull();
+  });
+});
+
+describe('isOverMargined', () => {
+  it('true when effective leverage is ≥10% below the setting (margin posted)', () => {
+    expect(isOverMargined(1.4, 5)).toBe(true);
+    expect(isOverMargined(4.4, 5)).toBe(true); // 4.4 < 4.5
+  });
+  it('false when effective ≈ setting, or inputs missing', () => {
+    expect(isOverMargined(4.9, 5)).toBe(false); // 4.9 > 4.5
+    expect(isOverMargined(null, 5)).toBe(false);
+    expect(isOverMargined(1.4, null)).toBe(false);
+    expect(isOverMargined(1.4, 0)).toBe(false);
   });
 });
 

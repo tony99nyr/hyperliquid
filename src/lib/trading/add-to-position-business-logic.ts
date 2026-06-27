@@ -10,17 +10,14 @@
  *     entry) — the martingale pattern; adding to a WINNER is the intended use.
  */
 
+import { isolatedLiqPx } from './leverage-business-logic';
+
 export type PositionSideLabel = 'long' | 'short';
 
-/** Maintenance-margin rate — MUST match open-positions-helpers so the add preview's
- *  "new liq" agrees with the position panel's displayed liq (no two-formula drift). */
-const MMR = 0.004;
-
-/** MMR-aware liquidation price (mirrors open-positions-helpers.liquidationPrice). PURE. */
-function liqPriceFor(side: PositionSideLabel, entryPx: number, leverage: number): number | null {
-  if (!Number.isFinite(entryPx) || entryPx <= 0 || !Number.isFinite(leverage) || leverage <= 0) return null;
-  return side === 'long' ? entryPx * (1 - 1 / leverage + MMR) : entryPx * (1 + 1 / leverage - MMR);
-}
+/** MMR-aware liquidation price — the canonical isolatedLiqPx (single source of truth,
+ *  so the add preview's "new liq" can never drift from the panel's). PURE. */
+const liqPriceFor = (side: PositionSideLabel, entryPx: number, leverage: number): number | null =>
+  isolatedLiqPx(side, entryPx, leverage);
 export type AddSizeMode = 'pct' | 'usd';
 
 /** Hard cap: a single add can be at most this multiple of the current size.

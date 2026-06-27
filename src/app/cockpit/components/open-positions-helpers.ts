@@ -18,6 +18,7 @@
  */
 
 import { ZONE_COLORS } from './panel-styles';
+import { isolatedLiqPx } from '@/lib/trading/leverage-business-logic';
 
 export type RegimeDir = 'bullish' | 'bearish' | 'neutral';
 
@@ -38,20 +39,14 @@ export interface PositionHealth {
   liqColor: string;
 }
 
-const MMR = 0.004;
-
-/** Maintenance-margin liquidation price for a leveraged perp. PURE. */
+/** Maintenance-margin liquidation price for a leveraged perp. Delegates to the
+ *  canonical {@link isolatedLiqPx} (mmr-aware) so the formula lives in one place. PURE. */
 export function liquidationPrice(
   side: 'long' | 'short',
   entryPx: number,
   leverage: number,
 ): number | null {
-  if (!Number.isFinite(entryPx) || entryPx <= 0 || !Number.isFinite(leverage) || leverage <= 0) {
-    return null;
-  }
-  return side === 'long'
-    ? entryPx * (1 - 1 / leverage + MMR)
-    : entryPx * (1 + 1 / leverage - MMR);
+  return isolatedLiqPx(side, entryPx, leverage);
 }
 
 /** Color for a liquidation proximity: green > 14%, amber 6–14%, red < 6%. */

@@ -31,6 +31,7 @@ import type { TradingMode } from '@/types/fill';
 import type { PnlSnapshot, PositionRow } from '@/hooks/realtime-row-mappers';
 import { ZONE_COLORS, TERM, GH, fmtUsd, fmtPx } from './panel-styles';
 import { positionHealth, stopStatus, uPnlPct, type RegimeDir } from './open-positions-helpers';
+import { isOverMargined } from '@/lib/trading/leverage-business-logic';
 import { userPositionDisplay } from './position-panel-helpers';
 import ExitModal, { type ExitTarget } from './ExitModal';
 import AdjustLeverageModal, { type AdjustLeverageTarget } from './AdjustLeverageModal';
@@ -349,9 +350,9 @@ function PositionRowCard({
           </span>
           <span className={css({ fontFamily: 'mono', fontSize: '11px', color: 'github.textMuted' })}>
             {pos.sz.toLocaleString('en-US', { maximumFractionDigits: 4 })}{d.leverage != null ? ` · ${d.leverage}×` : ''}
-            {/* Effective leverage when posted margin pulls it meaningfully below the
-                setting (≥10% lower) — shows the de-risk that the lev-setting hides. */}
-            {risk?.effLeverage != null && d.leverage != null && risk.effLeverage < d.leverage * 0.9 && (
+            {/* Effective leverage when posted margin pulls it below the setting —
+                shows the de-risk that the lev-setting hides. */}
+            {isOverMargined(risk?.effLeverage, d.leverage) && risk?.effLeverage != null && (
               <span data-testid="position-eff-lev" style={{ color: ZONE_COLORS.ok }}> · {risk.effLeverage.toFixed(1)}× eff</span>
             )}
           </span>

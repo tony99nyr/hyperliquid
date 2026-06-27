@@ -71,16 +71,39 @@ export function serverValidateLeverage(
   return clampLeverage(n, coinMax);
 }
 
+/** HL maintenance-margin rate — the single source of truth for liq math that wants
+ *  to account for the maintenance buffer (liquidates slightly sooner than margin-only). */
+export const MMR = 0.004;
+
 /**
- * Estimate the isolated-margin liquidation price. Fee/funding-agnostic first
- * order: the position liquidates once the adverse move equals the posted margin,
- * i.e. a move of entry/leverage. Long → below entry; short → above. Returns null
- * for degenerate inputs (so the UI shows "—" rather than a bogus number).
+ * Canonical isolated-margin liquidation price (PURE). A long liquidates BELOW entry
+ * by ~entry/leverage, a short ABOVE. `mmr` (maintenance rate) pulls liq slightly
+ * toward the mark — pass the default for the HL-accurate estimate, or 0 for the
+ * first-order margin-only estimate. Returns null for degenerate inputs.
+ *
+ * This is THE liq formula — `liquidationPx` (buy/sell, margin-only) and the cockpit's
+ * `liquidationPrice` / `liqPriceFor` (long/short, mmr-aware) all delegate here so the
+ * money math lives in one place.
  */
+export function isolatedLiqPx(side: 'long' | 'short', entryPx: number, leverage: number, mmr: number = MMR): number | null {
+  if (!(entryPx > 0) || !(leverage > 0)) return null;
+  return side === 'long' ? entryPx * (1 - 1 / leverage + mmr) : entryPx * (1 + 1 / leverage - mmr);
+}
+
+/** Margin-only (no maintenance buffer) liquidation price, side as buy/sell. Delegates
+ *  to {@link isolatedLiqPx} with mmr=0. Keeps the `leverage >= 1` guard of its callers. */
 export function liquidationPx(side: OrderSideLabel, entryPx: number, leverage: number): number | null {
-  if (!(entryPx > 0) || !(leverage >= 1)) return null;
-  const moveFrac = 1 / leverage; // adverse fraction that wipes the margin
-  return side === 'buy' ? entryPx * (1 - moveFrac) : entryPx * (1 + moveFrac);
+  if (!(leverage >= 1)) return null;
+  return isolatedLiqPx(side === 'buy' ? 'long' : 'short', entryPx, leverage, 0);
+}
+
+/**
+ * A position is "over-margined" when posted margin pulls effective leverage well
+ * below the leverage SETTING (≥10% lower) — i.e. you've added margin, so the
+ * setting-based liq formula understates how far liquidation really sits. PURE.
+ */
+export function isOverMargined(effLeverage: number | null | undefined, settingLeverage: number | null | undefined): boolean {
+  return effLeverage != null && settingLeverage != null && settingLeverage > 0 && effLeverage < settingLeverage * 0.9;
 }
 
 /**
