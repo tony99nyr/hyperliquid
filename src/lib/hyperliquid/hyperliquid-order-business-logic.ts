@@ -65,6 +65,41 @@ export function buildStopOrderAction(input: {
 }
 
 /**
+ * Build a STOP-ENTRY trigger order — a trigger-to-OPEN (NOT reduce-only) that rests on
+ * HL and fires a market open when the mark crosses `triggerPxStr`. This is the breakout
+ * / breakdown entry: `isBuy=true` (long) fires on an UP-cross of a trigger ABOVE the
+ * mark; `isBuy=false` (short) fires on a DOWN-cross of a trigger BELOW the mark — same
+ * `tpsl:'sl'` direction as a protective stop, but `reduceOnly:false` because it OPENS.
+ *
+ * Deliberately a SEPARATE builder from buildStopOrderAction so the protective-stop path
+ * stays hard reduce-only (it can never become an opener) and so findOpenStop's
+ * reduce-only filter never mistakes an entry trigger for a protective stop.
+ *
+ * ⚠ The `tpsl` direction is load-bearing — rehearse on testnet (long + short) before live.
+ */
+export function buildEntryTriggerAction(input: {
+  assetIndex: number;
+  isBuy: boolean;
+  triggerPxStr: string;
+  sizeStr: string;
+}): HlOrderAction {
+  return {
+    type: 'order',
+    orders: [
+      {
+        a: input.assetIndex,
+        b: input.isBuy,
+        p: input.triggerPxStr,
+        s: input.sizeStr,
+        r: false, // OPENS the position — NOT reduce-only (distinct from the protective stop)
+        t: { trigger: { isMarket: true, triggerPx: input.triggerPxStr, tpsl: 'sl' } },
+      },
+    ],
+    grouping: 'na',
+  };
+}
+
+/**
  * Build a native OCO BRACKET — a stop-loss AND a take-profit attached to an open
  * position via `grouping:'positionTpsl'`. Both legs are reduce-only and SAME-SIDE
  * (both CLOSE the position: a long's bracket SELLS, `isBuy` false). HL links them

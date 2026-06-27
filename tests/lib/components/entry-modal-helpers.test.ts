@@ -16,6 +16,7 @@ import {
   entryLiveConfirmPhrase,
   entryLivePhraseMatches,
   entryProposalReady,
+  entryTriggerError,
   isEntryApproveEnabled,
   type EntryFormState,
 } from '@/app/cockpit/components/entry-modal-helpers';
@@ -28,6 +29,8 @@ const baseForm: EntryFormState = {
   stopFrac: 0.04,
   leverage: 5,
   thesis: 'manual short',
+  entryType: 'market',
+  triggerPx: null,
 };
 
 describe('buildEntryPreview', () => {
@@ -143,6 +146,50 @@ describe('isEntryApproveEnabled', () => {
   });
 });
 
+describe('entryTriggerError — breakout/breakdown direction + distance (mirrors the route)', () => {
+  it('null (valid) for a LONG trigger ABOVE the mark within bounds', () => {
+    expect(entryTriggerError('buy', 2020, 2000)).toBeNull();
+  });
+
+  it('null (valid) for a SHORT trigger BELOW the mark within bounds', () => {
+    expect(entryTriggerError('sell', 1980, 2000)).toBeNull();
+  });
+
+  it('rejects a LONG trigger AT/BELOW the mark (wrong direction)', () => {
+    expect(entryTriggerError('buy', 2000, 2000)).toMatch(/above/i);
+    expect(entryTriggerError('buy', 1990, 2000)).toMatch(/above/i);
+  });
+
+  it('rejects a SHORT trigger AT/ABOVE the mark (wrong direction)', () => {
+    expect(entryTriggerError('sell', 2010, 2000)).toMatch(/below/i);
+  });
+
+  it('rejects a trigger that sits too close (fires instantly)', () => {
+    expect(entryTriggerError('buy', 2001, 2000)).toMatch(/instantly/i); // 0.05% < 0.1%
+  });
+
+  it('rejects a trigger absurdly far from the mark', () => {
+    expect(entryTriggerError('buy', 4000, 2000)).toMatch(/check the price/i); // 100% > 50%
+  });
+
+  it('asks for a price / mark when missing', () => {
+    expect(entryTriggerError('buy', null, 2000)).toMatch(/trigger price/i);
+    expect(entryTriggerError('buy', 2020, null)).toMatch(/mark/i);
+  });
+});
+
+describe('isEntryApproveEnabled — trigger-error block', () => {
+  it('an invalid trigger BLOCKS Approve even with a ready proposal + matching phrase', () => {
+    const p = buildEntryPreview(baseForm, 2000)!;
+    expect(isEntryApproveEnabled('live', p, false, false, 'sell eth', 'bad direction')).toBe(false);
+  });
+
+  it('a valid (null) trigger error does not block an otherwise-ready proposal', () => {
+    const p = buildEntryPreview(baseForm, 2000)!;
+    expect(isEntryApproveEnabled('paper', p, false, false, '', null)).toBe(true);
+  });
+});
+
 describe('defaultEntryForm', () => {
   it('defaults to a long on the given coin', () => {
     const f = defaultEntryForm('btc');
@@ -150,6 +197,8 @@ describe('defaultEntryForm', () => {
     expect(f.side).toBe('buy');
     expect(f.riskUsd).toBeGreaterThan(0);
     expect(f.stopFrac).toBeGreaterThan(0);
+    expect(f.entryType).toBe('market'); // defaults to market-now, not a resting trigger
+    expect(f.triggerPx).toBeNull();
   });
 
   it('seeds the given side (so a SHORT opportunity opens a SHORT preview)', () => {

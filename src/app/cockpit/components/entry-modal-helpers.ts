@@ -23,6 +23,9 @@ import type { HoldTimeframe } from '@/lib/cockpit/stop-suggestion-business-logic
 export const ENTRY_COINS = TRADEABLE_COINS;
 export type EntryCoin = (typeof ENTRY_COINS)[number];
 
+/** How the order enters: at the market NOW, or rest a breakout/breakdown trigger. */
+export type EntryType = 'market' | 'trigger';
+
 /** The mutable form state the modal owns. */
 export interface EntryFormState {
   coin: string;
@@ -37,6 +40,10 @@ export interface EntryFormState {
   leverage: number;
   /** The thesis the operator is betting on. */
   thesis: string;
+  /** Market-now vs a resting breakout/breakdown trigger. */
+  entryType: EntryType;
+  /** The breakout/breakdown level (only when entryType==='trigger'). */
+  triggerPx: number | null;
 }
 
 /** Sensible defaults the modal opens with. Default hold = swing (the ATR stop then
@@ -50,7 +57,33 @@ export function defaultEntryForm(coin: string, side: OrderSide = 'buy'): EntryFo
     stopFrac: 0.04,
     leverage: 3,
     thesis: '',
+    entryType: 'market',
+    triggerPx: null,
   };
+}
+
+/** Direction/distance bounds for a breakout/breakdown trigger — must match the
+ *  server (`/api/cockpit/entry-trigger`): a LONG fires ABOVE the mark, a SHORT
+ *  BELOW; the level can't sit AT the mark (fires instantly) or absurdly far. */
+export const ENTRY_TRIGGER_MIN_DIST = 0.001;
+export const ENTRY_TRIGGER_MAX_DIST = 0.5;
+
+/**
+ * Validate a breakout/breakdown trigger against the current mark. Returns an
+ * operator-facing reason string when invalid, or null when the trigger is good.
+ * Mirrors the route's checks so the UI never lets through what the server rejects.
+ */
+export function entryTriggerError(side: OrderSide, triggerPx: number | null, markPx: number | null): string | null {
+  if (triggerPx == null || !(triggerPx > 0)) return 'Enter a trigger price';
+  if (markPx == null || !(markPx > 0)) return 'Waiting for a live mark';
+  const isLong = side === 'buy';
+  if (isLong ? triggerPx <= markPx : triggerPx >= markPx) {
+    return `A ${isLong ? 'long' : 'short'} breakout must trigger ${isLong ? 'above' : 'below'} the mark (${markPx}).`;
+  }
+  const dist = Math.abs(markPx - triggerPx) / markPx;
+  if (dist < ENTRY_TRIGGER_MIN_DIST) return 'Trigger too close to the mark — it would fire instantly.';
+  if (dist > ENTRY_TRIGGER_MAX_DIST) return `Trigger is > ${ENTRY_TRIGGER_MAX_DIST * 100}% from the mark — check the price.`;
+  return null;
 }
 
 /**
@@ -150,7 +183,11 @@ export function isEntryApproveEnabled(
   liqInsideStop: boolean,
   ackLiqInsideStop: boolean,
   typed: string,
+  /** When the entry is a resting trigger, the trigger-validation reason (null = valid).
+   *  A non-null value BLOCKS Approve; omit/null for a market-now entry. */
+  triggerError?: string | null,
 ): boolean {
+  if (triggerError) return false;
   if (!entryProposalReady(proposal, liqInsideStop, ackLiqInsideStop)) return false;
   if (mode === 'paper') return true;
   if (!proposal) return false;

@@ -12,6 +12,7 @@ import {
   aggressiveIocPrice,
   buildIocOrderAction,
   buildStopOrderAction,
+  buildEntryTriggerAction,
   buildBracketAction,
   resolveAsset,
   parseOrderResponse,
@@ -89,6 +90,28 @@ describe('buildStopOrderAction — reduce-only stop-market trigger shape', () =>
     const o = action.orders[0];
     expect(o.r).toBe(true); // reduce-only either way
     expect(o.t).toEqual({ trigger: { isMarket: true, triggerPx: '1750', tpsl: 'tp' } });
+  });
+});
+
+describe('buildEntryTriggerAction — stop-ENTRY (trigger-to-open, NOT reduce-only)', () => {
+  it('is a NON-reduce-only sl trigger that OPENS (long = buy), canonical key order, grouping na', () => {
+    const action = buildEntryTriggerAction({ assetIndex: 5, isBuy: true, triggerPxStr: '1800', sizeStr: '0.5' });
+    expect(action.type).toBe('order');
+    expect(action.grouping).toBe('na'); // independent opener, not attached to a position
+    const o = action.orders[0];
+    expect(Object.keys(o)).toEqual(['a', 'b', 'p', 's', 'r', 't']); // load-bearing msgpack order
+    expect(o.a).toBe(5);
+    expect(o.b).toBe(true); // long entry BUYS on the up-break
+    expect(o.r).toBe(false); // OPENS exposure — must NOT be reduce-only (vs the protective stop)
+    // same 'sl' trigger direction as a stop, but reduceOnly:false makes it an opener
+    expect(o.t).toEqual({ trigger: { isMarket: true, triggerPx: '1800', tpsl: 'sl' } });
+  });
+  it('builds a SHORT breakdown entry (sell) — still NON-reduce-only', () => {
+    const action = buildEntryTriggerAction({ assetIndex: 5, isBuy: false, triggerPxStr: '1600', sizeStr: '0.5' });
+    const o = action.orders[0];
+    expect(o.b).toBe(false); // short entry SELLS on the down-break
+    expect(o.r).toBe(false); // still opens exposure
+    expect(o.t).toEqual({ trigger: { isMarket: true, triggerPx: '1600', tpsl: 'sl' } });
   });
 });
 

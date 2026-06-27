@@ -37,7 +37,7 @@ import {
   type HoldTimeframe,
 } from '@/lib/cockpit/stop-suggestion-business-logic';
 import { leaderPositionForCoin } from './leader-alignment-helpers';
-import { LeverageControl, SideSegment, SummaryRow } from './approval-popup-parts';
+import { LeverageControl, SideSegment, SummaryRow, NumberField } from './approval-popup-parts';
 import {
   ENTRY_COINS,
   buildEntryPreview,
@@ -46,6 +46,7 @@ import {
   entryLeverageRead,
   entryLiqInsideStop,
   entryLiveConfirmPhrase,
+  entryTriggerError,
   isEntryApproveEnabled,
   type EntryFormState,
 } from './entry-modal-helpers';
@@ -137,11 +138,18 @@ export default function EntryModal({
   const effectiveLev = clampLeverage(form.leverage, tfCoinMax);
   const formForPreview = effectiveLev === form.leverage ? form : { ...form, leverage: effectiveLev };
 
-  const proposal = buildEntryPreview(formForPreview, entryPx);
-  const read = entryLeverageRead(formForPreview, proposal, entryPx);
-  const liqInsideStop = entryLiqInsideStop(formForPreview, proposal, entryPx);
+  // A resting breakout/breakdown trigger fills at the TRIGGER level, not the current
+  // mark — so when it's a valid trigger, the whole preview (size / liq / stop / ROE)
+  // is computed off triggerPx. The direction check still uses the live mark (entryPx).
+  const isTrigger = form.entryType === 'trigger';
+  const triggerErr = isTrigger ? entryTriggerError(form.side, form.triggerPx, entryPx) : null;
+  const previewPx = isTrigger && triggerErr == null ? form.triggerPx : entryPx;
+
+  const proposal = buildEntryPreview(formForPreview, previewPx);
+  const read = entryLeverageRead(formForPreview, proposal, previewPx);
+  const liqInsideStop = entryLiqInsideStop(formForPreview, proposal, previewPx);
   const approveEnabled =
-    !busy && isEntryApproveEnabled(mode, proposal, liqInsideStop, ackLiqInsideStop, typed);
+    !busy && isEntryApproveEnabled(mode, proposal, liqInsideStop, ackLiqInsideStop, typed, triggerErr);
 
   const dialogRef = useRef<HTMLElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -225,21 +233,41 @@ export default function EntryModal({
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch('/api/cockpit/open-position', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          coin: form.coin,
-          side: form.side,
-          timeframe: form.timeframe,
-          riskUsd: form.riskUsd,
-          stopFrac: form.stopFrac,
-          entryPx,
-          leverage: effectiveLev,
-          thesis: form.thesis,
-          confirmPhrase: isLive ? typed : undefined,
-        }),
-      });
+      // Two seams: a MARKET-now open (executes immediately via the approval pipeline)
+      // vs a resting breakout/breakdown TRIGGER (rests on HL, opens on the cross). BOTH
+      // send the risk inputs (riskUsd + stopFrac) — the server sizes off them (never a
+      // client coin count); the trigger path sizes against triggerPx, the level it fills.
+      const res = isTrigger
+        ? await fetch('/api/cockpit/entry-trigger', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              action: 'place',
+              coin: form.coin,
+              side: form.side === 'buy' ? 'long' : 'short',
+              triggerPx: form.triggerPx,
+              riskUsd: form.riskUsd,
+              stopFrac: form.stopFrac,
+              timeframe: form.timeframe,
+              leverage: effectiveLev,
+              confirmPhrase: isLive ? typed : undefined,
+            }),
+          })
+        : await fetch('/api/cockpit/open-position', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              coin: form.coin,
+              side: form.side,
+              timeframe: form.timeframe,
+              riskUsd: form.riskUsd,
+              stopFrac: form.stopFrac,
+              entryPx,
+              leverage: effectiveLev,
+              thesis: form.thesis,
+              confirmPhrase: isLive ? typed : undefined,
+            }),
+          });
       const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; sessionId?: string };
       if (!res.ok || json.ok === false) {
         setError(json.error ?? `Failed (${res.status})`);
@@ -258,7 +286,7 @@ export default function EntryModal({
   const notionalUsd = read?.notionalUsd ?? 0;
   const liqPx = read?.liqPx ?? null;
   const stopPx = proposal?.stopPx ?? null;
-  const cushion = liquidationCushion(entryPx, stopPx, liqPx);
+  const cushion = liquidationCushion(previewPx, stopPx, liqPx);
   const dollarRisk = proposal?.dollarRisk ?? null;
   const takerFeeUsd = notionalUsd > 0 ? notionalUsd * 0.00035 : null;
   const szStr = proposal ? proposal.intent.sz.toLocaleString('en-US', { maximumFractionDigits: 6 }) : '—';
@@ -267,9 +295,13 @@ export default function EntryModal({
   const requiredPhrase = proposal ? entryLiveConfirmPhrase(form.side, form.coin) : '';
   const approveLabel = busy
     ? 'Submitting…'
-    : isLive
-      ? 'Approve LIVE'
-      : `Approve & ${sideLong ? 'Long' : 'Short'} ${szStr} ${form.coin}`;
+    : isTrigger
+      ? isLive
+        ? 'Approve LIVE trigger'
+        : `Arm ${sideLong ? 'Long' : 'Short'} trigger · ${szStr} ${form.coin}`
+      : isLive
+        ? 'Approve LIVE'
+        : `Approve & ${sideLong ? 'Long' : 'Short'} ${szStr} ${form.coin}`;
 
   return (
     <div
@@ -336,6 +368,7 @@ export default function EntryModal({
                     type="button"
                     data-testid={`entry-coin-${c}`}
                     data-active={active}
+                    aria-pressed={active}
                     onClick={() => setCoin(c)}
                     style={{ background: active ? '#1c2536' : 'transparent', color: active ? '#e8ebf2' : '#8b95a6' }}
                     className={css({ flex: 1, fontFamily: 'mono', fontSize: '13px', fontWeight: 'semibold', paddingY: '8px', borderRadius: '6px', border: 'none', cursor: 'pointer' })}
@@ -349,12 +382,61 @@ export default function EntryModal({
 
           {/* Side toggle (LONG / SHORT) — editable here (unlike the approval readout). */}
           <div className={css({ display: 'flex', gap: '4px', borderRadius: '9px', padding: '4px', marginBottom: '18px' })} style={{ background: TERM.inset, border: '1px solid rgba(255,255,255,.08)' }}>
-            <button type="button" data-testid="entry-side-long" data-active={sideLong} onClick={() => patch({ side: 'buy' })} className={css({ display: 'flex', flex: 1, border: 'none', cursor: 'pointer', borderRadius: '6px', padding: '0' })} style={{ background: 'transparent' }}>
+            <button type="button" data-testid="entry-side-long" data-active={sideLong} aria-pressed={sideLong} onClick={() => patch({ side: 'buy' })} className={css({ display: 'flex', flex: 1, border: 'none', cursor: 'pointer', borderRadius: '6px', padding: '0' })} style={{ background: 'transparent' }}>
               <SideSegment label="LONG" active={sideLong} activeColor={ZONE_COLORS.ok} />
             </button>
-            <button type="button" data-testid="entry-side-short" data-active={!sideLong} onClick={() => patch({ side: 'sell' })} className={css({ display: 'flex', flex: 1, border: 'none', cursor: 'pointer', borderRadius: '6px', padding: '0' })} style={{ background: 'transparent' }}>
+            <button type="button" data-testid="entry-side-short" data-active={!sideLong} aria-pressed={!sideLong} onClick={() => patch({ side: 'sell' })} className={css({ display: 'flex', flex: 1, border: 'none', cursor: 'pointer', borderRadius: '6px', padding: '0' })} style={{ background: 'transparent' }}>
               <SideSegment label="SHORT" active={!sideLong} activeColor={ZONE_COLORS.danger} />
             </button>
+          </div>
+
+          {/* Entry type — fill at the market NOW, or rest a breakout/breakdown trigger. */}
+          <div className={css({ marginBottom: '16px' })}>
+            <span className={css({ fontFamily: 'sans', fontSize: '10.5px', fontWeight: 'semibold', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: '7px' })} style={{ color: '#9aa4b5' }}>Entry type</span>
+            <div role="group" aria-label="Entry type" className={css({ display: 'flex', gap: '4px', borderRadius: '9px', padding: '4px' })} style={{ background: TERM.inset, border: '1px solid rgba(255,255,255,.08)' }}>
+              {([['market', 'Market now'], ['trigger', 'Trigger (rest on break)']] as const).map(([t, label]) => {
+                const active = t === form.entryType;
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    data-testid={`entry-type-${t}`}
+                    data-active={active}
+                    aria-pressed={active}
+                    onClick={() => { patch({ entryType: t }); setTyped(''); }}
+                    style={{ background: active ? '#1c2536' : 'transparent', color: active ? '#e8ebf2' : '#8b95a6' }}
+                    className={css({ flex: 1, fontFamily: 'mono', fontSize: '12px', fontWeight: 'semibold', paddingY: '7px', borderRadius: '6px', border: 'none', cursor: 'pointer' })}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            {isTrigger && (
+              <div className={css({ marginTop: '10px' })}>
+                <div className={css({ display: 'flex', alignItems: 'center', gap: '8px', borderRadius: '9px', padding: '9px 12px' })} style={{ background: TERM.inset, border: `1px solid ${triggerErr ? 'rgba(248,81,73,.4)' : 'rgba(255,255,255,.08)'}` }}>
+                  <span className={css({ fontFamily: 'mono', fontSize: '11px', flex: 'none' })} style={{ color: TERM.faint }}>Trigger @</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    data-testid="entry-trigger-px"
+                    value={form.triggerPx ?? ''}
+                    step="any"
+                    min={0}
+                    onChange={(e) => {
+                      const n = parseFloat(e.target.value);
+                      patch({ triggerPx: Number.isFinite(n) ? n : null });
+                    }}
+                    placeholder={entryPx != null ? `e.g. ${sideLong ? (entryPx * 1.01).toFixed(2) : (entryPx * 0.99).toFixed(2)}` : 'price'}
+                    className={css({ flex: 1, width: '100%', background: 'transparent', border: 'none', outline: 'none', color: 'github.textBright', fontFamily: 'mono', fontSize: '15px', fontWeight: 'semibold' })}
+                    style={{ fontFeatureSettings: '"tnum"' }}
+                  />
+                </div>
+                <span data-testid="entry-trigger-hint" className={css({ fontFamily: 'mono', fontSize: '9.5px', display: 'block', marginTop: '5px' })} style={{ color: triggerErr ? ZONE_COLORS.danger : ZONE_COLORS.warn }}>
+                  {triggerErr ?? `Rests on HL · fires a market ${sideLong ? 'long on a break ABOVE' : 'short on a break BELOW'} ${fmtPx(form.triggerPx)}.`}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Hold timeframe — drives the ATR stop + leverage ceiling (fixes wick-outs). */}
@@ -491,9 +573,21 @@ export default function EntryModal({
             />
           </label>
 
+          {/* A resting trigger OPENS the position but attaches NO stop — make that
+              impossible to miss (the stop/risk rows below are only a PLAN to execute
+              after the fill, not an order that will exist). */}
+          {isTrigger && (
+            <div data-testid="entry-naked-warning" role="alert" className={css({ display: 'flex', alignItems: 'flex-start', gap: '8px', borderRadius: '10px', padding: '10px 13px', marginBottom: '12px' })} style={{ background: 'rgba(248,81,73,.1)', border: `1px solid rgba(248,81,73,.4)` }}>
+              <span aria-hidden className={css({ fontSize: '13px', lineHeight: 1.3 })} style={{ color: ZONE_COLORS.danger }}>⚠</span>
+              <span className={css({ fontFamily: 'sans', fontSize: '11px', lineHeight: 1.45 })} style={{ color: '#f5c2c0' }}>
+                Opens <strong>without a protective stop</strong>. If it fires while you&rsquo;re away, the position is naked until you place a stop. The stop / risk / ROE below are your <strong>plan to execute after the fill</strong> — not part of this order.
+              </span>
+            </div>
+          )}
+
           {/* Summary box */}
           <div className={css({ borderRadius: '11px', padding: '6px 16px', marginBottom: '16px' })} style={{ background: TERM.inset, border: '1px solid token(colors.github.border)' }}>
-            <SummaryRow label="Entry (market)" value={fmtPx(entryPx)} />
+            <SummaryRow label={isTrigger ? 'Entry (on trigger)' : 'Entry (market)'} value={fmtPx(previewPx)} />
             <SummaryRow label="Notional" value={notionalUsd > 0 ? fmtCompactUsd(notionalUsd) : '—'} color={GH.textBright} />
             <SummaryRow label="Margin required" value={read ? fmtUsd(read.marginUsd).replace('+', '') : '—'} color={GH.textBright} />
             <SummaryRow label="Liquidation price" value={liqPx == null ? '—' : fmtPx(liqPx)} color={liqInsideStop ? ZONE_COLORS.danger : GH.text} />
@@ -504,8 +598,10 @@ export default function EntryModal({
               // red means "near the gate," not a benign 2×. warn 1.5–2.5×, ok ≥2.5×.
               color={cushion == null ? GH.textMuted : cushion < 1.5 ? ZONE_COLORS.danger : cushion < 2.5 ? ZONE_COLORS.warn : ZONE_COLORS.ok}
             />
-            <SummaryRow label="Stop price" value={fmtPx(stopPx)} color={ZONE_COLORS.warn} />
-            <SummaryRow label="Risk at stop" value={dollarRisk == null ? '—' : fmtUsd(-Math.abs(dollarRisk))} color={ZONE_COLORS.danger} />
+            {/* In trigger mode these describe the stop the operator must place AFTER the
+                fill — labeled "(after fill)" so they're never read as part of the order. */}
+            <SummaryRow label={isTrigger ? 'Stop price (after fill)' : 'Stop price'} value={fmtPx(stopPx)} color={ZONE_COLORS.warn} />
+            <SummaryRow label={isTrigger ? 'Risk at stop (planned)' : 'Risk at stop'} value={dollarRisk == null ? '—' : fmtUsd(-Math.abs(dollarRisk))} color={ZONE_COLORS.danger} />
             <SummaryRow label="ROE @ stop" value={read?.roeAtStopPct == null ? '—' : fmtPctSigned(read.roeAtStopPct)} color={ZONE_COLORS.danger} />
             {takerFeeUsd != null && <SummaryRow label="Est. taker fee" value={fmtUsd(takerFeeUsd).replace('+', '')} color={GH.textMuted} last />}
           </div>
@@ -568,49 +664,5 @@ export default function EntryModal({
         </div>
       </section>
     </div>
-  );
-}
-
-function NumberField({
-  label,
-  value,
-  onChange,
-  step,
-  min,
-  max,
-  suffix,
-  testid,
-}: {
-  label: string;
-  value: number;
-  onChange: (v: number) => void;
-  step: number;
-  min?: number;
-  max?: number;
-  suffix?: string;
-  testid: string;
-}) {
-  return (
-    <label className={css({ display: 'flex', flexDirection: 'column', gap: '7px', flex: 1, minWidth: '120px' })}>
-      <span className={css({ fontFamily: 'sans', fontSize: '10.5px', fontWeight: 'semibold', textTransform: 'uppercase', letterSpacing: '0.1em' })} style={{ color: '#9aa4b5' }}>{label}</span>
-      <div className={css({ display: 'flex', alignItems: 'center', gap: '6px', borderRadius: '9px', padding: '9px 12px' })} style={{ background: TERM.inset, border: '1px solid rgba(255,255,255,.08)' }}>
-        <input
-          type="number"
-          inputMode="decimal"
-          data-testid={testid}
-          value={Number.isFinite(value) ? value : ''}
-          step={step}
-          min={min}
-          max={max}
-          onChange={(e) => {
-            const n = parseFloat(e.target.value);
-            if (Number.isFinite(n)) onChange(n);
-          }}
-          className={css({ flex: 1, width: '100%', background: 'transparent', border: 'none', outline: 'none', color: 'github.textBright', fontFamily: 'mono', fontSize: '15px', fontWeight: 'semibold' })}
-          style={{ fontFeatureSettings: '"tnum"' }}
-        />
-        {suffix && <span className={css({ fontFamily: 'mono', fontSize: '12px' })} style={{ color: TERM.faint }}>{suffix}</span>}
-      </div>
-    </label>
   );
 }

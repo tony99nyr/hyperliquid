@@ -33,6 +33,7 @@ import {
   buildIocOrderAction,
   buildStopOrderAction,
   buildBracketAction,
+  buildEntryTriggerAction,
   parseOrderResponse,
 } from './hyperliquid-order-business-logic';
 
@@ -324,6 +325,45 @@ export async function submitBracket(coin: string, stopPx: number, tpPx: number, 
   };
   // Leg order matches buildBracketAction: [0] = stop ('sl'), [1] = take-profit ('tp').
   return { stopOid: oidOf(statuses[0]), tpOid: oidOf(statuses[1]) };
+}
+
+/**
+ * Place a resting STOP-ENTRY (trigger-to-open, NOT reduce-only) that fires a market
+ * open when the mark crosses `triggerPx`. Sets the coin's leverage FIRST — a resting
+ * trigger isn't margin-checked until it fires, so we pin leverage at place time so the
+ * fill opens at the intended risk. `isBuy` = the position side (buy=long breakout above
+ * mark, sell=short breakdown below mark). Returns the resting oid. Throws on rejection.
+ *
+ * ⚠ NEW live signing path (reduceOnly:false trigger) — testnet-rehearse long+short first.
+ */
+export async function submitEntryTrigger(coin: string, triggerPx: number, size: number, isBuy: boolean, leverage: number): Promise<{ oid: number | null }> {
+  if (!(triggerPx > 0) || !(size > 0)) throw new Error(`submitEntryTrigger: triggerPx + size must be positive (got ${triggerPx}, ${size})`);
+  const testnet = isTestnet();
+  const network = testnet ? 'testnet' : 'mainnet';
+  const wallet = privateKeyToAccount(readAgentKey());
+  const universe = await fetchPerpMeta(network);
+  const { assetIndex, szDecimals } = resolveAsset(universe, coin);
+
+  // Validate size to the lot floor BEFORE mutating account leverage — otherwise a
+  // sub-lot order would throw here AFTER submitUpdateLeverage already changed the
+  // coin's leverage, silently mutating account state on a "failed" place.
+  const sizeStr = formatHlSize(size, szDecimals);
+  if (!(Number(sizeStr) > 0)) throw new Error(`entry size ${size} rounds below the ${coin} lot size.`);
+  const triggerPxStr = formatHlPrice(triggerPx, szDecimals);
+
+  await submitUpdateLeverage(coin, leverage, false); // pin leverage before the resting open
+  const action = buildEntryTriggerAction({ assetIndex, isBuy, triggerPxStr, sizeStr });
+  const nonce = nextNonce();
+  const signature = await signL1Action({ wallet, action: action as unknown as Record<string, unknown>, nonce, isTestnet: testnet });
+  const res = await fetch(testnet ? EXCHANGE_URL.testnet : EXCHANGE_URL.mainnet, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, nonce, signature }),
+  });
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) throw new Error(`HL entry-trigger HTTP ${res.status}: ${JSON.stringify(json)}`);
+  const parsed = parseOrderResponse(json); // throws on a per-order error; resting → oid
+  return { oid: parsed.oid };
 }
 
 /** Cancel an order by (coin, oid) via the HL `cancel` action. Throws on rejection. */

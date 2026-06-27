@@ -272,3 +272,52 @@ function ReadCell({ label, value, color, testid }: { label: string; value: strin
     </div>
   );
 }
+
+/**
+ * A labeled numeric input cell (risk-$, stop-%, etc.) for the self-service entry
+ * form. Pure presentational; the parent owns the value + onChange. Extracted from
+ * EntryModal to keep that file under the 600-line cap.
+ */
+export function NumberField({
+  label,
+  value,
+  onChange,
+  step,
+  min,
+  max,
+  suffix,
+  testid,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  step: number;
+  min?: number;
+  max?: number;
+  suffix?: string;
+  testid: string;
+}) {
+  return (
+    <label className={css({ display: 'flex', flexDirection: 'column', gap: '7px', flex: 1, minWidth: '120px' })}>
+      <span className={css({ fontFamily: 'sans', fontSize: '10.5px', fontWeight: 'semibold', textTransform: 'uppercase', letterSpacing: '0.1em' })} style={{ color: '#9aa4b5' }}>{label}</span>
+      <div className={css({ display: 'flex', alignItems: 'center', gap: '6px', borderRadius: '9px', padding: '9px 12px' })} style={{ background: TERM.inset, border: '1px solid rgba(255,255,255,.08)' }}>
+        <input
+          type="number"
+          inputMode="decimal"
+          data-testid={testid}
+          value={Number.isFinite(value) ? value : ''}
+          step={step}
+          min={min}
+          max={max}
+          onChange={(e) => {
+            const n = parseFloat(e.target.value);
+            if (Number.isFinite(n)) onChange(n);
+          }}
+          className={css({ flex: 1, width: '100%', background: 'transparent', border: 'none', outline: 'none', color: 'github.textBright', fontFamily: 'mono', fontSize: '15px', fontWeight: 'semibold' })}
+          style={{ fontFeatureSettings: '"tnum"' }}
+        />
+        {suffix && <span className={css({ fontFamily: 'mono', fontSize: '12px' })} style={{ color: TERM.faint }}>{suffix}</span>}
+      </div>
+    </label>
+  );
+}
