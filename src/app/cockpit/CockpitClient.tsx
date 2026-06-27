@@ -21,7 +21,7 @@
  * Market-Read/Trade-Health) all survive inside the design's structure.
  */
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { css } from '@styled-system/css';
 import type { TradingMode } from '@/types/fill';
 import type { Session } from '@/types/cockpit';
@@ -80,6 +80,17 @@ export default function CockpitClient({
   // wins post-hydration). Each surface mounts EXACTLY once (no double subscriptions).
   const [surface, setSurface] = useUrlParamState<ViewKey>('tab', 'cockpit', TAB_KEYS);
   const [coin, setCoin] = useState(coins[0] ?? 'ETH');
+
+  // "Copy a leader position" hand-off: clicking Copy on a trader's position (Traders
+  // tab) repoints the cockpit to that coin, switches to the Cockpit tab, and stages
+  // the side so CockpitView opens a pre-filled entry preview on arrival. NO-AUTO-FIRE:
+  // it only opens the modal; the operator still Approves the entry.
+  const [stageReq, setStageReq] = useState<{ coin: string; side: 'long' | 'short' } | null>(null);
+  const onCopyPosition = useCallback((c: string, side: 'long' | 'short') => {
+    setCoin(c);
+    setStageReq({ coin: c, side });
+    setSurface('cockpit');
+  }, [setSurface]);
 
   // Auto-bind the latest active session (server seed → poll) so a session opened
   // MID-FLOW surfaces its popup + Safe-Exit without a refresh.
@@ -190,7 +201,7 @@ export default function CockpitClient({
           className={css({ flex: 1, overflowY: 'auto', padding: '12px' })}
         >
           <div className={css({ maxWidth: '1100px', marginX: 'auto' })}>
-            <TradersTable traders={topTraders} followedAddress={leaderAddress} ratings={ratings} />
+            <TradersTable traders={topTraders} followedAddress={leaderAddress} ratings={ratings} onCopyPosition={onCopyPosition} />
           </div>
         </section>
       ) : (
@@ -204,6 +215,8 @@ export default function CockpitClient({
           leaderAddress={leaderAddress}
           leaderPositions={resolvedLeaderPositions}
           currentEquityUsd={equityUsd ?? 0}
+          stageRequest={stageReq}
+          onStageConsumed={() => setStageReq(null)}
         />
       )}
 

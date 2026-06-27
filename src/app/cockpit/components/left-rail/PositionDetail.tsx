@@ -5,7 +5,9 @@
  * position row in the trader drawer; REPLACES the drawer body (single dialog — no
  * nested modal) with a back button. Shows: when the leader opened it (leader_actions
  * "first detected", or "held before we watched them" for the silent-baseline case),
- * a health read (liq-distance), the entry-vs-market chart, and a Follow toggle.
+ * a health read (liq-distance), the entry-vs-market chart, and a "Copy this position"
+ * action that opens a pre-filled entry preview in the cockpit (operator approves —
+ * no-auto-fire).
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -18,6 +20,7 @@ import {
   type HealthStatus,
 } from '@/lib/cockpit/position-health-business-logic';
 import PositionHistoryChart from './PositionHistoryChart';
+import { TRADEABLE_COINS } from './top-traders-filter-helpers';
 import { GH, ZONE_COLORS, fmtUsd, fmtPx, fmtCompactUsd } from '../panel-styles';
 
 const HEALTH_COLOR: Record<HealthStatus, string> = {
@@ -34,6 +37,9 @@ export interface PositionDetailProps {
   leaderAddress: string;
   position: HlPosition;
   onBack: () => void;
+  /** Copy this leader's position → opens the pre-filled entry preview in the cockpit
+   *  (switches tab + coin). Operator approves; nothing fires automatically. */
+  onCopy?: (coin: string, side: 'long' | 'short') => void;
   /** Test seam: skip the leader_actions / follows reads. */
   override?: { openedAtMs: number | null; following: boolean };
 }
@@ -47,7 +53,7 @@ function MicroStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-export default function PositionDetail({ leaderAddress, position: p, onBack, override }: PositionDetailProps) {
+export default function PositionDetail({ leaderAddress, position: p, onBack, onCopy, override }: PositionDetailProps) {
   const addr = leaderAddress.toLowerCase();
   const coin = p.coin.toUpperCase();
   const [openedAtMs, setOpenedAtMs] = useState<number | null>(override?.openedAtMs ?? null);
@@ -90,17 +96,6 @@ export default function PositionDetail({ leaderAddress, position: p, onBack, ove
     return () => { active = false; };
   }, [addr, coin, override]);
 
-  const markPx = markFromPosition(p.positionValue, p.size);
-  const health = computePositionHealth({ markPx, liquidationPx: p.liquidationPx });
-  const sideColor = p.side === 'long' ? ZONE_COLORS.ok : ZONE_COLORS.danger;
-  const pnlColor = p.unrealizedPnl > 0 ? ZONE_COLORS.ok : p.unrealizedPnl < 0 ? ZONE_COLORS.danger : GH.textMuted;
-
-  const openedLabel = !openLoaded
-    ? 'checking…'
-    : openedAtMs
-      ? `first detected ${new Date(openedAtMs).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
-      : 'held before we watched them';
-
   async function toggleFollow() {
     if (busy) return;
     setBusy(true);
@@ -122,6 +117,19 @@ export default function PositionDetail({ leaderAddress, position: p, onBack, ove
       setBusy(false);
     }
   }
+
+  const markPx = markFromPosition(p.positionValue, p.size);
+  const health = computePositionHealth({ markPx, liquidationPx: p.liquidationPx });
+  // Copy only works for coins the cockpit can trade (chart/feed/entry are scoped to it).
+  const copyTradeable = (TRADEABLE_COINS as readonly string[]).includes(coin);
+  const sideColor = p.side === 'long' ? ZONE_COLORS.ok : ZONE_COLORS.danger;
+  const pnlColor = p.unrealizedPnl > 0 ? ZONE_COLORS.ok : p.unrealizedPnl < 0 ? ZONE_COLORS.danger : GH.textMuted;
+
+  const openedLabel = !openLoaded
+    ? 'checking…'
+    : openedAtMs
+      ? `first detected ${new Date(openedAtMs).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
+      : 'held before we watched them';
 
   return (
     <div data-testid="position-detail" className={css({ display: 'flex', flexDirection: 'column', gap: '12px' })}>
@@ -168,25 +176,41 @@ export default function PositionDetail({ leaderAddress, position: p, onBack, ove
 
       <PositionHistoryChart coin={coin} side={p.side} entryPx={p.entryPx} liquidationPx={p.liquidationPx} openedAtMs={openedAtMs} />
 
-      <button
-        type="button"
-        data-testid="position-follow"
-        aria-pressed={following}
-        aria-busy={busy}
-        disabled={busy}
-        onClick={toggleFollow}
-        style={following ? { borderColor: '#5b8cff', color: '#e8ebf2', background: 'rgba(91,140,255,0.14)' } : undefined}
-        className={css({ fontFamily: 'mono', fontSize: '11px', fontWeight: 'bold', color: 'github.text', bg: 'github.bg', border: '1px solid token(colors.github.borderSubtle)', borderRadius: '6px', padding: '8px', cursor: busy ? 'wait' : 'pointer', _disabled: { opacity: 0.6 }, _hover: { borderColor: 'github.link' }, _focusVisible: { outline: '2px solid token(colors.github.link)' } })}
-      >
-        {busy ? 'Saving…' : following ? '✓ Following — tap to unfollow' : '+ Follow this position'}
-      </button>
+      {/* Two distinct actions: Copy = enter now (pre-filled preview); Follow = track
+          it (shows in the cockpit's Following panel + Discord alerts on the leader's
+          moves + a keep-matched reduce suggestion on their exits). */}
+      <div className={css({ display: 'flex', gap: '8px', flexWrap: 'wrap' })}>
+        <button
+          type="button"
+          data-testid="position-copy"
+          disabled={!onCopy || !copyTradeable}
+          title={!copyTradeable ? `${coin} isn't tradeable in the cockpit` : undefined}
+          onClick={() => copyTradeable && onCopy?.(coin, p.side)}
+          style={{ borderColor: '#5b8cff', color: '#e8ebf2', background: 'rgba(91,140,255,0.14)' }}
+          className={css({ flex: 1, minWidth: '150px', fontFamily: 'mono', fontSize: '11px', fontWeight: 'bold', border: '1px solid', borderRadius: '6px', padding: '9px', cursor: 'pointer', _disabled: { opacity: 0.5, cursor: 'not-allowed' }, _hover: { borderColor: 'github.link' }, _focusVisible: { outline: '2px solid token(colors.github.link)' } })}
+        >
+          {copyTradeable ? `Copy this ${p.side} → preview entry` : `${coin} not tradeable here`}
+        </button>
+        <button
+          type="button"
+          data-testid="position-follow"
+          aria-pressed={following}
+          aria-busy={busy}
+          disabled={busy}
+          onClick={toggleFollow}
+          style={following ? { borderColor: '#19c98a', color: '#bff4e1', background: 'rgba(25,201,138,0.14)' } : undefined}
+          className={css({ fontFamily: 'mono', fontSize: '11px', fontWeight: 'bold', color: 'github.text', bg: 'github.bg', border: '1px solid token(colors.github.borderSubtle)', borderRadius: '6px', paddingX: '12px', paddingY: '9px', cursor: busy ? 'wait' : 'pointer', _disabled: { opacity: 0.6 }, _hover: { borderColor: 'github.link' }, _focusVisible: { outline: '2px solid token(colors.github.link)' } })}
+        >
+          {busy ? 'Saving…' : following ? '✓ Following' : '+ Follow'}
+        </button>
+      </div>
       {followError && (
         <span role="status" data-testid="position-follow-error" style={{ color: ZONE_COLORS.danger }} className={css({ fontFamily: 'mono', fontSize: '9px' })}>
           Follow update failed — tap to retry.
         </span>
       )}
       <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted', lineHeight: 1.4 })}>
-        Following surfaces a keep-matched suggestion when this leader reduces/closes — you approve every action (no auto-fire).
+        Copy opens a pre-filled entry preview ({p.side.toUpperCase()} {coin}) — you set size + stop and Approve. Follow tracks it in the cockpit + alerts you (Discord) when this leader changes the position. Nothing fires automatically.
       </span>
     </div>
   );

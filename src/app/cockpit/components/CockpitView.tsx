@@ -17,7 +17,7 @@
  * Wired to REAL data throughout (Supabase realtime + HL ws + candle polls).
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { css } from '@styled-system/css';
 import type { HlPosition } from '@/lib/hyperliquid/hyperliquid-info-service';
 import type { OrderSide, TradingMode } from '@/types/fill';
@@ -28,6 +28,7 @@ import CandleChartPanel from './chart/CandleChartPanel';
 import OpenPositionsPanel from './OpenPositionsPanel';
 import MarketRegimePanel from './right-rail/MarketRegimePanel';
 import FavoritePlaysBoard from './opportunity/FavoritePlaysBoard';
+import FollowingPanel from './FollowingPanel';
 import WhalePosture from './opportunity/WhalePosture';
 import HealthPanel from './HealthPanel';
 import LeaderVsYou from './LeaderVsYou';
@@ -44,6 +45,11 @@ export interface CockpitViewProps {
   leaderAddress: string | null;
   leaderPositions: HlPosition[];
   currentEquityUsd: number;
+  /** A pending "copy a leader position" request (set when switching here from the
+   *  Traders tab) — consumed on arrival to open the pre-filled entry preview. */
+  stageRequest?: { coin: string; side: 'long' | 'short' } | null;
+  /** Called once the stageRequest has been consumed (parent clears it). */
+  onStageConsumed?: () => void;
 }
 
 export default function CockpitView({
@@ -56,6 +62,8 @@ export default function CockpitView({
   leaderAddress,
   leaderPositions,
   currentEquityUsd,
+  stageRequest,
+  onStageConsumed,
 }: CockpitViewProps) {
   // Net regime bias per coin (from the right-rail Market Regime panel) drives the
   // Open Positions alignment badge — fetched ONCE per coin, lifted up here.
@@ -75,8 +83,13 @@ export default function CockpitView({
   // opening from an opportunity carries THAT opportunity's side (so a SHORT setup
   // opens a SHORT preview, not the default long).
   const [entrySide, setEntrySide] = useState<OrderSide>('buy');
+  // Bumps on each FRESH open/stage so the modal re-keys (reseeds) only then — NOT when
+  // the operator changes coin inside the open ticket (which would wipe their typed
+  // size/leverage/LIVE phrase). Keying on `coin` directly was that bug.
+  const [stageNonce, setStageNonce] = useState(0);
   const onNewPosition = useCallback(() => {
     setEntrySide('buy');
+    setStageNonce((n) => n + 1);
     setShowEntry(true);
   }, []);
 
@@ -88,10 +101,26 @@ export default function CockpitView({
     (playCoin: string, side: 'long' | 'short') => {
       if (playCoin !== coin) onCoinChange(playCoin);
       setEntrySide(side === 'long' ? 'buy' : 'sell');
+      setStageNonce((n) => n + 1);
       setShowEntry(true);
     },
     [coin, onCoinChange],
   );
+
+  // Consume a "copy a leader position" request handed over from the Traders tab: the
+  // parent has already repointed the coin + switched here, so just open the pre-filled
+  // entry preview with the leader's side, then signal the parent to clear the request.
+  // Deferred a tick (setState lives in the timeout callback, not the effect body) so it
+  // doesn't synchronously cascade renders on mount.
+  useEffect(() => {
+    if (!stageRequest) return;
+    const { coin: stageCoin, side } = stageRequest;
+    const t = setTimeout(() => {
+      onStagePlay(stageCoin, side);
+      onStageConsumed?.();
+    }, 0);
+    return () => clearTimeout(t);
+  }, [stageRequest, onStagePlay, onStageConsumed]);
 
   // Live mark for the selected coin (the entry modal's sizing needs a price).
   const book = useHlOrderbook(coin);
@@ -138,6 +167,7 @@ export default function CockpitView({
           currentEquityUsd={currentEquityUsd}
           onNewPosition={onNewPosition}
         />
+        <FollowingPanel onCopy={onStagePlay} />
         <FavoritePlaysBoard onStagePlay={onStagePlay} />
         <HealthPanel sessionId={sessionId} coin={coin} onCoinChange={onCoinChange} />
         <MarketRegimePanel coin={coin} onNetBias={onNetBias} />
@@ -150,6 +180,10 @@ export default function CockpitView({
           popup path (mounted in CockpitClient) still works in parallel. */}
       {showEntry && (
         <EntryModal
+          // Re-key on the stage NONCE (bumped only on a fresh open/stage) so a new
+          // Copy reseeds — but changing coin INSIDE the open ticket does NOT remount
+          // (that would wipe the operator's typed size/leverage/LIVE phrase).
+          key={`entry-${stageNonce}`}
           mode={mode}
           coin={coin}
           initialSide={entrySide}

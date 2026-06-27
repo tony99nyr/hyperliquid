@@ -1,7 +1,7 @@
 /**
- * PositionDetail drill-down tests — health read, when-opened label, follow toggle.
- * The chart (lightweight-charts) is stubbed; the leader_actions/follows reads are
- * skipped via the `override` test seam.
+ * PositionDetail drill-down tests — health read, when-opened label, copy action.
+ * The chart (lightweight-charts) is stubbed; the leader_actions read is skipped via
+ * the `override` test seam.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -48,6 +48,13 @@ describe('PositionDetail', () => {
     render(<PositionDetail leaderAddress="0xABC" position={pos()} onBack={onBack} override={{ openedAtMs: null, following: false }} />);
     fireEvent.click(screen.getByTestId('position-detail-back'));
     expect(onBack).toHaveBeenCalled();
+  });
+
+  it('copy button calls onCopy with the position coin + side', () => {
+    const onCopy = vi.fn();
+    render(<PositionDetail leaderAddress="0xABC" position={pos({ coin: 'ETH', side: 'short' })} onBack={() => {}} onCopy={onCopy} override={{ openedAtMs: null, following: false }} />);
+    fireEvent.click(screen.getByTestId('position-copy'));
+    expect(onCopy).toHaveBeenCalledWith('ETH', 'short');
   });
 
   it('follow button posts a follow action to the route', async () => {

@@ -32,10 +32,12 @@ import {
   diffLeaderPositions,
   buildLeaderPositionRow,
   buildLeaderActionRow,
+  describeFollowedAction,
   type LeaderAction,
   type LeaderPositionSnapshot,
 } from './leader-diff-business-logic';
 import { resolveWatchSet, normalizeLeaderAddress } from './watch-set-business-logic';
+import { sendDiscord } from '@/lib/infrastructure/notify/discord-notify';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 /** Default number of top-rated leaders to watch. */
@@ -183,6 +185,27 @@ async function writeLeaderActions(client: SupabaseClient, actions: LeaderAction[
   if (error) throw new Error(`writeLeaderActions failed: ${error.message}`);
 }
 
+/**
+ * Discord-alert any detected action on a coin the operator is actively FOLLOWING.
+ * Server-side (runs in the daemon), so it fires even with no cockpit tab open — the
+ * in-app keep-matched popup can't. Best-effort: never throws (must not break the tick
+ * or the baseline), and sendDiscord is itself a no-op when DISCORD_WEBHOOK_URL is unset.
+ */
+async function notifyFollowedLeaderActions(client: SupabaseClient, leaderAddress: string, actions: LeaderAction[]): Promise<void> {
+  if (actions.length === 0) return;
+  const { data, error } = await client
+    .from('followed_positions')
+    .select('coin')
+    .eq('leader_address', leaderAddress.toLowerCase())
+    .eq('status', 'active');
+  if (error || !data || data.length === 0) return;
+  const followed = new Set(data.map((r) => String((r as { coin: string }).coin).toUpperCase()));
+  for (const a of actions) {
+    if (!followed.has(a.coin.toUpperCase())) continue;
+    await sendDiscord(describeFollowedAction(a));
+  }
+}
+
 /** Default retention window for the append-only leader_actions log (days). */
 export const LEADER_ACTIONS_RETENTION_DAYS = 7;
 
@@ -314,6 +337,14 @@ export async function runLeaderTick(
   // Update the baseline only AFTER a successful persist, so a write failure
   // re-tries the same diff next cycle instead of silently swallowing it.
   prior.set(leaderAddress, snapshots);
+
+  // Best-effort Discord alert for followed coins — AFTER the baseline is committed so
+  // an alert failure can never affect detection/persistence. Never throws.
+  try {
+    await notifyFollowedLeaderActions(client, leaderAddress, actions);
+  } catch {
+    // non-critical — alerting must not break the watch tick
+  }
 
   return {
     leaderAddress,

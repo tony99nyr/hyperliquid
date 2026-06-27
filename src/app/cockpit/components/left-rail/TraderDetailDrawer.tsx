@@ -43,6 +43,8 @@ export interface TraderDetailDrawerProps {
   isFavorite?: boolean;
   /** Toggle this trader's favorite from inside the modal (no need to close it). */
   onToggleFavorite?: () => void;
+  /** Copy a leader position → pre-filled entry preview in the cockpit (switches tab). */
+  onCopyPosition?: (coin: string, side: 'long' | 'short') => void;
   /** Test seed: render fixed positions instead of fetching. */
   detailOverride?: {
     positions: HlPosition[];
@@ -60,7 +62,7 @@ const SEVERITY_COLOR: Record<FlagSeverity, string> = {
   info: GH.textMuted,
 };
 
-export default function TraderDetailDrawer({ trader, onClose, isFavorite, onToggleFavorite, detailOverride }: TraderDetailDrawerProps) {
+export default function TraderDetailDrawer({ trader, onClose, isFavorite, onToggleFavorite, onCopyPosition, detailOverride }: TraderDetailDrawerProps) {
   const live = useTraderPositions(detailOverride ? null : trader.address);
   const detail = detailOverride ?? live;
   // Where the positions came from: 'supabase' (watcher covers this leader — live,
@@ -255,6 +257,7 @@ export default function TraderDetailDrawer({ trader, onClose, isFavorite, onTogg
             leaderAddress={trader.address}
             position={selectedPosition}
             onBack={() => setSelectedPosition(null)}
+            onCopy={onCopyPosition}
           />
         ) : (
         <>

@@ -39,6 +39,8 @@ export interface TradersTableProps {
   traders: TopTraderRow[];
   followedAddress?: string | null;
   ratings?: RatingsFreshness | null;
+  /** Copy a leader position → pre-filled entry preview in the cockpit (switches tab). */
+  onCopyPosition?: (coin: string, side: 'long' | 'short') => void;
 }
 
 const PAGE = 30;
@@ -110,7 +112,7 @@ function Chip({ label, title, active, disabled, onToggle }: { label: string; tit
   );
 }
 
-export default function TradersTable({ traders, followedAddress, ratings }: TradersTableProps) {
+export default function TradersTable({ traders, followedAddress, ratings, onCopyPosition }: TradersTableProps) {
   const followed = followedAddress?.toLowerCase() ?? null;
   const fav = useFavorites();
   const { getEval } = useTraderEvaluations();
@@ -336,6 +338,7 @@ export default function TradersTable({ traders, followedAddress, ratings }: Trad
           onClose={() => setSelected(null)}
           isFavorite={fav.isFavorite(selected.address)}
           onToggleFavorite={() => void fav.toggle(selected.address).catch(() => {})}
+          onCopyPosition={onCopyPosition}
         />
       )}
     </section>

@@ -4,7 +4,10 @@ import {
   buildLeaderPositionRow,
   buildLeaderActionRow,
   formatLeaderAction,
+  describeFollowedAction,
+  shortAddress,
   MIN_REL_SIZE_DELTA,
+  type LeaderAction,
   type LeaderPositionSnapshot,
 } from '@/lib/trader-watch/leader-diff-business-logic';
 
@@ -202,5 +205,33 @@ describe('formatLeaderAction', () => {
     expect(formatLeaderAction(action, '0xecb6…1234')).toBe(
       '0xecb6…1234 closed short ETH (was 1.128)',
     );
+  });
+});
+
+describe('describeFollowedAction (Discord alert lines)', () => {
+  function action(over: Partial<LeaderAction>): LeaderAction {
+    return {
+      leaderAddress: LEADER, coin: 'ETH', kind: 'open', prevSide: null, newSide: 'long',
+      prevSize: 0, newSize: 1, sizeDelta: 1, entryPx: 1600, notionalUsd: 1600, unrealizedPnl: 0, ...over,
+    };
+  }
+  it('shortens the address', () => {
+    expect(shortAddress(LEADER)).toBe('0xecb6…1234');
+  });
+  it('describes an OPEN with side + notional', () => {
+    const s = describeFollowedAction(action({ kind: 'open', newSide: 'short', notionalUsd: 2000 }));
+    expect(s).toMatch(/OPENED SHORT ETH/);
+    expect(s).toMatch(/\$2,000/);
+  });
+  it('describes a REDUCE with the relative percent', () => {
+    const s = describeFollowedAction(action({ kind: 'reduce', newSide: 'short', prevSize: 2, newSize: 1, sizeDelta: -1 }));
+    expect(s).toMatch(/REDUCED SHORT ETH/);
+    expect(s).toMatch(/−50%/);
+  });
+  it('describes a CLOSE off the previous side', () => {
+    expect(describeFollowedAction(action({ kind: 'close', prevSide: 'long', newSide: null }))).toMatch(/CLOSED LONG ETH/);
+  });
+  it('describes a FLIP with both sides', () => {
+    expect(describeFollowedAction(action({ kind: 'flip', prevSide: 'long', newSide: 'short' }))).toMatch(/FLIPPED ETH LONG → SHORT/);
   });
 });

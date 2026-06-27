@@ -7,9 +7,11 @@ vi.mock('@/lib/hyperliquid/hyperliquid-info-service', () => ({
   fetchClearinghouseState: vi.fn(),
 }));
 vi.mock('@/lib/hyperliquid/top-traders-service', () => ({ getTopTraders: vi.fn() }));
+vi.mock('@/lib/infrastructure/notify/discord-notify', () => ({ sendDiscord: vi.fn() }));
 
 import { fetchClearinghouseState } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { getTopTraders } from '@/lib/hyperliquid/top-traders-service';
+import { sendDiscord } from '@/lib/infrastructure/notify/discord-notify';
 import {
   runLeaderWatchCycle,
   pruneLeaderActions,
@@ -20,6 +22,7 @@ import {
 
 const mFetch = vi.mocked(fetchClearinghouseState);
 const mTopTraders = vi.mocked(getTopTraders);
+const mDiscord = vi.mocked(sendDiscord);
 
 const LEADER = '0xecb6000000000000000000000000000000001234';
 const NOW = 1_700_000_000_000;
@@ -87,7 +90,8 @@ function chState(positions: HlPosition[], over: Partial<HlClearinghouseState> = 
  * performs. delete()/upsert()/insert() each resolve to `{ error: null }` and are
  * awaitable (delete returns a chainable thenable so `.eq(...).not(...)` works).
  */
-function fakeClient() {
+function fakeClient(opts: { followedCoins?: string[] } = {}) {
+  const followedRows = (opts.followedCoins ?? []).map((coin) => ({ coin }));
   const calls = {
     upserts: [] as unknown[][],
     inserts: [] as unknown[][],
@@ -106,11 +110,21 @@ function fakeClient() {
     };
     return chain;
   };
+  // .select(...).eq(...).eq(...) → awaitable; serves followed_positions rows so the
+  // daemon's Discord-notify path can be exercised (empty for any other table).
+  const selectChain = (table: string) => {
+    const chain: Record<string, unknown> = {};
+    chain.eq = () => chain;
+    chain.then = (resolve: (v: { data: unknown[]; error: null }) => void) =>
+      Promise.resolve({ data: table === 'followed_positions' ? followedRows : [], error: null }).then(resolve);
+    return chain;
+  };
   const client = {
     from(table: string) {
       calls.lastTable = table;
       return {
         delete: () => deleteChain(),
+        select: () => selectChain(table),
         upsert: (rows: unknown[]) => {
           calls.upserts.push(rows);
           return Promise.resolve({ error: null });
@@ -195,6 +209,33 @@ describe('runLeaderWatchCycle', () => {
     expect(calls.inserts).toHaveLength(0); // NO actions written
     expect(calls.upserts).toHaveLength(0); // baseline untouched
     expect(prior.get(LEADER)).toHaveLength(1); // prior baseline preserved
+  });
+
+  it('Discord-alerts a followed leader action (reduce), silent for an un-followed coin', async () => {
+    const prior: LeaderSnapshotStore = new Map();
+    // Baseline cycle (no follows yet, no actions).
+    mFetch.mockResolvedValueOnce(chState([hlPos('ETH', 'short', 2)]));
+    await runLeaderWatchCycle(prior, { now: NOW, clientFactory: () => fakeClient().client });
+
+    // Second cycle: leader REDUCES ETH 2 → 1 (−50%). Operator follows ETH.
+    mFetch.mockResolvedValueOnce(chState([hlPos('ETH', 'short', 1)]));
+    const { client } = fakeClient({ followedCoins: ['ETH'] });
+    await runLeaderWatchCycle(prior, { now: NOW + 30_000, clientFactory: () => client });
+
+    expect(mDiscord).toHaveBeenCalledTimes(1);
+    expect(String(mDiscord.mock.calls[0][0])).toMatch(/REDUCED.*ETH/i);
+  });
+
+  it('does NOT Discord-alert when the changed coin is not followed', async () => {
+    const prior: LeaderSnapshotStore = new Map();
+    mFetch.mockResolvedValueOnce(chState([hlPos('ETH', 'short', 2)]));
+    await runLeaderWatchCycle(prior, { now: NOW, clientFactory: () => fakeClient().client });
+
+    mFetch.mockResolvedValueOnce(chState([hlPos('ETH', 'short', 1)]));
+    const { client } = fakeClient({ followedCoins: ['BTC'] }); // following BTC, leader changed ETH
+    await runLeaderWatchCycle(prior, { now: NOW + 30_000, clientFactory: () => client });
+
+    expect(mDiscord).not.toHaveBeenCalled();
   });
 
   it('isolates a per-leader failure without aborting the cycle', async () => {

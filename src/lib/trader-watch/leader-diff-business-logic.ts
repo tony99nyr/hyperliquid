@@ -283,3 +283,33 @@ export function formatLeaderAction(action: LeaderAction, shortAddr?: string): st
       : `${action.newSize}`;
   return `${who} ${verb[action.kind]} ${side} ${action.coin} (${sizePart}${px})`.trim();
 }
+
+/** Shorten an address for human-facing alerts: 0x1234…abcd. PURE. */
+export function shortAddress(a: string): string {
+  return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
+}
+
+/**
+ * Discord alert line for a FOLLOWED leader's action — richer than formatLeaderAction
+ * (emoji + notional + change %) since it's a push the operator reads at a glance. PURE.
+ */
+export function describeFollowedAction(action: LeaderAction): string {
+  const who = shortAddress(action.leaderAddress);
+  const coin = action.coin.toUpperCase();
+  const notional = action.notionalUsd ? `$${Math.round(action.notionalUsd).toLocaleString('en-US')}` : null;
+  const relPct = action.prevSize > 0 ? Math.round((Math.abs(action.sizeDelta) / action.prevSize) * 100) : null;
+  switch (action.kind) {
+    case 'open':
+      return `🟢 Followed ${who} OPENED ${(action.newSide ?? '').toUpperCase()} ${coin}${notional ? ` — ${notional}` : ''}${action.entryPx != null ? ` @ $${action.entryPx}` : ''}`;
+    case 'add':
+      return `➕ Followed ${who} ADDED to ${(action.newSide ?? '').toUpperCase()} ${coin}${relPct != null ? ` (+${relPct}%)` : ''}${notional ? ` — now ${notional}` : ''}`;
+    case 'reduce':
+      return `🔻 Followed ${who} REDUCED ${(action.newSide ?? '').toUpperCase()} ${coin}${relPct != null ? ` (−${relPct}%)` : ''}${notional ? ` — now ${notional}` : ''}`;
+    case 'close':
+      return `⚪ Followed ${who} CLOSED ${(action.prevSide ?? '').toUpperCase()} ${coin}`;
+    case 'flip':
+      return `🔄 Followed ${who} FLIPPED ${coin} ${(action.prevSide ?? '').toUpperCase()} → ${(action.newSide ?? '').toUpperCase()}`;
+    default:
+      return `Followed ${who} ${action.kind} ${coin}`;
+  }
+}
