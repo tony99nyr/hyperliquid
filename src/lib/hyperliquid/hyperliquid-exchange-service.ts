@@ -32,6 +32,7 @@ import {
   aggressiveIocPrice,
   buildIocOrderAction,
   buildStopOrderAction,
+  buildBracketAction,
   parseOrderResponse,
 } from './hyperliquid-order-business-logic';
 
@@ -277,6 +278,52 @@ export async function submitStopOrder(coin: string, triggerPx: number, size: num
   if (!res.ok) throw new Error(`HL stop order HTTP ${res.status}: ${JSON.stringify(json)}`);
   const parsed = parseOrderResponse(json); // throws on a per-order error; resting → oid
   return { oid: parsed.oid };
+}
+
+/**
+ * Place a native OCO BRACKET (stop-loss + take-profit, `grouping:'positionTpsl'`) in
+ * ONE signed action. `isBuy` = the order side (OPPOSITE the position; both legs close
+ * it). HL links the two one-cancels-other + auto-cancels on close. Returns both resting
+ * oids. Throws if EITHER leg is rejected (fail-closed — never leave a half-bracket).
+ *
+ * NOTE: the positionTpsl grouping is a NEW live path — rehearse on HL_NETWORK=testnet
+ * (both long + short) before relying on it in production.
+ */
+export async function submitBracket(coin: string, stopPx: number, tpPx: number, size: number, isBuy: boolean): Promise<{ stopOid: number | null; tpOid: number | null }> {
+  if (!(stopPx > 0) || !(tpPx > 0) || !(size > 0)) throw new Error(`submitBracket: stopPx, tpPx + size must be positive (got ${stopPx}, ${tpPx}, ${size})`);
+  const testnet = isTestnet();
+  const network = testnet ? 'testnet' : 'mainnet';
+  const wallet = privateKeyToAccount(readAgentKey());
+  const universe = await fetchPerpMeta(network);
+  const { assetIndex, szDecimals } = resolveAsset(universe, coin);
+
+  const sizeStr = formatHlSize(size, szDecimals);
+  if (!(Number(sizeStr) > 0)) throw new Error(`bracket size ${size} rounds below the ${coin} lot size.`);
+  const stopPxStr = formatHlPrice(stopPx, szDecimals);
+  const tpPxStr = formatHlPrice(tpPx, szDecimals);
+
+  const action = buildBracketAction({ assetIndex, isBuy, stopPxStr, tpPxStr, sizeStr });
+  const nonce = nextNonce();
+  const signature = await signL1Action({ wallet, action: action as unknown as Record<string, unknown>, nonce, isTestnet: testnet });
+  const res = await fetch(testnet ? EXCHANGE_URL.testnet : EXCHANGE_URL.mainnet, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, nonce, signature }),
+  });
+  const json = (await res.json().catch(() => ({}))) as { status?: string; response?: { data?: { statuses?: Array<Record<string, unknown>> } } };
+  if (!res.ok) throw new Error(`HL bracket HTTP ${res.status}: ${JSON.stringify(json)}`);
+  if (json.status !== 'ok') throw new Error(`HL exchange rejected bracket: ${JSON.stringify(json.status ? json : json)}`);
+  const statuses = json.response?.data?.statuses;
+  if (!Array.isArray(statuses) || statuses.length < 2) throw new Error(`HL bracket: expected 2 order statuses, got ${JSON.stringify(json)}`);
+  // Fail-closed: if EITHER leg errored, the bracket is half-placed — surface it.
+  for (const s of statuses) { const e = (s as { error?: unknown }).error; if (e) throw new Error(`HL bracket leg rejected: ${String(e)}`); }
+  const oidOf = (s: Record<string, unknown>): number | null => {
+    const resting = (s as { resting?: { oid?: number } }).resting?.oid;
+    const filled = (s as { filled?: { oid?: number } }).filled?.oid;
+    return resting ?? filled ?? null;
+  };
+  // Leg order matches buildBracketAction: [0] = stop ('sl'), [1] = take-profit ('tp').
+  return { stopOid: oidOf(statuses[0]), tpOid: oidOf(statuses[1]) };
 }
 
 /** Cancel an order by (coin, oid) via the HL `cancel` action. Throws on rejection. */

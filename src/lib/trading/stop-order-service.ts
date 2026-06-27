@@ -13,7 +13,7 @@ import { getTradingMode } from '@/lib/env/mode';
 import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
 import { validateEnv } from '@/lib/env/env';
 import { fetchOpenOrders, type HlOpenOrder } from '@/lib/hyperliquid/hyperliquid-info-service';
-import { submitStopOrder, submitCancel } from '@/lib/hyperliquid/hyperliquid-exchange-service';
+import { submitStopOrder, submitBracket, submitCancel } from '@/lib/hyperliquid/hyperliquid-exchange-service';
 
 /** A reduce-only Stop trigger order (vs a take-profit or a plain limit). */
 function isStopOrder(o: HlOpenOrder): boolean {
@@ -103,3 +103,16 @@ export async function placeTpOnHl(coin: string, triggerPx: number, size: number,
 
 /** Cancel a resting take-profit by (coin, oid) — same mechanism as a stop cancel. */
 export const cancelTpOnHl = cancelStopOnHl;
+
+/**
+ * Place a native OCO BRACKET (stop + take-profit, mutually-cancelling) on the position
+ * in ONE action. `side` is the POSITION side; both legs are the opposite (they close).
+ * LIVE only; PAPER no-op. Throws if either leg is rejected (fail-closed). The two
+ * orders auto-cancel each other on fill and both auto-cancel when the position closes —
+ * no orphan reduce-only order on a flat position.
+ */
+export async function placeBracketOnHl(coin: string, stopPx: number, tpPx: number, size: number, side: 'long' | 'short'): Promise<{ pushed: boolean; stopOid: number | null; tpOid: number | null }> {
+  if (getTradingMode() !== 'live') return { pushed: false, stopOid: null, tpOid: null };
+  const { stopOid, tpOid } = await submitBracket(coin, stopPx, tpPx, size, side === 'short'); // long bracket SELLS, short BUYS
+  return { pushed: true, stopOid, tpOid };
+}

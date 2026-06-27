@@ -12,6 +12,7 @@ import {
   aggressiveIocPrice,
   buildIocOrderAction,
   buildStopOrderAction,
+  buildBracketAction,
   resolveAsset,
   parseOrderResponse,
 } from '@/lib/hyperliquid/hyperliquid-order-business-logic';
@@ -88,6 +89,24 @@ describe('buildStopOrderAction — reduce-only stop-market trigger shape', () =>
     const o = action.orders[0];
     expect(o.r).toBe(true); // reduce-only either way
     expect(o.t).toEqual({ trigger: { isMarket: true, triggerPx: '1750', tpsl: 'tp' } });
+  });
+});
+
+describe('buildBracketAction — native OCO (positionTpsl): stop + take-profit', () => {
+  it('emits two same-side reduce-only legs (stop first, tp second) grouped positionTpsl', () => {
+    const action = buildBracketAction({ assetIndex: 5, isBuy: false, stopPxStr: '1700', tpPxStr: '1450', sizeStr: '0.36' });
+    expect(action.type).toBe('order');
+    expect(action.grouping).toBe('positionTpsl'); // links the legs one-cancels-other
+    expect(action.orders).toHaveLength(2);
+    const [sl, tp] = action.orders;
+    // both legs CLOSE the position → same side (a short's bracket BUYS), both reduce-only
+    expect(sl.b).toBe(false); expect(tp.b).toBe(false);
+    expect(sl.r).toBe(true); expect(tp.r).toBe(true);
+    // load-bearing key order within each leg
+    expect(Object.keys(sl)).toEqual(['a', 'b', 'p', 's', 'r', 't']);
+    // leg 0 = stop ('sl'), leg 1 = take-profit ('tp')
+    expect(sl.t).toEqual({ trigger: { isMarket: true, triggerPx: '1700', tpsl: 'sl' } });
+    expect(tp.t).toEqual({ trigger: { isMarket: true, triggerPx: '1450', tpsl: 'tp' } });
   });
 });
 

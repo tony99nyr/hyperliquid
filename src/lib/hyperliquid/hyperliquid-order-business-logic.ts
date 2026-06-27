@@ -10,6 +10,11 @@
 
 export type HlTif = 'Ioc' | 'Gtc' | 'Alo';
 
+/** Order grouping. 'na' = independent; 'normalTpsl' = entry+TP+SL OCO set;
+ *  'positionTpsl' = TP/SL attached to an open position (children one-cancels-other +
+ *  auto-cancel when the position closes). */
+export type HlGrouping = 'na' | 'normalTpsl' | 'positionTpsl';
+
 /** The exact `order` action HL hashes. KEY ORDER IS LOAD-BEARING (insertion order
  *  = msgpack serialization order = the signed bytes): type, orders, grouping; and
  *  within an order a, b, p, s, r, t. p and s MUST be strings. */
@@ -23,7 +28,7 @@ export interface HlOrderAction {
     r: boolean; // reduceOnly
     t: { limit: { tif: HlTif } } | { trigger: { isMarket: boolean; triggerPx: string; tpsl: 'tp' | 'sl' } };
   }>;
-  grouping: 'na';
+  grouping: HlGrouping;
 }
 
 /**
@@ -56,6 +61,36 @@ export function buildStopOrderAction(input: {
       },
     ],
     grouping: 'na',
+  };
+}
+
+/**
+ * Build a native OCO BRACKET — a stop-loss AND a take-profit attached to an open
+ * position via `grouping:'positionTpsl'`. Both legs are reduce-only and SAME-SIDE
+ * (both CLOSE the position: a long's bracket SELLS, `isBuy` false). HL links them
+ * one-cancels-other and auto-cancels both when the position closes — so the stop can
+ * never orphan on a flat position, and "filled-but-unstopped" is impossible. Stop leg
+ * first (tpsl 'sl'), target leg second ('tp'); the msgpack order is what's signed.
+ */
+export function buildBracketAction(input: {
+  assetIndex: number;
+  isBuy: boolean;
+  stopPxStr: string;
+  tpPxStr: string;
+  sizeStr: string;
+}): HlOrderAction {
+  const leg = (triggerPxStr: string, tpsl: 'sl' | 'tp') => ({
+    a: input.assetIndex,
+    b: input.isBuy,
+    p: triggerPxStr,
+    s: input.sizeStr,
+    r: true, // reduce-only — a protective leg can only CLOSE
+    t: { trigger: { isMarket: true, triggerPx: triggerPxStr, tpsl } },
+  });
+  return {
+    type: 'order',
+    orders: [leg(input.stopPxStr, 'sl'), leg(input.tpPxStr, 'tp')],
+    grouping: 'positionTpsl',
   };
 }
 
