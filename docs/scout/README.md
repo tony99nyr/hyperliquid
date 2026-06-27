@@ -17,10 +17,28 @@ worth running?** — measured on a pre-registered bar before any real money.
    ambiguous, high-stakes calls. Opus is otherwise your Tier-1 manual session +
    the weekly review.
 
-## What the scout trades today (decision model)
+## Multi-lane (since 2026-06-26)
 
-The honest current baseline — so the roadmap refactors from reality, not the
-runbook's aspiration. All values from `data/rubric/rubric-v0.1.0.json`.
+The scout now runs **multiple lanes**, each scored on its own number in
+`scout:review` and the cockpit Scout tab (see `SCOUT_ALPHA_ROADMAP.md`):
+
+- **directional** — the original lane below (Claude trades the rubric, paper).
+- **vault:HLP** (Lane A) — a passive HLP allocation, scored on HLP's flow-free
+  per-capital return. Ingested by `pnpm vault-watch` (NAS tick).
+- **carry** (Lane B) — a delta-neutral funding-carry **benchmark** (earn funding
+  on the funding-receiving side, exit on a sign flip). Scored from live HL funding.
+- Lanes A + B are paper **benchmarks** ("does the edge pay?"), not live-executed.
+  Lane C (cross-sectional) was gate-checked and **rejected** (no edge on majors).
+
+`pnpm scout:lanes` (on the NAS tick) computes the per-lane breakdown and persists
+it to `lane_scorecards`; the cockpit reads it. Env knobs:
+`SCOUT_{VAULT,CARRY}_{LOOKBACK_DAYS,NOTIONAL_USD,BAR_USD}`. The account-level NET +
+verdict (the pre-registered bar + circuit breaker) stays the aggregate.
+
+## What the directional lane trades (decision model)
+
+The honest baseline for the **directional** lane. All values from
+`data/rubric/rubric-v0.1.0.json`.
 
 - **Universe:** ETH, BTC, SOL, HYPE only.
 - **Edge hypothesis (directional):** Claude reasons over the deterministic

@@ -1,12 +1,31 @@
 # Scout Alpha Roadmap — stop, rebuild, relaunch
 
-> **Status: PROPOSED.** Pairs with `docs/scout/README.md` (current decision model)
-> and `docs/scout/BACKTEST_FINDINGS.md` (why the directional core is weak). The
-> external evidence below comes from a verified deep-research pass (18 confirmed /
-> 7 adversarially-refuted claims); **time-sensitive numbers must be re-measured
-> live — see Caveats.** The decision: **stop the current directional scout,
-> rebuild it around durable+accessible edges, relaunch each as a pre-registered
-> paper lane.**
+> **Status: LARGELY IMPLEMENTED (2026-06-26).** Pairs with `docs/scout/README.md`
+> (current decision model) and `docs/scout/BACKTEST_FINDINGS.md` (why the
+> directional core is weak). The external evidence comes from a verified
+> deep-research pass (18 confirmed / 7 refuted claims); **time-sensitive numbers
+> must be re-measured live — see Caveats.**
+
+## Implementation status (2026-06-26)
+
+The refactor below is built and live; the P&L was reset to a fresh book with the
+lanes enabled.
+
+| Piece | Status |
+|---|---|
+| **Pre-work #0** — multi-lane isolation (`positions.lane`/`hypotheses.lane`, per-lane scorecard) | ✅ built (migs 0019/0020) |
+| **Lane A — vault allocation (HLP)** | ✅ built — ingested (`vault-watch`, mig 0021), flow-free return scored |
+| **Lane B — delta-neutral funding carry** | ✅ built — `fundingCarryBenchmark`, negative-funding exit guard, scored |
+| **Lane C — cross-sectional** | ❌ **gate-check FAILED → not built** (HYPE single-name in one bull regime; see §Lane C) |
+| **Per-lane scorecard + cockpit Scout-tab UI** | ✅ built — `lane-scorecard-service` (single compute) → `lane_scorecards` (mig 0022) → route/hook/ScoutPanel |
+| **NAS ingestion** | ✅ `nas-watch.sh` runs `vault-watch --once` + `scout:lanes` each tick (no new cron) |
+
+Lanes A and B are scored as **paper benchmarks** ("does this edge pay?"), not
+live-executed lanes — promoting either to live execution is the next step *if its
+track record earns it*. Env knobs: `SCOUT_{VAULT,CARRY}_{LOOKBACK_DAYS,NOTIONAL_USD,BAR_USD}`.
+
+The original plan (the decision to stop directional, rebuild around durable edges,
+relaunch each as a pre-registered paper lane) follows.
 
 ---
 
