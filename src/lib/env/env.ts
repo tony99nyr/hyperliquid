@@ -72,6 +72,19 @@ const envSchema = z.object({
   // Dedicated bearer token for the detector/cron to call /api/cockpit/risk-exit.
   // Separate from ADMIN_SECRET so the NAS/cron never holds the admin credential.
   AUTO_EXIT_CRON_SECRET: z.string().min(1).optional(),
+
+  // --- Armed Ladder (see docs/ARMED_LADDER_ARCHITECTURE.md) ---
+  // Master kill-switch for the LIVE ladder capability. Default OFF: a LIVE-mode
+  // ladder cannot be armed and the fire route refuses to execute unless this is
+  // explicitly 'true'. PAPER ladders work regardless (paper-first). Gates the new
+  // live signing paths until the §4b testnet rehearsal is green.
+  LADDER_LIVE_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  // Dedicated bearer token for the NAS watcher to call /api/cockpit/ladder/fire-rung
+  // (P1d). Separate from ADMIN_SECRET so the watcher never holds the admin credential.
+  LADDER_CRON_SECRET: z.string().min(1).optional(),
   // Vercel's native cron secret (auto-injected as `Authorization: Bearer $CRON_SECRET`
   // on cron invocations). Accepted as a fallback so setting only CRON_SECRET (the
   // Vercel convention) still authenticates the backup detector.
@@ -106,5 +119,7 @@ export function validateEnv(source: NodeJS.ProcessEnv = process.env): CockpitEnv
     AUTO_EXIT_ENABLED: source.AUTO_EXIT_ENABLED,
     AUTO_EXIT_CRON_SECRET: source.AUTO_EXIT_CRON_SECRET,
     CRON_SECRET: source.CRON_SECRET,
+    LADDER_LIVE_ENABLED: source.LADDER_LIVE_ENABLED,
+    LADDER_CRON_SECRET: source.LADDER_CRON_SECRET,
   });
 }

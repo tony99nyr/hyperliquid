@@ -5,7 +5,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { validateLadderForArm, type ArmRung, type ValidateLadderInput } from '@/lib/ladder/ladder-arm-business-logic';
+import { validateLadderForArm, resolveArmRung, ladderArmConfirmPhrase, type ArmRung, type ValidateLadderInput } from '@/lib/ladder/ladder-arm-business-logic';
+import type { LadderRung } from '@/lib/ladder/ladder-types';
 
 const NOW = 1_700_000_000_000;
 const coinMax = () => 25; // ETH/BTC ~25× for the tests
@@ -126,6 +127,43 @@ describe('validateLadderForArm — pyramiding guardrails (§2)', () => {
       rung({ seq: 2, side: 'short', action: 'open', triggerKind: 'price_below', entryPx: 2000, sizeCoins: 1, stopPx: 2100, triggerPx: 2000 }),
     ];
     expect(validateLadderForArm(input({ rungs })).warnings.some((w) => /both long and short/i.test(w))).toBe(true);
+  });
+});
+
+function dbRung(over: Partial<LadderRung> = {}): LadderRung {
+  return {
+    id: 'r1', ladderId: 'L1', seq: 1, coin: 'ETH', side: 'long', action: 'open',
+    triggerKind: 'price_above', triggerPx: 2000, triggerMeta: null,
+    sizeCoins: null, riskUsd: null, stopFrac: null, leverage: 5, stopPx: null, targetPx: null,
+    status: 'pending', cloid: null, ...over,
+  };
+}
+
+describe('resolveArmRung — entry/size/stop resolution', () => {
+  it('price rung: entry = trigger; risk-sizes when no explicit size; derives the stop from stopFrac', () => {
+    const r = resolveArmRung(dbRung({ triggerPx: 2000, riskUsd: 50, stopFrac: 0.04, sizeCoins: null, stopPx: null }));
+    expect(r.entryPx).toBe(2000);
+    expect(r.sizeCoins).toBeCloseTo(50 / (2000 * 0.04), 6); // 0.625
+    expect(r.stopPx).toBeCloseTo(2000 * (1 - 0.04), 6); // long stop below
+  });
+  it('keeps an explicit size + stop (no derivation)', () => {
+    const r = resolveArmRung(dbRung({ sizeCoins: 1.5, stopPx: 1850 }));
+    expect(r.sizeCoins).toBe(1.5);
+    expect(r.stopPx).toBe(1850);
+  });
+  it('short stop derives ABOVE entry', () => {
+    const r = resolveArmRung(dbRung({ side: 'short', triggerKind: 'price_below', triggerPx: 2000, riskUsd: 50, stopFrac: 0.04 }));
+    expect(r.stopPx).toBeCloseTo(2000 * 1.04, 6);
+  });
+  it('non-price trigger keeps entry null (sized at fire against the live mark)', () => {
+    const r = resolveArmRung(dbRung({ triggerKind: 'volume', triggerPx: null, triggerMeta: { minVolume: 1000 }, sizeCoins: 1 }));
+    expect(r.entryPx).toBeNull();
+  });
+});
+
+describe('ladderArmConfirmPhrase', () => {
+  it('is "arm <id8>" lowercased', () => {
+    expect(ladderArmConfirmPhrase({ id: 'ABCD1234-5678-90ef' })).toBe('arm abcd1234');
   });
 });
 

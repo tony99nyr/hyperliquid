@@ -16,9 +16,10 @@
  * needs live unrealized PnL, so /ladder/fire-rung checks it per-fire — never here.
  */
 
-import type { LadderSide, RungAction, RungTriggerKind, RungTriggerMeta } from './ladder-types';
+import type { Ladder, LadderRung, LadderSide, RungAction, RungTriggerKind, RungTriggerMeta } from './ladder-types';
 import {
   computeLadderRisk,
+  rungEntryPx,
   type LadderCaps,
   type LadderRiskRead,
   type RungRisk,
@@ -168,6 +169,51 @@ export function validateLadderForArm(input: ValidateLadderInput): ValidateLadder
   warnings.push(...risk.breaches);
 
   return { warnings, risk };
+}
+
+/**
+ * Resolve a persisted LadderRung into the ArmRung the validator/risk math consume:
+ * entry = the trigger level (price kinds); size = explicit, else risk-based
+ * (riskUsd / (entry·stopFrac)); stop = explicit, else derived from stopFrac off entry.
+ * PURE. Non-price-triggered rungs keep entry=null (sized at fire against the live mark).
+ */
+export function resolveArmRung(rung: LadderRung): ArmRung {
+  const entryPx = rungEntryPx(rung, null);
+  // stopFrac is a fraction of entry — bound to (0, 1), the canonical open-sizer's
+  // range. Outside it, leave size/stop unresolved so the validator flags the rung
+  // (a >= 1 stopFrac would derive a non-positive long stop / oversize the position).
+  const validStopFrac = rung.stopFrac != null && rung.stopFrac > 0 && rung.stopFrac < 1;
+  let sizeCoins = rung.sizeCoins;
+  if ((sizeCoins == null || !(sizeCoins > 0)) && rung.riskUsd != null && rung.riskUsd > 0 && validStopFrac && entryPx != null && entryPx > 0) {
+    sizeCoins = rung.riskUsd / (entryPx * (rung.stopFrac as number));
+  }
+  let stopPx = rung.stopPx;
+  if ((stopPx == null || !(stopPx > 0)) && validStopFrac && entryPx != null && entryPx > 0) {
+    const frac = rung.stopFrac as number;
+    stopPx = rung.side === 'long' ? entryPx * (1 - frac) : entryPx * (1 + frac);
+  }
+  return {
+    seq: rung.seq,
+    coin: rung.coin,
+    side: rung.side,
+    action: rung.action,
+    triggerKind: rung.triggerKind,
+    triggerPx: rung.triggerPx,
+    triggerMeta: rung.triggerMeta,
+    entryPx,
+    sizeCoins: sizeCoins ?? null,
+    leverage: rung.leverage,
+    stopPx: stopPx ?? null,
+  };
+}
+
+/**
+ * The exact phrase a LIVE arm must type — `arm <id8>` (lowercased), where id8 is the
+ * ladder's first 8 id chars. Specific to THIS ladder (can't be muscle-memory'd across
+ * ladders), mirrors the entry/exit typed-phrase gates. The arm IS the authorization.
+ */
+export function ladderArmConfirmPhrase(ladder: Pick<Ladder, 'id'>): string {
+  return `arm ${ladder.id.slice(0, 8)}`.toLowerCase();
 }
 
 /** Map ArmRung[] → the RungRisk[] the risk math consumes. */

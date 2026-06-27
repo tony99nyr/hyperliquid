@@ -104,6 +104,20 @@ exchange-level double-fire rejection.
 - **P1 — single-coin armed ladder + watcher** (migration 0023 with the §3.6 DB
   constraint; `/ladder/arm` typed-phrase; `/ladder/fire-rung` cron-bearer + claim/dedupe
   + `assertLadderArmed` + precondition-snapshot re-check; NAS watcher tick; preview modal).
+  - ✅ **P1a foundation** (commit 1f6e234): migration 0023 (ladders/rungs/fires + the
+    §3.6 DB CHECK + one-shot fire ledger); `ladder-types.ts`; the PURE authority-free
+    `ladder-trigger-evaluator.ts` (fail-closed, completed-candle, split-sink-safe).
+  - ✅ **P1b consent math** (commit 0f85ff7): `ladder-risk-business-logic.ts`
+    (slippage-bounded no-netting worst-case, per-(coin,side) liq, caps, precondition
+    snapshot/hash — self-defending vs risk understatement); `ladder-arm-business-logic.ts`
+    (arm-readiness + pyramiding guardrails: decreasing size + tightening stop).
+  - ⬜ **P1c arm path** (NEXT, lower-risk): `ladder-service.ts` service-role CRUD +
+    `/ladder/arm` (admin + typed-phrase → validate → snapshot → status='armed'). Arming
+    is AUTHORIZATION only — moves no money.
+  - ⬜ **P1d fire path** (the money-moving slice — deliberate/testnet-gated): `/ladder/fire-rung`
+    (cron-bearer + ladder_fires claim/dedupe + assertLadderArmed + precondition STRING
+    re-check + runtime risk-covered-by-profit + atomic add→re-bracket → executeIntent);
+    NAS watcher tick; `LadderPreviewModal`. Behind `LADDER_LIVE_ENABLED` OFF, paper-first.
   Surfaces native **Scale + TWAP**. Watcher owns volume/funding/indicator triggers.
   **MUST also include (moved up from P2 — P1 already adds to a live position):** the
   pyramiding-guardrail enforcement (a rung that *increases* exposure fires only if its
