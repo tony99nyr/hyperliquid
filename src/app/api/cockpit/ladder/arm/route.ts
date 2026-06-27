@@ -23,7 +23,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyAdminAuth, getClientIdentifier } from '@/lib/infrastructure/auth/auth';
 import { isSameOrigin } from '@/lib/infrastructure/auth/same-origin';
 import { checkRateLimit } from '@/lib/infrastructure/rate-limiting/in-memory-rate-limit';
-import { validateEnv } from '@/lib/env/env';
+import { isLadderLiveEnabled } from '@/lib/ladder/ladder-flags';
 import { getActiveSession } from '@/lib/cockpit/session-service';
 import { getLadderWithRungs, armLadder } from '@/lib/ladder/ladder-service';
 import {
@@ -81,10 +81,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // Defense-in-depth with the DB CHECK: a scout-authored ladder can NEVER be armed.
   if (ladder.author !== 'operator') return NextResponse.json({ ok: false, error: 'only operator-authored ladders can be armed' }, { status: 403 });
 
-  // Paper-first kill-switch: a LIVE ladder can't be armed while LADDER_LIVE_ENABLED is off.
-  const liveEnabled = validateEnv().LADDER_LIVE_ENABLED;
-  if (ladder.mode === 'live' && !liveEnabled) {
-    return NextResponse.json({ ok: false, error: 'LIVE ladders are disabled (LADDER_LIVE_ENABLED off) — paper-first.' }, { status: 403 });
+  // Capability gate: a LIVE ladder can't be armed while LADDER_LIVE_ENABLED is off.
+  // (This is the ARM capability — autonomous firing is the separate LADDER_AUTOFIRE
+  // switch the fire route checks; arming does not move money.)
+  if (ladder.mode === 'live' && !isLadderLiveEnabled()) {
+    return NextResponse.json({ ok: false, error: 'LIVE ladders are disabled (LADDER_LIVE_ENABLED off).' }, { status: 403 });
   }
 
   // Resolve rungs + run the full static validation against live state.

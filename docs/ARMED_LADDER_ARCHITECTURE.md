@@ -133,6 +133,13 @@ exchange-level double-fire rejection.
 
 ## 4b. Live-enablement gate (before `LADDER_LIVE_ENABLED` flips on)
 
+**Two independent kill-switches (so "go live for MANUAL execution" ≠ "enable AFK auto-fire"):**
+- `TRADING_MODE=live` — manual cockpit actions sign + submit real money (the global paper↔live switch).
+- `LADDER_LIVE_ENABLED` — a LIVE ladder may be ARMED (operator authorization). Default OFF.
+- `LADDER_AUTOFIRE_ENABLED` — the watcher / fire-rung route may AUTONOMOUSLY execute a pre-armed
+  rung. Default OFF, and the operator can run **fully live for manual trading with this hard-off**.
+  The fire route checks it as its single enforcement point (item 7) before any AFK fill.
+
 **Testnet rehearsal checklist — ALL green on `HL_NETWORK=testnet`, long AND short:**
 1. Bracket fires the correct leg long and short (stop-entry `tpsl` direction correct).
 2. OCO actually one-cancels-other on testnet.

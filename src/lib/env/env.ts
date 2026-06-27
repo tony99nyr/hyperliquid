@@ -74,11 +74,21 @@ const envSchema = z.object({
   AUTO_EXIT_CRON_SECRET: z.string().min(1).optional(),
 
   // --- Armed Ladder (see docs/ARMED_LADDER_ARCHITECTURE.md) ---
-  // Master kill-switch for the LIVE ladder capability. Default OFF: a LIVE-mode
-  // ladder cannot be armed and the fire route refuses to execute unless this is
-  // explicitly 'true'. PAPER ladders work regardless (paper-first). Gates the new
-  // live signing paths until the §4b testnet rehearsal is green.
+  // Capability gate for LIVE ladders: a LIVE-mode ladder can be ARMED (the operator
+  // authorization) only when this is 'true'. PAPER ladders work regardless. Default
+  // OFF. NOTE: arming ≠ executing — this does NOT let the watcher fire autonomously;
+  // that is the SEPARATE LADDER_AUTOFIRE_ENABLED switch below.
   LADDER_LIVE_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  // The "automatic execute" kill-switch — INDEPENDENT of TRADING_MODE and
+  // LADDER_LIVE_ENABLED. Only when this is 'true' may the NAS watcher / fire-rung route
+  // (P1d) AUTONOMOUSLY execute a pre-armed rung while the operator is AFK. Default OFF,
+  // and deliberately kept OFF even when the cockpit is fully live for MANUAL execution:
+  // going live ≠ enabling AFK auto-fire. The fire route checks this as its single
+  // enforcement point (invariant §4b.7 kill-switch) before any autonomous fill.
+  LADDER_AUTOFIRE_ENABLED: z
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
@@ -120,6 +130,7 @@ export function validateEnv(source: NodeJS.ProcessEnv = process.env): CockpitEnv
     AUTO_EXIT_CRON_SECRET: source.AUTO_EXIT_CRON_SECRET,
     CRON_SECRET: source.CRON_SECRET,
     LADDER_LIVE_ENABLED: source.LADDER_LIVE_ENABLED,
+    LADDER_AUTOFIRE_ENABLED: source.LADDER_AUTOFIRE_ENABLED,
     LADDER_CRON_SECRET: source.LADDER_CRON_SECRET,
   });
 }
