@@ -19,8 +19,10 @@ describe('AdjustLeverageModal margin-aware display', () => {
     expect(screen.getAllByText(/2,658/).length).toBeGreaterThan(0);
     // Over-margined warning present (adjusting leverage may release posted margin).
     expect(screen.getByTestId('adjust-lev-overmargined')).toBeTruthy();
-    // New liq is labelled an estimate in this state.
-    expect(screen.getByText(/New liq \(est\.\)/)).toBeTruthy();
+    // At no change the New-liq row reads coherently as the REAL liq (not the formula
+    // ~1880) — both current and new show 2,658, so "5× → 5×" doesn't fake a liq jump.
+    expect(screen.getByTestId('adjust-lev-newliq').textContent).toMatch(/2,658/);
+    expect(screen.queryByText(/1,880/)).toBeNull();
   });
 
   it('no over-margined warning when effective leverage ≈ the setting', () => {

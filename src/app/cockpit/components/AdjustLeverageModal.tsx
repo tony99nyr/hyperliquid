@@ -120,6 +120,14 @@ export default function AdjustLeverageModal({ target, onClose, onExecuted }: Adj
   // setting. Changing the leverage SETTING may rebalance that margin and move liq —
   // the formula "new liq" below assumes margin realigns to the setting.
   const overMargined = isOverMargined(target.effLeverage, target.currentLeverage);
+  // For an over-margined position, "no change" must READ as no change: show the REAL
+  // liq for the new-liq rows when the slider hasn't moved (otherwise the setting-based
+  // formula contradicts the real current liq — "5× → 5×" but liq jumps). On an actual
+  // change we show the formula estimate, which is always ≤ the real distance for an
+  // over-margined position (conservative) and is flagged "(est.)" + the warning.
+  const showRealForNew = overMargined && noChange;
+  const displayNewLiqPx = showRealForNew ? realCurrentLiq : plan.liqPx;
+  const displayNewLiqDistPct = showRealForNew ? realCurrentLiqDistPct : plan.liqDistFromMarkPct;
   // Lowering leverage on an isolated position = posting more margin; HL rejects when
   // free collateral is short. "Add margin" does the same de-risk without that
   // restriction, so nudge toward it when the operator drags leverage DOWN.
@@ -218,14 +226,14 @@ export default function AdjustLeverageModal({ target, onClose, onExecuted }: Adj
             <SummaryRow label="New leverage" value={`${plan.leverage}×`} />
             <SummaryRow label="Current liq" value={`${fmtPx(realCurrentLiq)}${realCurrentLiqDistPct != null ? ` (${realCurrentLiqDistPct.toFixed(1)}%)` : ''}`} color={GH.textMuted} />
             <SummaryRow
-              label={overMargined ? 'New liq (est.)' : 'New liq'}
-              value={fmtPx(plan.liqPx)}
+              label={overMargined && !noChange ? 'New liq (est.)' : 'New liq'}
+              value={fmtPx(displayNewLiqPx)}
               color={plan.dangerNearMark ? ZONE_COLORS.danger : GH.text}
               testid="adjust-lev-newliq"
             />
             <SummaryRow
               label="Liq vs mark"
-              value={plan.liqDistFromMarkPct == null ? '—' : `${plan.liqDistFromMarkPct.toFixed(1)}% away`}
+              value={displayNewLiqDistPct == null ? '—' : `${displayNewLiqDistPct.toFixed(1)}% away`}
               color={plan.dangerNearMark ? ZONE_COLORS.danger : GH.textMuted}
               last
             />
