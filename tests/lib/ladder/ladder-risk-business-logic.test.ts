@@ -12,6 +12,7 @@ import {
   computeLadderRisk,
   buildPreconditionSnapshot,
   hashPreconditionSnapshot,
+  addRiskCoveredByProfit,
   STOP_SLIPPAGE_TOL,
   type RungRisk,
 } from '@/lib/ladder/ladder-risk-business-logic';
@@ -129,6 +130,20 @@ describe('computeLadderRisk — totals, no-netting worst-case, cap breaches', ()
     // Two SEPARATE legs (each with its own real liq), never one blended $4000 long.
     expect(r.perCoin).toHaveLength(2);
     expect(new Set(r.perCoin.map((c) => c.side))).toEqual(new Set(['long', 'short']));
+  });
+});
+
+describe('addRiskCoveredByProfit (§2 runtime pyramiding guard)', () => {
+  it('covered: add risk ≤ unrealized profit', () => {
+    expect(addRiskCoveredByProfit(100, 150)).toBe(true);
+    expect(addRiskCoveredByProfit(150, 150)).toBe(true); // equal is covered
+  });
+  it('NOT covered: add risk exceeds profit', () => {
+    expect(addRiskCoveredByProfit(200, 150)).toBe(false);
+  });
+  it('NOT covered when the position is flat/losing (profit ≤ 0) — never martingale', () => {
+    expect(addRiskCoveredByProfit(10, 0)).toBe(false);
+    expect(addRiskCoveredByProfit(10, -50)).toBe(false);
   });
 });
 

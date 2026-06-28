@@ -49,7 +49,7 @@ async function main(): Promise<void> {
     const eq = pair.indexOf('=');
     const cookie = { name: pair.slice(0, eq), value: pair.slice(eq + 1), domain: '127.0.0.1', path: '/' };
 
-    async function capture(width: number, height: number, isMobile: boolean, suffix: string): Promise<void> {
+    async function capture(width: number, height: number, isMobile: boolean, suffix: string, doArm: boolean): Promise<void> {
       const ctx = await browser.newContext({ viewport: { width, height }, isMobile });
       await ctx.addCookies([cookie]);
       const page = await ctx.newPage();
@@ -69,12 +69,24 @@ async function main(): Promise<void> {
         await delay(800);
         await page.screenshot({ path: `${DIR}/ladder-builder-${suffix}.png` });
         console.log(`  shot: ladder-builder-${suffix}.png`);
+
+        if (doArm) {
+          // Drive the full PAPER create+arm, then capture the armed row in the list.
+          await page.getByTestId('ladder-arm').click();
+          await page.waitForFunction(() => !document.querySelector('[data-testid="ladder-builder-modal"]'), { timeout: 15_000 }).catch(() => notes.push(`${suffix}: arm modal did not close`));
+          await delay(2_000); // list reload
+          await page.locator('[data-testid^="ladder-status-"]').first().waitFor({ state: 'visible', timeout: 8_000 }).catch(() => notes.push(`${suffix}: no armed row`));
+          await page.screenshot({ path: `${DIR}/ladders-armed-${suffix}.png` });
+          console.log(`  shot: ladders-armed-${suffix}.png`);
+        } else {
+          await page.getByTestId('ladder-close').click();
+        }
       } else notes.push(`${suffix}: no ladder-new button`);
       await ctx.close();
     }
 
-    await capture(1440, 900, false, 'desktop');
-    await capture(390, 844, true, 'mobile');
+    await capture(1440, 900, false, 'desktop', true); // desktop arms a paper ladder
+    await capture(390, 844, true, 'mobile', false); // mobile shows it in the list + the builder
   } finally {
     await browser.close();
     if (server && !server.killed) server.kill('SIGTERM');

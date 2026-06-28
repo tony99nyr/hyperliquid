@@ -237,6 +237,19 @@ export function buildPreconditionSnapshot(rungs: Pick<LadderRung, 'coin' | 'acti
   return parts.join('|');
 }
 
+/**
+ * The §2 RUNTIME pyramiding guardrail (enforced at FIRE, not arm — it needs live PnL):
+ * an exposure-INCREASING add fires only if its worst-case loss is fully covered by the
+ * existing position's CURRENT unrealized profit. A flat/losing position (profit ≤ 0)
+ * can never cover an add → refused. This is the inviolable "risk covered by profit"
+ * rule that separates disciplined pyramiding from martingale averaging-up. PURE.
+ */
+export function addRiskCoveredByProfit(addWorstCaseLossUsd: number, unrealizedProfitUsd: number): boolean {
+  if (!(unrealizedProfitUsd > 0)) return false;
+  if (!(addWorstCaseLossUsd >= 0)) return false;
+  return addWorstCaseLossUsd <= unrealizedProfitUsd;
+}
+
 /** Deterministic, dependency-free string hash (FNV-1a, 32-bit) for the precondition
  *  snapshot — pure, stable across processes (no crypto / Date needed). */
 export function hashPreconditionSnapshot(snapshot: string): string {

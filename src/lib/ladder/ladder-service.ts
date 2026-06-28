@@ -197,6 +197,40 @@ export async function armLadder(
   return true;
 }
 
+/**
+ * Idempotently CLAIM a rung fire — the atomic double-fire guard. Inserts a
+ * ladder_fires row keyed by the unique dedupe_key (= ladderId:rungId) with ON CONFLICT
+ * DO NOTHING. Returns claimed=true ONLY for the caller that inserted the row; a
+ * concurrent/retried fire of the same rung gets claimed=false and must NOT execute.
+ */
+export async function claimRungFire(ladderId: string, rungId: string): Promise<{ claimed: boolean; fireId: string | null }> {
+  const db = getServiceRoleClient();
+  const { data, error } = await db
+    .from('ladder_fires')
+    .upsert(
+      { ladder_id: ladderId, rung_id: rungId, dedupe_key: `${ladderId}:${rungId}`, status: 'claimed' },
+      { onConflict: 'dedupe_key', ignoreDuplicates: true },
+    )
+    .select('id');
+  if (error) throw new Error(`claimRungFire failed: ${error.message}`);
+  if (data && data.length > 0) return { claimed: true, fireId: data[0].id as string };
+  return { claimed: false, fireId: null }; // already claimed (conflict → no row)
+}
+
+/** Record the terminal outcome of a claimed fire (filled / failed / flattened). */
+export async function markFireOutcome(fireId: string, status: 'filled' | 'failed' | 'flattened', detail?: string): Promise<void> {
+  const db = getServiceRoleClient();
+  const { error } = await db.from('ladder_fires').update({ status, detail: detail ?? null }).eq('id', fireId);
+  if (error) throw new Error(`markFireOutcome failed: ${error.message}`);
+}
+
+/** Set a rung's status (fired / skipped / failed / cancelled). */
+export async function setRungStatus(rungId: string, status: 'fired' | 'skipped' | 'failed' | 'cancelled'): Promise<void> {
+  const db = getServiceRoleClient();
+  const { error } = await db.from('ladder_rungs').update({ status }).eq('id', rungId);
+  if (error) throw new Error(`setRungStatus failed: ${error.message}`);
+}
+
 /** Disarm a ladder (operator kill-switch or precondition drift): status→'disarmed'. */
 export async function disarmLadder(id: string, reason: string): Promise<void> {
   const db = getServiceRoleClient();
