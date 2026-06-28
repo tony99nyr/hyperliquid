@@ -41,6 +41,14 @@ export default function LaddersView({ coin = 'ETH' }: LaddersViewProps) {
     } catch { setError('Network error — retry.'); }
   }, []);
 
+  const disarm = useCallback(async (id: string) => {
+    try {
+      const res = await fetch('/api/cockpit/ladder/disarm', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ladderId: id }) });
+      if (!res.ok) { const j = (await res.json().catch(() => ({}))) as { error?: string }; setError(j.error ?? `Disarm failed (${res.status})`); return; }
+      await load();
+    } catch { setError('Network error — retry.'); }
+  }, [load]);
+
   // Defer the initial load out of the effect's synchronous body (its setState would
   // otherwise trip react-hooks/set-state-in-effect — the cascading-render guard).
   useEffect(() => { const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [load]);
@@ -76,6 +84,11 @@ export default function LaddersView({ coin = 'ETH' }: LaddersViewProps) {
               <span className={css({ fontFamily: 'mono', fontSize: '10px', fontWeight: 'bold', borderRadius: '5px', paddingX: '7px', paddingY: '3px' })}
                 style={{ background: l.mode === 'live' ? 'rgba(248,81,73,.16)' : 'rgba(255,255,255,.06)', color: l.mode === 'live' ? ZONE_COLORS.danger : GH.textMuted }}>{l.mode.toUpperCase()}</span>
               <span data-testid={`ladder-status-${l.id}`} className={css({ fontFamily: 'mono', fontSize: '11px', fontWeight: 'semibold', textTransform: 'uppercase', letterSpacing: '0.06em', minWidth: '64px', textAlign: 'right' })} style={{ color: STATUS_COLOR[l.status] }}>{l.status}</span>
+              {l.status === 'armed' && (
+                <button type="button" data-testid={`ladder-disarm-${l.id}`} onClick={() => void disarm(l.id)}
+                  className={css({ fontFamily: 'mono', fontSize: '10.5px', fontWeight: 'semibold', borderRadius: '6px', paddingX: '10px', paddingY: '5px', cursor: 'pointer', flex: 'none' })}
+                  style={{ background: 'rgba(248,81,73,.12)', color: ZONE_COLORS.danger, border: '1px solid rgba(248,81,73,.3)' }}>Disarm</button>
+              )}
             </div>
           ))}
         </div>
