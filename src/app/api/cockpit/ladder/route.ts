@@ -15,7 +15,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyAdminAuth, getClientIdentifier } from '@/lib/infrastructure/auth/auth';
 import { isSameOrigin } from '@/lib/infrastructure/auth/same-origin';
 import { checkRateLimit } from '@/lib/infrastructure/rate-limiting/in-memory-rate-limit';
-import { createLadder, listLadders, type NewRung } from '@/lib/ladder/ladder-service';
+import { createLadder, listLadders, listLaddersWithRungs, type NewRung } from '@/lib/ladder/ladder-service';
 import type { Ladder, LadderSide, RungAction, RungTriggerKind } from '@/lib/ladder/ladder-types';
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 
@@ -38,8 +38,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
   const statusRaw = request.nextUrl.searchParams.get('status');
   const status = statusRaw && VALID_STATUS.includes(statusRaw as Ladder['status']) ? (statusRaw as Ladder['status']) : undefined;
+  const withRungs = request.nextUrl.searchParams.get('withRungs') === '1';
   try {
-    return NextResponse.json({ ok: true, ladders: await listLadders(status) });
+    const ladders = withRungs ? await listLaddersWithRungs(status) : await listLadders(status);
+    return NextResponse.json({ ok: true, ladders });
   } catch (err) {
     return NextResponse.json({ ok: false, error: extractErrorMessage(err) }, { status: 502 });
   }

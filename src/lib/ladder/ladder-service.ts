@@ -164,6 +164,23 @@ export async function listLadders(status?: Ladder['status']): Promise<Ladder[]> 
   return (data ?? []).map(rowToLadder);
 }
 
+/** List ladders WITH their rungs (newest first), optionally filtered by status. One
+ *  ladder query + one rungs query (not N+1) — the cockpit's armed-ladder panel reads this. */
+export async function listLaddersWithRungs(status?: Ladder['status']): Promise<LadderWithRungs[]> {
+  const db = getServiceRoleClient();
+  const ladders = await listLadders(status);
+  if (ladders.length === 0) return [];
+  const ids = ladders.map((l) => l.id);
+  const { data, error } = await db.from('ladder_rungs').select('*').in('ladder_id', ids).order('seq', { ascending: true });
+  if (error) throw new Error(`listLaddersWithRungs rungs failed: ${error.message}`);
+  const byLadder = new Map<string, LadderRung[]>();
+  for (const row of data ?? []) {
+    const r = rowToRung(row);
+    (byLadder.get(r.ladderId) ?? byLadder.set(r.ladderId, []).get(r.ladderId)!).push(r);
+  }
+  return ladders.map((l) => ({ ...l, rungs: byLadder.get(l.id) ?? [] }));
+}
+
 /**
  * Arm a DRAFT ladder: status→'armed', stamp armed_at + the precondition hash + expiry,
  * and set each rung's deterministic cloid. CONDITIONAL on the row still being a draft

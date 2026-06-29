@@ -26,6 +26,7 @@ import type { RegimeDir } from './open-positions-helpers';
 import { useHlOrderbook } from '@/hooks/useHlOrderbook';
 import CandleChartPanel from './chart/CandleChartPanel';
 import OpenPositionsPanel from './OpenPositionsPanel';
+import ArmedLaddersPanel from './ArmedLaddersPanel';
 import MarketRegimePanel from './right-rail/MarketRegimePanel';
 import FavoritePlaysBoard from './opportunity/FavoritePlaysBoard';
 import FollowingPanel from './FollowingPanel';
@@ -167,6 +168,7 @@ export default function CockpitView({
           currentEquityUsd={currentEquityUsd}
           onNewPosition={onNewPosition}
         />
+        <ArmedLaddersPanel coin={coin} markPx={entryPx} />
         <FollowingPanel onCopy={onStagePlay} />
         <FavoritePlaysBoard onStagePlay={onStagePlay} />
         <HealthPanel sessionId={sessionId} coin={coin} onCoinChange={onCoinChange} />
