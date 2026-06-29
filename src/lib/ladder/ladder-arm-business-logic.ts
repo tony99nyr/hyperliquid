@@ -114,6 +114,11 @@ export function validateLadderForArm(input: ValidateLadderInput): ValidateLadder
   for (const r of rungs) {
     const tp = triggerProblem(r);
     if (tp) warnings.push(tp);
+    // The autofire watcher only builds price + volume snapshots; funding/indicator
+    // triggers would arm but NEVER fire (fail-closed) — reject so an armed rung is honest.
+    if (r.triggerKind === 'funding' || r.triggerKind === 'indicator') {
+      warnings.push(`rung ${r.seq}: ${r.triggerKind} triggers aren't yet evaluated by the watcher — use a price or volume trigger.`);
+    }
 
     if (INCREASES_EXPOSURE(r.action)) {
       if (r.entryPx == null || !(r.entryPx > 0)) warnings.push(`rung ${r.seq}: needs a positive entry level.`);
@@ -183,7 +188,12 @@ export function resolveArmRung(rung: LadderRung): ArmRung {
   // range. Outside it, leave size/stop unresolved so the validator flags the rung
   // (a >= 1 stopFrac would derive a non-positive long stop / oversize the position).
   const validStopFrac = rung.stopFrac != null && rung.stopFrac > 0 && rung.stopFrac < 1;
-  let sizeCoins = rung.sizeCoins;
+  // open/add are RISK-sized to MATCH the fire path (fireOpenOrAdd → buildOpenProposal,
+  // which ignores any explicit sizeCoins). Honoring an explicit sizeCoins here would make
+  // the ARM-time consent preview diverge from what FIRE executes. An explicit sizeCoins is
+  // kept only for reduce/close (the trim amount). Parity = the operator consents to the real size.
+  const increasesExposure = rung.action === 'open' || rung.action === 'add';
+  let sizeCoins = increasesExposure ? null : rung.sizeCoins;
   if ((sizeCoins == null || !(sizeCoins > 0)) && rung.riskUsd != null && rung.riskUsd > 0 && validStopFrac && entryPx != null && entryPx > 0) {
     sizeCoins = rung.riskUsd / (entryPx * (rung.stopFrac as number));
   }

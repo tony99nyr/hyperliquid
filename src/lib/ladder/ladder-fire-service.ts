@@ -48,6 +48,7 @@ import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
 import { validateEnv } from '@/lib/env/env';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 import type { CanonicalFill, OrderSide } from '@/types/fill';
+import type { Position } from '@/types/position';
 
 export interface LadderFireResult {
   fired: boolean;
@@ -207,52 +208,86 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
     }
   }
 
-  const fill = await executeIntent(proposal.intent, { forcePaper });
-
-  // ATOMICALLY bracket the fill (invariant §3.3). A bracket reject is a hard fault →
-  // FLATTEN the just-opened exposure rather than leave it unstopped.
-  const filledSize = fill.sz > 0 ? fill.sz : proposal.intent.sz;
+  // Execute the open AND bracket it INSIDE ONE try (invariant §3.3 atomic-with-stop).
+  // CRITICAL: executeIntent does liveFill → persistFill → applyFillToPosition, so a
+  // Supabase write that throws AFTER a live fill leaves a real open position. ANY throw
+  // here (post-fill DB error OR a bracket reject) must FLATTEN — never leave it unstopped.
+  let filledSize = proposal.intent.sz;
   try {
-    if (rung.targetPx != null && rung.targetPx > 0) {
-      await placeBracketOnHl(coin, proposal.stopPx, rung.targetPx, filledSize, side);
-    } else {
-      await placeStopOnHl(coin, proposal.stopPx, filledSize, side);
+    const fill = await executeIntent(proposal.intent, { forcePaper });
+    // Zero-fill (IOC didn't cross): no exposure opened — nothing to bracket or fire.
+    if (!(fill.sz > 0)) {
+      await markFireOutcome(fireId, 'failed', 'no-fill');
+      await setRungStatus(rung.id, 'failed');
+      return skip('no-fill');
     }
-  } catch (bracketErr) {
-    // Filled-but-unstopped: flatten immediately (reduce-only). CHECK the flatten result —
-    // if the flatten ALSO fails, the position is genuinely unstopped: record a distinct
-    // CRITICAL fault (not 'flattened') so it's never mistaken for "safely closed".
-    const detail = bracketErr instanceof Error ? bracketErr.message : String(bracketErr);
-    let flattenOk = false;
-    try {
-      const pos = await loadPosition(sessionId, coin);
-      if (pos && pos.side !== 'flat' && pos.sz > 0) {
-        const closeIntent = buildMarketReduceOnlyClose(pos, { sessionId, clientIntentId: randomUUID(), now: Date.now() });
-        if (closeIntent) { await executeIntent(closeIntent, { forcePaper }); flattenOk = true; }
-      } else {
-        flattenOk = true; // nothing on the books to flatten (e.g. paper / already flat)
-      }
-    } catch { flattenOk = false; }
-    await setRungStatus(rung.id, 'failed');
-    if (flattenOk) {
-      await markFireOutcome(fireId, 'flattened', `bracket-reject: ${detail}`);
-      await alert(sessionId, `Ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: bracket REJECTED after fill — FLATTENED (filled-but-unstopped fault).`);
-      return { fired: false, skipped: 'bracket-reject-flattened', flattened: true };
+    filledSize = fill.sz;
+    // Bracket ONLY a live fill. A PAPER ladder places NO real exchange orders (the
+    // bracket helpers gate on the GLOBAL TRADING_MODE, so without this guard a paper
+    // ladder on a live deployment would rest a REAL stop/TP that could close a real
+    // position in this coin). Paper fires fully simulated, recorded without a bracket.
+    if (!forcePaper) {
+      if (rung.targetPx != null && rung.targetPx > 0) await placeBracketOnHl(coin, proposal.stopPx, rung.targetPx, filledSize, side);
+      else await placeStopOnHl(coin, proposal.stopPx, filledSize, side);
     }
-    await markFireOutcome(fireId, 'failed', `CRITICAL bracket-reject AND flatten-FAILED — UNSTOPPED position: ${detail}`);
-    await alert(sessionId, `🚨 Ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: bracket rejected AND flatten FAILED — ${coin} is UNSTOPPED. Manual intervention required.`);
-    return { fired: false, skipped: 'bracket-reject-flatten-failed', flattened: false };
+    await markFireOutcome(fireId, 'filled');
+    await setRungStatus(rung.id, 'fired');
+    await writeAnalysisLog({ sessionId, source: 'ladder-fire', severity: 'info', message: `FIRED ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: ${rung.action} ${side} ${filledSize} ${coin} @ ~${markPx} (${ladder.mode}${forcePaper ? ' · paper' : ''}).` }).catch(() => {});
+    return { fired: true, skipped: null, fill };
+  } catch (err) {
+    // A live fill MAY have landed before this throw (post-fill DB error, or a bracket
+    // reject after a confirmed fill). Flatten the (possible) exposure rather than leave
+    // it unstopped — sized to just this rung's fill so a base position keeps its own stop.
+    return await flattenAfterFault(ladder, rung, sessionId, coin, fireId, forcePaper, filledSize, err instanceof Error ? err.message : String(err));
   }
-
-  await markFireOutcome(fireId, 'filled');
-  await setRungStatus(rung.id, 'fired');
-  await writeAnalysisLog({ sessionId, source: 'ladder-fire', severity: 'info', message: `FIRED ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: ${rung.action} ${side} ${filledSize} ${coin} @ ~${markPx} (${ladder.mode}).` }).catch(() => {});
-  return { fired: true, skipped: null, fill };
 }
 
-/** REDUCE / CLOSE — reduce-only, sized from the live position (can never open/flip). */
+/**
+ * The just-fired open/add faulted AFTER a possible fill (post-fill DB error or a bracket
+ * reject). Flatten the exposure reduce-only and record the outcome. Reads the EFFECTIVE
+ * position (live HL when not paper) so it closes what's really open. If the flatten ALSO
+ * fails, record a distinct CRITICAL "UNSTOPPED" fault + page — never mislabel it 'flattened'.
+ */
+async function flattenAfterFault(ladder: LadderWithRungs, rung: LadderRung, sessionId: string, coin: string, fireId: string, forcePaper: boolean, reduceSize: number, detail: string): Promise<LadderFireResult> {
+  let flattenOk = false;
+  try {
+    const pos = await loadEffectivePosition(sessionId, coin, forcePaper);
+    if (pos && pos.side !== 'flat' && pos.sz > 0) {
+      const fraction = reduceSize > 0 ? Math.min(1, reduceSize / pos.sz) : 1; // close just this rung's add; base keeps its own stop
+      const closeIntent = buildMarketReduceOnlyClose(pos, { sessionId, clientIntentId: randomUUID(), now: Date.now(), fraction });
+      if (closeIntent) { await executeIntent(closeIntent, { forcePaper }); flattenOk = true; }
+      else flattenOk = true;
+    } else {
+      flattenOk = true; // nothing open to flatten (rejected pre-fill / already flat)
+    }
+  } catch { flattenOk = false; }
+  await setRungStatus(rung.id, 'failed');
+  if (flattenOk) {
+    await markFireOutcome(fireId, 'flattened', `fault-flattened: ${detail}`);
+    await alert(sessionId, `Ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: fault after fill — FLATTENED (filled-but-unstopped fault). ${detail}`);
+    return { fired: false, skipped: 'fault-flattened', flattened: true };
+  }
+  await markFireOutcome(fireId, 'failed', `CRITICAL fault AND flatten-FAILED — possible UNSTOPPED position: ${detail}`);
+  await alert(sessionId, `🚨 Ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: fault AND flatten FAILED — ${coin} may be UNSTOPPED. Manual intervention required. ${detail}`);
+  return { fired: false, skipped: 'fault-flatten-failed', flattened: false };
+}
+
+/** The position to size a close against: the LIVE HL position when not paper (the ledger
+ *  can lag the venue), else the paper ledger. Returns null when genuinely flat. */
+async function loadEffectivePosition(sessionId: string, coin: string, forcePaper: boolean): Promise<Position | null> {
+  if (forcePaper) return loadPosition(sessionId, coin);
+  const address = getHlAccountAddress();
+  if (!address) return loadPosition(sessionId, coin); // can't read venue → ledger fallback
+  const ch = await fetchClearinghouseState(address, { uncached: true });
+  const hl = ch.positions.find((p) => p.coin.toUpperCase() === coin.toUpperCase());
+  if (!hl || !(hl.size > 0)) return null;
+  return { coin: coin.toUpperCase(), side: hl.side, sz: hl.size, avgEntryPx: hl.entryPx ?? 0, realizedPnlUsd: 0, feesPaidUsd: 0 };
+}
+
+/** REDUCE / CLOSE — reduce-only, sized from the EFFECTIVE (live-when-live) position so a
+ *  ledger that lags the venue can't under-close. Can never open/flip (reduceOnly). */
 async function fireReduce(ladder: LadderWithRungs, rung: LadderRung, sessionId: string, coin: string, fireId: string, forcePaper: boolean): Promise<LadderFireResult> {
-  const pos = await loadPosition(sessionId, coin);
+  const pos = await loadEffectivePosition(sessionId, coin, forcePaper);
   if (!pos || pos.side === 'flat' || pos.sz <= 0) {
     await markFireOutcome(fireId, 'failed', 'flat');
     await setRungStatus(rung.id, 'skipped');
@@ -263,11 +298,12 @@ async function fireReduce(ladder: LadderWithRungs, rung: LadderRung, sessionId: 
   const intent = buildMarketReduceOnlyClose(pos, { sessionId, clientIntentId: randomUUID(), now: Date.now(), fraction });
   if (!intent) {
     await markFireOutcome(fireId, 'failed', 'no-close-intent');
+    await setRungStatus(rung.id, 'failed');
     return skip('no-close-intent');
   }
   const fill = await executeIntent(intent, { forcePaper });
   await markFireOutcome(fireId, 'filled');
   await setRungStatus(rung.id, 'fired');
-  await writeAnalysisLog({ sessionId, source: 'ladder-fire', severity: 'info', message: `FIRED ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: ${rung.action} ${coin} (frac ${fraction.toFixed(2)}, ${ladder.mode}).` }).catch(() => {});
+  await writeAnalysisLog({ sessionId, source: 'ladder-fire', severity: 'info', message: `FIRED ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: ${rung.action} ${coin} (frac ${fraction.toFixed(2)}, ${ladder.mode}${forcePaper ? ' · paper' : ''}).` }).catch(() => {});
   return { fired: true, skipped: null, fill };
 }

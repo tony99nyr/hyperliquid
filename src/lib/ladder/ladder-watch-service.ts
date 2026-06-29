@@ -23,7 +23,10 @@ import type { CandleInterval } from '@/lib/hyperliquid/candle-service-business-l
 /** Timeframe whose CLOSED candle a price trigger evaluates against. A breakout is a
  *  completed-bar close across the level — 15m balances responsiveness vs whipsaw. */
 const WATCH_INTERVAL: CandleInterval = '15m';
+const WATCH_INTERVAL_MS = 15 * 60 * 1000;
 const LOOKBACK_MS = 6 * 60 * 60 * 1000; // enough 15m bars for a couple completed candles
+// Feed-freshness bound: the newest bar must be within 2 intervals of now, else fail closed.
+const MAX_CANDLE_AGE_MS = 2 * WATCH_INTERVAL_MS;
 
 export interface LadderWatchSummary {
   autofireOff: boolean;
@@ -54,7 +57,7 @@ export async function runLadderWatchTick(args: { now: number }): Promise<LadderW
     [...coins].map(async (coin) => {
       try {
         const res = await fetchCandles(coin, WATCH_INTERVAL, args.now - LOOKBACK_MS, args.now);
-        snapshots[coin] = snapshotFromCandleResult(coin, res.candles, res.stale);
+        snapshots[coin] = snapshotFromCandleResult(coin, res.candles, res.stale, { now: args.now, maxAgeMs: MAX_CANDLE_AGE_MS });
       } catch {
         snapshots[coin] = { coin, completedClose: 0, stale: true }; // fail closed
       }

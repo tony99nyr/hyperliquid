@@ -139,14 +139,30 @@ describe('performLadderRungFire — guard stack', () => {
 });
 
 describe('performLadderRungFire — execution', () => {
-  it('fires a PAPER open: executes + atomically places the protective stop', async () => {
+  it('fires a PAPER open: simulates the fill and places NO real exchange order', async () => {
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(res.fired).toBe(true);
-    expect(executeIntent).toHaveBeenCalledTimes(1);
-    // No target → a stop (not a bracket); long stop ~1920 (2000*(1-0.04)), size from the fill.
-    expect(placeStopOnHl).toHaveBeenCalledWith('ETH', expect.closeTo(1920, 1), 0.625, 'long');
+    expect(executeIntent).toHaveBeenCalledWith(expect.anything(), { forcePaper: true });
+    // CRIT: a paper ladder must NOT write a real stop/bracket to the exchange.
+    expect(placeStopOnHl).not.toHaveBeenCalled();
+    expect(placeBracketOnHl).not.toHaveBeenCalled();
     expect(markFireOutcome).toHaveBeenCalledWith('f1', 'filled');
     expect(setRungStatus).toHaveBeenCalledWith('r1', 'fired');
+  });
+
+  it('a PAPER ladder on a LIVE deployment STILL places no real exchange order (CRIT-A)', async () => {
+    getTradingMode.mockReturnValue('live'); // live deployment, paper ladder
+    await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(placeStopOnHl).not.toHaveBeenCalled();
+    expect(placeBracketOnHl).not.toHaveBeenCalled();
+  });
+
+  it('zero-fill (IOC did not cross) → no-fill skip, no bracket (HIGH-1)', async () => {
+    executeIntent.mockResolvedValue({ sz: 0, avgPx: 0 });
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toBe('no-fill');
+    expect(placeStopOnHl).not.toHaveBeenCalled();
+    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'failed', 'no-fill');
   });
 
   it('a PAPER ladder ALWAYS simulates (forcePaper) — even on a LIVE deployment', async () => {
@@ -169,22 +185,50 @@ describe('performLadderRungFire — execution', () => {
     expect(executeIntent).toHaveBeenCalledWith(expect.anything(), { forcePaper: true });
   });
 
-  it('places a BRACKET when the rung has a target', async () => {
-    getLadderWithRungs.mockResolvedValue(ladder({}, [openRung({ targetPx: 2200 })]));
+  it('a LIVE ladder with a target places a real BRACKET', async () => {
+    getTradingMode.mockReturnValue('live');
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }, [openRung({ targetPx: 2200 })]));
     await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(placeBracketOnHl).toHaveBeenCalledWith('ETH', expect.closeTo(1920, 1), 2200, 0.625, 'long');
   });
 
-  it('FLATTENS on a bracket reject (filled-but-unstopped hard fault)', async () => {
+  it('FLATTENS a LIVE fill on a bracket reject (filled-but-unstopped hard fault)', async () => {
+    getTradingMode.mockReturnValue('live');
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }));
+    getHlAccountAddress.mockReturnValue('0xabc'); // live → loadEffectivePosition reads HL
     placeStopOnHl.mockRejectedValue(new Error('HL stop rejected'));
-    loadPosition.mockResolvedValue({ coin: 'ETH', side: 'long', sz: 0.625, avgEntryPx: 2000, realizedPnlUsd: 0, feesPaidUsd: 0 });
+    // loadEffectivePosition reads the LIVE HL position for a live ladder.
+    fetchClearinghouseState.mockResolvedValue({ positions: [{ coin: 'ETH', side: 'long', size: 0.625, entryPx: 2000 }] });
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(res.flattened).toBe(true);
     expect(res.fired).toBe(false);
-    // Two executeIntent calls: the open, then the reduce-only flatten.
-    expect(executeIntent).toHaveBeenCalledTimes(2);
-    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'flattened', expect.stringContaining('bracket-reject'));
+    expect(executeIntent).toHaveBeenCalledTimes(2); // the open, then the reduce-only flatten
+    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'flattened', expect.stringContaining('fault-flattened'));
     expect(setRungStatus).toHaveBeenCalledWith('r1', 'failed');
+  });
+
+  it('CRIT-B: executeIntent THROWS post-fill on a live ladder → flattens (no silent unstopped position)', async () => {
+    getTradingMode.mockReturnValue('live');
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }));
+    // The live order FILLED on HL, but persistFill threw → executeIntent throws on the open.
+    getHlAccountAddress.mockReturnValue('0xabc'); // live → loadEffectivePosition reads HL
+    executeIntent.mockRejectedValueOnce(new Error('Supabase persistFill failed')).mockResolvedValue({ sz: 0.625, avgPx: 2000 });
+    fetchClearinghouseState.mockResolvedValue({ positions: [{ coin: 'ETH', side: 'long', size: 0.625, entryPx: 2000 }] });
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.flattened).toBe(true); // the (possible) exposure was flattened, not left unstopped
+    expect(executeIntent).toHaveBeenCalledTimes(2); // the throwing open, then the flatten close
+    expect(setRungStatus).toHaveBeenCalledWith('r1', 'failed');
+  });
+
+  it('CRIT-B worst case: post-fill throw AND flatten ALSO fails → CRITICAL unstopped fault (not "flattened")', async () => {
+    getTradingMode.mockReturnValue('live');
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }));
+    getHlAccountAddress.mockReturnValue('0xabc'); // live → loadEffectivePosition reads HL
+    executeIntent.mockRejectedValue(new Error('exchange/db error')); // both the open AND the flatten close fail
+    fetchClearinghouseState.mockResolvedValue({ positions: [{ coin: 'ETH', side: 'long', size: 0.625, entryPx: 2000 }] });
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.flattened).toBe(false);
+    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'failed', expect.stringContaining('UNSTOPPED'));
   });
 
   it('REFUSES an add whose risk is not covered by unrealized profit (no martingale)', async () => {

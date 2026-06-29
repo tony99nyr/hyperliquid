@@ -12,9 +12,21 @@ import type { RungMarketSnapshot } from './ladder-trigger-evaluator';
  * candle). Fails closed (stale=true → evaluator never fires) when the feed is stale or
  * there aren't yet two candles (no completed bar to read). PURE.
  */
-export function snapshotFromCandleResult(coin: string, candles: PriceCandle[], feedStale: boolean): RungMarketSnapshot {
+export function snapshotFromCandleResult(
+  coin: string,
+  candles: PriceCandle[],
+  feedStale: boolean,
+  opts?: { now: number; maxAgeMs: number },
+): RungMarketSnapshot {
   const c = coin.toUpperCase();
   if (feedStale || candles.length < 2) {
+    return { coin: c, completedClose: 0, stale: true };
+  }
+  // Freshness: the newest (in-progress) bar must cover ~now. If the latest candle is
+  // older than maxAgeMs, the feed is LAGGING — fail closed (a trigger can't evaluate on
+  // a stale completed close, e.g. HL returned a cached set during an outage).
+  const newest = candles[candles.length - 1];
+  if (opts && (!newest || opts.now - newest.timestamp > opts.maxAgeMs)) {
     return { coin: c, completedClose: 0, stale: true };
   }
   const completed = candles[candles.length - 2]; // [-1] is the in-progress bar

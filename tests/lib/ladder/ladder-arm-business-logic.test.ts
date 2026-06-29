@@ -146,10 +146,15 @@ describe('resolveArmRung — entry/size/stop resolution', () => {
     expect(r.sizeCoins).toBeCloseTo(50 / (2000 * 0.04), 6); // 0.625
     expect(r.stopPx).toBeCloseTo(2000 * (1 - 0.04), 6); // long stop below
   });
-  it('keeps an explicit size + stop (no derivation)', () => {
-    const r = resolveArmRung(dbRung({ sizeCoins: 1.5, stopPx: 1850 }));
+  it('IGNORES an explicit size on an OPEN/ADD rung — risk-sized to match the fire path', () => {
+    // An open/add rung with an explicit sizeCoins but risk inputs present must size by
+    // RISK (what fireOpenOrAdd does), so arm-consent == what fires. The explicit 1.5 is dropped.
+    const r = resolveArmRung(dbRung({ action: 'open', sizeCoins: 1.5, riskUsd: 50, stopFrac: 0.04, triggerPx: 2000 }));
+    expect(r.sizeCoins).toBeCloseTo(50 / (2000 * 0.04), 6); // 0.625, NOT 1.5
+  });
+  it('KEEPS an explicit size on a REDUCE/CLOSE rung (the trim amount)', () => {
+    const r = resolveArmRung(dbRung({ action: 'reduce', sizeCoins: 1.5, stopPx: 1850 }));
     expect(r.sizeCoins).toBe(1.5);
-    expect(r.stopPx).toBe(1850);
   });
   it('short stop derives ABOVE entry', () => {
     const r = resolveArmRung(dbRung({ side: 'short', triggerKind: 'price_below', triggerPx: 2000, riskUsd: 50, stopFrac: 0.04 }));

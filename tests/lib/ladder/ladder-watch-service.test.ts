@@ -29,6 +29,16 @@ describe('snapshotFromCandleResult — completed candle only, fail-closed', () =
   it('fails closed when the completed close is non-positive', () => {
     expect(snapshotFromCandleResult('ETH', [candle(0), candle(9999)], false).stale).toBe(true);
   });
+  it('fails closed when the newest bar is older than maxAge (lagging feed)', () => {
+    const now = 10_000_000;
+    // newest bar is 1h old, maxAge 30m → stale even though there are 2+ candles.
+    const fresh = snapshotFromCandleResult('ETH', [candle(1900, now - 7_200_000), candle(2050, now - 3_600_000)], false, { now, maxAgeMs: 1_800_000 });
+    expect(fresh.stale).toBe(true);
+    // within maxAge → not stale.
+    const ok = snapshotFromCandleResult('ETH', [candle(1900, now - 1_800_000), candle(2050, now - 60_000)], false, { now, maxAgeMs: 1_800_000 });
+    expect(ok.stale).toBe(false);
+    expect(ok.completedClose).toBe(1900); // [-2]
+  });
 });
 
 // ---- service ----
