@@ -30,6 +30,10 @@ export default function LaddersView({ coin = 'ETH' }: LaddersViewProps) {
   const [ladders, setLadders] = useState<Ladder[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
+  // Inline arm for an existing DRAFT row: which ladder is being armed + the typed phrase.
+  const [armingId, setArmingId] = useState<string | null>(null);
+  const [armPhrase, setArmPhrase] = useState('');
+  const [armBusy, setArmBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -48,6 +52,17 @@ export default function LaddersView({ coin = 'ETH' }: LaddersViewProps) {
       await load();
     } catch { setError('Network error — retry.'); }
   }, [load]);
+
+  const arm = useCallback(async (l: Ladder) => {
+    setArmBusy(true);
+    try {
+      const res = await fetch('/api/cockpit/ladder/arm', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ladderId: l.id, confirmPhrase: l.mode === 'live' ? armPhrase : undefined }) });
+      const j = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; warnings?: string[] };
+      if (!res.ok || j.ok === false) { setError(j.warnings?.join(' ') ?? j.error ?? `Arm failed (${res.status})`); setArmBusy(false); return; }
+      setArmingId(null); setArmPhrase(''); setArmBusy(false);
+      await load();
+    } catch { setError('Network error — retry.'); setArmBusy(false); }
+  }, [armPhrase, load]);
 
   // Defer the initial load out of the effect's synchronous body (its setState would
   // otherwise trip react-hooks/set-state-in-effect — the cascading-render guard).
@@ -88,6 +103,25 @@ export default function LaddersView({ coin = 'ETH' }: LaddersViewProps) {
                 <button type="button" data-testid={`ladder-disarm-${l.id}`} onClick={() => void disarm(l.id)}
                   className={css({ fontFamily: 'mono', fontSize: '10.5px', fontWeight: 'semibold', borderRadius: '6px', paddingX: '10px', paddingY: '5px', cursor: 'pointer', flex: 'none' })}
                   style={{ background: 'rgba(248,81,73,.12)', color: ZONE_COLORS.danger, border: '1px solid rgba(248,81,73,.3)' }}>Disarm</button>
+              )}
+              {l.status === 'draft' && armingId !== l.id && (
+                <button type="button" data-testid={`ladder-arm-${l.id}`} onClick={() => { setArmingId(l.id); setArmPhrase(''); setError(null); }}
+                  className={css({ fontFamily: 'mono', fontSize: '10.5px', fontWeight: 'semibold', borderRadius: '6px', paddingX: '12px', paddingY: '5px', cursor: 'pointer', flex: 'none' })}
+                  style={{ background: ZONE_COLORS.ok, color: TERM.darkText, border: 'none' }}>Arm</button>
+              )}
+              {l.status === 'draft' && armingId === l.id && (
+                <div className={css({ display: 'flex', alignItems: 'center', gap: '6px', flex: 'none' })}>
+                  {l.mode === 'live' && (
+                    <input data-testid={`ladder-arm-phrase-${l.id}`} value={armPhrase} onChange={(e) => setArmPhrase(e.target.value)} autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                      placeholder={`arm ${l.id.slice(0, 8)}`}
+                      className={css({ borderRadius: '6px', color: 'github.textBright', fontFamily: 'mono', fontSize: '11px', padding: '5px 8px', width: '120px' })} style={{ background: TERM.inset, border: '1px solid rgba(248,81,73,.35)' }} />
+                  )}
+                  <button type="button" data-testid={`ladder-arm-confirm-${l.id}`} disabled={armBusy || (l.mode === 'live' && armPhrase.trim().toLowerCase() !== `arm ${l.id.slice(0, 8)}`)} onClick={() => void arm(l)}
+                    className={css({ fontFamily: 'mono', fontSize: '10.5px', fontWeight: 'bold', borderRadius: '6px', paddingX: '10px', paddingY: '5px', cursor: 'pointer', border: 'none', _disabled: { opacity: 0.5, cursor: 'not-allowed' } })}
+                    style={{ background: l.mode === 'live' ? ZONE_COLORS.danger : ZONE_COLORS.ok, color: l.mode === 'live' ? '#fff' : TERM.darkText }}>{armBusy ? '…' : l.mode === 'live' ? 'Arm LIVE' : 'Arm'}</button>
+                  <button type="button" aria-label="Cancel arm" onClick={() => { setArmingId(null); setArmPhrase(''); }}
+                    className={css({ fontFamily: 'mono', fontSize: '11px', color: 'github.textMuted', bg: 'transparent', border: 'none', cursor: 'pointer' })}>✕</button>
+                </div>
               )}
             </div>
           ))}
