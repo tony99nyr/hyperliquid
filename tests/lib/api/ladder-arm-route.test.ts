@@ -48,7 +48,7 @@ function draftLadder(over: Partial<LadderWithRungs> = {}): LadderWithRungs {
     rungs: [{
       id: 'r1', ladderId: 'abcd1234-0000-0000', seq: 1, coin: 'ETH', side: 'long', action: 'open',
       triggerKind: 'price_above', triggerPx: 2000, triggerMeta: null,
-      sizeCoins: 1, riskUsd: null, stopFrac: null, leverage: 5, stopPx: 1900, targetPx: 2200,
+      sizeCoins: null, riskUsd: 50, stopFrac: 0.04, leverage: 5, stopPx: 1900, targetPx: 2200,
       status: 'pending', cloid: null,
     }],
     ...over,
