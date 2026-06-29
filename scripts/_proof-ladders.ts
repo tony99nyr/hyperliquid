@@ -70,6 +70,16 @@ async function main(): Promise<void> {
         await page.screenshot({ path: `${DIR}/ladder-builder-${suffix}.png` });
         console.log(`  shot: ladder-builder-${suffix}.png`);
 
+        // Safety-gating proof: an over-cap leverage must surface a ⚠ warning + disable Arm.
+        await page.getByTestId('rung-lev-0').fill('60');
+        await delay(600);
+        const armDisabled = await page.getByTestId('ladder-arm').isDisabled().catch(() => null);
+        const warnCount = await page.getByTestId('ladder-warnings').locator('li').count().catch(() => 0);
+        notes.push(`${suffix}: lev=60 → warnings=${warnCount} armDisabled=${armDisabled}`);
+        await page.screenshot({ path: `${DIR}/ladder-warning-${suffix}.png` });
+        console.log(`  shot: ladder-warning-${suffix}.png`);
+        await page.getByTestId('rung-lev-0').fill('5'); // restore
+
         if (doArm) {
           // Drive the full PAPER create+arm, then capture the armed row in the list.
           await page.getByTestId('ladder-arm').click();
@@ -85,8 +95,11 @@ async function main(): Promise<void> {
       await ctx.close();
     }
 
-    await capture(1440, 900, false, 'desktop', true); // desktop arms a paper ladder
-    await capture(390, 844, true, 'mobile', false); // mobile shows it in the list + the builder
+    // Pass --arm to drive the full create+arm E2E (writes a paper ladder); without it a
+    // baseline run only captures the tab + the builder preview (no DB writes).
+    const doArm = process.argv.includes('--arm');
+    await capture(1440, 900, false, 'desktop', doArm);
+    await capture(390, 844, true, 'mobile', false);
   } finally {
     await browser.close();
     if (server && !server.killed) server.kill('SIGTERM');
