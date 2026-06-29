@@ -75,6 +75,13 @@ describe('validateLadderForArm — per-rung validity', () => {
   it('flags leverage over the coin max', () => {
     expect(validateLadderForArm(input({ rungs: [rung({ leverage: 50 })] })).warnings.some((w) => /exceeds/i.test(w))).toBe(true);
   });
+  it('rejects funding/indicator triggers (the watcher only evaluates price/volume)', () => {
+    const fr = rung({ triggerKind: 'funding', triggerPx: null, triggerMeta: { op: 'above', fundingRate: 0.0001 } });
+    expect(validateLadderForArm(input({ rungs: [fr] })).warnings.some((w) => /not yet evaluated|funding/i.test(w))).toBe(true);
+    const ir = rung({ triggerKind: 'indicator', triggerPx: null, triggerMeta: { op: 'above', indicatorName: 'rsi14', indicatorValue: 70 } });
+    expect(validateLadderForArm(input({ rungs: [ir] })).warnings.some((w) => /not yet evaluated|indicator/i.test(w))).toBe(true);
+  });
+
   it('flags a volume trigger missing minVolume', () => {
     const r = rung({ triggerKind: 'volume', triggerPx: null, triggerMeta: {} });
     expect(validateLadderForArm(input({ rungs: [r] })).warnings.some((w) => /minVolume/i.test(w))).toBe(true);

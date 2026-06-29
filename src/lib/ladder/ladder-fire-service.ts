@@ -27,7 +27,7 @@ import {
   setRungStatus,
   disarmLadder,
 } from './ladder-service';
-import { isLadderAutofireEnabled } from './ladder-flags';
+import { isLadderAutofireEnabled, isLadderLiveEnabled } from './ladder-flags';
 import {
   rungWorstCaseLoss,
   addRiskCoveredByProfit,
@@ -109,6 +109,17 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
   }
   // 2) Defense-in-depth with the §3.6 DB CHECK: a scout ladder can NEVER fire.
   if (ladder.author !== 'operator') return skip('not-operator');
+
+  // 2b) MODE-MATCH: a deployment fires ONLY ladders of its OWN mode. In the shared-DB
+  // topology (paper box + live box on one Supabase) this stops a PAPER deployment's
+  // watcher from claiming + simulating a LIVE ladder's rung (which would spend the
+  // one-shot claim so the LIVE box could never fire it — a silent loss of the operator's
+  // live authorization). Skip BEFORE the claim so the matching deployment still fires it.
+  const deploymentLive = getTradingMode() === 'live';
+  if ((ladder.mode === 'live') !== deploymentLive) return skip('mode-mismatch');
+  // 2c) LADDER_LIVE_ENABLED is a live kill-switch at FIRE too (not only at arm): flipping
+  // it off must immediately stop an already-armed live ladder from firing.
+  if (ladder.mode === 'live' && !isLadderLiveEnabled()) return skip('live-disabled');
 
   // 3) Rung must exist + still be pending.
   const rung = ladder.rungs.find((r) => r.id === rungId);
@@ -208,38 +219,44 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
     }
   }
 
-  // Execute the open AND bracket it INSIDE ONE try (invariant §3.3 atomic-with-stop).
-  // CRITICAL: executeIntent does liveFill → persistFill → applyFillToPosition, so a
-  // Supabase write that throws AFTER a live fill leaves a real open position. ANY throw
-  // here (post-fill DB error OR a bracket reject) must FLATTEN — never leave it unstopped.
+  // (1) EXECUTE the open. executeIntent does liveFill → persistFill → applyFillToPosition,
+  // so a Supabase write throwing AFTER a live fill leaves a real open position → FLATTEN
+  // (never leave it unstopped). filledSize defaults to the intended size for that flatten.
   let filledSize = proposal.intent.sz;
+  let fill;
   try {
-    const fill = await executeIntent(proposal.intent, { forcePaper });
-    // Zero-fill (IOC didn't cross): no exposure opened — nothing to bracket or fire.
-    if (!(fill.sz > 0)) {
-      await markFireOutcome(fireId, 'failed', 'no-fill');
-      await setRungStatus(rung.id, 'failed');
-      return skip('no-fill');
-    }
-    filledSize = fill.sz;
-    // Bracket ONLY a live fill. A PAPER ladder places NO real exchange orders (the
-    // bracket helpers gate on the GLOBAL TRADING_MODE, so without this guard a paper
-    // ladder on a live deployment would rest a REAL stop/TP that could close a real
-    // position in this coin). Paper fires fully simulated, recorded without a bracket.
-    if (!forcePaper) {
+    fill = await executeIntent(proposal.intent, { forcePaper });
+  } catch (err) {
+    return await flattenAfterFault(ladder, rung, sessionId, coin, fireId, forcePaper, filledSize, `open-threw: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // (2) Zero-fill (IOC didn't cross): no exposure opened — nothing to bracket or fire.
+  if (!(fill.sz > 0)) {
+    await markFireOutcome(fireId, 'failed', 'no-fill');
+    await setRungStatus(rung.id, 'failed');
+    return skip('no-fill');
+  }
+  filledSize = fill.sz;
+
+  // (3) Bracket the fill ATOMICALLY (invariant §3.3) — but ONLY a live fill. A PAPER
+  // ladder places NO real exchange orders (placeBracket/placeStop gate on the GLOBAL
+  // TRADING_MODE, so without this guard a paper ladder on a live deployment would rest a
+  // REAL stop/TP). A bracket reject → FLATTEN (filled-but-unstopped fault).
+  if (!forcePaper) {
+    try {
       if (rung.targetPx != null && rung.targetPx > 0) await placeBracketOnHl(coin, proposal.stopPx, rung.targetPx, filledSize, side);
       else await placeStopOnHl(coin, proposal.stopPx, filledSize, side);
+    } catch (err) {
+      return await flattenAfterFault(ladder, rung, sessionId, coin, fireId, forcePaper, filledSize, `bracket-reject: ${err instanceof Error ? err.message : String(err)}`);
     }
-    await markFireOutcome(fireId, 'filled');
-    await setRungStatus(rung.id, 'fired');
-    await writeAnalysisLog({ sessionId, source: 'ladder-fire', severity: 'info', message: `FIRED ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: ${rung.action} ${side} ${filledSize} ${coin} @ ~${markPx} (${ladder.mode}${forcePaper ? ' · paper' : ''}).` }).catch(() => {});
-    return { fired: true, skipped: null, fill };
-  } catch (err) {
-    // A live fill MAY have landed before this throw (post-fill DB error, or a bracket
-    // reject after a confirmed fill). Flatten the (possible) exposure rather than leave
-    // it unstopped — sized to just this rung's fill so a base position keeps its own stop.
-    return await flattenAfterFault(ladder, rung, sessionId, coin, fireId, forcePaper, filledSize, err instanceof Error ? err.message : String(err));
   }
+
+  // (4) SUCCESS telemetry — OUTSIDE any flatten-guarded try. The fill is in and (if live)
+  // stopped; a transient telemetry/Supabase failure here must NOT flatten a good position.
+  await markFireOutcome(fireId, 'filled').catch(() => {});
+  await setRungStatus(rung.id, 'fired').catch(() => {});
+  await writeAnalysisLog({ sessionId, source: 'ladder-fire', severity: 'info', message: `FIRED ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: ${rung.action} ${side} ${filledSize} ${coin} @ ~${markPx} (${ladder.mode}${forcePaper ? ' · paper' : ''}).` }).catch(() => {});
+  return { fired: true, skipped: null, fill };
 }
 
 /**
@@ -272,22 +289,35 @@ async function flattenAfterFault(ladder: LadderWithRungs, rung: LadderRung, sess
   return { fired: false, skipped: 'fault-flatten-failed', flattened: false };
 }
 
-/** The position to size a close against: the LIVE HL position when not paper (the ledger
- *  can lag the venue), else the paper ledger. Returns null when genuinely flat. */
+/** The position to size a close against: the LIVE HL position when not paper, else the
+ *  paper ledger. Returns null only when the read SUCCEEDS and the coin is genuinely flat.
+ *  THROWS when a LIVE position can't be read (no address / feed error) — callers MUST
+ *  fail-closed: the ledger could miss a just-placed-but-unpersisted live fill, so treating
+ *  an unreadable live account as "flat" would let a flatten mark 'flattened' over a real
+ *  naked position (the CRIT-B hole). */
 async function loadEffectivePosition(sessionId: string, coin: string, forcePaper: boolean): Promise<Position | null> {
   if (forcePaper) return loadPosition(sessionId, coin);
   const address = getHlAccountAddress();
-  if (!address) return loadPosition(sessionId, coin); // can't read venue → ledger fallback
-  const ch = await fetchClearinghouseState(address, { uncached: true });
+  if (!address) throw new Error('cannot read live position: no HL account address');
+  const ch = await fetchClearinghouseState(address, { uncached: true }); // throws on feed error → caller fails closed
   const hl = ch.positions.find((p) => p.coin.toUpperCase() === coin.toUpperCase());
-  if (!hl || !(hl.size > 0)) return null;
+  if (!hl || !(hl.size > 0)) return null; // read succeeded, genuinely flat
   return { coin: coin.toUpperCase(), side: hl.side, sz: hl.size, avgEntryPx: hl.entryPx ?? 0, realizedPnlUsd: 0, feesPaidUsd: 0 };
 }
 
 /** REDUCE / CLOSE — reduce-only, sized from the EFFECTIVE (live-when-live) position so a
  *  ledger that lags the venue can't under-close. Can never open/flip (reduceOnly). */
 async function fireReduce(ladder: LadderWithRungs, rung: LadderRung, sessionId: string, coin: string, fireId: string, forcePaper: boolean): Promise<LadderFireResult> {
-  const pos = await loadEffectivePosition(sessionId, coin, forcePaper);
+  let pos: Position | null;
+  try {
+    pos = await loadEffectivePosition(sessionId, coin, forcePaper);
+  } catch (e) {
+    // Can't read the live position → don't blindly reduce. Skip (the position keeps its
+    // existing protection); the claim is spent (one-shot), operator can re-arm.
+    await markFireOutcome(fireId, 'failed', `cannot-read-position: ${e instanceof Error ? e.message : String(e)}`);
+    await setRungStatus(rung.id, 'skipped');
+    return skip('cannot-read-position');
+  }
   if (!pos || pos.side === 'flat' || pos.sz <= 0) {
     await markFireOutcome(fireId, 'failed', 'flat');
     await setRungStatus(rung.id, 'skipped');

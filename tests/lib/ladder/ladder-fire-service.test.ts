@@ -24,8 +24,12 @@ const getTradingMode = vi.fn();
 const getHlAccountAddress = vi.fn();
 const writeAnalysisLog = vi.fn();
 const isLadderAutofireEnabled = vi.fn();
+const isLadderLiveEnabled = vi.fn();
 
-vi.mock('@/lib/ladder/ladder-flags', () => ({ isLadderAutofireEnabled: (...a: unknown[]) => isLadderAutofireEnabled(...a) }));
+vi.mock('@/lib/ladder/ladder-flags', () => ({
+  isLadderAutofireEnabled: (...a: unknown[]) => isLadderAutofireEnabled(...a),
+  isLadderLiveEnabled: (...a: unknown[]) => isLadderLiveEnabled(...a),
+}));
 vi.mock('@/lib/ladder/ladder-service', () => ({
   getLadderWithRungs: (...a: unknown[]) => getLadderWithRungs(...a),
   claimRungFire: (...a: unknown[]) => claimRungFire(...a),
@@ -71,6 +75,7 @@ function ladder(over: Partial<LadderWithRungs> = {}, rungs?: LadderRung[]): Ladd
 beforeEach(() => {
   vi.clearAllMocks();
   isLadderAutofireEnabled.mockReturnValue(true);
+  isLadderLiveEnabled.mockReturnValue(true);
   getLadderWithRungs.mockResolvedValue(ladder());
   claimRungFire.mockResolvedValue({ claimed: true, fireId: 'f1' });
   markFireOutcome.mockResolvedValue(undefined);
@@ -150,13 +155,6 @@ describe('performLadderRungFire — execution', () => {
     expect(setRungStatus).toHaveBeenCalledWith('r1', 'fired');
   });
 
-  it('a PAPER ladder on a LIVE deployment STILL places no real exchange order (CRIT-A)', async () => {
-    getTradingMode.mockReturnValue('live'); // live deployment, paper ladder
-    await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
-    expect(placeStopOnHl).not.toHaveBeenCalled();
-    expect(placeBracketOnHl).not.toHaveBeenCalled();
-  });
-
   it('zero-fill (IOC did not cross) → no-fill skip, no bracket (HIGH-1)', async () => {
     executeIntent.mockResolvedValue({ sz: 0, avgPx: 0 });
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
@@ -165,10 +163,29 @@ describe('performLadderRungFire — execution', () => {
     expect(markFireOutcome).toHaveBeenCalledWith('f1', 'failed', 'no-fill');
   });
 
-  it('a PAPER ladder ALWAYS simulates (forcePaper) — even on a LIVE deployment', async () => {
-    getTradingMode.mockReturnValue('live'); // live deployment…
-    await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW }); // …but ladder.mode='paper'
-    expect(executeIntent).toHaveBeenCalledWith(expect.anything(), { forcePaper: true });
+  it('MODE-MISMATCH: a PAPER ladder on a LIVE deployment is skipped WITHOUT claiming', async () => {
+    getTradingMode.mockReturnValue('live'); // live deployment, paper ladder
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toBe('mode-mismatch');
+    expect(claimRungFire).not.toHaveBeenCalled(); // claim not spent → the matching box can fire it
+    expect(executeIntent).not.toHaveBeenCalled();
+  });
+
+  it('MODE-MISMATCH: a LIVE ladder on a PAPER deployment is skipped WITHOUT claiming', async () => {
+    getTradingMode.mockReturnValue('paper');
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toBe('mode-mismatch');
+    expect(claimRungFire).not.toHaveBeenCalled();
+  });
+
+  it('LIVE-DISABLED: a live ladder is refused at FIRE when LADDER_LIVE_ENABLED is off', async () => {
+    getTradingMode.mockReturnValue('live');
+    isLadderLiveEnabled.mockReturnValue(false); // operator flipped the live kill-switch
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toBe('live-disabled');
+    expect(claimRungFire).not.toHaveBeenCalled();
   });
 
   it('a LIVE ladder on a LIVE deployment fills live (forcePaper false)', async () => {
@@ -176,13 +193,6 @@ describe('performLadderRungFire — execution', () => {
     getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }));
     await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(executeIntent).toHaveBeenCalledWith(expect.anything(), { forcePaper: false });
-  });
-
-  it('a LIVE ladder on a PAPER deployment still simulates (forcePaper true)', async () => {
-    getTradingMode.mockReturnValue('paper');
-    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }));
-    await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
-    expect(executeIntent).toHaveBeenCalledWith(expect.anything(), { forcePaper: true });
   });
 
   it('a LIVE ladder with a target places a real BRACKET', async () => {
@@ -229,6 +239,24 @@ describe('performLadderRungFire — execution', () => {
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(res.flattened).toBe(false);
     expect(markFireOutcome).toHaveBeenCalledWith('f1', 'failed', expect.stringContaining('UNSTOPPED'));
+  });
+
+  it('a LIVE add that is profit-COVERED fires + places a real bracket', async () => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc');
+    const addRung = openRung({ action: 'add' });
+    // arm-time precondition hash must match the live ETH position at fire (add depends on it).
+    const liveState = [{ coin: 'ETH', side: 'long' as const, leverage: 5 }];
+    getLadderWithRungs.mockResolvedValue(
+      ladder({ mode: 'live', preconditionHash: hashPreconditionSnapshot(buildPreconditionSnapshot([addRung], liveState)) }, [addRung]),
+    );
+    // used by both the precondition re-derive AND the add profit-guard; profit 500 >> add risk ~170.
+    fetchClearinghouseState.mockResolvedValue({ positions: [{ coin: 'ETH', side: 'long', size: 1, entryPx: 1800, leverage: 5, unrealizedPnl: 500 }] });
+    loadPosition.mockResolvedValue({ coin: 'ETH', side: 'long', sz: 1, avgEntryPx: 1800, realizedPnlUsd: 0, feesPaidUsd: 0 });
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.fired).toBe(true);
+    expect(placeStopOnHl).toHaveBeenCalled(); // live → a real protective stop rests
+    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'filled');
   });
 
   it('REFUSES an add whose risk is not covered by unrealized profit (no martingale)', async () => {
