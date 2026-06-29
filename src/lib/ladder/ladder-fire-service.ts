@@ -145,11 +145,15 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
 
   try {
     const session = (await getActiveSession()) ?? (await openSession({ mode: ladder.mode, title: `ladder ${ladder.id.slice(0, 8)}`, leaderAddress: null }));
+    // A fill is LIVE only when the ladder is live AND the deployment is live — a PAPER
+    // ladder ALWAYS simulates (forcePaper), even on a live deployment. This is the
+    // ladder-mode-respecting fill the global TRADING_MODE switch alone would not give.
+    const forcePaper = !(ladder.mode === 'live' && getTradingMode() === 'live');
 
     if (rung.action === 'reduce' || rung.action === 'close') {
-      return await fireReduce(ladder, rung, session.id, coin, fireId);
+      return await fireReduce(ladder, rung, session.id, coin, fireId, forcePaper);
     }
-    return await fireOpenOrAdd(ladder, rung, session.id, coin, markPx, fireId);
+    return await fireOpenOrAdd(ladder, rung, session.id, coin, markPx, fireId, forcePaper);
   } catch (e) {
     await markFireOutcome(fireId, 'failed', e instanceof Error ? e.message : String(e));
     await setRungStatus(rung.id, 'failed');
@@ -159,7 +163,7 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
 
 /** OPEN / ADD — increases exposure. ADD is gated by the runtime risk-covered-by-profit
  *  rule; both atomically bracket the fill (stop[+target]); a bracket reject FLATTENS. */
-async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionId: string, coin: string, markPx: number, fireId: string): Promise<LadderFireResult> {
+async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionId: string, coin: string, markPx: number, fireId: string, forcePaper: boolean): Promise<LadderFireResult> {
   const side = rung.side;
   // Size + stop come from the rung's risk inputs, computed at the CURRENT mark.
   const stopFrac = rung.stopFrac ?? (rung.stopPx != null && rung.stopPx > 0 ? Math.abs(markPx - rung.stopPx) / markPx : null);
@@ -203,7 +207,7 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
     }
   }
 
-  const fill = await executeIntent(proposal.intent);
+  const fill = await executeIntent(proposal.intent, { forcePaper });
 
   // ATOMICALLY bracket the fill (invariant §3.3). A bracket reject is a hard fault →
   // FLATTEN the just-opened exposure rather than leave it unstopped.
@@ -224,7 +228,7 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
       const pos = await loadPosition(sessionId, coin);
       if (pos && pos.side !== 'flat' && pos.sz > 0) {
         const closeIntent = buildMarketReduceOnlyClose(pos, { sessionId, clientIntentId: randomUUID(), now: Date.now() });
-        if (closeIntent) { await executeIntent(closeIntent); flattenOk = true; }
+        if (closeIntent) { await executeIntent(closeIntent, { forcePaper }); flattenOk = true; }
       } else {
         flattenOk = true; // nothing on the books to flatten (e.g. paper / already flat)
       }
@@ -247,7 +251,7 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
 }
 
 /** REDUCE / CLOSE — reduce-only, sized from the live position (can never open/flip). */
-async function fireReduce(ladder: LadderWithRungs, rung: LadderRung, sessionId: string, coin: string, fireId: string): Promise<LadderFireResult> {
+async function fireReduce(ladder: LadderWithRungs, rung: LadderRung, sessionId: string, coin: string, fireId: string, forcePaper: boolean): Promise<LadderFireResult> {
   const pos = await loadPosition(sessionId, coin);
   if (!pos || pos.side === 'flat' || pos.sz <= 0) {
     await markFireOutcome(fireId, 'failed', 'flat');
@@ -261,7 +265,7 @@ async function fireReduce(ladder: LadderWithRungs, rung: LadderRung, sessionId: 
     await markFireOutcome(fireId, 'failed', 'no-close-intent');
     return skip('no-close-intent');
   }
-  const fill = await executeIntent(intent);
+  const fill = await executeIntent(intent, { forcePaper });
   await markFireOutcome(fireId, 'filled');
   await setRungStatus(rung.id, 'fired');
   await writeAnalysisLog({ sessionId, source: 'ladder-fire', severity: 'info', message: `FIRED ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: ${rung.action} ${coin} (frac ${fraction.toFixed(2)}, ${ladder.mode}).` }).catch(() => {});

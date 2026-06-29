@@ -149,6 +149,26 @@ describe('performLadderRungFire — execution', () => {
     expect(setRungStatus).toHaveBeenCalledWith('r1', 'fired');
   });
 
+  it('a PAPER ladder ALWAYS simulates (forcePaper) — even on a LIVE deployment', async () => {
+    getTradingMode.mockReturnValue('live'); // live deployment…
+    await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW }); // …but ladder.mode='paper'
+    expect(executeIntent).toHaveBeenCalledWith(expect.anything(), { forcePaper: true });
+  });
+
+  it('a LIVE ladder on a LIVE deployment fills live (forcePaper false)', async () => {
+    getTradingMode.mockReturnValue('live');
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }));
+    await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(executeIntent).toHaveBeenCalledWith(expect.anything(), { forcePaper: false });
+  });
+
+  it('a LIVE ladder on a PAPER deployment still simulates (forcePaper true)', async () => {
+    getTradingMode.mockReturnValue('paper');
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }));
+    await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(executeIntent).toHaveBeenCalledWith(expect.anything(), { forcePaper: true });
+  });
+
   it('places a BRACKET when the rung has a target', async () => {
     getLadderWithRungs.mockResolvedValue(ladder({}, [openRung({ targetPx: 2200 })]));
     await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });

@@ -42,12 +42,16 @@ export async function persistFill(fill: CanonicalFill): Promise<void> {
  * recovers) and write a meaningless ledger row. The (empty) fill is still
  * returned so the caller can report "no fill".
  */
-export async function executeIntent(intent: TradeIntent): Promise<CanonicalFill> {
+export async function executeIntent(intent: TradeIntent, opts?: { forcePaper?: boolean }): Promise<CanonicalFill> {
   // SEAM-LEVEL safety: a scout-origin intent can NEVER execute live, no matter
   // who calls executeIntent. The boundary travels with the intent (defense in
   // depth beyond the scout-trade caller-side guard). Real money = human popup.
   if (intent.origin === 'scout') assertScoutPaperMode(getTradingMode());
-  const fill = getTradingMode() === 'live' ? await liveFill(intent) : await paperFill(intent);
+  // `forcePaper` lets a caller simulate REGARDLESS of the global TRADING_MODE — used
+  // by the armed-ladder fire path so a PAPER ladder never fills with real money on a
+  // live deployment (live happens only when the ladder is live AND the deployment is).
+  const live = !opts?.forcePaper && getTradingMode() === 'live';
+  const fill = live ? await liveFill(intent) : await paperFill(intent);
   if (fill.sz <= 0) return fill; // nothing filled — do not record (retry stays possible)
   await persistFill(fill);
   // Leverage is intent METADATA (not derived from the fill, so the fold stays
