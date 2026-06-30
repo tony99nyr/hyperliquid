@@ -27,6 +27,7 @@
     "skill:run-session": "tsx --tsconfig tsconfig.scripts.json scripts/run-session.ts",
     "skill:report-context": "tsx --tsconfig tsconfig.scripts.json scripts/report-context.ts",
     "skill:review-previews": "tsx --tsconfig tsconfig.scripts.json scripts/review-previews.ts",
+    "skill:review-ladder": "tsx --tsconfig tsconfig.scripts.json scripts/review-ladder.ts",
     "smoke": "tsx --tsconfig tsconfig.scripts.json scripts/_smoke-cockpit.ts",
     "verify:design": "tsx --tsconfig tsconfig.scripts.json scripts/_verify-design.ts",
     "smoke:data": "tsx --tsconfig tsconfig.scripts.json scripts/_smoke.ts",

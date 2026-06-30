@@ -1,0 +1,97 @@
+/**
+ * skill:review-ladder entrypoint (thin I/O). ADVISORY ONLY — never arms or trades.
+ *
+ * Runs the PURE "pro-desk" critical scorecard (reviewLadder) over one ladder (--ladder
+ * <id>) or every ARMED + DRAFT ladder (default). Fetches live mids + funding (read-only),
+ * scores RISK and UPSIDE pillars 0/10, and prints a verdict + any hard blockers. The two
+ * judgment pillars (thesis/signal, timing) can be supplied with --signal / --timing (0-10)
+ * after an analyze-market / analyze-traders read; otherwise they score neutral + flag the
+ * owed read.
+ *
+ * Usage:
+ *   pnpm skill:review-ladder [--ladder <id>] [--equity 980] [--signal 6] [--timing 7] [--session <id>]
+ */
+
+import { parseArgs, optionalNumber, header, line, run } from './_skill-runtime';
+import { listLaddersWithRungs, getLadderWithRungs } from '@/lib/ladder/ladder-service';
+import { reviewLadder, type LadderReviewScorecard } from '@/lib/skills/review-ladder-business-logic';
+import { fetchAllMids, fetchMetaAndAssetCtxs } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { validateEnv } from '@/lib/env/env';
+import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
+import type { LadderWithRungs } from '@/lib/ladder/ladder-types';
+
+const bar = (score: number): string => '█'.repeat(Math.round(score)) + '░'.repeat(10 - Math.round(score));
+
+function printScorecard(sc: LadderReviewScorecard): void {
+  header(`${sc.title}  [${sc.mode}/${sc.status}]  ${sc.ladderId.slice(0, 8)}`);
+  line(`VERDICT: ${sc.verdict}`);
+  line(`RISK ${sc.riskScore}/10   UPSIDE ${sc.upsideScore}/10`);
+  line(`worst case (slip+funding): $${sc.worstCaseLossWithFundingUsd}  ·  notional $${sc.totalNotionalUsd}${sc.pctOfEquity != null ? `  ·  ${sc.pctOfEquity}% of equity` : ''}`);
+  if (sc.blockers.length) { line('\n  ⛔ BLOCKERS:'); for (const b of sc.blockers) line(`     - ${b}`); }
+  line('\n  RISK pillars (0/10, higher = safer):');
+  for (const p of sc.riskPillars) line(`     ${bar(p.score)} ${p.score}/10  ${p.label} · ${p.lens}\n        ${p.note}`);
+  line('\n  UPSIDE pillars (0/10, higher = better):');
+  for (const p of sc.upsidePillars) line(`     ${bar(p.score)} ${p.score}/10  ${p.label} · ${p.lens}\n        ${p.note}`);
+}
+
+run(async () => {
+  const args = parseArgs(process.argv.slice(2));
+  const network = validateEnv().HL_NETWORK;
+  const onlyId = typeof args['ladder'] === 'string' ? args['ladder'] : null;
+  const equity = optionalNumber(args, 'equity', NaN);
+  const signal = typeof args['signal'] === 'string' ? Number(args['signal']) : null;
+  const timing = typeof args['timing'] === 'string' ? Number(args['timing']) : null;
+  const sessionId = typeof args['session'] === 'string' && args['session'].trim() ? args['session'] : null;
+  const now = Date.now();
+
+  header('review-ladder — pro-desk critical scorecard (advisory)');
+  let ladders: LadderWithRungs[];
+  if (onlyId) {
+    const l = await getLadderWithRungs(onlyId);
+    if (!l) { line(`No ladder ${onlyId}.`); return; }
+    ladders = [l];
+  } else {
+    const all = await listLaddersWithRungs();
+    ladders = all.filter((l) => l.status === 'armed' || l.status === 'draft');
+  }
+  if (ladders.length === 0) { line('No armed or draft ladders to review.'); return; }
+
+  const coins = Array.from(new Set(ladders.flatMap((l) => l.rungs.map((r) => r.coin.toUpperCase()))));
+  const mids = await fetchAllMids(network, { uncached: true });
+  let fundingByCoin: Record<string, number | null> = {};
+  try {
+    const ctxs = await fetchMetaAndAssetCtxs(network);
+    fundingByCoin = Object.fromEntries(coins.map((c) => [c, ctxs[c]?.fundingHourly ?? null]));
+  } catch { fundingByCoin = {}; }
+  const midByCoin = Object.fromEntries(coins.map((c) => [c, Number.isFinite(mids[c]) ? mids[c] : null]));
+  const accountEquityUsd = Number.isFinite(equity) ? equity : null;
+
+  const baseCtx = { midByCoin, fundingByCoin, accountEquityUsd, signalScore: signal, timingScore: timing, now } as const;
+  // First pass for book heat. An OCO group is ONE position (one leg fires → the sibling
+  // auto-disarms), so a group contributes only its WORST leg — else a straddle double-counts.
+  const first = ladders.map((l) => reviewLadder(l, { ...baseCtx, otherLaddersWorstCaseUsd: null }));
+  const wcById = new Map(first.map((s) => [s.ladderId, s.worstCaseLossWithFundingUsd]));
+  const groupWc = new Map<string, number>();
+  for (const l of ladders) {
+    const key = l.ocoGroupId ?? `solo:${l.id}`;
+    groupWc.set(key, Math.max(groupWc.get(key) ?? 0, wcById.get(l.id) ?? 0));
+  }
+  const bookHeat = [...groupWc.values()].reduce((a, b) => a + b, 0);
+
+  line(`${ladders.length} ladder(s) · book heat $${bookHeat.toFixed(0)} (OCO groups counted once)${accountEquityUsd ? ` = ${((bookHeat / accountEquityUsd) * 100).toFixed(1)}% of equity` : ''}`);
+
+  for (const l of ladders) {
+    const others = bookHeat - (wcById.get(l.id) ?? 0);
+    const sc = ladders.length > 1 ? reviewLadder(l, { ...baseCtx, otherLaddersWorstCaseUsd: others }) : first[0];
+    printScorecard(sc);
+    if (sessionId) {
+      await writeAnalysisLog({
+        sessionId,
+        source: 'review-ladder',
+        severity: sc.blockers.length ? 'danger' : sc.riskScore < 5 ? 'warn' : 'info',
+        message: `Ladder ${sc.ladderId.slice(0, 8)} "${sc.title}": RISK ${sc.riskScore}/10, UPSIDE ${sc.upsideScore}/10 — ${sc.verdict}`,
+      }).catch(() => {});
+    }
+  }
+  line('\nAdvisory only. Reviewing a ladder never arms it — the operator arms in the cockpit (typed phrase).');
+});

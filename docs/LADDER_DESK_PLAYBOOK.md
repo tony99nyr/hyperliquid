@@ -14,6 +14,12 @@ cockpit. This is the **operator method**; the system design lives in
 > a claim is an engine fact it cites the module; where it is operator discipline the engine
 > does **not** enforce, it says so explicitly — do not assume the system is catching it.
 
+> **Grade what you build.** That same panel is wired up as the **`review-ladder`** skill
+> (`pnpm skill:review-ladder [--ladder <id>] --equity <usd>`): it scores a draft or open
+> ladder 0/10 on RISK and UPSIDE pillars and flags hard blockers. Use it as the build
+> checklist and before every arm — but it never arms (advisory only). Aim for RISK ≥ ~7 with
+> no blockers; a clean risk score on a weak thesis is still a bad trade (the Thesis pillar).
+
 ---
 
 ## 0. When a ladder is the right tool

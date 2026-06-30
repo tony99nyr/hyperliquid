@@ -28,6 +28,15 @@ author (draft)  →  ARM (typed phrase, authorization)  →  watcher fires rung 
   to `done`, leaves the watcher set + the cockpit Armed panel, and the position lives on in
   Open Positions with its resting stop.
 
+## Grade it before you arm (`review-ladder`)
+Run `pnpm skill:review-ladder [--ladder <id>] --equity <usd>` to score any draft or open
+ladder 0/10 on RISK (liq safety, loss/equity, stop integrity, pyramiding, funding, ops) and
+UPSIDE (reward:risk, scale-out, convexity, thesis) pillars, with hard **blockers** called out.
+With no `--ladder` it scores every armed + draft ladder and the OCO-aware book heat. Advisory
+only — it never arms. Aim for RISK ≥ ~7 with no blockers; the cockpit's Arm button gates on
+the same engine blockers (and now shows *why* it's disabled). See the desk method in
+[LADDER_DESK_PLAYBOOK.md](./LADDER_DESK_PLAYBOOK.md).
+
 ## The three switches (independent; all ON in production)
 | Env flag | Controls | Default |
 |---|---|---|
