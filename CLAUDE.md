@@ -88,6 +88,7 @@ src/lib/health/                                      # multi-TF health engine (s
 src/lib/rubric/                                      # deterministic opportunity scoring (pillars + kill-gates) — ADR-0006
 src/lib/scout/                                       # autonomous PAPER scout (guard, trigger, cycle, review) — ADR-0005
 src/lib/auto-exit/ + src/lib/risk/                   # Layer-1 auto-exit + account circuit-breaker — ADR-0007
+src/lib/ladder/                                      # Armed Ladders — autonomous multi-rung exec (LIVE) ⚠ read src/lib/ladder/CLAUDE.md
 src/lib/trader-watch/ + src/lib/watch/               # leader-position feed daemon + crash-safe position watcher
 src/lib/backtest/                                    # PURE regime-core replay + significance (scripts/backtest*.ts)
 src/lib/ws/                                          # HL websocket client + reducer + REST fallback (market data)
@@ -95,9 +96,10 @@ src/hooks/                                           # realtime hooks (useRealti
 src/app/cockpit/{page,CockpitClient}.tsx + components/  # PIN-gated cockpit shell + panels (4 tabs)
 src/lib/cockpit/{supabase-server,supabase-browser}.ts
 src/lib/infrastructure/{auth,logging,config}/        # vendored admin-PIN + stubs
-supabase/migrations/0001_init.sql … 0014_*.sql       # 14 migrations (RLS + realtime publication; idempotent)
+supabase/migrations/0001_init.sql … 0024_*.sql       # migrations (RLS + realtime publication; idempotent; 0023 = ladders)
 data/{backups/wallet-rating/rated-wallets.json,auto-exit/}  # vendored dataset + versioned auto-exit thresholds
-docs/{CONTEXT.md, CODE_ORGANIZATION.md, adr/, scout/, LIVE_*.md}
+docs/{CONTEXT.md, CODE_ORGANIZATION.md, adr/, scout/, LIVE_*.md,
+      ARMED_LADDER_ARCHITECTURE.md, LADDER_OPERATOR_RUNBOOK.md}  # ladder: design + operator runbook
 ```
 
 ## Vendored from iamrossi

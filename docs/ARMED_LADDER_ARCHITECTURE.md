@@ -8,6 +8,20 @@ can't express, plus the institutional risk rules enforced as guardrails.
 This doc supersedes the inline plan. It folds in a 3-agent critical review and a
 verified deep-research pass (24/25 claims confirmed, mostly HL primary docs, 2026-06).
 
+> ## 0. STATUS — SHIPPED & LIVE (updated 2026-06-29)
+>
+> The system below is **built, deployed, and live.** First autonomous real-money fire:
+> **2026-06-29** — a single-rung ETH short opened on a 15m candle close with an atomic
+> protective stop, then self-completed. P0 + P1 are **delivered** (the `LADDER_LIVE_ENABLED`
+> / `LADDER_AUTOFIRE_ENABLED` gates are ON in production; the watcher runs via an external
+> cron-job.org schedule, not a Vercel cron — Hobby caps crons at daily). **Live-proven:**
+> the single-rung `open` → bracket → `done` path. **Built but NOT yet live-exercised:**
+> multi-rung adds, the runtime add-coverage gate, and trailing stops (P2/P3).
+>
+> - **Operate it:** [LADDER_OPERATOR_RUNBOOK.md](./LADDER_OPERATOR_RUNBOOK.md)
+> - **Modify it (agents):** [src/lib/ladder/CLAUDE.md](../src/lib/ladder/CLAUDE.md)
+> - **As-built deltas** (what shipped beyond this design doc): see §7 below.
+
 ---
 
 ## 1. The native-vs-watcher boundary (verified against HL primary docs)
@@ -111,13 +125,14 @@ exchange-level double-fire rejection.
     (slippage-bounded no-netting worst-case, per-(coin,side) liq, caps, precondition
     snapshot/hash — self-defending vs risk understatement); `ladder-arm-business-logic.ts`
     (arm-readiness + pyramiding guardrails: decreasing size + tightening stop).
-  - ⬜ **P1c arm path** (NEXT, lower-risk): `ladder-service.ts` service-role CRUD +
-    `/ladder/arm` (admin + typed-phrase → validate → snapshot → status='armed'). Arming
-    is AUTHORIZATION only — moves no money.
-  - ⬜ **P1d fire path** (the money-moving slice — deliberate/testnet-gated): `/ladder/fire-rung`
-    (cron-bearer + ladder_fires claim/dedupe + assertLadderArmed + precondition STRING
-    re-check + runtime risk-covered-by-profit + atomic add→re-bracket → executeIntent);
-    NAS watcher tick; `LadderPreviewModal`. Behind `LADDER_LIVE_ENABLED` OFF, paper-first.
+  - ✅ **P1c arm path** (DONE): `ladder-service.ts` service-role CRUD + `/ladder/arm`
+    (admin + typed-phrase → validate → snapshot → status='armed'). Arming is AUTHORIZATION
+    only — moves no money.
+  - ✅ **P1d fire path** (DONE, LIVE): `performLadderRungFire` (the guard stack — see
+    [CLAUDE.md](../src/lib/ladder/CLAUDE.md)) via `/ladder/fire-rung` + `/api/cron/ladder-watch`
+    (cron-bearer + `ladder_fires` claim/dedupe + author/mode/armed + precondition re-check +
+    runtime risk-covered-by-profit + atomic bracket → flatten-on-fault → executeIntent); the
+    cron-job.org watcher tick; the rich `LadderDetailModal`. First live fire 2026-06-29.
   Surfaces native **Scale + TWAP**. Watcher owns volume/funding/indicator triggers.
   **MUST also include (moved up from P2 — P1 already adds to a live position):** the
   pyramiding-guardrail enforcement (a rung that *increases* exposure fires only if its
@@ -209,3 +224,45 @@ route template) · `claimPreviewForExecute` + `clientIntentId` + `auto_exit_lock
 (idempotency/locks) · `ApprovalPopup` (arm gate) · `PositionInsightsModal` helpers +
 `CandleChart`/`buildTradeLines` (preview risk + overlays) · `verifyCronBearer` (keyless
 NAS→Vercel auth) · native HL Scale/TWAP/OCO/triggers (compose, don't rebuild).
+
+## 7. As-built (current shipped state — deltas from the design above)
+
+What actually shipped, where it differs from or extends the plan:
+
+- **The watcher runs on cron-job.org, not the NAS/Vercel cron.** Vercel Hobby caps crons
+  at daily, so the tick is an external scheduler hitting `GET /api/cron/ladder-watch`
+  every ~2 min with `Authorization: Bearer $LADDER_CRON_SECRET`. Triggers evaluate on the
+  last **completed 15m** candle (`snapshotFromCandleResult` drops the in-progress bar,
+  fails closed on a stale/lagging feed). There is **no dead-watcher heartbeat alert yet**
+  (§4b's "armed-but-silent" page) — a known follow-up.
+
+- **Fire sizes at the candle-close mark, not the trigger.** A rung fires when the
+  completed candle *closes through* its trigger; `fireOpenOrAdd` then sizes off the live
+  **mark** (which overshoots the trigger), so the real fill's entry/stop/size drift from
+  the previewed trigger values while **dollar risk and notional stay fixed**
+  (`notional = riskUsd/stopFrac`, mark-invariant). Verified live 2026-06-29: $1,602 short
+  trigger → ~$1,594 fill → stop $1,674 → $5 risk preserved. The UI states this explicitly.
+
+- **Completion is modeled.** When every rung reaches a terminal status the ladder
+  transitions `armed → done` (`markLadderDone`, fire-path, armed-guarded). A `done` ladder
+  leaves the watcher set and the cockpit Armed-Ladders panel; the position lives on in
+  Open Positions with its resting bracket. The Ladders list shows `done` as "✓ filled".
+
+- **Rich detail/consent UI (beyond the planned preview modal).** `LadderDetailModal` shows
+  a 15m chart with every rung's trigger/stop/target overlaid + the live mark (price axis
+  auto-stretches to off-candle levels), a per-rung trade card (size/notional/leverage,
+  **clean stop risk AND the 10%-slipped max loss**, target/reward/R:R-ideal), a **live
+  distance-to-trigger** per rung, the §3.5 aggregate worst-case, and the always-visible
+  `arm <id8>` consent phrase. `ArmedLaddersPanel` (cockpit) shows armed ladders with live
+  proximity for every coin and is clickable into the same modal. Display math lives in the
+  PURE `ladder-projection-business-logic.ts` (`projectRung`/`rungProximity`), which reuses
+  `resolveArmRung` for parity.
+
+- **Two kill-switches, both ON in prod.** `LADDER_LIVE_ENABLED` (arm gate) and
+  `LADDER_AUTOFIRE_ENABLED` (autonomous-fire gate) are independent of `TRADING_MODE`. See
+  `ladder-flags.ts` and the runbook.
+
+**Not yet delivered:** multi-rung live exercise (adds + the add-coverage gate are
+unit-tested only), trailing stops (P2), multi-leg/delta-neutral (P3), the dead-watcher
+heartbeat, and a per-tick watcher lock for cross-coin portfolio-cap atomicity (§invariant 2
+is enforced per-fire today, not under one ladder-wide lock).
