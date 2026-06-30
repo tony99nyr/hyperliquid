@@ -198,7 +198,7 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
               {/* WORST CASE — the aggregate §3.5 read. */}
               {risk && (
                 <div data-testid="ladder-detail-risk" className={css({ borderRadius: '11px', padding: '6px 16px', marginBottom: '14px' })} style={{ background: TERM.inset, border: '1px solid token(colors.github.border)' }}>
-                  <div className={css({ fontFamily: 'sans', fontSize: '10px', fontWeight: 'semibold', textTransform: 'uppercase', letterSpacing: '0.12em', padding: '8px 0 4px', color: 'cockpit.faint' })}>Worst case · all stops slip at once (no netting)</div>
+                  <div className={css({ fontFamily: 'sans', fontSize: '10px', fontWeight: 'semibold', textTransform: 'uppercase', letterSpacing: '0.12em', padding: '8px 0 4px', color: 'github.textMuted' })}>Worst case · all stops slip at once (no netting)</div>
                   <SummaryRow label="Worst-case loss" value={fmtUsd(-Math.abs(risk.aggregateWorstCaseLossUsd))} color={ZONE_COLORS.danger} />
                   <SummaryRow label="Total notional" value={risk.totalNotionalUsd > 0 ? fmtCompactUsd(risk.totalNotionalUsd) : '—'} color={GH.textBright} />
                   <SummaryRow label="Total margin" value={risk.totalMarginUsd > 0 ? fmtUsd(risk.totalMarginUsd).replace('+', '') : '—'} color={GH.textBright} />
@@ -255,7 +255,8 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   return <span className={css({ fontFamily: 'sans', fontSize: '10.5px', fontWeight: 'semibold', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block' })} style={{ color: '#9aa4b5' }}>{children}</span>;
 }
 
-/** One rung as a rich card: header (side/action/status) → live proximity → the trade grid. */
+/** One rung as a rich card: header (side/action/status) → the trigger + live distance →
+ *  a label-above-value metric grid grouped risk (red) / reward (green). */
 function RungCard({ rung, markPx }: { rung: LadderRung; markPx: number | null }) {
   const long = rung.side === 'long';
   const p = projectRung(rung);
@@ -264,52 +265,62 @@ function RungCard({ rung, markPx }: { rung: LadderRung; markPx: number | null })
   const prox = rung.status === 'pending' ? rungProximity(rung, markPx) : null;
   const sideBg = long ? 'rgba(25,201,138,.14)' : 'rgba(242,77,94,.14)';
   const sideColor = long ? ZONE_COLORS.ok : ZONE_COLORS.danger;
+  const hasTarget = p.targetPx != null;
 
   return (
-    <div data-testid={`rung-card-${rung.id}`} className={css({ borderRadius: '11px', padding: '12px 14px' })} style={{ background: TERM.inset, border: '1px solid token(colors.github.border)' }}>
+    <div data-testid={`rung-card-${rung.id}`} className={css({ borderRadius: '11px', padding: '13px 15px' })} style={{ background: TERM.inset, border: '1px solid token(colors.github.border)' }}>
       {/* Header row */}
-      <div className={css({ display: 'flex', alignItems: 'center', gap: '9px', marginBottom: '9px' })}>
-        <span className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted', flex: 'none' })}>#{rung.seq}</span>
+      <div className={css({ display: 'flex', alignItems: 'center', gap: '9px', marginBottom: '11px' })}>
+        <span className={css({ fontFamily: 'mono', fontSize: '10.5px', color: 'github.textMuted', flex: 'none' })}>#{rung.seq}</span>
         <span className={css({ fontFamily: 'mono', fontSize: '11px', fontWeight: 'bold', borderRadius: '5px', paddingX: '7px', paddingY: '3px', flex: 'none' })} style={{ background: sideBg, color: sideColor }}>{rung.coin} {long ? 'LONG' : 'SHORT'}</span>
-        <span className={css({ fontFamily: 'mono', fontSize: '11px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.05em', flex: 1 })}>{rung.action}</span>
-        <span data-testid={`rung-card-status-${rung.id}`} className={css({ fontFamily: 'mono', fontSize: '9.5px', fontWeight: 'bold', letterSpacing: '0.05em', flex: 'none' })} style={{ color: prox?.primed ? ZONE_COLORS.ok : st.color }}>{prox?.primed ? '● PRIMED' : st.label}</span>
+        <span className={css({ fontFamily: 'mono', fontSize: '10.5px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.06em', flex: 1 })}>{rung.action}</span>
+        <span data-testid={`rung-card-status-${rung.id}`} className={css({ fontFamily: 'mono', fontSize: '10px', fontWeight: 'bold', letterSpacing: '0.06em', borderRadius: '4px', paddingX: '6px', paddingY: '2px', flex: 'none' })}
+          style={{ color: prox?.primed ? ZONE_COLORS.ok : st.color, background: prox?.primed ? 'rgba(25,201,138,.12)' : 'rgba(255,255,255,.04)' }}>{prox?.primed ? '● PRIMED' : st.label}</span>
       </div>
 
-      {/* WHERE + HOW CLOSE — the trigger and the live distance to it. */}
-      <div className={css({ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' })}>
-        <span className={css({ fontFamily: 'mono', fontSize: '13px', fontWeight: 'bold', color: 'github.textBright' })} style={{ fontFeatureSettings: '"tnum"' }}>
+      {/* WHERE + WHEN — the trigger and the live distance to it (the headline of the card). */}
+      <div className={css({ display: 'flex', alignItems: 'baseline', gap: '9px', flexWrap: 'wrap', marginBottom: '12px' })}>
+        <span className={css({ fontFamily: 'sans', fontSize: '9.5px', fontWeight: 'semibold', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'github.textMuted', flex: 'none' })}>Fires at</span>
+        <span className={css({ fontFamily: 'mono', fontSize: '15px', fontWeight: 'bold', color: 'github.textBright' })} style={{ fontFeatureSettings: '"tnum"' }}>
           {rung.triggerPx != null ? `${dir} ${fmtPx(rung.triggerPx)}` : rung.triggerKind}
         </span>
         {prox ? (
-          <span data-testid={`rung-card-prox-${rung.id}`} className={css({ fontFamily: 'mono', fontSize: '10.5px' })} style={{ color: prox.primed ? ZONE_COLORS.ok : ZONE_COLORS.warn, fontFeatureSettings: '"tnum"' }}>
+          <span data-testid={`rung-card-prox-${rung.id}`} className={css({ fontFamily: 'mono', fontSize: '11px', fontWeight: 'semibold' })} style={{ color: prox.primed ? ZONE_COLORS.ok : ZONE_COLORS.warn, fontFeatureSettings: '"tnum"' }}>
             {prox.primed
-              ? '— fires on the next 15m close'
-              : `${markPx != null ? `${rung.coin} ${fmtPx(markPx)} · ` : ''}needs ${prox.direction === 'up' ? '+' : '−'}${(prox.pct * 100).toFixed(2)}%`}
+              ? '● fires on the next 15m close'
+              : `${markPx != null ? `${rung.coin} ${fmtPx(markPx)} · ` : ''}needs ${prox.direction === 'up' ? '+' : '−'}${(prox.pct * 100).toFixed(2)}% to ${fmtPx(prox.toPx)}`}
           </span>
         ) : rung.status === 'fired' ? (
-          <span className={css({ fontFamily: 'mono', fontSize: '10.5px', color: 'cockpit.faint' })}>→ live in Open Positions</span>
+          <span className={css({ fontFamily: 'mono', fontSize: '11px', color: 'github.textMuted' })}>→ now live in Open Positions</span>
         ) : null}
       </div>
 
-      {/* WHAT — the projected trade. */}
-      <div className={css({ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '7px 16px' })}>
-        <Stat label="Size" value={p.sizeCoins != null ? `${p.sizeCoins.toLocaleString('en-US', { maximumFractionDigits: 4 })} ${rung.coin}` : '—'} />
-        <Stat label="Notional" value={p.notionalUsd != null ? fmtCompactUsd(p.notionalUsd) : '—'} />
-        <Stat label="Stop" value={p.stopPx != null ? `${fmtPx(p.stopPx)}${p.stopPct != null ? ` (${fmtPctSigned(-p.stopPct * 100)})` : ''}` : '—'} valueColor={p.stopPx != null ? ZONE_COLORS.danger : undefined} />
-        <Stat label="Risk at stop" value={p.riskUsd != null ? fmtUsd(-p.riskUsd) : '—'} valueColor={p.riskUsd != null ? ZONE_COLORS.danger : undefined} />
-        <Stat label="Target" value={p.targetPx != null ? `${fmtPx(p.targetPx)}${p.targetPct != null ? ` (${fmtPctSigned(p.targetPct * 100)})` : ''}` : '—'} valueColor={p.targetPx != null ? ZONE_COLORS.ok : undefined} />
-        <Stat label="Reward · R:R" value={p.rewardUsd != null ? `${fmtUsd(p.rewardUsd)}${p.rrRatio != null ? ` · ${p.rrRatio.toFixed(1)}R` : ''}` : '—'} valueColor={p.rewardUsd != null ? ZONE_COLORS.ok : undefined} />
-        {p.leverage != null && <Stat label="Leverage" value={`${p.leverage}×`} />}
+      {/* WHAT — the projected trade, label-above-value so every figure is legible. */}
+      <div className={css({ display: 'grid', gridTemplateColumns: { base: 'repeat(2, 1fr)', sm: 'repeat(3, 1fr)' }, gap: '11px 14px', paddingTop: '11px', borderTop: '1px solid rgba(255,255,255,.06)' })}>
+        <Cell label="Size" value={p.sizeCoins != null ? `${p.sizeCoins.toLocaleString('en-US', { maximumFractionDigits: 4 })} ${rung.coin}` : '—'} />
+        <Cell label="Notional" value={p.notionalUsd != null ? fmtCompactUsd(p.notionalUsd) : '—'} />
+        <Cell label="Leverage" value={p.leverage != null ? `${p.leverage}×` : '—'} />
+        <Cell label="Stop" value={p.stopPx != null ? `${fmtPx(p.stopPx)}${p.stopPct != null ? ` ${fmtPctSigned(-p.stopPct * 100)}` : ''}` : '—'} valueColor={p.stopPx != null ? ZONE_COLORS.danger : undefined} />
+        <Cell label="Risk at stop" value={p.riskUsd != null ? fmtUsd(-p.riskUsd) : '—'} valueColor={p.riskUsd != null ? ZONE_COLORS.danger : undefined} />
+        <Cell label="R : R" value={p.rrRatio != null ? `${p.rrRatio.toFixed(1)} R` : '—'} />
+        <Cell label="Target" value={hasTarget ? `${fmtPx(p.targetPx)}${p.targetPct != null ? ` ${fmtPctSigned(p.targetPct * 100)}` : ''}` : 'none'} valueColor={hasTarget ? ZONE_COLORS.ok : GH.textMuted} />
+        <Cell label="Reward" value={p.rewardUsd != null ? fmtUsd(p.rewardUsd) : '—'} valueColor={p.rewardUsd != null ? ZONE_COLORS.ok : undefined} />
       </div>
+
+      {!hasTarget && (
+        <p className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted', marginTop: '10px' })}>Stop-only — no take-profit target; exit is manual or by a later rung.</p>
+      )}
     </div>
   );
 }
 
-function Stat({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+/** A metric: a small uppercase label ABOVE a mono value (reads cleaner + more legible than
+ *  a cramped label-left/value-right row; label uses the ≥4.5:1 muted color, not faint). */
+function Cell({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
   return (
-    <div className={css({ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '8px', minWidth: 0 })}>
-      <span className={css({ fontFamily: 'sans', fontSize: '10px', color: 'cockpit.faint', flex: 'none' })}>{label}</span>
-      <span className={css({ fontFamily: 'mono', fontSize: '11px', color: 'github.text', textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })} style={{ color: valueColor, fontFeatureSettings: '"tnum"' }}>{value}</span>
+    <div className={css({ display: 'flex', flexDirection: 'column', gap: '3px', minWidth: 0 })}>
+      <span className={css({ fontFamily: 'sans', fontSize: '9.5px', fontWeight: 'semibold', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'github.textMuted' })}>{label}</span>
+      <span className={css({ fontFamily: 'mono', fontSize: '12px', color: 'github.textBright', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })} style={{ color: valueColor, fontFeatureSettings: '"tnum"' }}>{value}</span>
     </div>
   );
 }

@@ -67,7 +67,7 @@ export default function LadderChart({ coin, rungs, lastPx = null, height = 260 }
         {changePct !== null && (
           <span className={css({ fontFamily: 'mono', fontSize: '11px' })} style={{ color: changePct >= 0 ? ZONE_COLORS.ok : ZONE_COLORS.danger, fontFeatureSettings: '"tnum"' }}>{fmtPctSigned(changePct)}</span>
         )}
-        <span className={css({ marginLeft: 'auto', fontFamily: 'mono', fontSize: '9.5px', color: 'cockpit.faint' })}>15m · fires on close</span>
+        <span className={css({ marginLeft: 'auto', fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>15m · fires on close</span>
       </div>
 
       {error && candles.length === 0 ? (

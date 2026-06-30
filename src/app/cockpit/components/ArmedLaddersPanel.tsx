@@ -18,6 +18,7 @@ import { GH, ZONE_COLORS, TERM, fmtPx } from './panel-styles';
 import { usePolledEndpoint } from '@/hooks/usePolledEndpoint';
 import { useHlOrderbook } from '@/hooks/useHlOrderbook';
 import { projectRung, rungProximity } from '@/lib/ladder/ladder-projection-business-logic';
+import LadderDetailModal from './ladders/LadderDetailModal';
 import type { LadderWithRungs, LadderRung } from '@/lib/ladder/ladder-types';
 
 export interface ArmedLaddersPanelProps {
@@ -54,6 +55,7 @@ export default function ArmedLaddersPanel({ coin = 'ETH' }: ArmedLaddersPanelPro
   const reportPx = useCallback((c: string, px: number | null) => {
     setMarks((m) => (m[c] === px ? m : { ...m, [c]: px }));
   }, []);
+  const [detailId, setDetailId] = useState<string | null>(null);
 
   if (ladders.length === 0) return null; // nothing armed → no panel
 
@@ -67,14 +69,24 @@ export default function ArmedLaddersPanel({ coin = 'ETH' }: ArmedLaddersPanelPro
       </div>
       <div className={css({ display: 'flex', flexDirection: 'column', gap: '10px' })}>
         {ladders.map((l) => (
-          <div key={l.id}>
-            <div className={css({ fontFamily: 'sans', fontSize: '11px', fontWeight: 'semibold', color: 'github.text', marginBottom: '5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })}>{l.title}</div>
+          // role=button (not <button>) so the rich rung rows can nest as valid HTML.
+          // Click / Enter / Space opens the full detail modal (chart + per-rung trade).
+          <div key={l.id} role="button" tabIndex={0} data-testid={`armed-ladder-${l.id}`} aria-label={`Review ${l.title}`}
+            onClick={() => setDetailId(l.id)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDetailId(l.id); } }}
+            className={css({ borderRadius: '9px', padding: '8px', margin: '-8px -8px 0', cursor: 'pointer', transition: 'background .12s', _hover: { background: 'rgba(91,140,255,.05)' }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '1px' } })}>
+            <div className={css({ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' })}>
+              <span className={css({ fontFamily: 'sans', fontSize: '11px', fontWeight: 'semibold', color: 'github.textBright', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })}>{l.title}</span>
+              <span aria-hidden className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted', flex: 'none' })}>details ›</span>
+            </div>
             <div className={css({ display: 'flex', flexDirection: 'column', gap: '5px' })}>
               {l.rungs.map((r) => <RungRow key={r.id} rung={r} accent={r.coin.toUpperCase() === coin.toUpperCase()} markPx={marks[r.coin.toUpperCase()] ?? null} />)}
             </div>
           </div>
         ))}
       </div>
+
+      {detailId && <LadderDetailModal ladderId={detailId} onClose={() => setDetailId(null)} onChanged={() => setDetailId(null)} />}
     </section>
   );
 }
