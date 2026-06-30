@@ -39,6 +39,7 @@ import {
   toLwcCandles,
   type ActiveTrade,
   type OpportunityLevels,
+  type TradePriceLine,
 } from './candle-chart-helpers';
 import { GH, ZONE_COLORS, TERM } from '../panel-styles';
 
@@ -50,6 +51,9 @@ export interface CandleChartProps {
   trade?: ActiveTrade | null;
   /** Rubric opportunity levels to overlay when FLAT (entry zone / inval / target). */
   opportunity?: OpportunityLevels | null;
+  /** Arbitrary pre-built horizontal levels (e.g. every ladder rung's trigger/stop/target).
+   *  Rendered independently of trade/opportunity so the ladder modal can show ALL rungs. */
+  extraLines?: TradePriceLine[] | null;
   height?: number;
   /** Coin + interval identify the dataset; a change re-fits the view ONCE. */
   coin?: string;
@@ -67,6 +71,7 @@ export default function CandleChart({
   lastPx = null,
   trade = null,
   opportunity = null,
+  extraLines = null,
   height = 460,
   coin,
   interval,
@@ -79,6 +84,7 @@ export default function CandleChart({
   const maSlowRef = useRef<ISeriesApi<'Line'> | null>(null);
   const oppLinesRef = useRef<IPriceLine[]>([]);
   const priceLinesRef = useRef<IPriceLine[]>([]);
+  const extraLinesRef = useRef<IPriceLine[]>([]);
   // Effective render height, decided ONCE at mount (this is a client-only
   // ssr:false island, so `window` is safe and there is no SSR/first-paint flip
   // that would re-trigger autoSize → the canvas can't overflow its card). On a
@@ -169,6 +175,7 @@ export default function CandleChart({
       maFastRef.current = null;
       maSlowRef.current = null;
       priceLinesRef.current = [];
+      extraLinesRef.current = [];
       fittedKeyRef.current = null;
     };
     // Create ONCE. `height` is applied imperatively in the effect below so a
@@ -281,6 +288,29 @@ export default function CandleChart({
       );
     }
   }, [opportunity, trade]);
+
+  // --- Overlay ARBITRARY caller-built levels (ladder rungs: trigger/stop/target for
+  // every rung at once). Own ref array so it never fights the trade/opportunity effects;
+  // the ladder modal passes only this prop (no trade/opportunity), so they coexist cleanly. ---
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+    for (const line of extraLinesRef.current) series.removePriceLine(line);
+    extraLinesRef.current = [];
+    for (const l of extraLines ?? []) {
+      if (!Number.isFinite(l.price)) continue;
+      extraLinesRef.current.push(
+        series.createPriceLine({
+          price: l.price,
+          color: l.color,
+          lineWidth: 1,
+          lineStyle: l.dashed ? LineStyle.Dashed : LineStyle.Solid,
+          axisLabelVisible: true,
+          title: l.title,
+        }),
+      );
+    }
+  }, [extraLines]);
 
   // `flexShrink: 0` + `minHeight` keep the canvas from collapsing to a sliver
   // when the panel is a flex column on mobile (autoSize's ResizeObserver would

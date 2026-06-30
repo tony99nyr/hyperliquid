@@ -168,7 +168,7 @@ export default function CockpitView({
           currentEquityUsd={currentEquityUsd}
           onNewPosition={onNewPosition}
         />
-        <ArmedLaddersPanel coin={coin} markPx={entryPx} />
+        <ArmedLaddersPanel coin={coin} />
         <FollowingPanel onCopy={onStagePlay} />
         <FavoritePlaysBoard onStagePlay={onStagePlay} />
         <HealthPanel sessionId={sessionId} coin={coin} onCoinChange={onCoinChange} />

@@ -24,8 +24,11 @@ async function main(): Promise<void> {
       if (await row.count()) {
         await row.click();
         await page.getByTestId('ladder-detail-modal').waitFor({ state: 'visible', timeout: 10_000 }).catch(() => notes.push(`${sfx}: no detail modal`));
-        await delay(800);
-        await page.screenshot({ path: `${DIR}/ladder-detail-${sfx}.png` });
+        // Let the 15m chart fetch candles + the per-coin mark probe connect so the
+        // overlaid trigger/stop lines + the live proximity reads are in the shot.
+        await page.getByTestId('ladder-chart').waitFor({ state: 'visible', timeout: 8_000 }).catch(() => notes.push(`${sfx}: no chart`));
+        await delay(4_000);
+        await page.screenshot({ path: `${DIR}/ladder-detail-${sfx}.png`, fullPage: m });
         console.log(`  shot: ladder-detail-${sfx}.png`);
       } else notes.push(`${sfx}: no ladder row`);
       await ctx.close();

@@ -1,23 +1,28 @@
 'use client';
 
 /**
- * LadderDetailModal — REVIEW then ARM/DISARM an existing ladder (opened by a row click).
+ * LadderDetailModal — REVIEW then ARM/DISARM a ladder (opened by a row click). Answers,
+ * at a glance: WHERE will it fire (chart + trigger), HOW CLOSE is it (live distance per
+ * rung), WHAT is the trade (size/stop/target/risk/reward/R:R per rung), and WHAT'S the
+ * worst case (aggregate). Then the consent surface (the always-visible `arm <id8>` phrase)
+ * and arm/disarm.
  *
- * The list rows are intentionally thin; the decision happens here: the full plan (every
- * rung), the §3.5 risk preview recomputed client-side, and the action. The fix this
- * replaces: arming used to be a cramped inline input whose required phrase lived ONLY in
- * the placeholder (gone the moment you typed). Here the `arm <id8>` phrase is ALWAYS
- * visible as a copyable chip ABOVE the input — read it, copy it, type it, arm.
+ * Live marks come from one shared per-coin probe (a hidden useHlOrderbook per distinct
+ * coin) so the proximity reads are live for EVERY rung — even coins the cockpit isn't
+ * currently showing — without spinning up a ws per card.
  *
  * Mirrors the EntryModal a11y contract: role=dialog, focus trap, Esc cancels.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { css } from '@styled-system/css';
-import { GH, ZONE_COLORS, TERM, fmtPx, fmtUsd, fmtCompactUsd } from '../panel-styles';
+import { GH, ZONE_COLORS, TERM, fmtPx, fmtUsd, fmtCompactUsd, fmtPctSigned } from '../panel-styles';
 import { SummaryRow } from '../approval-popup-parts';
+import { useHlOrderbook } from '@/hooks/useHlOrderbook';
 import { resolveArmRung } from '@/lib/ladder/ladder-arm-business-logic';
 import { computeLadderRisk } from '@/lib/ladder/ladder-risk-business-logic';
+import { projectRung, rungProximity } from '@/lib/ladder/ladder-projection-business-logic';
+import LadderChart from './LadderChart';
 import type { LadderWithRungs, LadderRung } from '@/lib/ladder/ladder-types';
 
 export interface LadderDetailModalProps {
@@ -31,16 +36,36 @@ const STATUS_COLOR: Record<LadderWithRungs['status'], string> = {
   draft: GH.textMuted, armed: ZONE_COLORS.ok, disarmed: ZONE_COLORS.warn, done: GH.textMuted, expired: GH.textMuted,
 };
 
+const RUNG_STATUS: Record<LadderRung['status'], { label: string; color: string }> = {
+  pending: { label: 'WAITING', color: ZONE_COLORS.warn },
+  fired: { label: '✓ FIRED', color: ZONE_COLORS.ok },
+  skipped: { label: 'SKIPPED', color: GH.textMuted },
+  failed: { label: 'FAILED', color: ZONE_COLORS.danger },
+  cancelled: { label: 'CANCELLED', color: GH.textMuted },
+};
+
+/** Hidden per-coin live-mark probe — one ws per distinct coin, reported up to the modal. */
+function MarkProbe({ coin, onPx }: { coin: string; onPx: (coin: string, px: number | null) => void }) {
+  const { lastPx } = useHlOrderbook(coin);
+  useEffect(() => { onPx(coin, lastPx); }, [coin, lastPx, onPx]);
+  return null;
+}
+
 export default function LadderDetailModal({ ladderId, onClose, onChanged }: LadderDetailModalProps) {
   const [ladder, setLadder] = useState<LadderWithRungs | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [typed, setTyped] = useState('');
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [marks, setMarks] = useState<Record<string, number | null>>({});
 
   const dialogRef = useRef<HTMLElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+
+  const reportPx = useCallback((coin: string, px: number | null) => {
+    setMarks((m) => (m[coin] === px ? m : { ...m, [coin]: px }));
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -70,12 +95,20 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
   const armPhrase = `arm ${ladderId.slice(0, 8)}`;
   const phraseOk = !isLive || typed.trim().toLowerCase() === armPhrase;
 
-  // Recompute the §3.5 risk preview from the loaded rungs (now=0 → render-pure; the
-  // server re-validates at arm). Shown read-only so the operator reviews before consenting.
+  // Distinct coins (probe each) + the primary coin to chart (the one with the most rungs).
+  const coins = useMemo(() => Array.from(new Set((ladder?.rungs ?? []).map((r) => r.coin.toUpperCase()))), [ladder]);
+  const primaryCoin = useMemo(() => {
+    const rungs = ladder?.rungs ?? [];
+    if (rungs.length === 0) return null;
+    const counts = new Map<string, number>();
+    for (const r of rungs) counts.set(r.coin.toUpperCase(), (counts.get(r.coin.toUpperCase()) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  }, [ladder]);
+
+  // §3.5 aggregate risk preview (render-pure; the server re-validates at arm).
   const risk = useMemo(() => {
     if (!ladder) return null;
-    const armRungs = ladder.rungs.map(resolveArmRung);
-    return computeLadderRisk(armRungs, { maxTotalNotionalUsd: ladder.maxTotalNotionalUsd, maxTotalLossUsd: ladder.maxTotalLossUsd });
+    return computeLadderRisk(ladder.rungs.map(resolveArmRung), { maxTotalNotionalUsd: ladder.maxTotalNotionalUsd, maxTotalLossUsd: ladder.maxTotalLossUsd });
   }, [ladder]);
 
   function onKeyDown(e: React.KeyboardEvent<HTMLElement>): void {
@@ -111,16 +144,23 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
     void navigator.clipboard?.writeText(armPhrase).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1400); }).catch(() => {});
   }
 
+  const breachCount = risk?.breaches.length ?? 0;
+  const armReady = !busy && phraseOk && breachCount === 0;
+
   return (
     <div ref={overlayRef} role="presentation" onKeyDown={onKeyDown}
       className={css({ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: { base: 'flex-end', md: 'center' }, justifyContent: 'center', padding: { base: '0', md: '16px' }, overflowY: 'auto' })}
       style={{ background: 'rgba(4,6,10,.65)', backdropFilter: 'blur(3px)' }}>
+
+      {/* Hidden live-mark probes — one per distinct coin (proximity is live for every rung). */}
+      {coins.map((c) => <MarkProbe key={c} coin={c} onPx={reportPx} />)}
+
       <section ref={dialogRef} data-testid="ladder-detail-modal" role="dialog" aria-modal="true" aria-label="Ladder detail"
-        className={css({ width: '100%', maxWidth: { base: '100%', md: '560px' }, maxHeight: '94vh', overflowY: 'auto', borderRadius: { base: '16px 16px 0 0', md: '16px' }, display: 'flex', flexDirection: 'column' })}
+        className={css({ width: '100%', maxWidth: { base: '100%', md: '680px' }, maxHeight: '94vh', overflowY: 'auto', borderRadius: { base: '16px 16px 0 0', md: '16px' }, display: 'flex', flexDirection: 'column' })}
         style={{ background: '#0e131c', border: '1px solid rgba(255,255,255,.12)', boxShadow: '0 30px 80px rgba(0,0,0,.6)' }}>
 
         {/* Header */}
-        <header className={css({ display: 'flex', alignItems: 'center', gap: '11px', padding: '18px 22px', borderBottom: '1px solid token(colors.github.border)' })}>
+        <header className={css({ display: 'flex', alignItems: 'center', gap: '11px', padding: '18px 22px', borderBottom: '1px solid token(colors.github.border)', position: 'sticky', top: 0, zIndex: 2 })} style={{ background: '#0e131c' }}>
           <h2 className={css({ fontFamily: 'sans', fontSize: '14px', fontWeight: 'bold', color: 'github.textBright', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })}>{ladder?.title ?? 'Ladder'}</h2>
           {ladder && (
             <>
@@ -134,7 +174,7 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
             style={{ background: TERM.button, color: GH.textMuted }}>✕</button>
         </header>
 
-        <div className={css({ padding: '18px 22px', overflowY: 'auto' })}>
+        <div className={css({ padding: '16px 22px', overflowY: 'auto' })}>
           {error && <p data-testid="ladder-detail-error" className={css({ fontSize: 'xs', color: 'zone.danger', marginBottom: '12px' })}>{error}</p>}
           {!ladder && !error && <p className={css({ fontFamily: 'mono', fontSize: '12px', color: 'cockpit.faint' })}>Loading…</p>}
 
@@ -142,16 +182,23 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
             <>
               {ladder.thesis && <p className={css({ fontFamily: 'sans', fontSize: '12px', color: 'github.textMuted', marginBottom: '14px', lineHeight: 1.5 })}>{ladder.thesis}</p>}
 
-              {/* Rungs — the plan, read-only */}
+              {/* WHERE — the chart with every rung's levels overlaid + the live mark. */}
+              {primaryCoin && (
+                <div className={css({ marginBottom: '16px' })}>
+                  <LadderChart coin={primaryCoin} rungs={ladder.rungs} lastPx={marks[primaryCoin] ?? null} />
+                </div>
+              )}
+
+              {/* WHAT + HOW CLOSE — a rich card per rung. */}
               <FieldLabel>Rungs ({ladder.rungs.length})</FieldLabel>
-              <div className={css({ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '7px', marginBottom: '16px' })}>
-                {ladder.rungs.map((r) => <RungLine key={r.id} rung={r} />)}
+              <div className={css({ display: 'flex', flexDirection: 'column', gap: '9px', marginTop: '8px', marginBottom: '16px' })}>
+                {ladder.rungs.map((r) => <RungCard key={r.id} rung={r} markPx={marks[r.coin.toUpperCase()] ?? null} />)}
               </div>
 
-              {/* Risk preview */}
+              {/* WORST CASE — the aggregate §3.5 read. */}
               {risk && (
-                <div data-testid="ladder-detail-risk" className={css({ borderRadius: '11px', padding: '6px 16px', marginBottom: '16px' })} style={{ background: TERM.inset, border: '1px solid token(colors.github.border)' }}>
-                  <div className={css({ fontFamily: 'sans', fontSize: '10px', fontWeight: 'semibold', textTransform: 'uppercase', letterSpacing: '0.12em', padding: '8px 0 4px', color: 'cockpit.faint' })}>Risk · all stops slip at once (no netting)</div>
+                <div data-testid="ladder-detail-risk" className={css({ borderRadius: '11px', padding: '6px 16px', marginBottom: '14px' })} style={{ background: TERM.inset, border: '1px solid token(colors.github.border)' }}>
+                  <div className={css({ fontFamily: 'sans', fontSize: '10px', fontWeight: 'semibold', textTransform: 'uppercase', letterSpacing: '0.12em', padding: '8px 0 4px', color: 'cockpit.faint' })}>Worst case · all stops slip at once (no netting)</div>
                   <SummaryRow label="Worst-case loss" value={fmtUsd(-Math.abs(risk.aggregateWorstCaseLossUsd))} color={ZONE_COLORS.danger} />
                   <SummaryRow label="Total notional" value={risk.totalNotionalUsd > 0 ? fmtCompactUsd(risk.totalNotionalUsd) : '—'} color={GH.textBright} />
                   <SummaryRow label="Total margin" value={risk.totalMarginUsd > 0 ? fmtUsd(risk.totalMarginUsd).replace('+', '') : '—'} color={GH.textBright} />
@@ -170,7 +217,7 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
 
         {/* Action footer — the consent surface */}
         {ladder && (ladder.status === 'draft' || ladder.status === 'armed') && (
-          <div className={css({ padding: '14px 22px 18px', borderTop: '1px solid rgba(255,255,255,.07)' })}>
+          <div className={css({ padding: '14px 22px 18px', borderTop: '1px solid rgba(255,255,255,.07)', position: 'sticky', bottom: 0 })} style={{ background: '#0e131c' }}>
             {ladder.status === 'armed' ? (
               <button type="button" data-testid="ladder-detail-disarm" disabled={busy} onClick={() => void disarm()}
                 className={css({ width: '100%', fontFamily: 'sans', fontSize: '13.5px', fontWeight: 'bold', borderRadius: '9px', padding: '13px', cursor: 'pointer', border: '1px solid rgba(248,81,73,.4)', _disabled: { opacity: 0.6 } })}
@@ -190,8 +237,8 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
                       className={css({ width: '100%', borderRadius: '9px', color: 'github.textBright', fontFamily: 'mono', fontSize: 'sm', padding: '11px 12px' })} style={{ background: TERM.inset, border: `1px solid ${phraseOk && typed ? 'rgba(63,185,80,.5)' : 'rgba(255,255,255,.1)'}` }} />
                   </div>
                 )}
-                <button type="button" data-testid="ladder-detail-arm" disabled={busy || !phraseOk || (risk?.breaches.length ?? 0) > 0} onClick={() => void arm()}
-                  style={{ background: !busy && phraseOk && (risk?.breaches.length ?? 0) === 0 ? (isLive ? ZONE_COLORS.danger : ZONE_COLORS.ok) : TERM.button, color: !busy && phraseOk && (risk?.breaches.length ?? 0) === 0 ? (isLive ? '#fff' : TERM.darkText) : GH.textMuted }}
+                <button type="button" data-testid="ladder-detail-arm" disabled={!armReady} onClick={() => void arm()}
+                  style={{ background: armReady ? (isLive ? ZONE_COLORS.danger : ZONE_COLORS.ok) : TERM.button, color: armReady ? (isLive ? '#fff' : TERM.darkText) : GH.textMuted }}
                   className={css({ width: '100%', border: 'none', borderRadius: '9px', fontFamily: 'sans', fontSize: '13.5px', fontWeight: 'bold', letterSpacing: '0.03em', padding: '13px', cursor: 'pointer', _disabled: { opacity: 0.6, cursor: 'not-allowed' } })}>
                   {busy ? 'Arming…' : isLive ? 'Arm LIVE →' : 'Arm →'}
                 </button>
@@ -208,23 +255,61 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   return <span className={css({ fontFamily: 'sans', fontSize: '10.5px', fontWeight: 'semibold', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block' })} style={{ color: '#9aa4b5' }}>{children}</span>;
 }
 
-/** One rung as a readable line: "1 · ETH LONG open · break ▲ 1618 · risk $5 · stop 5% · 3×". */
-function RungLine({ rung }: { rung: LadderRung }) {
+/** One rung as a rich card: header (side/action/status) → live proximity → the trade grid. */
+function RungCard({ rung, markPx }: { rung: LadderRung; markPx: number | null }) {
   const long = rung.side === 'long';
+  const p = projectRung(rung);
+  const st = RUNG_STATUS[rung.status];
   const dir = rung.triggerKind === 'price_above' ? '▲' : rung.triggerKind === 'price_below' ? '▼' : '•';
-  const bits = [
-    rung.triggerPx != null ? `break ${dir} ${fmtPx(rung.triggerPx)}` : rung.triggerKind,
-    rung.riskUsd != null ? `risk ${fmtUsd(rung.riskUsd).replace('+', '')}` : rung.sizeCoins != null ? `${rung.sizeCoins}` : null,
-    rung.stopFrac != null ? `stop ${Math.round(rung.stopFrac * 1000) / 10}%` : null,
-    rung.leverage != null ? `${rung.leverage}×` : null,
-    rung.targetPx != null ? `tp ${fmtPx(rung.targetPx)}` : null,
-  ].filter(Boolean);
+  const prox = rung.status === 'pending' ? rungProximity(rung, markPx) : null;
+  const sideBg = long ? 'rgba(25,201,138,.14)' : 'rgba(242,77,94,.14)';
+  const sideColor = long ? ZONE_COLORS.ok : ZONE_COLORS.danger;
+
   return (
-    <div className={css({ display: 'flex', alignItems: 'center', gap: '9px', borderRadius: '9px', padding: '10px 13px' })} style={{ background: 'rgba(255,255,255,.02)', border: '1px solid rgba(255,255,255,.07)' }}>
-      <span className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted', flex: 'none' })}>#{rung.seq}</span>
-      <span className={css({ fontFamily: 'mono', fontSize: '11px', fontWeight: 'bold', borderRadius: '5px', paddingX: '7px', paddingY: '3px', flex: 'none' })} style={{ background: long ? 'rgba(63,185,80,.16)' : 'rgba(248,81,73,.16)', color: long ? ZONE_COLORS.ok : ZONE_COLORS.danger }}>{rung.coin} {long ? 'LONG' : 'SHORT'}</span>
-      <span className={css({ fontFamily: 'mono', fontSize: '11px', color: 'github.textMuted', flex: 'none' })}>{rung.action}</span>
-      <span className={css({ fontFamily: 'mono', fontSize: '11px', color: 'github.text', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })} style={{ fontFeatureSettings: '"tnum"' }}>{bits.join(' · ')}</span>
+    <div data-testid={`rung-card-${rung.id}`} className={css({ borderRadius: '11px', padding: '12px 14px' })} style={{ background: TERM.inset, border: '1px solid token(colors.github.border)' }}>
+      {/* Header row */}
+      <div className={css({ display: 'flex', alignItems: 'center', gap: '9px', marginBottom: '9px' })}>
+        <span className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted', flex: 'none' })}>#{rung.seq}</span>
+        <span className={css({ fontFamily: 'mono', fontSize: '11px', fontWeight: 'bold', borderRadius: '5px', paddingX: '7px', paddingY: '3px', flex: 'none' })} style={{ background: sideBg, color: sideColor }}>{rung.coin} {long ? 'LONG' : 'SHORT'}</span>
+        <span className={css({ fontFamily: 'mono', fontSize: '11px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.05em', flex: 1 })}>{rung.action}</span>
+        <span data-testid={`rung-card-status-${rung.id}`} className={css({ fontFamily: 'mono', fontSize: '9.5px', fontWeight: 'bold', letterSpacing: '0.05em', flex: 'none' })} style={{ color: prox?.primed ? ZONE_COLORS.ok : st.color }}>{prox?.primed ? '● PRIMED' : st.label}</span>
+      </div>
+
+      {/* WHERE + HOW CLOSE — the trigger and the live distance to it. */}
+      <div className={css({ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' })}>
+        <span className={css({ fontFamily: 'mono', fontSize: '13px', fontWeight: 'bold', color: 'github.textBright' })} style={{ fontFeatureSettings: '"tnum"' }}>
+          {rung.triggerPx != null ? `${dir} ${fmtPx(rung.triggerPx)}` : rung.triggerKind}
+        </span>
+        {prox ? (
+          <span data-testid={`rung-card-prox-${rung.id}`} className={css({ fontFamily: 'mono', fontSize: '10.5px' })} style={{ color: prox.primed ? ZONE_COLORS.ok : ZONE_COLORS.warn, fontFeatureSettings: '"tnum"' }}>
+            {prox.primed
+              ? '— fires on the next 15m close'
+              : `${markPx != null ? `${rung.coin} ${fmtPx(markPx)} · ` : ''}needs ${prox.direction === 'up' ? '+' : '−'}${(prox.pct * 100).toFixed(2)}%`}
+          </span>
+        ) : rung.status === 'fired' ? (
+          <span className={css({ fontFamily: 'mono', fontSize: '10.5px', color: 'cockpit.faint' })}>→ live in Open Positions</span>
+        ) : null}
+      </div>
+
+      {/* WHAT — the projected trade. */}
+      <div className={css({ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '7px 16px' })}>
+        <Stat label="Size" value={p.sizeCoins != null ? `${p.sizeCoins.toLocaleString('en-US', { maximumFractionDigits: 4 })} ${rung.coin}` : '—'} />
+        <Stat label="Notional" value={p.notionalUsd != null ? fmtCompactUsd(p.notionalUsd) : '—'} />
+        <Stat label="Stop" value={p.stopPx != null ? `${fmtPx(p.stopPx)}${p.stopPct != null ? ` (${fmtPctSigned(-p.stopPct * 100)})` : ''}` : '—'} valueColor={p.stopPx != null ? ZONE_COLORS.danger : undefined} />
+        <Stat label="Risk at stop" value={p.riskUsd != null ? fmtUsd(-p.riskUsd) : '—'} valueColor={p.riskUsd != null ? ZONE_COLORS.danger : undefined} />
+        <Stat label="Target" value={p.targetPx != null ? `${fmtPx(p.targetPx)}${p.targetPct != null ? ` (${fmtPctSigned(p.targetPct * 100)})` : ''}` : '—'} valueColor={p.targetPx != null ? ZONE_COLORS.ok : undefined} />
+        <Stat label="Reward · R:R" value={p.rewardUsd != null ? `${fmtUsd(p.rewardUsd)}${p.rrRatio != null ? ` · ${p.rrRatio.toFixed(1)}R` : ''}` : '—'} valueColor={p.rewardUsd != null ? ZONE_COLORS.ok : undefined} />
+        {p.leverage != null && <Stat label="Leverage" value={`${p.leverage}×`} />}
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+  return (
+    <div className={css({ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '8px', minWidth: 0 })}>
+      <span className={css({ fontFamily: 'sans', fontSize: '10px', color: 'cockpit.faint', flex: 'none' })}>{label}</span>
+      <span className={css({ fontFamily: 'mono', fontSize: '11px', color: 'github.text', textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })} style={{ color: valueColor, fontFeatureSettings: '"tnum"' }}>{value}</span>
     </div>
   );
 }
