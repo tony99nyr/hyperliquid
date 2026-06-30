@@ -166,6 +166,22 @@ describe('precondition snapshot (§3.7)', () => {
     expect(snap).toBe('ETH:none');
   });
 
+  it('EXCLUDES a coin the ladder opens itself — an open→add pyramid armed flat must not drift-disarm', () => {
+    // open + add on the SAME coin: the add depends on the ladder's OWN open, not external
+    // state. The snapshot must be EMPTY (not 'ETH:none'), so after the open creates the
+    // position the add still matches and can fire (the coverage gate guards it instead).
+    const rungs = [
+      { coin: 'ETH', action: 'open' as const },
+      { coin: 'ETH', action: 'add' as const },
+      { coin: 'ETH', action: 'reduce' as const },
+    ];
+    expect(buildPreconditionSnapshot(rungs, [])).toBe(''); // flat at arm
+    // and still empty AFTER the open created the ETH position (no drift):
+    expect(buildPreconditionSnapshot(rungs, [{ coin: 'ETH', side: 'short', leverage: 3 }])).toBe('');
+    // a pure add-to-existing-position ladder (no open for the coin) is STILL guarded:
+    expect(buildPreconditionSnapshot([{ coin: 'ETH', action: 'add' }], [])).toBe('ETH:none');
+  });
+
   it('hash is deterministic + changes when the snapshot drifts (side flip / leverage change)', () => {
     const a = buildPreconditionSnapshot([{ coin: 'ETH', action: 'add' }], [{ coin: 'ETH', side: 'long', leverage: 5 }]);
     const b = buildPreconditionSnapshot([{ coin: 'ETH', action: 'add' }], [{ coin: 'ETH', side: 'short', leverage: 5 }]);
