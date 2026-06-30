@@ -15,6 +15,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { css } from '@styled-system/css';
 import { GH, ZONE_COLORS, TERM, fmtPx, fmtUsd, fmtCompactUsd, fmtPctSigned } from '../panel-styles';
 import { SummaryRow } from '../approval-popup-parts';
@@ -78,8 +79,11 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
 
   useEffect(() => { const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [load]);
 
-  // A11y: focus + inert siblings.
+  // A11y: focus + inert siblings + restore focus to the opener on close. Because the
+  // overlay is PORTALED to document.body, inerting the overlay's siblings now neutralizes
+  // the whole app root (real focus trap), not just whatever panel rendered this modal.
   useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
     closeRef.current?.focus();
     const overlay = overlayRef.current;
     const siblings: Element[] = [];
@@ -88,7 +92,10 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
         if (child !== overlay) { siblings.push(child); child.setAttribute('inert', ''); child.setAttribute('aria-hidden', 'true'); }
       }
     }
-    return () => { for (const c of siblings) { c.removeAttribute('inert'); c.removeAttribute('aria-hidden'); } };
+    return () => {
+      for (const c of siblings) { c.removeAttribute('inert'); c.removeAttribute('aria-hidden'); }
+      opener?.focus?.(); // return focus to the row/button that opened the modal
+    };
   }, []);
 
   const isLive = ladder?.mode === 'live';
@@ -146,9 +153,11 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
 
   const breachCount = risk?.breaches.length ?? 0;
   const armReady = !busy && phraseOk && breachCount === 0;
+  if (typeof document === 'undefined') return null; // portal target only exists client-side
 
-  return (
+  return createPortal(
     <div ref={overlayRef} role="presentation" onKeyDown={onKeyDown}
+      onClick={(e) => { if (e.target === overlayRef.current && !busy) onClose(); }}
       className={css({ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: { base: 'flex-end', md: 'center' }, justifyContent: 'center', padding: { base: '0', md: '16px' }, overflowY: 'auto' })}
       style={{ background: 'rgba(4,6,10,.65)', backdropFilter: 'blur(3px)' }}>
 
@@ -176,7 +185,7 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
 
         <div className={css({ padding: '16px 22px', overflowY: 'auto' })}>
           {error && <p data-testid="ladder-detail-error" className={css({ fontSize: 'xs', color: 'zone.danger', marginBottom: '12px' })}>{error}</p>}
-          {!ladder && !error && <p className={css({ fontFamily: 'mono', fontSize: '12px', color: 'cockpit.faint' })}>Loading…</p>}
+          {!ladder && !error && <p className={css({ fontFamily: 'mono', fontSize: '12px', color: 'github.textMuted' })}>Loading…</p>}
 
           {ladder && (
             <>
@@ -186,6 +195,10 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
               {primaryCoin && (
                 <div className={css({ marginBottom: '16px' })}>
                   <LadderChart coin={primaryCoin} rungs={ladder.rungs} lastPx={marks[primaryCoin] ?? null} />
+                  <p className={css({ fontFamily: 'mono', fontSize: '9.5px', color: 'github.textMuted', marginTop: '6px', lineHeight: 1.4 })}>
+                    Levels are at the trigger; a rung fills at the 15m candle <em>close</em> (may overshoot). Dollar risk &amp; notional are fixed.
+                    {coins.length > 1 && ` · Chart shows ${primaryCoin} only — other coins' rungs are listed below.`}
+                  </p>
                 </div>
               )}
 
@@ -247,7 +260,8 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
           </div>
         )}
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -287,7 +301,7 @@ function RungCard({ rung, markPx }: { rung: LadderRung; markPx: number | null })
         {prox ? (
           <span data-testid={`rung-card-prox-${rung.id}`} className={css({ fontFamily: 'mono', fontSize: '11px', fontWeight: 'semibold' })} style={{ color: prox.primed ? ZONE_COLORS.ok : ZONE_COLORS.warn, fontFeatureSettings: '"tnum"' }}>
             {prox.primed
-              ? '● fires on the next 15m close'
+              ? `${markPx != null ? `${rung.coin} ${fmtPx(markPx)} · ` : ''}● through — fires only if this 15m candle CLOSES past`
               : `${markPx != null ? `${rung.coin} ${fmtPx(markPx)} · ` : ''}needs ${prox.direction === 'up' ? '+' : '−'}${(prox.pct * 100).toFixed(2)}% to ${fmtPx(prox.toPx)}`}
           </span>
         ) : rung.status === 'fired' ? (
@@ -302,9 +316,10 @@ function RungCard({ rung, markPx }: { rung: LadderRung; markPx: number | null })
         <Cell label="Leverage" value={p.leverage != null ? `${p.leverage}×` : '—'} />
         <Cell label="Stop" value={p.stopPx != null ? `${fmtPx(p.stopPx)}${p.stopPct != null ? ` ${fmtPctSigned(-p.stopPct * 100)}` : ''}` : '—'} valueColor={p.stopPx != null ? ZONE_COLORS.danger : undefined} />
         <Cell label="Risk at stop" value={p.riskUsd != null ? fmtUsd(-p.riskUsd) : '—'} valueColor={p.riskUsd != null ? ZONE_COLORS.danger : undefined} />
-        <Cell label="R : R" value={p.rrRatio != null ? `${p.rrRatio.toFixed(1)} R` : '—'} />
+        <Cell label="If stop slips" value={p.slippedRiskUsd != null ? fmtUsd(-p.slippedRiskUsd) : '—'} valueColor={p.slippedRiskUsd != null ? ZONE_COLORS.danger : undefined} />
         <Cell label="Target" value={hasTarget ? `${fmtPx(p.targetPx)}${p.targetPct != null ? ` ${fmtPctSigned(p.targetPct * 100)}` : ''}` : 'none'} valueColor={hasTarget ? ZONE_COLORS.ok : GH.textMuted} />
         <Cell label="Reward" value={p.rewardUsd != null ? fmtUsd(p.rewardUsd) : '—'} valueColor={p.rewardUsd != null ? ZONE_COLORS.ok : undefined} />
+        <Cell label="R : R (ideal)" value={p.rrRatio != null ? `${p.rrRatio.toFixed(1)} R` : '—'} />
       </div>
 
       {!hasTarget && (
@@ -320,7 +335,9 @@ function Cell({ label, value, valueColor }: { label: string; value: string; valu
   return (
     <div className={css({ display: 'flex', flexDirection: 'column', gap: '3px', minWidth: 0 })}>
       <span className={css({ fontFamily: 'sans', fontSize: '9.5px', fontWeight: 'semibold', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'github.textMuted' })}>{label}</span>
-      <span className={css({ fontFamily: 'mono', fontSize: '12px', color: 'github.textBright', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })} style={{ color: valueColor, fontFeatureSettings: '"tnum"' }}>{value}</span>
+      {/* Wrap on mobile (narrow 2-col cells) so a value like "$1,682 −5.00%" is never
+          truncated away; single-line + ellipsis only on the wider sm+ 3-col grid. */}
+      <span className={css({ fontFamily: 'mono', fontSize: '12px', color: 'github.textBright', overflow: 'hidden', textOverflow: { base: 'clip', sm: 'ellipsis' }, whiteSpace: { base: 'normal', sm: 'nowrap' } })} style={{ color: valueColor, fontFeatureSettings: '"tnum"' }}>{value}</span>
     </div>
   );
 }

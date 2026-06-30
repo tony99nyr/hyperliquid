@@ -10,6 +10,7 @@
  */
 
 import { resolveArmRung } from './ladder-arm-business-logic';
+import { rungWorstCaseLoss } from './ladder-risk-business-logic';
 import type { LadderRung, LadderSide, RungTriggerKind } from './ladder-types';
 
 /** The full trade a rung projects: levels, size, and the risk/reward read. */
@@ -25,6 +26,10 @@ export interface RungProjection {
   marginUsd: number | null;
   /** Clean risk to the stop: |entry − stop| · size (≈ the configured riskUsd). */
   riskUsd: number | null;
+  /** Honest max risk: the stop fires as an HL market-on-trigger and SLIPS the full 10%
+   *  tolerance (worstStopFill). Always ≥ riskUsd — this is the number that can actually
+   *  hit the account, so the card must show it, not just the clean stop risk. */
+  slippedRiskUsd: number | null;
   /** |entry − stop| / entry. */
   stopPct: number | null;
   /** Reward at the target: |target − entry| · size (null when no target). */
@@ -46,13 +51,16 @@ export function projectRung(rung: LadderRung): RungProjection {
   const marginUsd = notionalUsd != null && has(leverage) ? notionalUsd / leverage : null;
 
   const riskUsd = has(entryPx) && has(stopPx) && has(sizeCoins) ? Math.abs(entryPx - stopPx) * sizeCoins : null;
+  // The real, slippage-bounded loss the stop can take (market-on-trigger, 10% tol). 0 → null.
+  const slipped = rungWorstCaseLoss({ side: rung.side, action: rung.action, entryPx, sizeCoins, stopPx });
+  const slippedRiskUsd = slipped > 0 ? slipped : null;
   const stopPct = has(entryPx) && has(stopPx) ? Math.abs(entryPx - stopPx) / entryPx : null;
 
   const rewardUsd = has(entryPx) && has(targetPx) && has(sizeCoins) ? Math.abs(targetPx - entryPx) * sizeCoins : null;
   const targetPct = has(entryPx) && has(targetPx) ? Math.abs(targetPx - entryPx) / entryPx : null;
   const rrRatio = rewardUsd != null && riskUsd != null && riskUsd > 0 ? rewardUsd / riskUsd : null;
 
-  return { entryPx, stopPx, targetPx: targetPx ?? null, sizeCoins, leverage, notionalUsd, marginUsd, riskUsd, stopPct, rewardUsd, targetPct, rrRatio };
+  return { entryPx, stopPx, targetPx: targetPx ?? null, sizeCoins, leverage, notionalUsd, marginUsd, riskUsd, slippedRiskUsd, stopPct, rewardUsd, targetPct, rrRatio };
 }
 
 /** Where the live mark sits relative to a rung's price trigger — the "is it close?" read. */

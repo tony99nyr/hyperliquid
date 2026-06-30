@@ -34,6 +34,13 @@ const RUNG_STATUS: Record<LadderRung['status'], { label: string; color: string }
   cancelled: { label: 'CANCELLED', color: GH.textMuted },
 };
 
+// Module-scope so its identity is STABLE — passing an inline arrow makes
+// usePolledEndpoint's effect deps change every render (the panel re-renders on every
+// mark-probe ws tick), which tears down + re-fires the poll on each tick = a fetch storm
+// on the real-money ladder endpoint. A stable reference polls on the 8s cadence only.
+const pickLadders = (j: Record<string, unknown>): LadderWithRungs[] | undefined =>
+  Array.isArray(j.ladders) ? (j.ladders as LadderWithRungs[]) : undefined;
+
 /** Hidden per-coin live-mark probe — one ws per distinct armed coin. */
 function MarkProbe({ coin, onPx }: { coin: string; onPx: (coin: string, px: number | null) => void }) {
   const { lastPx } = useHlOrderbook(coin);
@@ -45,7 +52,7 @@ export default function ArmedLaddersPanel({ coin = 'ETH' }: ArmedLaddersPanelPro
   const { data } = usePolledEndpoint<LadderWithRungs[]>(
     '/api/cockpit/ladder?status=armed&withRungs=1',
     true,
-    (j) => (Array.isArray(j.ladders) ? (j.ladders as LadderWithRungs[]) : undefined),
+    pickLadders,
     8000,
   );
   const ladders = useMemo(() => (data ?? []).filter((l) => l.rungs.length > 0), [data]);
@@ -65,7 +72,7 @@ export default function ArmedLaddersPanel({ coin = 'ETH' }: ArmedLaddersPanelPro
       <div className={css({ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' })}>
         <span className={css({ width: '6px', height: '6px', borderRadius: '50%', flex: 'none' })} style={{ background: ZONE_COLORS.ok, boxShadow: `0 0 6px ${ZONE_COLORS.ok}` }} aria-hidden />
         <h3 className={css({ fontFamily: 'sans', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'github.textBright' })}>Armed Ladders</h3>
-        <span className={css({ fontFamily: 'mono', fontSize: '10px', color: 'cockpit.faint' })}>{ladders.length} armed</span>
+        <span className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>{ladders.length} armed</span>
       </div>
       <div className={css({ display: 'flex', flexDirection: 'column', gap: '10px' })}>
         {ladders.map((l) => (
@@ -74,7 +81,7 @@ export default function ArmedLaddersPanel({ coin = 'ETH' }: ArmedLaddersPanelPro
           <div key={l.id} role="button" tabIndex={0} data-testid={`armed-ladder-${l.id}`} aria-label={`Review ${l.title}`}
             onClick={() => setDetailId(l.id)}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDetailId(l.id); } }}
-            className={css({ borderRadius: '9px', padding: '8px', margin: '-8px -8px 0', cursor: 'pointer', transition: 'background .12s', _hover: { background: 'rgba(91,140,255,.05)' }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '1px' } })}>
+            className={css({ borderRadius: '9px', padding: '8px', margin: '-8px -8px 0', cursor: 'pointer', transition: 'background .12s', _hover: { background: 'rgba(91,140,255,.09)' }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '1px' } })}>
             <div className={css({ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' })}>
               <span className={css({ fontFamily: 'sans', fontSize: '11px', fontWeight: 'semibold', color: 'github.textBright', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })}>{l.title}</span>
               <span aria-hidden className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted', flex: 'none' })}>details ›</span>
@@ -107,7 +114,7 @@ function RungRow({ rung, accent, markPx }: { rung: LadderRung; accent: boolean; 
           <span className={css({ fontFamily: 'mono', fontSize: '11px', color: 'github.textBright', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })} style={{ fontFeatureSettings: '"tnum"' }}>
             {rung.triggerPx != null ? `${dir} ${fmtPx(rung.triggerPx)}` : rung.triggerKind} {rung.action !== 'open' && `· ${rung.action}`}
           </span>
-          <span className={css({ fontFamily: 'mono', fontSize: '9.5px', color: 'cockpit.faint' })} style={{ fontFeatureSettings: '"tnum"' }}>
+          <span className={css({ fontFamily: 'mono', fontSize: '9.5px', color: 'github.textMuted' })} style={{ fontFeatureSettings: '"tnum"' }}>
             {p.sizeCoins != null ? `${p.sizeCoins.toLocaleString('en-US', { maximumFractionDigits: 4 })} ${rung.coin}` : '—'}
             {p.stopPx != null && ` · stop ${fmtPx(p.stopPx)}`}
             {rung.leverage != null && ` · ${rung.leverage}×`}
@@ -118,7 +125,7 @@ function RungRow({ rung, accent, markPx }: { rung: LadderRung; accent: boolean; 
       {prox && (
         <div data-testid={`armed-rung-prox-${rung.id}`} className={css({ fontFamily: 'mono', fontSize: '9.5px', paddingLeft: '2px' })} style={{ color: prox.primed ? ZONE_COLORS.ok : ZONE_COLORS.warn, fontFeatureSettings: '"tnum"' }}>
           {prox.primed
-            ? `${markPx != null ? `${rung.coin} ${fmtPx(markPx)} · ` : ''}● PRIMED — fires on the next 15m close`
+            ? `${markPx != null ? `${rung.coin} ${fmtPx(markPx)} · ` : ''}● through — fires if this 15m candle CLOSES past`
             : `${markPx != null ? `${rung.coin} ${fmtPx(markPx)} · ` : ''}needs ${prox.direction === 'up' ? '+' : '−'}${(prox.pct * 100).toFixed(2)}% to ${fmtPx(prox.toPx)}`}
         </div>
       )}

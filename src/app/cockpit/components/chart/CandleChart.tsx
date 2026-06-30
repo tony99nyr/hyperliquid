@@ -91,18 +91,8 @@ export default function CandleChart({
   // entry) would fall off-screen. This ref feeds the autoscaleInfoProvider so the price
   // axis always stretches to include every overlaid level.
   const overlayPricesRef = useRef<number[]>([]);
+  // Set inside the chart-creation effect (reading refs during render is disallowed).
   const autoscaleProviderRef = useRef<(base: () => AutoscaleInfo | null) => AutoscaleInfo | null>(null);
-  if (!autoscaleProviderRef.current) {
-    autoscaleProviderRef.current = (base) => {
-      const res = base();
-      const prices = overlayPricesRef.current;
-      if (!res || !res.priceRange || prices.length === 0) return res ?? null;
-      let lo = res.priceRange.minValue;
-      let hi = res.priceRange.maxValue;
-      for (const p of prices) { if (!Number.isFinite(p)) continue; lo = Math.min(lo, p); hi = Math.max(hi, p); }
-      return { ...res, priceRange: { minValue: lo, maxValue: hi } };
-    };
-  }
   // Effective render height, decided ONCE at mount (this is a client-only
   // ssr:false island, so `window` is safe and there is no SSR/first-paint flip
   // that would re-trigger autoSize → the canvas can't overflow its card). On a
@@ -127,6 +117,18 @@ export default function CandleChart({
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+
+    // Defined here (not during render) so its overlayPricesRef read is effect-scoped.
+    const autoscaleProvider = (base: () => AutoscaleInfo | null): AutoscaleInfo | null => {
+      const res = base();
+      const prices = overlayPricesRef.current;
+      if (!res || !res.priceRange || prices.length === 0) return res ?? null;
+      let lo = res.priceRange.minValue;
+      let hi = res.priceRange.maxValue;
+      for (const p of prices) { if (!Number.isFinite(p)) continue; lo = Math.min(lo, p); hi = Math.max(hi, p); }
+      return { ...res, priceRange: { minValue: lo, maxValue: hi } };
+    };
+    autoscaleProviderRef.current = autoscaleProvider;
 
     const chart = createChart(el, {
       layout: {
@@ -166,7 +168,7 @@ export default function CandleChart({
       wickDownColor: ZONE_COLORS.danger,
       priceLineColor: GH.textMuted,
       // Stretch the price axis to include overlay levels outside the candle range.
-      autoscaleInfoProvider: autoscaleProviderRef.current ?? undefined,
+      autoscaleInfoProvider: autoscaleProvider,
     });
     const maFast = chart.addSeries(LineSeries, {
       color: MA_FAST.color,

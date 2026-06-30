@@ -37,6 +37,16 @@ describe('projectRung', () => {
     expect(p.stopPct).toBeCloseTo(0.05, 6);
   });
 
+  it('exposes the slipped worst-case risk (≥ clean stop risk)', () => {
+    const p = projectRung(longRung());
+    // clean = $5; slipped fills the stop 10% worse → loss grows by 0.1·entry·size beyond it.
+    expect(p.slippedRiskUsd).not.toBeNull();
+    expect(p.slippedRiskUsd!).toBeGreaterThan(p.riskUsd!);
+    // long: stop 1537.10 slips to ×0.9 = 1383.39; adverse = 1618−1383.39 = 234.61 × size
+    const size = 5 / (1618 * 0.05);
+    expect(p.slippedRiskUsd!).toBeCloseTo((1618 - 1537.1 * 0.9) * size, 2);
+  });
+
   it('derives reward + R:R only when a target is present', () => {
     const noTgt = projectRung(longRung());
     expect(noTgt.rewardUsd).toBeNull();
