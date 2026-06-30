@@ -209,7 +209,10 @@ export default function CockpitView({
 function CockpitCoinTabs({ coin, coins, onChange }: { coin: string; coins: string[]; onChange: (c: string) => void }) {
   if (coins.length <= 1) return null;
   return (
-    <div role="group" aria-label="Select coin" className={css({ display: 'flex', gap: '2px', bg: 'cockpit.navIdle', border: '1px solid token(colors.github.border)', borderRadius: '8px', padding: '3px', width: 'fit-content' })}>
+    // fit-content so it hugs the tabs on desktop, but capped at 100% + horizontally
+    // SCROLLABLE so a long coin list (mobile) swipes instead of squishing the tabs or
+    // pushing the page. Buttons are flexShrink:0 so they keep full size and overflow scrolls.
+    <div role="group" aria-label="Select coin" className={css({ display: 'flex', flexWrap: 'nowrap', gap: '2px', bg: 'cockpit.navIdle', border: '1px solid token(colors.github.border)', borderRadius: '8px', padding: '3px', width: 'fit-content', maxWidth: '100%', overflowX: 'auto', scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' } })}>
       {coins.map((c) => {
         const active = c === coin;
         return (
@@ -220,7 +223,7 @@ function CockpitCoinTabs({ coin, coins, onChange }: { coin: string; coins: strin
             data-active={active}
             onClick={() => onChange(c)}
             style={{ background: active ? '#1c2536' : 'transparent', color: active ? '#e8ebf2' : '#8b95a6' }}
-            className={css({ fontFamily: 'mono', fontSize: '12px', fontWeight: 'semibold', paddingX: '14px', paddingY: '5px', borderRadius: '6px', border: 'none', cursor: 'pointer' })}
+            className={css({ fontFamily: 'mono', fontSize: '12px', fontWeight: 'semibold', paddingX: '14px', paddingY: '5px', borderRadius: '6px', border: 'none', cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap' })}
           >
             {c}
           </button>
