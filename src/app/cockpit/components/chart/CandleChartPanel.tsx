@@ -17,7 +17,7 @@ import { useCandles } from '@/hooks/useCandles';
 import { useHlOrderbook } from '@/hooks/useHlOrderbook';
 import { useUrlParamState } from '@/hooks/useUrlParamState';
 import { detectMarketRegime } from '@/lib/strategy/analysis/market-regime-detector';
-import type { ActiveTrade, OpportunityLevels } from './candle-chart-helpers';
+import type { ActiveTrade, OpportunityLevels, TradePriceLine } from './candle-chart-helpers';
 import TimeframeTabs, { CHART_TIMEFRAMES } from './TimeframeTabs';
 import {
   GH,
@@ -49,6 +49,9 @@ export interface CandleChartPanelProps {
   trade?: ActiveTrade | null;
   /** Rubric opportunity levels to overlay when flat (entry zone / inval / target). */
   opportunity?: OpportunityLevels | null;
+  /** Extra horizontal lines to overlay (e.g. ARMED ladders' pending entry levels for this
+   *  coin). Coexists with the trade/opportunity overlays. */
+  extraLines?: TradePriceLine[] | null;
   /** Test seed: skip the timeframe selector default. */
   initialTimeframe?: CandleInterval;
 }
@@ -57,6 +60,7 @@ export default function CandleChartPanel({
   coin,
   trade = null,
   opportunity = null,
+  extraLines = null,
   initialTimeframe = '15m',
 }: CandleChartPanelProps) {
   // Timeframe is mirrored to the `?tf=` URL param so refresh + back/forward retain
@@ -160,7 +164,7 @@ export default function CandleChartPanel({
           loading {coin.toUpperCase()} {timeframe}…
         </div>
       ) : (
-        <CandleChart candles={candles} lastPx={lastPx} trade={trade} opportunity={opportunity} coin={coin} interval={timeframe} status={status} />
+        <CandleChart candles={candles} lastPx={lastPx} trade={trade} opportunity={opportunity} extraLines={extraLines} coin={coin} interval={timeframe} status={status} />
       )}
 
       <footer className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>
@@ -170,6 +174,7 @@ export default function CandleChartPanel({
           {trade && <Legend color={TERM.accent} label="ENTRY" />}
           {trade?.stopPx != null && <Legend color={ZONE_COLORS.danger} label="STOP" />}
           {trade?.targetPx != null && <Legend color={ZONE_COLORS.ok} label="TARGET" />}
+          {extraLines && extraLines.length > 0 && <span className={css({ display: 'inline-flex', alignItems: 'center', gap: '4px' })}>⚡ armed entry</span>}
         </span>
         <span data-testid="chart-feed-status">
           {stale || pxStale ? 'stale feed' : status}

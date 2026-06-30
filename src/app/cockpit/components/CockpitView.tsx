@@ -24,6 +24,7 @@ import type { OrderSide, TradingMode } from '@/types/fill';
 import type { ActiveTrade } from './chart/candle-chart-helpers';
 import type { RegimeDir } from './open-positions-helpers';
 import { useHlOrderbook } from '@/hooks/useHlOrderbook';
+import { useArmedLadderLines } from '@/hooks/useArmedLadderLines';
 import CandleChartPanel from './chart/CandleChartPanel';
 import OpenPositionsPanel from './OpenPositionsPanel';
 import ArmedLaddersPanel from './ArmedLaddersPanel';
@@ -127,6 +128,9 @@ export default function CockpitView({
   const book = useHlOrderbook(coin);
   const entryPx = book.lastPx ?? book.book.mid ?? null;
 
+  // ARMED ladders' pending entry levels for the displayed coin → overlaid on the chart.
+  const armedLadderLines = useArmedLadderLines(coin);
+
   return (
     <div
       data-testid="cockpit-view"
@@ -150,7 +154,7 @@ export default function CockpitView({
       {/* LEFT — the chart (the thing you watch price on). */}
       <main className={css({ order: { base: 1, lg: 0 }, display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0, minHeight: { base: 'auto', lg: '0' }, overflowY: { base: 'visible', lg: 'auto' }, paddingRight: { lg: '2px' } })}>
         <CockpitCoinTabs coin={coin} coins={coins} onChange={onCoinChange} />
-        <CandleChartPanel coin={coin} trade={trade} />
+        <CandleChartPanel coin={coin} trade={trade} extraLines={armedLadderLines} />
       </main>
 
       {/* RIGHT — the decision column: what you ACT on (positions + opportunities)

@@ -3,6 +3,7 @@ import {
   projectRung,
   rungProximity,
   buildLadderChartLines,
+  buildArmedEntryLines,
 } from '@/lib/ladder/ladder-projection-business-logic';
 import type { LadderRung } from '@/lib/ladder/ladder-types';
 
@@ -112,5 +113,31 @@ describe('buildLadderChartLines', () => {
       'ETH',
     );
     expect(lines.every((l) => l.price < 5000)).toBe(true); // no BTC level leaked in
+  });
+});
+
+describe('buildArmedEntryLines', () => {
+  it('returns one tagged line per armed PENDING open rung on the coin', () => {
+    const ladders = [
+      { id: '2c0c5028-aaaa', rungs: [longRung({ side: 'short', triggerKind: 'price_below', triggerPx: 1544 })] },
+      { id: '1c51446c-bbbb', rungs: [longRung({ triggerKind: 'price_above', triggerPx: 1640 })] },
+    ];
+    const lines = buildArmedEntryLines(ladders, 'ETH');
+    expect(lines.map((l) => ({ px: l.price, side: l.side, dir: l.dir, id: l.ladderId8, title: l.title }))).toEqual([
+      { px: 1544, side: 'short', dir: 'down', id: '2c0c5028', title: '⚡2c0c5028 ▼' },
+      { px: 1640, side: 'long', dir: 'up', id: '1c51446c', title: '⚡1c51446c ▲' },
+    ]);
+  });
+
+  it('excludes add/reduce rungs, non-pending rungs, and other coins', () => {
+    const ladders = [{ id: 'abcd1234', rungs: [
+      longRung({ id: 'a', action: 'open', status: 'fired' }),                       // not pending
+      longRung({ id: 'b', action: 'add', triggerPx: 1700 }),                        // not an open
+      longRung({ id: 'c', action: 'open', coin: 'BTC', triggerPx: 63000 }),         // other coin
+      longRung({ id: 'd', action: 'open', triggerPx: 1620 }),                       // ✓ the only one
+    ] }];
+    const lines = buildArmedEntryLines(ladders, 'ETH');
+    expect(lines).toHaveLength(1);
+    expect(lines[0].price).toBe(1620);
   });
 });

@@ -129,3 +129,38 @@ export function buildLadderChartLines(rungs: LadderRung[], coin: string): Ladder
   }
   return lines;
 }
+
+/** The entry (trigger) level of an ARMED, still-PENDING `open` rung, tagged with the
+ *  ladder's id8 so the operator can tell which ladder a line belongs to. */
+export interface ArmedEntryLine {
+  price: number;
+  side: LadderSide;
+  /** Up (price_above) or down (price_below) breakout. */
+  dir: 'up' | 'down';
+  /** First 8 chars of the ladder id (matches the `arm <id8>` phrase). */
+  ladderId8: string;
+  title: string;
+}
+
+/**
+ * Across several armed ladders, the pending `open`-rung entry levels for ONE coin — for
+ * overlaying on the main cockpit chart so the operator sees where their armed entries sit.
+ * ONLY `open` rungs that are still `pending` and price-triggered (the at-a-glance "where
+ * will this ladder enter"); stops/targets/adds stay in the detail modal. Each line carries
+ * the ladder id8 in its title. PURE.
+ */
+export function buildArmedEntryLines(ladders: { id: string; rungs: LadderRung[] }[], coin: string): ArmedEntryLine[] {
+  const out: ArmedEntryLine[] = [];
+  for (const l of ladders) {
+    const id8 = l.id.slice(0, 8);
+    for (const r of l.rungs) {
+      if (r.action !== 'open' || r.status !== 'pending') continue;
+      if (r.coin.toUpperCase() !== coin.toUpperCase()) continue;
+      if (r.triggerKind !== 'price_above' && r.triggerKind !== 'price_below') continue;
+      if (r.triggerPx == null || !(r.triggerPx > 0)) continue;
+      const dir = r.triggerKind === 'price_above' ? 'up' : 'down';
+      out.push({ price: r.triggerPx, side: r.side, dir, ladderId8: id8, title: `⚡${id8} ${dir === 'up' ? '▲' : '▼'}` });
+    }
+  }
+  return out;
+}
