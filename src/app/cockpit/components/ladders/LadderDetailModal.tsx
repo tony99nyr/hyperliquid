@@ -153,6 +153,15 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
 
   const breachCount = risk?.breaches.length ?? 0;
   const armReady = !busy && phraseOk && breachCount === 0;
+  // Why the Arm button is disabled — surfaced IN the sticky footer (the breach list lives
+  // higher in the scroll body and can be off-screen, so a disabled button looked unexplained).
+  const blockReason = busy
+    ? null
+    : breachCount > 0
+      ? `Can't arm — ${breachCount} blocking risk ${breachCount === 1 ? 'issue' : 'issues'}: ${risk?.breaches[0] ?? ''}`
+      : isLive && !phraseOk
+        ? 'Type the confirmation phrase exactly to enable.'
+        : null;
   if (typeof document === 'undefined') return null; // portal target only exists client-side
 
   return createPortal(
@@ -276,6 +285,11 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
                     </div>
                     <input data-testid="ladder-arm-input" value={typed} onChange={(e) => setTyped(e.target.value)} autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="type the phrase here"
                       className={css({ width: '100%', borderRadius: '9px', color: 'github.textBright', fontFamily: 'mono', fontSize: 'sm', padding: '11px 12px' })} style={{ background: TERM.inset, border: `1px solid ${phraseOk && typed ? 'rgba(63,185,80,.5)' : 'rgba(255,255,255,.1)'}` }} />
+                  </div>
+                )}
+                {blockReason && (
+                  <div data-testid="ladder-arm-blocked" role="status" className={css({ marginBottom: '10px', fontFamily: 'sans', fontSize: '11.5px', lineHeight: 1.45, borderRadius: '8px', padding: '9px 11px' })} style={{ background: 'rgba(210,153,34,.10)', border: '1px solid rgba(210,153,34,.35)', color: ZONE_COLORS.warn }}>
+                    {blockReason}
                   </div>
                 )}
                 <button type="button" data-testid="ladder-detail-arm" disabled={!armReady} onClick={() => void arm()}

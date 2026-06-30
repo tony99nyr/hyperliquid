@@ -37,7 +37,9 @@ can defend, not a substitute for the thesis.
 3. **A stop is a market-on-trigger order, NOT a guaranteed price.** HL stops fire at market
    on the mark with up to **10% slippage tolerance** (`STOP_SLIPPAGE_TOL = 0.1` in
    `ladder-risk-business-logic.ts`). Your realized worst case is the **slipped** loss the
-   preview shows (`slippedRiskUsd ≈ riskUsd × 1.1` as a floor), and on a gap it is larger.
+   preview shows. An HL stop slips up to **10% of price**, so the loss multiplier is
+   `slippedRiskUsd ≈ riskUsd × (1 + 0.10/stopFrac)` — for a *tight* stop this is FAR more
+   than ×1.1 (a 14% stop → ~×1.7; an 8% stop → ~×2.2). On a gap it is larger still.
    Never quote the clean stop price as your worst case.
 4. **The aggregate stop only ever tightens — but pre-size for vol expansion.** Never widen a
    stop to "give it room." Because you cannot widen later, set the *initial* stop off the
@@ -172,9 +174,10 @@ rule of thumb when in doubt.
 
 **Costs are part of max-loss.** `maxTotalLossUsd` and your "worst case" must be net of:
 ```
-effectiveLoss ≈ Σ rungRiskUsd × 1.10        # 10% stop slippage (engine's no-netting cap)
+effectiveLoss ≈ Σ rungRiskUsd × (1 + 0.10/stopFrac)   # 10% slip is 10% OF PRICE → the
+                                                      # multiplier blows up for tight stops
               + roundTripFees
-              + expectedFunding              # = notional × fundingRate × (hoursHeld) , charged hourly
+              + expectedFunding                       # = notional × fundingRate × hoursHeld, hourly
 ```
 The engine's `computeLadderRisk` applies the 10% slippage haircut **and now folds estimated
 funding into the loss cap at arm time** — the arm route fetches each coin's current hourly
@@ -259,22 +262,25 @@ monthly vest, NOT a cliff** (the "$565M unlock" headline was false) — the 7-da
 a supply bomb. *Carry/floor caveats:* the fee-funded **buyback is procyclical and weakening
 (~−40% over two quarters) — do NOT size as if it is a floor under you.**
 
-Campaign budget: `campaignRiskUsd = 980 × ~2% ≈ $20`, split across two rungs.
+Campaign budget: at-stop `≈ $10 (~1%)` — but the engine's no-netting **slipped** worst case is
+the binding number (see below), so size to that.
 
 | # | Action | Trigger (≠fill) | rungRiskUsd | Stop (isolated) | ~Notional | Purpose |
 |---|--------|-----------------|-------------|-----------------|-----------|---------|
-| 1 | open (core) | ~$66.0 | $12 | ~$56.5 (−14%, below $58.4 shelf) | ~$85 | Toe in; core alone is a coherent trade |
-| 2 | add (pyramid) | price_above **$72.0** | $8 | ~$66 (re-bracket on add; **static otherwise — no live trailing**) | ~$96 | Adds only if rung 1 green *and* you tighten the core; $72 is also where the double-top invalidates |
-| 3 | reduce ~40% | price_above $74.5 | — | — | — | Bank into prior-ATH resistance (close-only; may miss a wick — consider a manual trim / bracket TP) |
-| 4 | reduce/close | price_above $80.0 | — | — | — | Trim the ATH-breakout extension |
+| 1 | open (core) | ~$66.0 | $6 | ~$56.5 (−14%, below $58.4 shelf) | ~$42 | Toe in; core alone is a coherent trade |
+| 2 | add (pyramid) | price_above **$72.0** | $3 | ~$66 (re-bracket on add; **static otherwise — no live trailing**) | ~$36 | **Smaller than the core** (decreasing-size rule — a tighter stop would size it BIGGER for equal risk, which arm rejects); fires only if rung 1 green *and* you tighten the core; $72 also invalidates the double-top |
+| 3 | reduce (`reduceFrac` 0.4) | price_above $74.5 | — | — | — | Bank 40% of the LIVE position into prior-ATH resistance (close-only; may miss a wick — manual trim / bracket TP) |
+| 4 | reduce (`reduceFrac` 0.4) | price_above $80.0 | — | — | — | Trim 40% of the remainder on the ATH-breakout extension |
 
-Leverage setting: **2×** per coin (1/L = 0.50; the −14% core stop, even slipped to ~15.5%, clears
-the ~46% liq line with huge margin). Caps: `maxTotalNotionalUsd ≈ $200`, aggregate eff. leverage
-≈ 0.18×. **Honest worst case:** the two rungs cap at $20 *at the stop*; slipped ≈ **−$22**, plus
-~$2–4 funding over 7 days ≈ **−$24–26** realized — set `maxTotalLossUsd ≈ $26`. Note both legs
-cannot lose full original risk at once (the add only fires once the core is green and re-bracketed),
-so −$22 is the no-netting cap surface, not the expected path. Best case: pyramided into a confirmed
-trend on house money, scaling out into strength.
+Leverage setting: **2×** per coin (1/L = 0.50; the −14% core stop, even slipped, clears the ~46%
+liq line with huge margin). Caps: `maxTotalNotionalUsd ≈ $100`, aggregate eff. leverage ≈ 0.08×.
+**Honest worst case (the cap MUST clear this, or the ladder won't arm):** at-stop the rungs total
+~$9, but each stop slips **10% of price** — core $6×(1+0.10/0.144)≈$10, add $3×(1+0.10/0.083)≈$7 —
+so the no-netting SLIPPED worst case ≈ **$16** (funding negligible here, ~$0.2). Set
+`maxTotalLossUsd ≈ $20`. The at-stop figure ($9) is **not** the cap — a tight-stop ladder slips
+far more than ×1.1. Both legs can't lose full risk at once (the add fires only once the core is
+green + re-bracketed), so ~$16 is the conservative cap surface, not the expected path. Best case:
+pyramided into a confirmed trend on house money, scaling out into strength.
 
 ## 8. When the thesis half-breaks (dead-zone rules)
 
