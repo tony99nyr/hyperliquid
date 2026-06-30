@@ -12,6 +12,7 @@ const claimRungFire = vi.fn();
 const markFireOutcome = vi.fn();
 const setRungStatus = vi.fn();
 const markLadderDone = vi.fn();
+const disarmOcoSiblings = vi.fn();
 const disarmLadder = vi.fn();
 const getActiveSession = vi.fn();
 const openSession = vi.fn();
@@ -37,6 +38,7 @@ vi.mock('@/lib/ladder/ladder-service', () => ({
   markFireOutcome: (...a: unknown[]) => markFireOutcome(...a),
   setRungStatus: (...a: unknown[]) => setRungStatus(...a),
   markLadderDone: (...a: unknown[]) => markLadderDone(...a),
+  disarmOcoSiblings: (...a: unknown[]) => disarmOcoSiblings(...a),
   disarmLadder: (...a: unknown[]) => disarmLadder(...a),
 }));
 vi.mock('@/lib/cockpit/session-service', () => ({ getActiveSession: (...a: unknown[]) => getActiveSession(...a), openSession: (...a: unknown[]) => openSession(...a) }));
@@ -68,7 +70,7 @@ function ladder(over: Partial<LadderWithRungs> = {}, rungs?: LadderRung[]): Ladd
   const hash = hashPreconditionSnapshot(buildPreconditionSnapshot(r, []));
   return {
     id: 'L1', title: 'T', thesis: null, author: 'operator', mode: 'paper', status: 'armed',
-    preconditionHash: hash, maxTotalNotionalUsd: 100_000, maxTotalLossUsd: 5_000,
+    preconditionHash: hash, ocoGroupId: null, maxTotalNotionalUsd: 100_000, maxTotalLossUsd: 5_000,
     expiresAt: new Date(NOW + 3_600_000).toISOString(), armedAt: null, disarmedAt: null, disarmReason: null,
     createdAt: '', updatedAt: '', rungs: r, ...over,
   };
@@ -83,6 +85,7 @@ beforeEach(() => {
   markFireOutcome.mockResolvedValue(undefined);
   setRungStatus.mockResolvedValue(undefined);
   markLadderDone.mockResolvedValue(undefined);
+  disarmOcoSiblings.mockResolvedValue([]);
   disarmLadder.mockResolvedValue(undefined);
   getActiveSession.mockResolvedValue({ id: 's1' });
   openSession.mockResolvedValue({ id: 's1' });
@@ -158,6 +161,15 @@ describe('performLadderRungFire — execution', () => {
     expect(setRungStatus).toHaveBeenCalledWith('r1', 'fired');
     // Single-rung ladder fully executed → marked done so the UI shows completion.
     expect(markLadderDone).toHaveBeenCalledWith('L1');
+    // Ungrouped ladder → no OCO sibling cancellation.
+    expect(disarmOcoSiblings).not.toHaveBeenCalled();
+  });
+
+  it('OCO: a grouped ladder firing auto-disarms its sibling(s)', async () => {
+    getLadderWithRungs.mockResolvedValue(ladder({ ocoGroupId: 'grp-1' }));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.fired).toBe(true);
+    expect(disarmOcoSiblings).toHaveBeenCalledWith('grp-1', 'L1', expect.stringContaining('oco'));
   });
 
   it('zero-fill (IOC did not cross) → no-fill skip, no bracket (HIGH-1)', async () => {

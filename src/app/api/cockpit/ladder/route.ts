@@ -58,7 +58,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!limit.allowed) return NextResponse.json({ ok: false, error: 'Too many requests' }, { status: 429 });
 
   let body: {
-    title?: unknown; thesis?: unknown; mode?: unknown;
+    title?: unknown; thesis?: unknown; mode?: unknown; ocoGroupId?: unknown;
     maxTotalNotionalUsd?: unknown; maxTotalLossUsd?: unknown; expiresAtMs?: unknown; rungs?: unknown;
   };
   try { body = (await request.json()) as typeof body; } catch { return NextResponse.json({ ok: false, error: 'Invalid body' }, { status: 400 }); }
@@ -103,6 +103,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       thesis: typeof body.thesis === 'string' ? body.thesis : null,
       author: 'operator',
       mode,
+      ocoGroupId: typeof body.ocoGroupId === 'string' && body.ocoGroupId.trim() ? body.ocoGroupId.trim() : null,
       maxTotalNotionalUsd: num(body.maxTotalNotionalUsd),
       maxTotalLossUsd: num(body.maxTotalLossUsd),
       expiresAtMs: num(body.expiresAtMs),

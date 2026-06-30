@@ -77,6 +77,12 @@ export interface Ladder {
   status: LadderStatus;
   /** Arm-time live-state snapshot hash (precondition re-checked at fire). */
   preconditionHash: string | null;
+  /** OCO group (one-cancels-other): ladders sharing this id are mutually exclusive — the
+   *  first to FIRE a rung auto-disarms every other armed ladder in the group. Used to make
+   *  a long+short straddle (two ladders, since long+short can't share one) self-managing.
+   *  null = ungrouped (default; behaves exactly as a standalone ladder). The OCO action
+   *  only DISARMS — it can never open/add/move money. */
+  ocoGroupId: string | null;
   maxTotalNotionalUsd: number | null;
   maxTotalLossUsd: number | null;
   expiresAt: string | null;

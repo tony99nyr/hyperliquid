@@ -46,6 +46,9 @@ export interface CreateLadderInput {
   author?: LadderAuthor;
   /** Defaults to 'paper'. */
   mode?: LadderMode;
+  /** OCO group id — share it across a straddle's two ladders to link them (one fires →
+   *  the other auto-disarms). null/omitted = standalone. */
+  ocoGroupId?: string | null;
   maxTotalNotionalUsd?: number | null;
   maxTotalLossUsd?: number | null;
   expiresAtMs?: number | null;
@@ -62,6 +65,7 @@ function rowToLadder(r: any): Ladder {
     mode: r.mode,
     status: r.status,
     preconditionHash: r.precondition_hash ?? null,
+    ocoGroupId: r.oco_group_id ?? null,
     maxTotalNotionalUsd: r.max_total_notional_usd ?? null,
     maxTotalLossUsd: r.max_total_loss_usd ?? null,
     expiresAt: r.expires_at ?? null,
@@ -108,6 +112,7 @@ export async function createLadder(input: CreateLadderInput): Promise<string> {
       author: input.author ?? 'operator',
       mode: input.mode ?? 'paper',
       status: 'draft',
+      oco_group_id: input.ocoGroupId ?? null,
       max_total_notional_usd: input.maxTotalNotionalUsd ?? null,
       max_total_loss_usd: input.maxTotalLossUsd ?? null,
       expires_at: input.expiresAtMs != null ? new Date(input.expiresAtMs).toISOString() : null,
@@ -262,6 +267,27 @@ export async function markLadderDone(id: string): Promise<void> {
     .eq('id', id)
     .eq('status', 'armed');
   if (error) throw new Error(`markLadderDone failed: ${error.message}`);
+}
+
+/**
+ * OCO one-cancels-other: disarm every OTHER armed ladder in `groupId` (all but the one
+ * that just fired). Returns the disarmed ladder ids. Only touches `status='armed'` rows —
+ * a draft/done/already-disarmed sibling is left as-is. This NEVER opens/adds/moves money;
+ * it only removes a sibling's pending authorization so a straddle can't fire both legs.
+ * Returns [] when `groupId` is null/empty (an ungrouped ladder has no siblings).
+ */
+export async function disarmOcoSiblings(groupId: string | null, exceptLadderId: string, reason: string): Promise<string[]> {
+  if (!groupId) return [];
+  const db = getServiceRoleClient();
+  const { data, error } = await db
+    .from('ladders')
+    .update({ status: 'disarmed', disarmed_at: new Date().toISOString(), disarm_reason: reason, updated_at: new Date().toISOString() })
+    .eq('oco_group_id', groupId)
+    .eq('status', 'armed')
+    .neq('id', exceptLadderId)
+    .select('id');
+  if (error) throw new Error(`disarmOcoSiblings failed: ${error.message}`);
+  return (data ?? []).map((r) => r.id as string);
 }
 
 /** Disarm a ladder (operator kill-switch or precondition drift): status→'disarmed'. */

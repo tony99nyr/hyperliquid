@@ -59,7 +59,7 @@ function openRung(over: Partial<LadderRung> = {}): LadderRung {
   return { id: 'r1', ladderId: 'L1', seq: 1, coin: 'ETH', side: 'long', action: 'open', triggerKind: 'price_above', triggerPx: 2000, triggerMeta: null, sizeCoins: null, riskUsd: 50, stopFrac: 0.04, leverage: 5, stopPx: null, targetPx: null, status: 'pending', cloid: 'L1:r1', ...over };
 }
 function ladder(rungs: LadderRung[]): LadderWithRungs {
-  return { id: 'L1', title: 'T', thesis: null, author: 'operator', mode: 'paper', status: 'armed', preconditionHash: 'h', maxTotalNotionalUsd: null, maxTotalLossUsd: null, expiresAt: null, armedAt: null, disarmedAt: null, disarmReason: null, createdAt: '', updatedAt: '', rungs };
+  return { id: 'L1', title: 'T', thesis: null, author: 'operator', mode: 'paper', status: 'armed', preconditionHash: 'h', ocoGroupId: null, maxTotalNotionalUsd: null, maxTotalLossUsd: null, expiresAt: null, armedAt: null, disarmedAt: null, disarmReason: null, createdAt: '', updatedAt: '', rungs };
 }
 
 beforeEach(() => {

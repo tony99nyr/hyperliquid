@@ -175,6 +175,9 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
             <>
               <span className={css({ fontFamily: 'mono', fontSize: '10px', fontWeight: 'bold', borderRadius: '5px', paddingX: '8px', paddingY: '4px' })}
                 style={{ background: isLive ? 'rgba(248,81,73,.16)' : 'rgba(255,255,255,.06)', color: isLive ? ZONE_COLORS.danger : GH.textMuted }}>{ladder.mode.toUpperCase()}</span>
+              {ladder.ocoGroupId && (
+                <span data-testid="ladder-oco-badge" title="OCO — the first leg of this straddle to fire auto-disarms the other" className={css({ fontFamily: 'mono', fontSize: '10px', fontWeight: 'bold', borderRadius: '5px', paddingX: '7px', paddingY: '4px' })} style={{ background: 'rgba(91,140,255,.14)', color: TERM.accent }}>⇄ OCO</span>
+              )}
               <span className={css({ fontFamily: 'mono', fontSize: '10.5px', fontWeight: 'semibold', textTransform: 'uppercase', letterSpacing: '0.06em' })} style={{ color: STATUS_COLOR[ladder.status] }}>{ladder.status}</span>
             </>
           )}
@@ -208,6 +211,12 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
               )}
 
               {ladder.thesis && <p className={css({ fontFamily: 'sans', fontSize: '12px', color: 'github.textMuted', marginBottom: '14px', lineHeight: 1.5 })}>{ladder.thesis}</p>}
+
+              {ladder.ocoGroupId && (
+                <p className={css({ fontFamily: 'mono', fontSize: '10.5px', borderRadius: '8px', padding: '8px 11px', marginBottom: '14px', lineHeight: 1.45 })} style={{ background: 'rgba(91,140,255,.08)', border: '1px solid rgba(91,140,255,.2)', color: GH.text }}>
+                  ⇄ <strong>OCO straddle</strong> — linked to a sibling ladder. The first leg to fire auto-disarms the other, so a whipsaw cannot open both sides. Arm both legs to be positioned for a move either way.
+                </p>
+              )}
 
               {/* WHERE — the chart with every rung's levels overlaid + the live mark. */}
               {primaryCoin && (

@@ -26,6 +26,7 @@ import {
   markFireOutcome,
   setRungStatus,
   markLadderDone,
+  disarmOcoSiblings,
   disarmLadder,
 } from './ladder-service';
 import { isLadderAutofireEnabled, isLadderLiveEnabled } from './ladder-flags';
@@ -256,6 +257,12 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
   // stopped; a transient telemetry/Supabase failure here must NOT flatten a good position.
   await markFireOutcome(fireId, 'filled').catch(() => {});
   await setRungStatus(rung.id, 'fired').catch(() => {});
+  // OCO one-cancels-other: this leg committed → auto-disarm its straddle sibling(s) so a
+  // whipsaw can't also fire the opposite side (which would net against this fill on HL).
+  // Disarm-only (removes authorization, never moves money) + .catch'd — can't harm the fill.
+  if (ladder.ocoGroupId) {
+    await disarmOcoSiblings(ladder.ocoGroupId, ladder.id, `oco: ${ladder.id.slice(0, 8)} fired rung ${rung.seq}`).catch(() => {});
+  }
   // If every rung is now terminal, the ladder's plan is fully executed → mark it DONE so the
   // UI shows completion and the watcher stops considering it. This rung just became 'fired'
   // (terminal); the others reflect their loaded status. markLadderDone is armed-guarded +
