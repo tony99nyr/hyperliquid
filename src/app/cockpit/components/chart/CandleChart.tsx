@@ -30,6 +30,7 @@ import {
   type ISeriesApi,
   type IPriceLine,
   type Time,
+  type AutoscaleInfo,
 } from 'lightweight-charts';
 import type { PriceCandle } from '@/types/trading-core';
 import {
@@ -85,6 +86,23 @@ export default function CandleChart({
   const oppLinesRef = useRef<IPriceLine[]>([]);
   const priceLinesRef = useRef<IPriceLine[]>([]);
   const extraLinesRef = useRef<IPriceLine[]>([]);
+  // All overlay LINE prices (trade/opportunity/extra). The candle series' autoscale only
+  // sees candle highs/lows — a level outside the candle range (e.g. a SHORT's stop above
+  // entry) would fall off-screen. This ref feeds the autoscaleInfoProvider so the price
+  // axis always stretches to include every overlaid level.
+  const overlayPricesRef = useRef<number[]>([]);
+  const autoscaleProviderRef = useRef<(base: () => AutoscaleInfo | null) => AutoscaleInfo | null>(null);
+  if (!autoscaleProviderRef.current) {
+    autoscaleProviderRef.current = (base) => {
+      const res = base();
+      const prices = overlayPricesRef.current;
+      if (!res || !res.priceRange || prices.length === 0) return res ?? null;
+      let lo = res.priceRange.minValue;
+      let hi = res.priceRange.maxValue;
+      for (const p of prices) { if (!Number.isFinite(p)) continue; lo = Math.min(lo, p); hi = Math.max(hi, p); }
+      return { ...res, priceRange: { minValue: lo, maxValue: hi } };
+    };
+  }
   // Effective render height, decided ONCE at mount (this is a client-only
   // ssr:false island, so `window` is safe and there is no SSR/first-paint flip
   // that would re-trigger autoSize → the canvas can't overflow its card). On a
@@ -147,6 +165,8 @@ export default function CandleChart({
       wickUpColor: ZONE_COLORS.ok,
       wickDownColor: ZONE_COLORS.danger,
       priceLineColor: GH.textMuted,
+      // Stretch the price axis to include overlay levels outside the candle range.
+      autoscaleInfoProvider: autoscaleProviderRef.current ?? undefined,
     });
     const maFast = chart.addSeries(LineSeries, {
       color: MA_FAST.color,
@@ -311,6 +331,19 @@ export default function CandleChart({
       );
     }
   }, [extraLines]);
+
+  // --- Keep the price axis stretched to include every overlay level. Collect all
+  // overlay line prices and re-apply the provider (which retriggers an autoscale pass)
+  // whenever the overlays change — so a level outside the candle range stays on-screen. ---
+  useEffect(() => {
+    const prices: number[] = [];
+    if (trade) for (const v of [trade.entryPx, trade.stopPx, trade.targetPx]) if (v != null && Number.isFinite(v)) prices.push(v);
+    if (opportunity && opportunity.side !== 'none') for (const v of [opportunity.entryLow, opportunity.entryHigh, opportunity.invalidation, opportunity.target]) if (v != null && Number.isFinite(v)) prices.push(v);
+    for (const l of extraLines ?? []) if (Number.isFinite(l.price)) prices.push(l.price);
+    overlayPricesRef.current = prices;
+    const series = candleSeriesRef.current;
+    if (series && autoscaleProviderRef.current) series.applyOptions({ autoscaleInfoProvider: autoscaleProviderRef.current });
+  }, [trade, opportunity, extraLines]);
 
   // `flexShrink: 0` + `minHeight` keep the canvas from collapsing to a sliver
   // when the panel is a flex column on mobile (autoSize's ResizeObserver would
