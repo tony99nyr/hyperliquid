@@ -39,8 +39,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const statusRaw = request.nextUrl.searchParams.get('status');
   const status = statusRaw && VALID_STATUS.includes(statusRaw as Ladder['status']) ? (statusRaw as Ladder['status']) : undefined;
   const withRungs = request.nextUrl.searchParams.get('withRungs') === '1';
+  // ?archived=1 → the audit view (archived ladders only); default = active only.
+  const opts = { archived: request.nextUrl.searchParams.get('archived') === '1' };
   try {
-    const ladders = withRungs ? await listLaddersWithRungs(status) : await listLadders(status);
+    const ladders = withRungs ? await listLaddersWithRungs(status, opts) : await listLadders(status, opts);
     return NextResponse.json({ ok: true, ladders });
   } catch (err) {
     return NextResponse.json({ ok: false, error: extractErrorMessage(err) }, { status: 502 });

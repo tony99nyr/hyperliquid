@@ -35,16 +35,18 @@ export default function LaddersView({ coin = 'ETH' }: LaddersViewProps) {
   const [error, setError] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
+  // The audit view: archived ladders are hidden by default; this toggle shows them (read-only).
+  const [showArchived, setShowArchived] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch('/api/cockpit/ladder', { cache: 'no-store' });
+      const res = await fetch(`/api/cockpit/ladder${showArchived ? '?archived=1' : ''}`, { cache: 'no-store' });
       const json = (await res.json().catch(() => ({}))) as { ok?: boolean; ladders?: Ladder[]; error?: string };
       if (!res.ok || json.ok === false) { setError(json.error ?? `Failed (${res.status})`); return; }
       setLadders(json.ladders ?? []);
       setError(null);
     } catch { setError('Network error — retry.'); }
-  }, []);
+  }, [showArchived]);
 
   // Defer the initial load out of the effect's synchronous body (its setState would
   // otherwise trip react-hooks/set-state-in-effect — the cascading-render guard).
@@ -58,9 +60,14 @@ export default function LaddersView({ coin = 'ETH' }: LaddersViewProps) {
           className={css({ fontFamily: 'sans', fontSize: '12.5px', fontWeight: 'semibold', borderRadius: '8px', padding: '8px 16px', border: 'none', cursor: 'pointer' })}
           style={{ background: ZONE_COLORS.ok, color: TERM.darkText }}>+ New Ladder</button>
       </div>
-      <p className={css({ fontFamily: 'mono', fontSize: '11px', color: 'cockpit.faint', marginBottom: '18px' })}>
-        Pre-authorized multi-rung plans. Click a ladder to review + arm it.
-      </p>
+      <div className={css({ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '12px', marginBottom: '18px' })}>
+        <p className={css({ fontFamily: 'mono', fontSize: '11px', color: 'cockpit.faint' })}>
+          {showArchived ? 'Archived ladders (audit history — read-only).' : 'Pre-authorized multi-rung plans. Click a ladder to review + arm it.'}
+        </p>
+        <button type="button" data-testid="ladders-toggle-archived" onClick={() => { setLadders(null); setShowArchived((v) => !v); }}
+          className={css({ fontFamily: 'mono', fontSize: '10.5px', fontWeight: 'semibold', borderRadius: '6px', padding: '5px 10px', cursor: 'pointer', border: '1px solid rgba(255,255,255,.12)', flex: 'none', _hover: { borderColor: 'rgba(91,140,255,.5)' } })}
+          style={{ background: TERM.button, color: showArchived ? TERM.accent : GH.textMuted }}>{showArchived ? '← active' : '🗄 archived'}</button>
+      </div>
 
       {error && <p data-testid="ladders-error" className={css({ fontSize: 'xs', color: 'zone.danger', marginBottom: '12px' })}>{error}</p>}
 
@@ -68,8 +75,8 @@ export default function LaddersView({ coin = 'ETH' }: LaddersViewProps) {
         error ? null : <p className={css({ fontFamily: 'mono', fontSize: '12px', color: 'cockpit.faint' })}>Loading…</p>
       ) : ladders.length === 0 ? (
         <div data-testid="ladders-empty" className={css({ borderRadius: '12px', padding: '32px', textAlign: 'center' })} style={{ background: TERM.inset, border: '1px dashed rgba(255,255,255,.1)' }}>
-          <p className={css({ fontFamily: 'sans', fontSize: '14px', color: 'github.text', marginBottom: '6px' })}>No ladders yet</p>
-          <p className={css({ fontFamily: 'mono', fontSize: '11px', color: 'cockpit.faint' })}>Build a multi-rung plan, preview its worst-case risk, and arm it.</p>
+          <p className={css({ fontFamily: 'sans', fontSize: '14px', color: 'github.text', marginBottom: '6px' })}>{showArchived ? 'No archived ladders' : 'No ladders yet'}</p>
+          <p className={css({ fontFamily: 'mono', fontSize: '11px', color: 'cockpit.faint' })}>{showArchived ? 'Archived ladders are hidden from the active list but kept for audit.' : 'Build a multi-rung plan, preview its worst-case risk, and arm it.'}</p>
         </div>
       ) : (
         <div className={css({ display: 'flex', flexDirection: 'column', gap: '8px' })}>

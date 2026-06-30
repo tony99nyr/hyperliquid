@@ -18,7 +18,7 @@ function ladder(rungs: LadderRung[], over: Partial<LadderWithRungs> = {}): Ladde
     id: '54118e71-0000-0000-0000-000000000000', title: 'HYPE long', thesis: null,
     author: 'operator', mode: 'live', status: 'draft', preconditionHash: null, ocoGroupId: null,
     maxTotalNotionalUsd: 100, maxTotalLossUsd: 20, expiresAt: new Date(NOW + 7 * 86_400_000).toISOString(),
-    armedAt: null, disarmedAt: null, disarmReason: null,
+    armedAt: null, disarmedAt: null, disarmReason: null, archivedAt: null,
     createdAt: new Date(NOW).toISOString(), updatedAt: new Date(NOW).toISOString(), rungs, ...over,
   };
 }

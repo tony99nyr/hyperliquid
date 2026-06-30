@@ -74,6 +74,7 @@ function rowToLadder(r: any): Ladder {
     armedAt: r.armed_at ?? null,
     disarmedAt: r.disarmed_at ?? null,
     disarmReason: r.disarm_reason ?? null,
+    archivedAt: r.archived_at ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -163,11 +164,19 @@ export async function getLadderWithRungs(id: string): Promise<LadderWithRungs | 
   return { ...rowToLadder(led), rungs: (rungs ?? []).map(rowToRung) };
 }
 
-/** List ladders (newest first), optionally filtered by status. */
-export async function listLadders(status?: Ladder['status']): Promise<Ladder[]> {
+/** Options for the list queries. `archived` selects which side of the soft-archive line:
+ *  false/undefined = ACTIVE only (the default the UI shows); true = ARCHIVED only (audit view). */
+export interface ListLaddersOpts {
+  archived?: boolean;
+}
+
+/** List ladders (newest first), optionally filtered by status. Excludes archived by
+ *  default (set opts.archived to view the archived audit list instead). */
+export async function listLadders(status?: Ladder['status'], opts?: ListLaddersOpts): Promise<Ladder[]> {
   const db = getServiceRoleClient();
   let q = db.from('ladders').select('*').order('created_at', { ascending: false });
   if (status) q = q.eq('status', status);
+  q = opts?.archived ? q.not('archived_at', 'is', null) : q.is('archived_at', null);
   const { data, error } = await q;
   if (error) throw new Error(`listLadders failed: ${error.message}`);
   return (data ?? []).map(rowToLadder);
@@ -175,9 +184,9 @@ export async function listLadders(status?: Ladder['status']): Promise<Ladder[]> 
 
 /** List ladders WITH their rungs (newest first), optionally filtered by status. One
  *  ladder query + one rungs query (not N+1) — the cockpit's armed-ladder panel reads this. */
-export async function listLaddersWithRungs(status?: Ladder['status']): Promise<LadderWithRungs[]> {
+export async function listLaddersWithRungs(status?: Ladder['status'], opts?: ListLaddersOpts): Promise<LadderWithRungs[]> {
   const db = getServiceRoleClient();
-  const ladders = await listLadders(status);
+  const ladders = await listLadders(status, opts);
   if (ladders.length === 0) return [];
   const ids = ladders.map((l) => l.id);
   const { data, error } = await db.from('ladder_rungs').select('*').in('ladder_id', ids).order('seq', { ascending: true });
@@ -271,6 +280,25 @@ export async function markLadderDone(id: string): Promise<void> {
     .eq('id', id)
     .eq('status', 'armed');
   if (error) throw new Error(`markLadderDone failed: ${error.message}`);
+}
+
+/**
+ * Soft-ARCHIVE a ladder — stamp archived_at so the active UI lists hide it, while the row
+ * (+ rungs + ladder_fires) stays for the audit trail. CONDITIONAL on the ladder NOT being
+ * 'armed' (an armed ladder is live authorization — never hide it) and not already archived.
+ * Returns true if it transitioned, false if it was armed / already archived / absent.
+ */
+export async function archiveLadder(id: string): Promise<boolean> {
+  const db = getServiceRoleClient();
+  const { data, error } = await db
+    .from('ladders')
+    .update({ archived_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .neq('status', 'armed') // never hide a live armed ladder
+    .is('archived_at', null) // idempotent
+    .select('id');
+  if (error) throw new Error(`archiveLadder failed: ${error.message}`);
+  return (data?.length ?? 0) > 0;
 }
 
 /**

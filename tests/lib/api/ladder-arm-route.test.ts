@@ -43,7 +43,7 @@ function draftLadder(over: Partial<LadderWithRungs> = {}): LadderWithRungs {
   return {
     id: 'abcd1234-0000-0000', title: 'Breakout', thesis: null, author: 'operator', mode: 'paper', status: 'draft',
     preconditionHash: null, ocoGroupId: null, maxTotalNotionalUsd: 100_000, maxTotalLossUsd: 5_000,
-    expiresAt: new Date(Date.now() + 3_600_000).toISOString(), armedAt: null, disarmedAt: null, disarmReason: null,
+    expiresAt: new Date(Date.now() + 3_600_000).toISOString(), armedAt: null, disarmedAt: null, disarmReason: null, archivedAt: null,
     createdAt: new Date(Date.now() - 1000).toISOString(), updatedAt: new Date(Date.now() - 1000).toISOString(),
     rungs: [{
       id: 'r1', ladderId: 'abcd1234-0000-0000', seq: 1, coin: 'ETH', side: 'long', action: 'open',

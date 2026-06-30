@@ -147,6 +147,9 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
   async function disarm(): Promise<void> {
     if (await post('/api/cockpit/ladder/disarm', { ladderId })) { onChanged?.(); onClose(); }
   }
+  async function archive(): Promise<void> {
+    if (await post('/api/cockpit/ladder/archive', { ladderId })) { onChanged?.(); onClose(); }
+  }
   function copyPhrase(): void {
     void navigator.clipboard?.writeText(armPhrase).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1400); }).catch(() => {});
   }
@@ -265,14 +268,15 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
           })()}
         </div>
 
-        {/* Action footer — the consent surface */}
-        {ladder && (ladder.status === 'draft' || ladder.status === 'armed') && (
+        {/* Action footer — the consent surface (+ archive for terminal/draft ladders).
+            An already-archived ladder is read-only (audit view) → no footer. */}
+        {ladder && !ladder.archivedAt && (
           <div className={css({ padding: '14px 22px 18px', borderTop: '1px solid rgba(255,255,255,.07)', position: 'sticky', bottom: 0 })} style={{ background: '#0e131c' }}>
             {ladder.status === 'armed' ? (
               <button type="button" data-testid="ladder-detail-disarm" disabled={busy} onClick={() => void disarm()}
                 className={css({ width: '100%', fontFamily: 'sans', fontSize: '13.5px', fontWeight: 'bold', borderRadius: '9px', padding: '13px', cursor: 'pointer', border: '1px solid rgba(248,81,73,.4)', _disabled: { opacity: 0.6 } })}
                 style={{ background: 'rgba(248,81,73,.12)', color: ZONE_COLORS.danger }}>{busy ? 'Disarming…' : 'Disarm'}</button>
-            ) : (
+            ) : ladder.status === 'draft' ? (
               <>
                 {isLive && (
                   // The phrase is ALWAYS visible (copyable chip) — never hidden in a placeholder.
@@ -297,7 +301,15 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
                   className={css({ width: '100%', border: 'none', borderRadius: '9px', fontFamily: 'sans', fontSize: '13.5px', fontWeight: 'bold', letterSpacing: '0.03em', padding: '13px', cursor: 'pointer', _disabled: { opacity: 0.6, cursor: 'not-allowed' } })}>
                   {busy ? 'Arming…' : isLive ? 'Arm LIVE →' : 'Arm →'}
                 </button>
+                <button type="button" data-testid="ladder-detail-archive" disabled={busy} onClick={() => void archive()}
+                  className={css({ width: '100%', marginTop: '8px', fontFamily: 'sans', fontSize: '12px', fontWeight: 'semibold', borderRadius: '9px', padding: '10px', cursor: 'pointer', border: '1px solid rgba(255,255,255,.1)', _disabled: { opacity: 0.6 } })}
+                  style={{ background: 'transparent', color: GH.textMuted }}>{busy ? '…' : 'Discard draft (archive)'}</button>
               </>
+            ) : (
+              // disarmed / done / expired → archive (hide; the row stays in the DB for audit)
+              <button type="button" data-testid="ladder-detail-archive" disabled={busy} onClick={() => void archive()}
+                className={css({ width: '100%', fontFamily: 'sans', fontSize: '13px', fontWeight: 'semibold', borderRadius: '9px', padding: '12px', cursor: 'pointer', border: '1px solid rgba(255,255,255,.12)', _disabled: { opacity: 0.6 } })}
+                style={{ background: TERM.button, color: GH.text }}>{busy ? 'Archiving…' : '🗄 Archive — hide (keeps audit history)'}</button>
             )}
           </div>
         )}

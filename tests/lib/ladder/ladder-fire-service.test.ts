@@ -71,7 +71,7 @@ function ladder(over: Partial<LadderWithRungs> = {}, rungs?: LadderRung[]): Ladd
   return {
     id: 'L1', title: 'T', thesis: null, author: 'operator', mode: 'paper', status: 'armed',
     preconditionHash: hash, ocoGroupId: null, maxTotalNotionalUsd: 100_000, maxTotalLossUsd: 5_000,
-    expiresAt: new Date(NOW + 3_600_000).toISOString(), armedAt: null, disarmedAt: null, disarmReason: null,
+    expiresAt: new Date(NOW + 3_600_000).toISOString(), armedAt: null, disarmedAt: null, disarmReason: null, archivedAt: null,
     createdAt: '', updatedAt: '', rungs: r, ...over,
   };
 }

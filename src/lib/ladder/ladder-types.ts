@@ -93,6 +93,9 @@ export interface Ladder {
   armedAt: string | null;
   disarmedAt: string | null;
   disarmReason: string | null;
+  /** Soft-archive tombstone: when set, the ladder is hidden from the active UI lists but
+   *  KEPT in the DB for the audit trail. Only a non-armed ladder can be archived. */
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
