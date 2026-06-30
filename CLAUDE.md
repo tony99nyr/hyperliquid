@@ -116,7 +116,8 @@ src/lib/infrastructure/{auth,logging,config}/        # vendored admin-PIN + stub
 supabase/migrations/0001_init.sql … 0024_*.sql       # migrations (RLS + realtime publication; idempotent; 0023 = ladders)
 data/{backups/wallet-rating/rated-wallets.json,auto-exit/}  # vendored dataset + versioned auto-exit thresholds
 docs/{CONTEXT.md, CODE_ORGANIZATION.md, adr/, scout/, LIVE_*.md,
-      ARMED_LADDER_ARCHITECTURE.md, LADDER_OPERATOR_RUNBOOK.md}  # ladder: design + operator runbook
+      ARMED_LADDER_ARCHITECTURE.md, LADDER_OPERATOR_RUNBOOK.md,
+      LADDER_DESK_PLAYBOOK.md}  # ladder: design + operator runbook + desk sizing methodology
 ```
 
 ## Vendored from iamrossi

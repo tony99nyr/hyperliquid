@@ -34,8 +34,9 @@ import {
 } from '@/lib/ladder/ladder-arm-business-logic';
 import { buildPreconditionSnapshot, hashPreconditionSnapshot, type LivePositionState } from '@/lib/ladder/ladder-risk-business-logic';
 import { resolveCoinMaxLeverage } from '@/lib/trading/leverage-business-logic';
-import { fetchClearinghouseState } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { fetchClearinghouseState, fetchMetaAndAssetCtxs } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
+import { validateEnv } from '@/lib/env/env';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 
@@ -91,6 +92,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // Resolve rungs + run the full static validation against live state.
   const armRungs = ladder.rungs.map(resolveArmRung);
   const expiresAtMs = ladder.expiresAt ? Date.parse(ladder.expiresAt) : null;
+  // Current per-coin funding (advisory honesty — folded into the loss cap so a multi-day
+  // hold's carry can't silently bust maxTotalLossUsd). A funding-fetch failure must NOT
+  // block arming: degrade to no-funding (the prior behavior).
+  let fundingRateByCoin: Record<string, number | null> = {};
+  try {
+    const ctxs = await fetchMetaAndAssetCtxs(validateEnv().HL_NETWORK);
+    fundingRateByCoin = Object.fromEntries(
+      armRungs.map((r) => [r.coin.toUpperCase(), ctxs[r.coin.toUpperCase()]?.fundingHourly ?? null]),
+    );
+  } catch {
+    fundingRateByCoin = {};
+  }
   const validation = validateLadderForArm({
     title: ladder.title,
     thesis: ladder.thesis,
@@ -99,6 +112,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     rungs: armRungs,
     now: Date.now(),
     coinMaxLeverage: (coin) => resolveCoinMaxLeverage(coin, null),
+    fundingRateByCoin,
   });
   if (validation.warnings.length > 0) {
     return NextResponse.json({ ok: false, error: 'Ladder is not safe to arm', warnings: validation.warnings }, { status: 422 });

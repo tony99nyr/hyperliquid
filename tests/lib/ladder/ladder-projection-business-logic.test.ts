@@ -11,7 +11,7 @@ function longRung(over: Partial<LadderRung> = {}): LadderRung {
   return {
     id: 'r1', ladderId: 'l1', seq: 1, coin: 'ETH', side: 'long', action: 'open',
     triggerKind: 'price_above', triggerPx: 1618, triggerMeta: null,
-    sizeCoins: null, riskUsd: 5, stopFrac: 0.05, leverage: 3,
+    sizeCoins: null, reduceFrac: null, riskUsd: 5, stopFrac: 0.05, leverage: 3,
     stopPx: null, targetPx: null, status: 'pending', cloid: null,
     ...over,
   };

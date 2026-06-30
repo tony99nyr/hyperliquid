@@ -95,6 +95,11 @@ const envSchema = z.object({
   // Dedicated bearer token for the NAS watcher to call /api/cockpit/ladder/fire-rung
   // (P1d). Separate from ADMIN_SECRET so the watcher never holds the admin credential.
   LADDER_CRON_SECRET: z.string().min(1).optional(),
+  // EXTERNAL dead-man's-switch (healthchecks.io) ping URL. The ladder-watch cron pings
+  // it each tick (/start → success, /fail on error); if pings stop, the external monitor
+  // alerts — catching total app/cron outages a self-hosted heartbeat can't (the alerter
+  // would be dead too). Optional; when unset the watcher simply doesn't ping.
+  LADDER_WATCH_HEALTHCHECK_URL: z.string().url().optional(),
   // Vercel's native cron secret (auto-injected as `Authorization: Bearer $CRON_SECRET`
   // on cron invocations). Accepted as a fallback so setting only CRON_SECRET (the
   // Vercel convention) still authenticates the backup detector.
@@ -132,5 +137,6 @@ export function validateEnv(source: NodeJS.ProcessEnv = process.env): CockpitEnv
     LADDER_LIVE_ENABLED: source.LADDER_LIVE_ENABLED,
     LADDER_AUTOFIRE_ENABLED: source.LADDER_AUTOFIRE_ENABLED,
     LADDER_CRON_SECRET: source.LADDER_CRON_SECRET,
+    LADDER_WATCH_HEALTHCHECK_URL: source.LADDER_WATCH_HEALTHCHECK_URL,
   });
 }

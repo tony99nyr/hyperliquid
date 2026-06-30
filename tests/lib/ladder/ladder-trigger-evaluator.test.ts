@@ -24,6 +24,7 @@ function rung(over: Partial<LadderRung> = {}): LadderRung {
     triggerPx: 2000,
     triggerMeta: null,
     sizeCoins: null,
+    reduceFrac: null,
     riskUsd: 50,
     stopFrac: 0.04,
     leverage: 5,

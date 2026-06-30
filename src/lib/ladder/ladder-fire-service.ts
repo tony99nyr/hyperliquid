@@ -35,6 +35,7 @@ import {
   addRiskCoveredByProfit,
   buildPreconditionSnapshot,
   hashPreconditionSnapshot,
+  reduceFraction,
   type LivePositionState,
 } from './ladder-risk-business-logic';
 import type { LadderRung, LadderWithRungs } from './ladder-types';
@@ -339,8 +340,9 @@ async function fireReduce(ladder: LadderWithRungs, rung: LadderRung, sessionId: 
     await setRungStatus(rung.id, 'skipped');
     return skip('flat');
   }
-  // 'reduce' trims a fraction (rung.sizeCoins / position) if specified; 'close' = full.
-  const fraction = rung.action === 'close' || rung.sizeCoins == null || !(rung.sizeCoins > 0) ? 1 : Math.min(1, rung.sizeCoins / pos.sz);
+  // 'reduce' trims a fraction of the CURRENT position — reduceFrac (path-independent) is
+  // preferred, else the absolute sizeCoins/position, else full; 'close' = full.
+  const fraction = reduceFraction({ action: rung.action, reduceFrac: rung.reduceFrac, sizeCoins: rung.sizeCoins, positionSz: pos.sz });
   const intent = buildMarketReduceOnlyClose(pos, { sessionId, clientIntentId: randomUUID(), now: Date.now(), fraction });
   if (!intent) {
     await markFireOutcome(fireId, 'failed', 'no-close-intent');

@@ -17,6 +17,8 @@ import { verifyCronBearer } from '@/lib/infrastructure/auth/auth';
 import { getLadderCronSecret } from '@/lib/ladder/ladder-flags';
 import { runLadderWatchTick } from '@/lib/ladder/ladder-watch-service';
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
+import { validateEnv } from '@/lib/env/env';
+import { pingHealthcheck } from '@/lib/infrastructure/monitoring/healthcheck';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,10 +26,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!verifyCronBearer(request, getLadderCronSecret())) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
   }
+  // External dead-man's-switch (healthchecks.io): ping only AFTER auth, so a bad caller
+  // can't keep a dead watcher's check green. /start brackets the run; success/fail close it.
+  const hcUrl = validateEnv().LADDER_WATCH_HEALTHCHECK_URL;
+  await pingHealthcheck(hcUrl, 'start');
   try {
     const summary = await runLadderWatchTick({ now: Date.now() });
+    await pingHealthcheck(hcUrl, 'success');
     return NextResponse.json({ ok: true, ...summary });
   } catch (e) {
+    await pingHealthcheck(hcUrl, 'fail');
     return NextResponse.json({ ok: false, error: extractErrorMessage(e) }, { status: 500 });
   }
 }

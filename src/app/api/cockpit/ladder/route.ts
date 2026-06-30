@@ -80,6 +80,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!VALID_SIDE.includes(r.side as LadderSide)) return NextResponse.json({ ok: false, error: `rung ${i + 1}: invalid side` }, { status: 400 });
     if (!VALID_ACTION.includes(r.action as RungAction)) return NextResponse.json({ ok: false, error: `rung ${i + 1}: invalid action` }, { status: 400 });
     if (!VALID_TRIGGER.includes(r.triggerKind as RungTriggerKind)) return NextResponse.json({ ok: false, error: `rung ${i + 1}: invalid triggerKind` }, { status: 400 });
+    // reduceFrac (when present) must be a fraction in (0, 1] — reject at the API layer with a
+    // clean 400 rather than leaning on the DB CHECK (which would surface as a 502). Matches
+    // the bound the fire path + DB constraint enforce downstream.
+    const reduceFracVal = num(r.reduceFrac);
+    if (reduceFracVal != null && !(reduceFracVal > 0 && reduceFracVal <= 1)) {
+      return NextResponse.json({ ok: false, error: `rung ${i + 1}: reduceFrac must be in (0, 1]` }, { status: 400 });
+    }
     rungs.push({
       seq: num(r.seq) ?? i + 1,
       coin,
@@ -89,6 +96,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       triggerPx: num(r.triggerPx),
       triggerMeta: (r.triggerMeta ?? null) as NewRung['triggerMeta'],
       sizeCoins: num(r.sizeCoins),
+      reduceFrac: reduceFracVal,
       riskUsd: num(r.riskUsd),
       stopFrac: num(r.stopFrac),
       leverage: num(r.leverage),

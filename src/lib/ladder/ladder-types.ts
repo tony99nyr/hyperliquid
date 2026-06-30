@@ -41,6 +41,10 @@ export interface LadderRung {
   triggerMeta: RungTriggerMeta | null;
   /** Explicit size, OR null when risk-based (riskUsd + stopFrac, server-sized). */
   sizeCoins: number | null;
+  /** reduce/close ONLY: trim this FRACTION (0,1] of the CURRENT live position at fire,
+   *  instead of the absolute sizeCoins (path-independent — robust to which rungs filled).
+   *  Preferred over sizeCoins by the fire path; null = use sizeCoins (or full close). */
+  reduceFrac: number | null;
   riskUsd: number | null;
   stopFrac: number | null;
   leverage: number | null;

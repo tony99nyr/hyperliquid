@@ -50,9 +50,10 @@ can defend, not a substitute for the thesis.
 6. **Every entry is bracketed — but only the native stop is intrabar + offline-proof.** A
    native HL stop rests atomically with each open/add fill and survives you/Claude being
    offline. **Everything else** — adds, scale-out (`reduce`) and `close` rungs — is
-   watcher-dependent: it fires only on a completed 15m candle via the external scheduler, and
-   there is **no dead-watcher alert yet**. A dead watcher silently stops firing those rungs
-   while your stop still protects you (see §3, §6).
+   watcher-dependent: it fires only on a completed 15m candle via the external scheduler. A
+   dead watcher silently stops firing those rungs while your stop still protects you — so an
+   **external dead-man's-switch (healthchecks.io) now pages you** if the ladder-watch cron
+   stops pinging (`LADDER_WATCH_HEALTHCHECK_URL`; see §6). Still confirm it's wired in prod.
 7. **Decreasing size per rung.** Later adds are smaller, keeping the blended entry near the
    first rung.
 8. **Isolated margin, always.** Size and liq math here assume **isolated** margin per coin
@@ -128,6 +129,12 @@ Each `open`/`add` rung is **risk-sized**: you supply `riskUsd` + `stopFrac` (+ `
 and the server computes `sizeCoins = riskUsd / (mark · stopFrac)` at fire time; the
 protective stop rests atomically with the fill.
 
+**Sizing a `reduce`/`close` rung — prefer `reduceFrac` over absolute `sizeCoins`.** An
+absolute `sizeCoins` trim is *path-dependent*: "shed 0.5 coins" is 40% of a position if the
+add filled but ~80% if it didn't. Set **`reduceFrac` (0,1]** instead — it trims that fraction
+of whatever is *actually* open at fire time, robust to which entry rungs filled. (`close`
+always exits 100%.)
+
 ## 4. Position sizing math
 
 **Step 1 — campaign budget (top-down):**
@@ -169,9 +176,14 @@ effectiveLoss ≈ Σ rungRiskUsd × 1.10        # 10% stop slippage (engine's no
               + roundTripFees
               + expectedFunding              # = notional × fundingRate × (hoursHeld) , charged hourly
 ```
-The engine's `computeLadderRisk` already applies the 10% slippage haircut to its cap; **funding
-and fees are on you to budget.** If funding alone is a large share of the budget, the holding
-period is too long for that carry — shorten the expiry or size down.
+The engine's `computeLadderRisk` applies the 10% slippage haircut **and now folds estimated
+funding into the loss cap at arm time** — the arm route fetches each coin's current hourly
+funding, extrapolates it over the arming window (per-coin, floored at 0 so a credit on one
+coin can't mask a cost on another, and clamped to a sane band so a transient spike can't
+falsely block the arm). So an arm whose stop loss **+ funding** exceeds `maxTotalLossUsd` is
+now refused. **Fees are still on you to budget**, and funding is an estimate over the *arming*
+window (not the eventual hold) — if funding is a large share of the budget, shorten the
+expiry or size down.
 
 **Wick tax.** Size the stop off structure/ATR (e.g. beyond the recent wick extremes / a named
 swing, ~`k·ATR` with `k ∈ [1.5, 2.5]`), then derive notional — never pick a round % first, and
@@ -228,8 +240,10 @@ related enforcing layers, but they do not replace this manual sum.
 - **Thin liquidity windows** — weekends, holidays, ~00:00–06:00 UTC: worse slippage and wicks.
   Cut size or avoid arming new entries into them.
 - **Dead watcher** — adds / scale-outs / `close` rungs silently stop firing if the external
-  scheduler dies (no alert yet). Only the native stop is watcher-independent. Confirm the
-  watcher is ticking before relying on a scale-out/add.
+  scheduler dies. Only the native stop is watcher-independent. An external healthchecks.io
+  dead-man's-switch (`LADDER_WATCH_HEALTHCHECK_URL`, Period 5 min / Grace ~13 min) pages you
+  when the cron stops pinging — confirm it's wired in prod, and still spot-check the watcher
+  is ticking before relying on a scale-out/add.
 - **Venue / oracle / collateral risk** — a native stop does NOT protect against HL
   auto-deleveraging, an oracle/mark wick triggering it off real price, venue downtime, or a
   USDC-collateral depeg (which cuts equity *and* can cascade liquidations). **Don't hold your

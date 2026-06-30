@@ -54,6 +54,9 @@ export interface ValidateLadderInput {
   now: number;
   /** Coin → its HL max leverage (caller resolves; the validator clamps against it). */
   coinMaxLeverage: (coin: string) => number;
+  /** Coin → current HOURLY funding rate (decimal; + = longs pay). Optional; when given
+   *  (with a future expiry) the risk read + loss cap include estimated funding carry. */
+  fundingRateByCoin?: Record<string, number | null>;
 }
 
 export interface ValidateLadderResult {
@@ -170,7 +173,15 @@ export function validateLadderForArm(input: ValidateLadderInput): ValidateLadder
   }
 
   // ---- Caps + per-coin leverage consistency (§3.5) via the risk read ----
-  const risk = computeLadderRisk(toRungRisk(rungs), caps);
+  // Funding carry is folded into the loss cap when the caller supplies rates: a multi-day
+  // perp hold whose stop loss + estimated funding exceeds maxTotalLossUsd is over-budget.
+  const hoursToExpiry = input.expiresAtMs != null && input.expiresAtMs > input.now
+    ? (input.expiresAtMs - input.now) / 3_600_000
+    : null;
+  const risk = computeLadderRisk(toRungRisk(rungs), caps, {
+    hoursToExpiry,
+    fundingRateByCoin: input.fundingRateByCoin,
+  });
   warnings.push(...risk.breaches);
 
   return { warnings, risk };

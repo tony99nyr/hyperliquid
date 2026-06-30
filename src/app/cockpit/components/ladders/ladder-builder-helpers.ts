@@ -69,6 +69,7 @@ export function draftRungToLadderRung(r: DraftRung, seq: number): LadderRung {
     triggerPx: r.triggerPx,
     triggerMeta: null,
     sizeCoins: null, // risk-sized by resolveArmRung
+    reduceFrac: null, // builder authors open/breakout rungs only (no fractional reduce yet)
     riskUsd: r.riskUsd,
     stopFrac: r.stopFrac,
     leverage: r.leverage,

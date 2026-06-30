@@ -20,6 +20,12 @@ import type { LadderRung, LadderSide, RungAction } from './ladder-types';
  *  preview assumes the FULL adverse tolerance — the loud, conservative number. */
 export const STOP_SLIPPAGE_TOL = 0.1;
 
+/** Defensive clamp on the per-hour funding rate used in the loss-cap estimate. Funding is
+ *  fetched as an instantaneous tick and extrapolated across the whole arming window, so an
+ *  unclamped transient spike (HL funding is volatile) would balloon into a false breach that
+ *  blocks a safe arm. 0.25%/hr is already far above any sane SUSTAINED funding regime. */
+export const MAX_FUNDING_RATE_PER_HOUR = 0.0025;
+
 /** The per-rung entry the risk math uses: a price-triggered rung fills at its trigger
  *  level; otherwise the caller supplies an intended entry. */
 export function rungEntryPx(rung: Pick<LadderRung, 'triggerKind' | 'triggerPx'>, fallbackPx: number | null): number | null {
@@ -56,6 +62,45 @@ export function rungWorstCaseLoss(rung: {
   if (fill == null) return 0;
   const adverse = rung.side === 'long' ? rung.entryPx - fill : fill - rung.entryPx;
   return adverse > 0 ? adverse * rung.sizeCoins : 0;
+}
+
+/**
+ * Estimated funding COST in USD over a holding period (signed: + = the position PAYS,
+ * − = it receives). HL funding is charged hourly; a LONG pays when the rate is positive,
+ * a SHORT pays when it's negative. PURE. Returns 0 for degenerate inputs. This is an
+ * ESTIMATE (rate-now × hours) — funding drifts — but it makes the "max loss" honest for a
+ * multi-day perp hold, which a stop-distance-only number is not.
+ */
+export function expectedFundingUsd(
+  notionalUsd: number,
+  side: LadderSide,
+  fundingRatePerHour: number | null,
+  hoursToExpiry: number | null,
+): number {
+  if (!(notionalUsd > 0)) return 0;
+  if (fundingRatePerHour == null || !Number.isFinite(fundingRatePerHour)) return 0;
+  if (hoursToExpiry == null || !(hoursToExpiry > 0)) return 0;
+  const signedRate = side === 'long' ? fundingRatePerHour : -fundingRatePerHour;
+  return notionalUsd * signedRate * hoursToExpiry;
+}
+
+/**
+ * The fraction of the CURRENT live position a reduce/close rung sheds. `close` is always
+ * full (1). A `reduce` prefers `reduceFrac` (path-INDEPENDENT — a fraction of whatever is
+ * actually open, robust to which entry rungs filled); else falls back to the absolute
+ * `sizeCoins / positionSz`; else full. Clamped to (0, 1]. PURE.
+ */
+export function reduceFraction(args: {
+  action: RungAction;
+  reduceFrac: number | null;
+  sizeCoins: number | null;
+  positionSz: number;
+}): number {
+  if (args.action === 'close') return 1;
+  if (!(args.positionSz > 0)) return 1;
+  if (args.reduceFrac != null && args.reduceFrac > 0) return Math.min(1, args.reduceFrac);
+  if (args.sizeCoins != null && args.sizeCoins > 0) return Math.min(1, args.sizeCoins / args.positionSz);
+  return 1;
 }
 
 /** A rung resolved to the numbers the risk read needs (caller maps LadderRung→this,
@@ -135,6 +180,11 @@ export interface LadderRiskRead {
   totalMarginUsd: number;
   /** Σ per-rung worst-case loss with ALL stops slipping at once — NO netting (§3.5). */
   aggregateWorstCaseLossUsd: number;
+  /** Estimated funding cost (USD, signed: + = position pays) over the holding period.
+   *  0 unless the caller supplies funding rates + hoursToExpiry. */
+  expectedFundingUsd: number;
+  /** The honest max loss: worst-case stop loss + funding cost (a credit doesn't reduce it). */
+  worstCaseLossWithFundingUsd: number;
   perCoin: PerCoinExposure[];
   /** Cap/consistency breaches that BLOCK arming (each a human-readable line). */
   breaches: string[];
@@ -145,7 +195,11 @@ export interface LadderRiskRead {
  * worst-case loss, per-coin liq at max exposure, and flags cap + per-coin-leverage
  * breaches. PURE — the route/modal render it; the typed-phrase consent rests on it.
  */
-export function computeLadderRisk(rungs: RungRisk[], caps: LadderCaps): LadderRiskRead {
+export function computeLadderRisk(
+  rungs: RungRisk[],
+  caps: LadderCaps,
+  opts?: { hoursToExpiry?: number | null; fundingRateByCoin?: Record<string, number | null> },
+): LadderRiskRead {
   const breaches: string[] = [];
   let totalNotional = 0;
   let totalMargin = 0;
@@ -188,17 +242,48 @@ export function computeLadderRisk(rungs: RungRisk[], caps: LadderCaps): LadderRi
 
   const perCoin = perCoinExposure(rungs);
 
+  // Estimated funding over the holding period (per-coin — HL funding is per-coin). 0 unless
+  // the caller supplies both hoursToExpiry and a funding-rate map. Two numbers come out:
+  //  • signedFunding — informational (+ = the book pays, − = it net-receives);
+  //  • fundingCost   — what the LOSS CAP uses: each coin's funding floored at 0 INDEPENDENTLY,
+  //    so a credit on one coin can never mask a cost on another (the consent surface must not
+  //    be understated for a multi-coin, mixed-sign ladder).
+  // The per-hour rate is CLAMPED first: funding is an instantaneous tick extrapolated across
+  // the whole arming window, so an unclamped transient spike (HL funding is volatile) would
+  // otherwise extrapolate to an absurd cost and FALSELY block a safe arm. NOTE: hoursToExpiry
+  // is the ARMING window, not the eventual hold — this is a within-window estimate.
+  let signedFunding = 0;
+  let fundingCost = 0;
+  const hoursToExpiry = opts?.hoursToExpiry ?? null;
+  const fundingByCoin = opts?.fundingRateByCoin ?? null;
+  if (hoursToExpiry != null && hoursToExpiry > 0 && fundingByCoin) {
+    for (const pc of perCoin) {
+      const raw = fundingByCoin[pc.coin] ?? null;
+      const clamped = raw == null ? null : Math.max(-MAX_FUNDING_RATE_PER_HOUR, Math.min(MAX_FUNDING_RATE_PER_HOUR, raw));
+      const f = expectedFundingUsd(pc.notionalUsd, pc.side, clamped, hoursToExpiry);
+      signedFunding += f;
+      fundingCost += Math.max(0, f);
+    }
+  }
+  const lossWithFunding = worstCase + fundingCost;
+
   if (caps.maxTotalNotionalUsd != null && totalNotional > caps.maxTotalNotionalUsd) {
     breaches.push(`Total notional $${totalNotional.toFixed(0)} exceeds the cap $${caps.maxTotalNotionalUsd.toFixed(0)}.`);
   }
-  if (caps.maxTotalLossUsd != null && worstCase > caps.maxTotalLossUsd) {
-    breaches.push(`Worst-case loss $${worstCase.toFixed(0)} (all stops slipping) exceeds the cap $${caps.maxTotalLossUsd.toFixed(0)}.`);
+  if (caps.maxTotalLossUsd != null && lossWithFunding > caps.maxTotalLossUsd) {
+    if (fundingCost > 0) {
+      breaches.push(`Worst-case loss $${worstCase.toFixed(0)} (all stops slipping) + ~$${fundingCost.toFixed(0)} est. funding = $${lossWithFunding.toFixed(0)} exceeds the cap $${caps.maxTotalLossUsd.toFixed(0)}.`);
+    } else {
+      breaches.push(`Worst-case loss $${worstCase.toFixed(0)} (all stops slipping) exceeds the cap $${caps.maxTotalLossUsd.toFixed(0)}.`);
+    }
   }
 
   return {
     totalNotionalUsd: totalNotional,
     totalMarginUsd: totalMargin,
     aggregateWorstCaseLossUsd: worstCase,
+    expectedFundingUsd: signedFunding,
+    worstCaseLossWithFundingUsd: lossWithFunding,
     perCoin,
     breaches,
   };
@@ -216,12 +301,24 @@ export interface LivePositionState {
  * Build the arm-time precondition snapshot string (§3.7) over the live positions for
  * the coins this ladder TOUCHES with an add/reduce/close (rungs that depend on an
  * existing position). A plain `open` rung depends on no prior state, so it's excluded.
+ *
+ * CRITICAL: a coin the LADDER ITSELF opens (it has an `open` rung for that coin) is also
+ * excluded — its add/reduce depend on the ladder's OWN open, NOT on external state. Were it
+ * included, a self-contained open→add pyramid armed while FLAT would snapshot `COIN:none`,
+ * then the open creates the position, and the add's fire would see `COIN:side:lev` ≠ `none`
+ * → auto-disarm before the add can ever fire. The precondition guards add/reduce on
+ * positions the ladder does NOT open (e.g. an add-to-an-existing-position ladder); the
+ * runtime add-coverage gate is what protects a self-opened pyramid's adds.
+ *
  * Canonical: coins sorted, leverage rounded to 1dp. The fire route re-derives this and
  * compares — any drift (side flip, position vanished, leverage changed) → auto-disarm.
  */
 export function buildPreconditionSnapshot(rungs: Pick<LadderRung, 'coin' | 'action'>[], live: LivePositionState[]): string {
+  const selfOpenedCoins = new Set(rungs.filter((r) => r.action === 'open').map((r) => r.coin.toUpperCase()));
   const dependentCoins = new Set(
-    rungs.filter((r) => r.action === 'add' || r.action === 'reduce' || r.action === 'close').map((r) => r.coin.toUpperCase()),
+    rungs
+      .filter((r) => (r.action === 'add' || r.action === 'reduce' || r.action === 'close') && !selfOpenedCoins.has(r.coin.toUpperCase()))
+      .map((r) => r.coin.toUpperCase()),
   );
   const liveByCoin = new Map(live.map((l) => [l.coin.toUpperCase(), l]));
   const parts: string[] = [];

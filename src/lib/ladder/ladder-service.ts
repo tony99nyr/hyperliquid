@@ -32,6 +32,8 @@ export interface NewRung {
   triggerPx?: number | null;
   triggerMeta?: RungTriggerMeta | null;
   sizeCoins?: number | null;
+  /** reduce/close ONLY: fraction (0,1] of the CURRENT live position to trim at fire. */
+  reduceFrac?: number | null;
   riskUsd?: number | null;
   stopFrac?: number | null;
   leverage?: number | null;
@@ -89,6 +91,7 @@ function rowToRung(r: any): LadderRung {
     triggerPx: r.trigger_px ?? null,
     triggerMeta: (r.trigger_meta ?? null) as RungTriggerMeta | null,
     sizeCoins: r.size_coins ?? null,
+    reduceFrac: r.reduce_frac ?? null,
     riskUsd: r.risk_usd ?? null,
     stopFrac: r.stop_frac ?? null,
     leverage: r.leverage ?? null,
@@ -132,6 +135,7 @@ export async function createLadder(input: CreateLadderInput): Promise<string> {
     trigger_px: r.triggerPx ?? null,
     trigger_meta: r.triggerMeta ?? null,
     size_coins: r.sizeCoins ?? null,
+    reduce_frac: r.reduceFrac ?? null,
     risk_usd: r.riskUsd ?? null,
     stop_frac: r.stopFrac ?? null,
     leverage: r.leverage ?? null,
