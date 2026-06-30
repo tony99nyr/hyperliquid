@@ -4,8 +4,25 @@ A **human + Claude collaborative trading cockpit for Hyperliquid**. The human
 runs Claude skills to analyze HL traders + multi-timeframe candles, picks a setup,
 and Claude manages trade health — **the human confirms every action.** A
 phone-accessible web cockpit live-renders the work via Supabase realtime.
-**Paper-first for weeks, then flip to live with ONE env var.** Standalone repo,
-own Vercel deploy. Lives deliberately OUTSIDE the iamrossi autonomous system.
+Standalone repo, own Vercel deploy. Lives deliberately OUTSIDE the iamrossi
+autonomous system.
+
+> ## ⚠ STATUS — LIVE (updated 2026-06-29)
+> **`TRADING_MODE=live`** (local `.env.local` AND production), `HL_NETWORK=mainnet` —
+> real orders fire. **Armed Ladders are live + autonomous:** `LADDER_LIVE_ENABLED` and
+> `LADDER_AUTOFIRE_ENABLED` are **ON in production**, and the watcher has already fired
+> real money (first live ladder fire 2026-06-29). This is NOT paper trading.
+>
+> - **The only thing still paper** is the **scout** (a separate subsystem, hard-guarded
+>   `assertScoutPaperMode`). "Paper-only" claims elsewhere in these docs refer to the
+>   scout, or are stale pre-go-live history — trust this banner.
+> - **Ladders fire on the PRODUCTION Vercel deployment**, not your local box. A ladder's
+>   **`mode` field decides paper vs live**, and the firing deployment must match it. So:
+>   create a real ladder with **`mode: 'live'`** — a `mode: 'paper'` ladder will NOT fire
+>   on the live production watcher (mode-mismatch skip) and no paper watcher is running,
+>   so it would just sit there. `LADDER_LIVE_ENABLED`/`LADDER_AUTOFIRE_ENABLED` are not in
+>   local `.env.local`; they gate *production* firing. See
+>   [LADDER_OPERATOR_RUNBOOK.md](docs/LADDER_OPERATOR_RUNBOOK.md).
 
 Read `docs/CONTEXT.md` for the domain language and `docs/adr/` for the locked
 decisions before making architectural changes.
@@ -153,12 +170,12 @@ the comments at the top of each vendored stub module.
     by a fresh, smart plan (not just the mechanical market-close fallback).
   - No-auto-fire (execute only after an approved popup or the Safe-Exit click),
     watch-only, and the paper↔live seam are all preserved + test-pinned.
-- **Phase 3b (live fill) — BUILT, gated OFF**: `fill-source-live.ts` +
+- **Phase 3b (live fill) — LIVE (was gated, flipped on)**: `fill-source-live.ts` +
   `hyperliquid-exchange-service.ts` (EIP-712 agent-key signing via
-  `@nktkas/hyperliquid`) + `hyperliquid-order-business-logic.ts` (pure) are
-  implemented and tested. Default `TRADING_MODE=paper` means nothing fires.
-  Going live is the operator sequence in `docs/LIVE_EXECUTION_RUNBOOK.md`
-  (two-key model, testnet→mainnet checklist) — still no code change to flip.
+  `@nktkas/hyperliquid`) + `hyperliquid-order-business-logic.ts` (pure). **`TRADING_MODE=live`
+  is set — real orders fire** (manual approvals + armed-ladder autonomous fires). The
+  go-live sequence in `docs/LIVE_EXECUTION_RUNBOOK.md` (two-key model, testnet→mainnet)
+  has been completed.
 - **Phase 4 — autonomous PAPER scout (DONE)**: a self-driving paper-only
   opportunity finder + manager (`src/lib/scout/**`, `.claude/skills/scout` +
   `scout-review`, `docs/scout/`). The inverted loop: a FREE deterministic daemon

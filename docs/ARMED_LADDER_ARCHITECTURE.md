@@ -140,7 +140,8 @@ exchange-level double-fire rejection.
   *tighter*) and the **atomic add→re-bracket** (the enlarged position is bracketed at the
   new full size *before the lock releases*; a re-bracket reject is a hard fault → flatten).
   Partial fills: caps measured against *actual filled* notional; the remainder is dropped,
-  not chased. Behind `LADDER_LIVE_ENABLED`, gated OFF, paper-first.
+  not chased. (Shipped + LIVE — `LADDER_LIVE_ENABLED`/`LADDER_AUTOFIRE_ENABLED` ON in prod;
+  see §0.)
 - **P2 — multi-asset / portfolio / sequencing** (per-coin leverage; portfolio worst-case;
   rung N arms after N-1 fills) + **trailing stops** (watcher).
 - **P3 — multi-leg / delta-neutral** (coupled legs, leg-risk sequencing, funding/basis

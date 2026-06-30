@@ -17,6 +17,14 @@ autonomously on a 15m close with an atomic stop, then self-completed). Single-ru
 `open` is live-proven; **multi-rung adds + the add-coverage gate are built + unit-tested
 but NOT yet exercised against the live exchange** — treat that path as unproven.
 
+**This is NOT paper trading.** `TRADING_MODE=live` (local + prod); `LADDER_LIVE_ENABLED` +
+`LADDER_AUTOFIRE_ENABLED` are ON in production. **Ladders fire on the PRODUCTION Vercel
+deployment**, and a ladder's **`mode` field** decides paper vs live (the firing deployment
+must match it via the mode-match guard). So a real ladder MUST be created `mode: 'live'`;
+a `mode: 'paper'` ladder will NOT fire on the live production watcher and no paper watcher
+runs, so it just sits. Don't be misled by older "paper-first" docs — that was pre-go-live,
+and the still-paper subsystem is the *scout*, not ladders.
+
 ## The pieces (canonical locations — don't duplicate)
 
 | File | Role |

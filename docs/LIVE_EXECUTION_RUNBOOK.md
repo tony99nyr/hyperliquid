@@ -3,9 +3,11 @@
 How the HL Cockpit places **real** orders on Hyperliquid, what you need to
 provision, and the exact testnet → mainnet checklist for flipping it on.
 
-> **Status:** the live execution *path* is built, tested, and **gated off**. The
-> default `TRADING_MODE=paper` means nothing can fire. Going live is a deliberate,
-> operator-only sequence (below) — there is no code change required to flip it.
+> **Status (updated 2026-06-29): LIVE.** `TRADING_MODE=live` is set — real orders fire
+> (manual approvals AND armed-ladder autonomous fires; the watcher has fired real money).
+> This was a deliberate operator go-live; the checklist below documents how it was done /
+> how to re-verify. To return to paper, set `TRADING_MODE=paper` (and disable the ladder
+> autofire flag). Note: the **scout** remains independently paper-only regardless.
 
 ---
 

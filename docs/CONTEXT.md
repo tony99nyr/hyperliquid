@@ -9,8 +9,9 @@ A **human + Claude collaborative trading cockpit** for Hyperliquid. The human
 sits down, runs Claude skills to analyze HL traders and multi-timeframe candles,
 and together they pick a setup to follow. Claude orchestrates analysis and trade
 health; **the human decides and confirms every action.** A phone-accessible web
-cockpit live-renders Claude's work. **Paper-first for weeks, then flip to live
-with one env var.** It lives deliberately OUTSIDE the iamrossi autonomous system.
+cockpit live-renders Claude's work. **STATUS: LIVE — `TRADING_MODE=live`, real orders
+fire** (incl. autonomous armed-ladder fires; the scout remains separately paper-only; see
+the root `CLAUDE.md` STATUS banner). It lives deliberately OUTSIDE the iamrossi autonomous system.
 
 ## Core terms
 
