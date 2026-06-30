@@ -248,6 +248,22 @@ export async function setRungStatus(rungId: string, status: 'fired' | 'skipped' 
   if (error) throw new Error(`setRungStatus failed: ${error.message}`);
 }
 
+/**
+ * Mark a ladder DONE — its plan is fully executed (every rung reached a terminal status).
+ * CONDITIONAL on the ladder still being 'armed' (idempotent; a disarmed/expired ladder is
+ * left as-is). The fired positions live on in Open Positions with their resting brackets;
+ * ladder status no longer governs them — 'done' just tells the UI + watcher it's complete.
+ */
+export async function markLadderDone(id: string): Promise<void> {
+  const db = getServiceRoleClient();
+  const { error } = await db
+    .from('ladders')
+    .update({ status: 'done', updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('status', 'armed');
+  if (error) throw new Error(`markLadderDone failed: ${error.message}`);
+}
+
 /** Disarm a ladder (operator kill-switch or precondition drift): status→'disarmed'. */
 export async function disarmLadder(id: string, reason: string): Promise<void> {
   const db = getServiceRoleClient();

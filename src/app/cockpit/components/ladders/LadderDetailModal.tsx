@@ -187,8 +187,26 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
           {error && <p data-testid="ladder-detail-error" className={css({ fontSize: 'xs', color: 'zone.danger', marginBottom: '12px' })}>{error}</p>}
           {!ladder && !error && <p className={css({ fontFamily: 'mono', fontSize: '12px', color: 'github.textMuted' })}>Loading…</p>}
 
-          {ladder && (
+          {ladder && (() => {
+            const firedCount = ladder.rungs.filter((r) => r.status === 'fired').length;
+            const isComplete = ladder.status === 'done';
+            const showBanner = isComplete || firedCount > 0;
+            return (
             <>
+              {/* COMPLETION — prominent when rungs have fired / the plan is done. A fully-fired
+                  ladder is finished: the position lives in Open Positions with its resting stop. */}
+              {showBanner && (
+                <div data-testid="ladder-complete-banner" className={css({ display: 'flex', alignItems: 'flex-start', gap: '10px', borderRadius: '10px', padding: '11px 14px', marginBottom: '14px' })} style={{ background: 'rgba(25,201,138,.10)', border: '1px solid rgba(25,201,138,.35)' }}>
+                  <span aria-hidden className={css({ fontFamily: 'mono', fontSize: '15px', fontWeight: 'bold', lineHeight: 1.1 })} style={{ color: ZONE_COLORS.ok }}>✓</span>
+                  <div className={css({ display: 'flex', flexDirection: 'column', gap: '2px' })}>
+                    <span className={css({ fontFamily: 'sans', fontSize: '12.5px', fontWeight: 'bold', color: 'github.textBright' })}>{isComplete ? 'Ladder complete' : 'Rung fired'}</span>
+                    <span className={css({ fontFamily: 'mono', fontSize: '10.5px', lineHeight: 1.45, color: 'github.textMuted' })}>
+                      {firedCount} of {ladder.rungs.length} rung{ladder.rungs.length === 1 ? '' : 's'} fired — your position is live in <strong className={css({ color: 'github.text' })}>Open Positions</strong> with its resting stop.{isComplete ? ' Nothing more will fire.' : ''}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {ladder.thesis && <p className={css({ fontFamily: 'sans', fontSize: '12px', color: 'github.textMuted', marginBottom: '14px', lineHeight: 1.5 })}>{ladder.thesis}</p>}
 
               {/* WHERE — the chart with every rung's levels overlaid + the live mark. */}
@@ -225,7 +243,8 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
                 </ul>
               )}
             </>
-          )}
+            );
+          })()}
         </div>
 
         {/* Action footer — the consent surface */}

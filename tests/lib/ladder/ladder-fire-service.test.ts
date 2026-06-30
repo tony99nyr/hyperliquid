@@ -11,6 +11,7 @@ const getLadderWithRungs = vi.fn();
 const claimRungFire = vi.fn();
 const markFireOutcome = vi.fn();
 const setRungStatus = vi.fn();
+const markLadderDone = vi.fn();
 const disarmLadder = vi.fn();
 const getActiveSession = vi.fn();
 const openSession = vi.fn();
@@ -35,6 +36,7 @@ vi.mock('@/lib/ladder/ladder-service', () => ({
   claimRungFire: (...a: unknown[]) => claimRungFire(...a),
   markFireOutcome: (...a: unknown[]) => markFireOutcome(...a),
   setRungStatus: (...a: unknown[]) => setRungStatus(...a),
+  markLadderDone: (...a: unknown[]) => markLadderDone(...a),
   disarmLadder: (...a: unknown[]) => disarmLadder(...a),
 }));
 vi.mock('@/lib/cockpit/session-service', () => ({ getActiveSession: (...a: unknown[]) => getActiveSession(...a), openSession: (...a: unknown[]) => openSession(...a) }));
@@ -80,6 +82,7 @@ beforeEach(() => {
   claimRungFire.mockResolvedValue({ claimed: true, fireId: 'f1' });
   markFireOutcome.mockResolvedValue(undefined);
   setRungStatus.mockResolvedValue(undefined);
+  markLadderDone.mockResolvedValue(undefined);
   disarmLadder.mockResolvedValue(undefined);
   getActiveSession.mockResolvedValue({ id: 's1' });
   openSession.mockResolvedValue({ id: 's1' });
@@ -153,6 +156,8 @@ describe('performLadderRungFire — execution', () => {
     expect(placeBracketOnHl).not.toHaveBeenCalled();
     expect(markFireOutcome).toHaveBeenCalledWith('f1', 'filled');
     expect(setRungStatus).toHaveBeenCalledWith('r1', 'fired');
+    // Single-rung ladder fully executed → marked done so the UI shows completion.
+    expect(markLadderDone).toHaveBeenCalledWith('L1');
   });
 
   it('zero-fill (IOC did not cross) → no-fill skip, no bracket (HIGH-1)', async () => {

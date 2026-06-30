@@ -25,6 +25,7 @@ import {
   claimRungFire,
   markFireOutcome,
   setRungStatus,
+  markLadderDone,
   disarmLadder,
 } from './ladder-service';
 import { isLadderAutofireEnabled, isLadderLiveEnabled } from './ladder-flags';
@@ -255,6 +256,14 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
   // stopped; a transient telemetry/Supabase failure here must NOT flatten a good position.
   await markFireOutcome(fireId, 'filled').catch(() => {});
   await setRungStatus(rung.id, 'fired').catch(() => {});
+  // If every rung is now terminal, the ladder's plan is fully executed → mark it DONE so the
+  // UI shows completion and the watcher stops considering it. This rung just became 'fired'
+  // (terminal); the others reflect their loaded status. markLadderDone is armed-guarded +
+  // .catch'd — it runs AFTER the fill+bracket and can never harm the live position.
+  const TERMINAL_RUNG = new Set(['fired', 'skipped', 'failed', 'cancelled']);
+  if (ladder.rungs.every((r) => r.id === rung.id || TERMINAL_RUNG.has(r.status))) {
+    await markLadderDone(ladder.id).catch(() => {});
+  }
   await writeAnalysisLog({ sessionId, source: 'ladder-fire', severity: 'info', message: `FIRED ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: ${rung.action} ${side} ${filledSize} ${coin} @ ~${markPx} (${ladder.mode}${forcePaper ? ' · paper' : ''}).` }).catch(() => {});
   return { fired: true, skipped: null, fill };
 }

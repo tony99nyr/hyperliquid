@@ -18,9 +18,12 @@ const STATUS_COLOR: Record<Ladder['status'], string> = {
   draft: GH.textMuted,
   armed: ZONE_COLORS.ok,
   disarmed: ZONE_COLORS.warn,
-  done: GH.textMuted,
+  done: ZONE_COLORS.ok, // fully executed (all rungs fired) — a positive terminal state
   expired: GH.textMuted,
 };
+
+/** Status label — 'done' reads as "✓ filled" so a completed ladder is obvious in the list. */
+const STATUS_LABEL: Partial<Record<Ladder['status'], string>> = { done: '✓ filled' };
 
 export interface LaddersViewProps {
   /** The cockpit's current coin (seeds a new ladder's first rung). */
@@ -77,7 +80,7 @@ export default function LaddersView({ coin = 'ETH' }: LaddersViewProps) {
               <span className={css({ fontFamily: 'sans', fontSize: '13.5px', fontWeight: 'semibold', color: 'github.textBright', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })}>{l.title}</span>
               <span className={css({ fontFamily: 'mono', fontSize: '10px', fontWeight: 'bold', borderRadius: '5px', paddingX: '7px', paddingY: '3px', flex: 'none' })}
                 style={{ background: l.mode === 'live' ? 'rgba(248,81,73,.16)' : 'rgba(255,255,255,.06)', color: l.mode === 'live' ? ZONE_COLORS.danger : GH.textMuted }}>{l.mode.toUpperCase()}</span>
-              <span data-testid={`ladder-status-${l.id}`} className={css({ fontFamily: 'mono', fontSize: '11px', fontWeight: 'semibold', textTransform: 'uppercase', letterSpacing: '0.06em', minWidth: '64px', textAlign: 'right', flex: 'none' })} style={{ color: STATUS_COLOR[l.status] }}>{l.status}</span>
+              <span data-testid={`ladder-status-${l.id}`} className={css({ fontFamily: 'mono', fontSize: '11px', fontWeight: 'semibold', textTransform: 'uppercase', letterSpacing: '0.06em', minWidth: '64px', textAlign: 'right', flex: 'none' })} style={{ color: STATUS_COLOR[l.status] }}>{STATUS_LABEL[l.status] ?? l.status}</span>
               <span aria-hidden className={css({ fontFamily: 'mono', fontSize: '15px', color: 'cockpit.faint', flex: 'none' })}>›</span>
             </button>
           ))}
