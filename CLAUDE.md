@@ -115,9 +115,9 @@ src/lib/cockpit/{supabase-server,supabase-browser}.ts
 src/lib/infrastructure/{auth,logging,config}/        # vendored admin-PIN + stubs
 supabase/migrations/0001_init.sql … 0024_*.sql       # migrations (RLS + realtime publication; idempotent; 0023 = ladders)
 data/{backups/wallet-rating/rated-wallets.json,auto-exit/}  # vendored dataset + versioned auto-exit thresholds
-docs/{CONTEXT.md, CODE_ORGANIZATION.md, adr/, scout/, LIVE_*.md,
+docs/{CONTEXT.md, CODE_ORGANIZATION.md, adr/, scout/, LIVE_*.md, OPERATOR_MANUAL.md,
       ARMED_LADDER_ARCHITECTURE.md, LADDER_OPERATOR_RUNBOOK.md,
-      LADDER_DESK_PLAYBOOK.md}  # ladder: design + operator runbook + desk sizing methodology
+      LADDER_DESK_PLAYBOOK.md}  # what-runs-where manual + ladder design/runbook/methodology
 ```
 
 ## Vendored from iamrossi
