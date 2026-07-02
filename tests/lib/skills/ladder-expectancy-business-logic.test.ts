@@ -27,7 +27,7 @@ function ladder(rungs: LadderRung[], over: Partial<LadderWithRungs> = {}): Ladde
     author: 'operator', mode: 'live', status: 'done', preconditionHash: null, ocoGroupId: null, leaderAddress: null,
     maxTotalNotionalUsd: 100, maxTotalLossUsd: 20,
     expiresAt: new Date(NOW + 86_400_000).toISOString(),
-    armedAt: new Date(ARMED_AT).toISOString(), disarmedAt: null, disarmReason: null, archivedAt: null,
+    armedAt: new Date(ARMED_AT).toISOString(), disarmedAt: null, disarmReason: null, archivedAt: null, expiryAlertAt: null,
     createdAt: new Date(ARMED_AT - 3_600_000).toISOString(), updatedAt: new Date(NOW).toISOString(),
     rungs, ...over,
   };

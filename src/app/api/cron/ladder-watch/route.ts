@@ -17,6 +17,7 @@ import { verifyCronBearer } from '@/lib/infrastructure/auth/auth';
 import { getLadderCronSecret } from '@/lib/ladder/ladder-flags';
 import { runLadderWatchTick } from '@/lib/ladder/ladder-watch-service';
 import { runLeaderGuard } from '@/lib/ladder/ladder-leader-guard-service';
+import { runExpiryAlerts } from '@/lib/ladder/ladder-expiry-alert-service';
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 import { validateEnv } from '@/lib/env/env';
 import { pingHealthcheck } from '@/lib/infrastructure/monitoring/healthcheck';
@@ -33,11 +34,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   await pingHealthcheck(hcUrl, 'start');
   try {
     const summary = await runLadderWatchTick({ now: Date.now() });
-    // Post-tick guards, both FAIL-SOFT (they must never break or fail the watcher tick):
+    // Post-tick guards, all FAIL-SOFT (they must never break or fail the watcher tick):
     //  - leader guard: DISARM-ONLY — kills copy-thesis ladders whose leader exited/flipped.
+    //  - expiry alert: ADVISORY — one page when an armed ladder nears expiry unfired.
     const leaderGuard = await runLeaderGuard(Date.now()).catch((e) => ({ checked: -1, disarmed: [], error: extractErrorMessage(e) }));
+    const expiryAlerts = await runExpiryAlerts(Date.now()).catch((e) => ({ checked: -1, alerted: [], error: extractErrorMessage(e) }));
     await pingHealthcheck(hcUrl, 'success');
-    return NextResponse.json({ ok: true, ...summary, leaderGuard });
+    return NextResponse.json({ ok: true, ...summary, leaderGuard, expiryAlerts });
   } catch (e) {
     await pingHealthcheck(hcUrl, 'fail');
     return NextResponse.json({ ok: false, error: extractErrorMessage(e) }, { status: 500 });

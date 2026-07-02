@@ -78,6 +78,7 @@ function rowToLadder(r: any): Ladder {
     disarmedAt: r.disarmed_at ?? null,
     disarmReason: r.disarm_reason ?? null,
     archivedAt: r.archived_at ?? null,
+    expiryAlertAt: r.expiry_alert_at ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
