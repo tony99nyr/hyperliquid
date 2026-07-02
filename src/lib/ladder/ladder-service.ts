@@ -51,6 +51,8 @@ export interface CreateLadderInput {
   /** OCO group id — share it across a straddle's two ladders to link them (one fires →
    *  the other auto-disarms). null/omitted = standalone. */
   ocoGroupId?: string | null;
+  /** Copy-thesis tag: the wallet this ladder follows (leader guard auto-disarm). */
+  leaderAddress?: string | null;
   maxTotalNotionalUsd?: number | null;
   maxTotalLossUsd?: number | null;
   expiresAtMs?: number | null;
@@ -68,6 +70,7 @@ function rowToLadder(r: any): Ladder {
     status: r.status,
     preconditionHash: r.precondition_hash ?? null,
     ocoGroupId: r.oco_group_id ?? null,
+    leaderAddress: r.leader_address ?? null,
     maxTotalNotionalUsd: r.max_total_notional_usd ?? null,
     maxTotalLossUsd: r.max_total_loss_usd ?? null,
     expiresAt: r.expires_at ?? null,
@@ -117,6 +120,7 @@ export async function createLadder(input: CreateLadderInput): Promise<string> {
       mode: input.mode ?? 'paper',
       status: 'draft',
       oco_group_id: input.ocoGroupId ?? null,
+      leader_address: input.leaderAddress ?? null,
       max_total_notional_usd: input.maxTotalNotionalUsd ?? null,
       max_total_loss_usd: input.maxTotalLossUsd ?? null,
       expires_at: input.expiresAtMs != null ? new Date(input.expiresAtMs).toISOString() : null,

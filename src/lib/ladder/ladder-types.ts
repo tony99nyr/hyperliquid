@@ -87,6 +87,11 @@ export interface Ladder {
    *  null = ungrouped (default; behaves exactly as a standalone ladder). The OCO action
    *  only DISARMS — it can never open/add/move money. */
   ocoGroupId: string | null;
+  /** Copy-thesis tag: the wallet this ladder follows. When set, the leader guard
+   *  AUTO-DISARMS the armed ladder if the trader-watch feed shows the leader closed or
+   *  flipped the coin after arming (disarm-only — the guard can never fire anything).
+   *  null = not a copy trade. */
+  leaderAddress: string | null;
   maxTotalNotionalUsd: number | null;
   maxTotalLossUsd: number | null;
   expiresAt: string | null;
