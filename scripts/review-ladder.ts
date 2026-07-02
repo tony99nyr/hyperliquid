@@ -85,6 +85,34 @@ run(async () => {
     } catch { recentWicksByCoin[coin] = null; }
   }
 
+  // LIVE resting stops for coins whose entry rung has FIRED — the real exchange order
+  // supersedes the arm-time projection (the fire path derives the stop off the FILL, and
+  // the operator may have tightened it since; scoring the projection produced false magnet
+  // flags). Read via the cockpit stops endpoint (the signing deployment). Semantics for the
+  // pure layer: number = live stop; null = read OK but NO stop (naked — blocker); key
+  // absent = unreadable → projection fallback. Fail-soft on any error.
+  const liveStopByCoin: Record<string, number | null> = {};
+  const firedCoins = new Set(
+    ladders.flatMap((l) => l.rungs.filter((r) => (r.action === 'open' || r.action === 'add') && r.status === 'fired').map((r) => r.coin.toUpperCase())),
+  );
+  if (firedCoins.size > 0) {
+    const base = process.env.COCKPIT_BASE_URL ?? 'https://hyperliquid-rouge.vercel.app';
+    const adminSecret = process.env.ADMIN_SECRET;
+    if (adminSecret) {
+      for (const coin of firedCoins) {
+        try {
+          const res = await fetch(`${base}/api/cockpit/position-stop?coin=${coin}`, { headers: { Authorization: `Bearer ${adminSecret}` }, signal: AbortSignal.timeout(8000) });
+          if (!res.ok) continue; // unreadable → projection fallback
+          const j = (await res.json()) as { ok?: boolean; stop?: { triggerPx?: number } | null };
+          if (j.ok === false) continue;
+          liveStopByCoin[coin] = j.stop?.triggerPx != null && j.stop.triggerPx > 0 ? j.stop.triggerPx : null;
+        } catch { /* unreadable → projection fallback */ }
+      }
+    } else {
+      line('(fired rung(s) present but no ADMIN_SECRET — stop pillar uses the arm-time projection)');
+    }
+  }
+
   // Auto-signal from the rubric (ADR-0006) when the operator didn't hand-score: the
   // freshest rubric_scores row per (coin, side), ≤24h old, mapped 0-100 → 0-10. A
   // kill-gated rubric is a hard 0 (the rubric says NO TRADE). Fail-soft: no row/stale/
@@ -115,7 +143,7 @@ run(async () => {
     const auto = signal == null ? (rubricSignalByLadder.get(l.id) ?? null) : null;
     const reason = rubricReasonByLadder.get(l.id);
     return {
-      midByCoin, fundingByCoin, accountEquityUsd, recentWicksByCoin, now,
+      midByCoin, fundingByCoin, accountEquityUsd, recentWicksByCoin, liveStopByCoin, now,
       signalScore: signal ?? auto,
       timingScore: timing,
       signalSource: signal != null ? 'operator' : auto != null ? `rubric ADR-0006, auto${reason ? ` — ${reason}` : ''}` : null,

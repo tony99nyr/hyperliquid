@@ -102,6 +102,41 @@ describe('reviewLadder — judgment pillar', () => {
   });
 });
 
+describe('reviewLadder — live resting stop supersedes the projection for FIRED rungs', () => {
+  // Fired core: projection derives stop 66×(1−0.144)=56.496 (ON the 56.5 magnet), but the
+  // LIVE resting stop was tightened to 59.85 (clean). The live one must win.
+  const FIRED = [
+    rung({ seq: 1, action: 'open', triggerPx: 66, riskUsd: 6, stopFrac: 0.144, leverage: 2, status: 'fired' }),
+    rung({ seq: 3, action: 'reduce', triggerPx: 77, reduceFrac: 0.4 }),
+  ];
+
+  it('scores the live stop, not the projected magnet', () => {
+    const sc = reviewLadder(ladder(FIRED, { status: 'armed' }), { ...ctx, liveStopByCoin: { HYPE: 59.85 } });
+    const stop = sc.riskPillars.find((p) => p.key === 'stop')!;
+    expect(stop.note).not.toMatch(/56\.5 round level/);
+    expect(stop.note).toMatch(/live resting stop/);
+    // width vs mark 64.7: (64.7−59.85)/64.7 ≈ 7.5% → clean 10 (no magnet on 59.85)
+    expect(stop.score).toBe(10);
+  });
+
+  it('read-ok-but-NO-stop on a fired coin = NAKED live position → blocker', () => {
+    const sc = reviewLadder(ladder(FIRED, { status: 'armed' }), { ...ctx, liveStopByCoin: { HYPE: null } });
+    expect(sc.blockers.some((b) => /naked/i.test(b))).toBe(true);
+    expect(sc.riskPillars.find((p) => p.key === 'stop')!.score).toBe(0);
+  });
+
+  it('unreadable (key absent) falls back to the projection — old behavior', () => {
+    const sc = reviewLadder(ladder(FIRED, { status: 'armed' }), { ...ctx, liveStopByCoin: {} });
+    const stop = sc.riskPillars.find((p) => p.key === 'stop')!;
+    expect(stop.note).toMatch(/56\.5 round level/); // the projected magnet flag returns
+  });
+
+  it('an UNFIRED draft never consults live stops (projection as before)', () => {
+    const sc = reviewLadder(ladder(CLEAN), { ...ctx, liveStopByCoin: { HYPE: null } });
+    expect(sc.blockers.some((b) => /naked/i.test(b))).toBe(false);
+  });
+});
+
 describe('rubricSignalScore (rubric → thesis pillar)', () => {
   it('maps opportunity 0-100 → 0-10 when fresh', () => {
     expect(rubricSignalScore(63, NOW - 3_600_000, NOW)).toBe(6.3);

@@ -68,6 +68,13 @@ export interface LadderReviewContext {
   /** Salient recent wick extremes per coin on the STOP side (lows for a long) — feeds the
    *  stop-hygiene check. Optional; absent ⇒ only the round-number magnet check runs. */
   recentWicksByCoin?: Record<string, number[] | null>;
+  /** LIVE resting stop triggerPx per coin, for ladders whose entry rung has FIRED — the
+   *  real exchange order, not the arm-time projection (the fire path derives the actual
+   *  stop off the FILL, and the operator may have tightened it since). Semantics:
+   *  key present with a number = the live stop; key present with null = the stops read
+   *  SUCCEEDED and there is NO resting stop (a naked live position — blocker!); key
+   *  absent = unreadable → fall back to the projection, labeled as such. */
+  liveStopByCoin?: Record<string, number | null>;
   now: number;
 }
 
@@ -146,27 +153,65 @@ function lossSizing(risk: LadderRiskRead, equity: number | null, capUsd: number 
 
 /** Stop integrity (Tail-risk lens): every exposure rung stopped on the loss side, not
  *  pathologically tight (wick-bait), and not sitting ON liquidity (round numbers / recent
- *  wick pools — the stop-hygiene check). */
-function stopIntegrity(open: ArmRung[], warnings: string[], recentWicksByCoin?: Record<string, number[] | null>): { pillar: PillarScore; blocker: string | null } {
-  const naked = open.some((r) => r.stopPx == null || !(r.stopPx > 0));
+ *  wick pools — the stop-hygiene check). For a FIRED rung, the LIVE resting stop (when
+ *  readable) replaces the arm-time projection — the fire path derives the real stop off
+ *  the FILL, and the operator may have tightened it since; scoring the projection produced
+ *  false magnet flags. A fired coin whose stops read succeeded with NO resting stop is a
+ *  NAKED live position → hard blocker. */
+function stopIntegrity(
+  open: ArmRung[],
+  warnings: string[],
+  recentWicksByCoin?: Record<string, number[] | null>,
+  live?: { firedCoins: Set<string>; liveStopByCoin?: Record<string, number | null>; midByCoin: Record<string, number | null> },
+): { pillar: PillarScore; blocker: string | null } {
+  // Naked check — a FIRED rung's projection is superseded by the live stop when readable.
+  const effectiveStop = (r: ArmRung): { px: number | null; source: 'live' | 'projected' | 'naked-live' } => {
+    const coin = r.coin.toUpperCase();
+    if (live?.firedCoins.has(coin) && live.liveStopByCoin && coin in live.liveStopByCoin) {
+      const px = live.liveStopByCoin[coin];
+      return px != null && px > 0 ? { px, source: 'live' } : { px: null, source: 'naked-live' };
+    }
+    return { px: r.stopPx ?? null, source: 'projected' };
+  };
+
+  const nakedLive = open.find((r) => effectiveStop(r).source === 'naked-live');
+  if (nakedLive) {
+    return { pillar: { key: 'stop', label: 'Stop integrity', lens: 'Crypto tail-risk', score: 0, note: `${nakedLive.coin.toUpperCase()} FIRED but the exchange shows NO resting stop — the live position is NAKED.` }, blocker: `${nakedLive.coin.toUpperCase()}: fired position has no resting stop on the exchange (naked).` };
+  }
+  const naked = open.some((r) => { const e = effectiveStop(r); return e.px == null || !(e.px > 0); });
   const lossSideWarn = warnings.some((w) => /not on the loss side|must carry a protective stop|UNBOUNDED/i.test(w));
   if (naked || lossSideWarn) {
     return { pillar: { key: 'stop', label: 'Stop integrity', lens: 'Crypto tail-risk', score: 0, note: 'An open/add rung is unstopped or mis-sided — worst case is unbounded.' }, blocker: 'A protective stop is missing or on the wrong side.' };
   }
-  const fracs = open.map(stopFracOf).filter((x): x is number => x != null);
+
+  // Width: for a live stop, distance vs the CURRENT mark (the relevant survival question
+  // now); for a projection, vs the planned entry as before.
+  const fracOf = (r: ArmRung): number | null => {
+    const e = effectiveStop(r);
+    if (e.px == null) return null;
+    if (e.source === 'live') {
+      const mid = live?.midByCoin[r.coin.toUpperCase()];
+      const ref = mid != null && mid > 0 ? mid : r.entryPx;
+      return ref != null && ref > 0 ? Math.abs(ref - e.px) / ref : null;
+    }
+    return stopFracOf(r);
+  };
+  const fracs = open.map(fracOf).filter((x): x is number => x != null);
   if (fracs.length === 0) return { pillar: { key: 'stop', label: 'Stop integrity', lens: 'Crypto tail-risk', score: 8, note: 'No new-exposure stops to assess.' }, blocker: null };
   const tightest = Math.min(...fracs);
+  const anyLive = open.some((r) => effectiveStop(r).source === 'live');
   // Very tight stops sit inside crypto noise → wick-bait. Heuristic (no ATR here).
   let score = tightest < 0.02 ? 3 : tightest < 0.04 ? 6 : tightest < 0.07 ? 8 : 10;
-  let note = `Tightest stop ${(tightest * 100).toFixed(1)}% from entry${tightest < 0.04 ? ' — tight for a high-vol alt (wick-out risk)' : ''}.`;
+  let note = `Tightest stop ${(tightest * 100).toFixed(1)}% from ${anyLive ? 'the mark (live resting stop)' : 'entry'}${tightest < 0.04 ? ' — tight for a high-vol alt (wick-out risk)' : ''}.`;
   // Placement hygiene: a stop ON a liquidity magnet caps the pillar regardless of width.
   let worstHygiene = 10;
   for (const r of open) {
-    if (r.stopPx == null || !(r.stopPx > 0)) continue;
-    const read = stopHygiene({ stopPx: r.stopPx, side: r.side, recentWicks: recentWicksByCoin?.[r.coin.toUpperCase()] ?? null });
+    const e = effectiveStop(r);
+    if (e.px == null || !(e.px > 0)) continue;
+    const read = stopHygiene({ stopPx: e.px, side: r.side, recentWicks: recentWicksByCoin?.[r.coin.toUpperCase()] ?? null });
     if (read.score < worstHygiene) {
       worstHygiene = read.score;
-      if (read.issues[0]) note += ` ${read.issues[0].note}`;
+      if (read.issues[0]) note += ` ${read.issues[0].note}${e.source === 'live' ? ' (live stop)' : ''}`;
     }
   }
   score = Math.min(score, worstHygiene === 10 ? score : worstHygiene);
@@ -287,7 +332,8 @@ export function reviewLadder(ladder: LadderWithRungs, ctx: LadderReviewContext):
   const blockers: string[] = [];
   const liq = liqSafety(open);
   const loss = lossSizing(risk, ctx.accountEquityUsd ?? null, ladder.maxTotalLossUsd); if (loss.blocker) blockers.push(loss.blocker);
-  const stop = stopIntegrity(open, warnings, ctx.recentWicksByCoin); if (stop.blocker) blockers.push(stop.blocker);
+  const firedCoins = new Set(ladder.rungs.filter((r) => (r.action === 'open' || r.action === 'add') && r.status === 'fired').map((r) => r.coin.toUpperCase()));
+  const stop = stopIntegrity(open, warnings, ctx.recentWicksByCoin, { firedCoins, liveStopByCoin: ctx.liveStopByCoin, midByCoin: ctx.midByCoin }); if (stop.blocker) blockers.push(stop.blocker);
   const pyr = pyramiding(ladder.rungs, warnings); if (pyr.blocker) blockers.push(pyr.blocker);
   const fund = fundingCarry(risk);
   const ops = operational(ladder, risk, warnings, ctx); if (ops.blocker) blockers.push(ops.blocker);
