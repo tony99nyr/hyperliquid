@@ -28,6 +28,14 @@ author (draft)  →  ARM (typed phrase, authorization)  →  watcher fires rung 
   to `done`, leaves the watcher set + the cockpit Armed panel, and the position lives on in
   Open Positions with its resting stop.
 
+## Close the loop weekly (`ladder-expectancy`)
+Run `pnpm skill:ladder-expectancy` weekly and after any ladder closes: it resolves terminal
+ladders into the outcome ledger (planned slip-aware R vs HL-realized R) and verdicts each
+setup type — KILL / HOLD / SIZE-UP / COLLECT — against a pre-registered bar. Also live now:
+the **leader guard** (a `leader_address`-tagged ladder auto-disarms when the leader exits —
+disarm-only), the **expiry-approaching page** (<12h unfired → one Discord alert), and the
+watch daemon's **time-stop advisory** (open >5d without progress → review).
+
 ## Grade it before you arm (`review-ladder`)
 Run `pnpm skill:review-ladder [--ladder <id>] --equity <usd>` to score any draft or open
 ladder 0/10 on RISK (liq safety, loss/equity, stop integrity, pyramiding, funding, ops) and
@@ -59,8 +67,10 @@ a *specific* ladder, **disarm** it (Ladders row → Disarm, or the cockpit panel
 - **If you rotate `LADDER_CRON_SECRET`** on Vercel, update the cron-job.org request header
   to match, or the watcher 401s and nothing fires. Verify with a longer log capture:
   `vercel logs hyperliquid-rouge.vercel.app | grep ladder-watch` — you want `200`, not `401`.
-- **Caveat:** there is no dead-watcher heartbeat alert yet. If the scheduler stops, armed
-  ladders silently stop firing. Check cron-job.org's execution history if in doubt.
+- **Dead-watcher alert:** the tick pings an external healthchecks.io dead-man's-switch
+  (`LADDER_WATCH_HEALTHCHECK_URL`, /start → success/fail after cron auth). If pings stop
+  (Period 5 min / Grace ~13 min), healthchecks pages you — a dead scheduler no longer
+  fails silently. Belt-and-suspenders: cron-job.org's execution history still works.
 
 ## What you'll see in the UI
 - **Ladders tab** — every ladder as a row (status: draft / armed / disarmed / **done = "✓

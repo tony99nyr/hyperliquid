@@ -216,12 +216,14 @@ the comments at the top of each vendored stub module.
 Each skill: one `.claude/skills/<name>/SKILL.md` (frontmatter + protocol) + one
 `scripts/<name>.ts` thin entrypoint + (where it has decision logic) a tested
 `src/lib/skills/<name>-business-logic.ts`. **The user decides and confirms every
-HUMAN-LANE ACTION.** The roster (11):
+HUMAN-LANE ACTION.** The roster (12):
 
 - **Advisory** (never trade): `analyze-traders`, `analyze-market-timeframes`,
   `assess-trade-health`, `review-previews`, `report-context-budget`,
   `review-ladder` (pro-desk 0/10 RISK + UPSIDE scorecard for open/draft ladders +
-  a build rubric — `pnpm skill:review-ladder`; never arms).
+  a build rubric; thesis pillar auto-scores from the rubric — never arms),
+  `ladder-expectancy` (the outcome LEDGER + weekly per-setup expectancy review:
+  KILL / HOLD / SIZE-UP / COLLECT against a pre-registered bar — never trades).
 - **Human action** (require an explicit `yes` / `--confirm yes` before
   `executeIntent`; never auto-fire): `open-position`, `advise-exit`.
 - **Orchestration**: `run-session` — the PICK→APPROVE active loop (entry popup,

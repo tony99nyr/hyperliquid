@@ -14,6 +14,12 @@ cockpit. This is the **operator method**; the system design lives in
 > a claim is an engine fact it cites the module; where it is operator discipline the engine
 > does **not** enforce, it says so explicitly — do not assume the system is catching it.
 
+> **Close the loop.** Every terminal ladder resolves into the outcome LEDGER and the weekly
+> **`ladder-expectancy`** review (KILL / HOLD / SIZE-UP / COLLECT per setup type against a
+> pre-registered bar — `pnpm skill:ladder-expectancy`). A SIZE-UP earns ONE risk-tier step;
+> a KILL is a standing stop-trading-this-setup instruction. Without this loop you cannot
+> tell skill from luck.
+
 > **Grade what you build.** That same panel is wired up as the **`review-ladder`** skill
 > (`pnpm skill:review-ladder [--ladder <id>] --equity <usd>`): it scores a draft or open
 > ladder 0/10 on RISK and UPSIDE pillars and flags hard blockers. Use it as the build
@@ -295,10 +301,13 @@ is gone. The plan for being wrong matters more than the entry plan:
 - **Thesis-break ≠ stop-hit.** If the reason you entered is gone — structure lost on the entry
   TF or a higher TF, the flagged divergence confirms against you, the copied leader exits/flips,
   funding flips hard against you — **disarm and manually exit now**. Riding a known-dead thesis
-  to the mechanical stop is a discipline failure, not patience.
+  to the mechanical stop is a discipline failure, not patience. *(The copied-leader case is now
+  AUTO-ENFORCED: tag the ladder with `leader_address` and the leader guard auto-disarms it when
+  the trader-watch feed shows a close/flip after arming — disarm-only, it never fires.)*
 - **Time-stop.** If the core hasn't moved toward the first add trigger by ~50% of time-to-expiry
   and isn't in profit, disarm pending adds and reassess — a thesis that isn't working is wrong
-  even if it isn't yet losing.
+  even if it isn't yet losing. *(The watch daemon now fires a `time-stop` advisory when an open
+  position is >5 days old without reaching +1% of notional — it alerts, you decide.)*
 - **A skipped add is the system working, not a failure.** The coverage gate skips an add
   (permanently — each rung is one-shot) whenever you're not in enough profit. **NEVER manually
   buy in to replace a skipped add** — chasing a rung the gate refused is martingale by hand.
