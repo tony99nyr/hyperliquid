@@ -73,6 +73,8 @@ export interface HlFill {
   sz: number;
   time: number;
   closedPnl: number | null;
+  /** Exchange fee on this fill (USD; HL sends it — needed for honest NET outcome math). */
+  fee: number | null;
   dir: string | null;
 }
 
@@ -394,6 +396,7 @@ function mapRawFill(f: Record<string, unknown>): HlFill {
     sz: num(f.sz),
     time: num(f.time),
     closedPnl: numOrNull(f.closedPnl),
+    fee: numOrNull(f.fee),
     dir: typeof f.dir === 'string' ? f.dir : null,
   };
 }

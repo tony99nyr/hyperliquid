@@ -86,6 +86,7 @@ describe('copy-monitor-analytics — alert derivation (pure)', () => {
       sz: 1,
       time: i,
       closedPnl: null,
+      fee: null,
       dir: 'Open Long',
     }));
     const analytics = buildCopyMonitorAnalytics(null, leaderState, fills);

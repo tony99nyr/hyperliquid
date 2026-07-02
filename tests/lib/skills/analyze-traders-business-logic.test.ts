@@ -46,6 +46,7 @@ function fills(n: number): HlFill[] {
     sz: 1,
     time: i,
     closedPnl: 0,
+    fee: null,
     dir: 'Open Long',
   }));
 }
