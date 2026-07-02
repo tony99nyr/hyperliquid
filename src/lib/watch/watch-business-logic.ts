@@ -37,12 +37,20 @@ export interface WatchConfig {
   drawdownPctOfNotional: number;
   /** |price − entry| / entry ≥ this fraction fires the big-move alert. */
   bigMovePct: number;
+  /** Time-stop: a position open longer than this many days that has NOT reached the
+   *  progress bar below fires the advisory 'time-stop' alert (a thesis that isn't
+   *  working is wrong even if it isn't yet losing — playbook §8). */
+  timeStopDays: number;
+  /** ...unless unrealized P&L ≥ this fraction of notional (the trade is "working"). */
+  timeStopMinProgressFracOfNotional: number;
 }
 
 /** Sensible defaults — conservative, surface real moves without spamming. */
 export const DEFAULT_WATCH_CONFIG: WatchConfig = {
   drawdownPctOfNotional: 0.05, // 5% of notional in unrealized loss
   bigMovePct: 0.05, // 5% move from entry
+  timeStopDays: 5, // a swing thesis should show progress within ~a week
+  timeStopMinProgressFracOfNotional: 0.01, // "working" = up ≥1% of notional
 };
 
 /** A computed alert: a stable code plus the severity to log it at. */
@@ -103,6 +111,9 @@ export function computeThresholdAlerts(
   markPx: number,
   uPnl: number,
   config: WatchConfig,
+  /** Epoch ms the position opened (null/undefined = unknown → time-stop skipped). */
+  openedAtMs?: number | null,
+  now?: number,
 ): string[] {
   const alerts: string[] = [];
   if (position.side === 'flat' || position.sz === 0) return alerts;
@@ -117,6 +128,14 @@ export function computeThresholdAlerts(
   if (position.avgEntryPx > 0) {
     const movePct = Math.abs(markPx - position.avgEntryPx) / position.avgEntryPx;
     if (movePct >= config.bigMovePct) alerts.push('big-move');
+  }
+
+  // Time-stop (ADVISORY — the no-auto-fire rule is untouched; this only alerts):
+  // open past the day bar without reaching the progress bar → the thesis is stalling.
+  if (openedAtMs != null && now != null && now > openedAtMs && notional > 0) {
+    const ageDays = (now - openedAtMs) / 86_400_000;
+    const progressing = uPnl >= config.timeStopMinProgressFracOfNotional * notional;
+    if (ageDays >= config.timeStopDays && !progressing) alerts.push('time-stop');
   }
 
   return alerts;
@@ -137,6 +156,10 @@ export function decideTick(input: {
   /** Alert codes that were active at the end of the previous tick (for dedup). */
   lastAlertCodes: string[];
   config?: WatchConfig;
+  /** Epoch ms the position opened (for the time-stop advisory); null = unknown. */
+  openedAtMs?: number | null;
+  /** Epoch ms "now" — injected with openedAtMs (pure code takes no clock). */
+  now?: number;
 }): WatchTickDecision {
   const config = input.config ?? DEFAULT_WATCH_CONFIG;
   const { position, markPx, health } = input;
@@ -167,7 +190,7 @@ export function decideTick(input: {
   }
 
   // Union of health alerts + watch threshold alerts, de-duplicated, stable order.
-  const thresholdAlerts = computeThresholdAlerts(position, markPx, uPnl, config);
+  const thresholdAlerts = computeThresholdAlerts(position, markPx, uPnl, config, input.openedAtMs, input.now);
   const activeAlertCodes = dedupePreserveOrder([...health.alerts, ...thresholdAlerts]);
 
   // New = active now AND not active last tick (state-change only — no spam).

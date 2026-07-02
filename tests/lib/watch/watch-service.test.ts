@@ -6,7 +6,7 @@ import type { HealthResult } from '@/lib/health/health-engine-types';
 // Mock every I/O dependency the watch-service touches.
 vi.mock('@/lib/cockpit/session-service', () => ({ listActiveSessions: vi.fn() }));
 vi.mock('@/lib/cockpit/fill-persistence-service', () => ({
-  loadOpenPositions: vi.fn(),
+  loadOpenPositionsWithOpenedAt: vi.fn(),
   writePnlSnapshot: vi.fn(),
 }));
 vi.mock('@/lib/cockpit/health-snapshot-service', () => ({ writeHealthSnapshot: vi.fn() }));
@@ -19,7 +19,7 @@ vi.mock('@/lib/hyperliquid/candle-service', () => ({ fetchCandles: vi.fn() }));
 
 import { listActiveSessions } from '@/lib/cockpit/session-service';
 import {
-  loadOpenPositions,
+  loadOpenPositionsWithOpenedAt,
   writePnlSnapshot,
 } from '@/lib/cockpit/fill-persistence-service';
 import { writeHealthSnapshot } from '@/lib/cockpit/health-snapshot-service';
@@ -38,7 +38,8 @@ const NOW = 1_700_000_900_000;
 const FRESH_TS = NOW - 60_000; // 1 minute old — well within the 2×15m window.
 
 const mActiveSessions = vi.mocked(listActiveSessions);
-const mLoadPositions = vi.mocked(loadOpenPositions);
+const mLoadPositions = vi.mocked(loadOpenPositionsWithOpenedAt);
+const withMeta = (ps: Position[]) => ps.map((position) => ({ position, openedAtMs: null }));
 const mWritePnl = vi.mocked(writePnlSnapshot);
 const mWriteHealth = vi.mocked(writeHealthSnapshot);
 const mWriteLog = vi.mocked(writeAnalysisLog);
@@ -170,7 +171,7 @@ describe('runWatchCycle — discovery + isolation', () => {
   it('monitors every open position across all active sessions', async () => {
     mActiveSessions.mockResolvedValue([session('s1'), session('s2')]);
     mLoadPositions.mockImplementation(async (sid: string) =>
-      sid === 's1' ? [pos({ coin: 'ETH' })] : [pos({ coin: 'BTC', avgEntryPx: 50000 })],
+      sid === 's1' ? withMeta([pos({ coin: 'ETH' })]) : withMeta([pos({ coin: 'BTC', avgEntryPx: 50000 })]),
     );
     mFetchCandles.mockImplementation(async (coin: string) => {
       const close = coin === 'ETH' ? 2100 : 51000;
@@ -203,7 +204,7 @@ describe('runWatchCycle — discovery + isolation', () => {
 
   it('isolates a failing tick — one session error does not abort the others', async () => {
     mActiveSessions.mockResolvedValue([session('s1'), session('s2')]);
-    mLoadPositions.mockResolvedValue([pos()]);
+    mLoadPositions.mockResolvedValue(withMeta([pos()]));
     // First position's mark fetch throws; second succeeds.
     mFetchCandles
       .mockRejectedValueOnce(new Error('network down'))
@@ -235,7 +236,7 @@ describe('runWatchCycle — discovery + isolation', () => {
   it('reset-on-clean-cycle: a no-HL-failure cycle clears the streak so the next cycle does NOT back off (FIX C)', async () => {
     vi.useRealTimers();
     mActiveSessions.mockResolvedValue([session('s1')]);
-    mLoadPositions.mockResolvedValue([pos()]);
+    mLoadPositions.mockResolvedValue(withMeta([pos()]));
 
     // Cycle 1: mark fetch fails → one HL failure → streak grows to 1.
     mFetchCandles.mockRejectedValueOnce(new Error('hl 429'));
@@ -262,7 +263,7 @@ describe('runWatchCycle — discovery + isolation', () => {
     mActiveSessions.mockResolvedValue([session('s1')]);
 
     // Cycle 1: a position fails → streak grows to 1.
-    mLoadPositions.mockResolvedValueOnce([pos()]);
+    mLoadPositions.mockResolvedValueOnce(withMeta([pos()]));
     mFetchCandles.mockRejectedValueOnce(new Error('hl down'));
     await runWatchCycle(new Map(), { now: NOW });
 
@@ -271,7 +272,7 @@ describe('runWatchCycle — discovery + isolation', () => {
     await runWatchCycle(new Map(), { now: NOW });
 
     // Cycle 3: a fresh position opens — must NOT be penalized by a stale streak.
-    mLoadPositions.mockResolvedValueOnce([pos()]);
+    mLoadPositions.mockResolvedValueOnce(withMeta([pos()]));
     mockMark(2100);
     const sleepSpy = vi.spyOn(globalThis, 'setTimeout');
     await runWatchCycle(new Map(), { now: NOW });
@@ -283,11 +284,11 @@ describe('runWatchCycle — discovery + isolation', () => {
     vi.useRealTimers();
     mActiveSessions.mockResolvedValue([session('s1')]);
     // Three positions, all failing the mark fetch.
-    mLoadPositions.mockResolvedValue([
+    mLoadPositions.mockResolvedValue(withMeta([
       pos({ coin: 'ETH' }),
       pos({ coin: 'BTC' }),
       pos({ coin: 'SOL' }),
-    ]);
+    ]));
     mFetchCandles.mockRejectedValue(new Error('hl outage'));
 
     // Cycle 1: builds a streak (3 failing positions ⇒ streak grows by ONE cycle).
@@ -306,7 +307,7 @@ describe('runWatchCycle — discovery + isolation', () => {
   it('cycle-start backoff is interruptible via shouldStop (FIX B)', async () => {
     vi.useRealTimers();
     mActiveSessions.mockResolvedValue([session('s1')]);
-    mLoadPositions.mockResolvedValue([pos()]);
+    mLoadPositions.mockResolvedValue(withMeta([pos()]));
     mFetchCandles.mockRejectedValue(new Error('hl outage'));
 
     // Build a large streak WITHOUT paying real backoff: shouldStop short-circuits
@@ -330,7 +331,7 @@ describe('runWatchCycle — discovery + isolation', () => {
     const state: AlertStateStore = new Map();
 
     // Cycle 1: position open → alerts fire + dedup baseline recorded.
-    mLoadPositions.mockResolvedValueOnce([pos()]);
+    mLoadPositions.mockResolvedValueOnce(withMeta([pos()]));
     await runWatchCycle(state, { now: NOW });
     expect(state.has('s1:ETH')).toBe(true);
     expect(mWriteLog.mock.calls.length).toBeGreaterThan(0);
@@ -343,7 +344,7 @@ describe('runWatchCycle — discovery + isolation', () => {
 
     // Cycle 3: position RE-OPENS → alerts re-fire (not suppressed by stale state).
     mWriteLog.mockClear();
-    mLoadPositions.mockResolvedValueOnce([pos()]);
+    mLoadPositions.mockResolvedValueOnce(withMeta([pos()]));
     await runWatchCycle(state, { now: NOW });
     expect(mWriteLog.mock.calls.length).toBeGreaterThan(0);
   });

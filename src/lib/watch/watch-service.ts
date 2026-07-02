@@ -23,7 +23,7 @@
 
 import { listActiveSessions } from '@/lib/cockpit/session-service';
 import {
-  loadOpenPositions,
+  loadOpenPositionsWithOpenedAt,
   writePnlSnapshot,
 } from '@/lib/cockpit/fill-persistence-service';
 import { writeHealthSnapshot } from '@/lib/cockpit/health-snapshot-service';
@@ -161,7 +161,7 @@ export async function runWatchTickForPosition(
   sessionId: string,
   position: Position,
   alertState: AlertStateStore,
-  opts: { config?: WatchConfig; now?: number } = {},
+  opts: { config?: WatchConfig; now?: number; openedAtMs?: number | null } = {},
 ): Promise<WatchTickDecision> {
   const now = opts.now ?? Date.now();
   const coin = position.coin;
@@ -183,6 +183,8 @@ export async function runWatchTickForPosition(
     health,
     lastAlertCodes: alertState.get(key) ?? [],
     config: opts.config,
+    openedAtMs: opts.openedAtMs ?? null,
+    now,
   });
 
   // Persist the health snapshot (drives the cockpit HealthPanel) and a pnl
@@ -254,14 +256,14 @@ export async function runWatchCycle(
 
   let first = true;
   for (const session of sessions) {
-    let positions: Position[];
+    let positions: Array<{ position: Position; openedAtMs: number | null }>;
     try {
-      positions = await loadOpenPositions(session.id);
+      positions = await loadOpenPositionsWithOpenedAt(session.id);
     } catch (err) {
       failures.push({ sessionId: session.id, coin: '*', error: extractErrorMessage(err) });
       continue;
     }
-    for (const position of positions) {
+    for (const { position, openedAtMs } of positions) {
       seenKeys.add(alertKey(session.id, position.coin));
       // Gentle per-position spacing so HL isn't hit at full rate (the harder
       // backoff is applied once per cycle above, FIX A). Interruptible (FIX B).
@@ -269,7 +271,7 @@ export async function runWatchCycle(
       first = false;
 
       try {
-        const decision = await runWatchTickForPosition(session.id, position, alertState, opts);
+        const decision = await runWatchTickForPosition(session.id, position, alertState, { ...opts, openedAtMs });
         monitored.push({ sessionId: session.id, coin: position.coin, decision });
       } catch (err) {
         cycleHlFailures++;

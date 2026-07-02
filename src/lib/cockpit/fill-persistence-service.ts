@@ -144,6 +144,29 @@ export async function loadOpenPositions(
 }
 
 /**
+ * loadOpenPositions plus each row's opened_at (epoch ms) — the watch daemon's
+ * time-stop advisory needs the position's age; plain loadOpenPositions keeps its
+ * original shape for every other caller. Additive, read-only.
+ */
+export async function loadOpenPositionsWithOpenedAt(
+  sessionId: string,
+  client: SupabaseClient = getServiceRoleClient(),
+): Promise<Array<{ position: Position; openedAtMs: number | null }>> {
+  const { data, error } = await client
+    .from('positions')
+    .select('coin, side, sz, avg_entry_px, realized_pnl_usd, fees_paid_usd, opened_at')
+    .eq('session_id', sessionId);
+  if (error) throw new Error(`loadOpenPositionsWithOpenedAt failed: ${error.message}`);
+  if (!data) return [];
+  return (data as Array<Parameters<typeof positionFromRow>[0] & { opened_at?: string | null }>)
+    .map((row) => ({
+      position: positionFromRow(row),
+      openedAtMs: row.opened_at ? Date.parse(row.opened_at) : null,
+    }))
+    .filter((r) => r.position.side !== 'flat' && r.position.sz > 0);
+}
+
+/**
  * Append a pnl snapshot row carrying a MARK price + unrealized P&L. Used by the
  * non-agent watch daemon: a fill writes a pnl row with mark=null (unrealized not
  * yet known), but the watch loop marks the open position to market each tick and

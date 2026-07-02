@@ -78,7 +78,7 @@ describe('decideTick — P&L computation', () => {
 });
 
 describe('computeThresholdAlerts — drawdown + big-move', () => {
-  const config: WatchConfig = { drawdownPctOfNotional: 0.05, bigMovePct: 0.05 };
+  const config: WatchConfig = { drawdownPctOfNotional: 0.05, bigMovePct: 0.05, timeStopDays: 5, timeStopMinProgressFracOfNotional: 0.01 };
 
   it('fires drawdown when unrealized loss exceeds % of notional', () => {
     // long 2 @ 2000 = $4000 notional; 5% = $200. mark 1850 ⇒ −$300 loss > $200.
@@ -185,5 +185,44 @@ describe('DEFAULT_WATCH_CONFIG', () => {
     const d = decideTick({ position: pos(), markPx: 2100, health: health(), lastAlertCodes: [] });
     expect(d.activeAlertCodes).toContain('big-move');
     expect(DEFAULT_WATCH_CONFIG.bigMovePct).toBe(0.05);
+  });
+});
+
+describe('computeThresholdAlerts — time-stop advisory', () => {
+  const NOW = 1_700_000_000_000;
+  const cfg: WatchConfig = { ...DEFAULT_WATCH_CONFIG }; // 5 days, 1% progress bar
+
+  it('fires when open past the day bar without reaching the progress bar', () => {
+    // long 2 @ 2000 = $4000 notional; progress bar = $40. uPnl +$10 → stalling.
+    const openedAt = NOW - 6 * 86_400_000;
+    const alerts = computeThresholdAlerts(pos(), 2005, 10, cfg, openedAt, NOW);
+    expect(alerts).toContain('time-stop');
+  });
+
+  it('silent when the trade is WORKING (progress ≥ bar) regardless of age', () => {
+    const openedAt = NOW - 30 * 86_400_000;
+    const alerts = computeThresholdAlerts(pos(), 2100, 200, cfg, openedAt, NOW);
+    expect(alerts).not.toContain('time-stop');
+  });
+
+  it('silent before the day bar', () => {
+    const openedAt = NOW - 2 * 86_400_000;
+    const alerts = computeThresholdAlerts(pos(), 2005, 10, cfg, openedAt, NOW);
+    expect(alerts).not.toContain('time-stop');
+  });
+
+  it('skipped entirely when openedAt/now are unknown (never guesses age)', () => {
+    expect(computeThresholdAlerts(pos(), 2005, 10, cfg, null, NOW)).not.toContain('time-stop');
+    expect(computeThresholdAlerts(pos(), 2005, 10, cfg, NOW - 10 * 86_400_000, undefined)).not.toContain('time-stop');
+  });
+
+  it('a stalling LOSING position fires time-stop too (loss also fails the progress bar)', () => {
+    const openedAt = NOW - 6 * 86_400_000;
+    const alerts = computeThresholdAlerts(pos(), 1980, -40, cfg, openedAt, NOW);
+    expect(alerts).toContain('time-stop');
+  });
+
+  it('time-stop is warn severity (advisory, not danger)', () => {
+    expect(severityForAlertCode('time-stop')).toBe('warn');
   });
 });
