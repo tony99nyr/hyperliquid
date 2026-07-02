@@ -14,7 +14,8 @@
 
 import { parseArgs, optionalNumber, header, line, run } from './_skill-runtime';
 import { listLaddersWithRungs, getLadderWithRungs } from '@/lib/ladder/ladder-service';
-import { reviewLadder, type LadderReviewScorecard } from '@/lib/skills/review-ladder-business-logic';
+import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
+import { reviewLadder, rubricSignalScore, type LadderReviewScorecard } from '@/lib/skills/review-ladder-business-logic';
 import { fetchAllMids, fetchMetaAndAssetCtxs } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { validateEnv } from '@/lib/env/env';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
@@ -66,10 +67,45 @@ run(async () => {
   const midByCoin = Object.fromEntries(coins.map((c) => [c, Number.isFinite(mids[c]) ? mids[c] : null]));
   const accountEquityUsd = Number.isFinite(equity) ? equity : null;
 
-  const baseCtx = { midByCoin, fundingByCoin, accountEquityUsd, signalScore: signal, timingScore: timing, now } as const;
+  // Auto-signal from the rubric (ADR-0006) when the operator didn't hand-score: the
+  // freshest rubric_scores row per (coin, side), ≤24h old, mapped 0-100 → 0-10. A
+  // kill-gated rubric is a hard 0 (the rubric says NO TRADE). Fail-soft: no row/stale/
+  // fetch error → null → the pillar renders neutral + "owed" exactly as before.
+  const rubricSignalByLadder = new Map<string, number | null>();
+  const rubricReasonByLadder = new Map<string, string>();
+  if (signal == null) {
+    try {
+      const db = getServiceRoleClient();
+      for (const l of ladders) {
+        const coin = (l.rungs[0]?.coin ?? '').toUpperCase();
+        const side = l.rungs.find((r) => r.action === 'open')?.side ?? l.rungs[0]?.side ?? 'long';
+        const { data } = await db
+          .from('rubric_scores')
+          .select('opportunity,computed_at,no_trade_reason')
+          .eq('coin', coin).eq('side', side)
+          .order('computed_at', { ascending: false }).limit(1);
+        const row = data?.[0];
+        const score = row
+          ? rubricSignalScore(row.opportunity as number, Date.parse(row.computed_at as string), now, (row.no_trade_reason as string | null) ?? null)
+          : null;
+        rubricSignalByLadder.set(l.id, score);
+        if (score != null && row?.no_trade_reason) rubricReasonByLadder.set(l.id, row.no_trade_reason as string);
+      }
+    } catch { /* fail-soft — pillar falls back to neutral+owed */ }
+  }
+  const ctxFor = (l: LadderWithRungs) => {
+    const auto = signal == null ? (rubricSignalByLadder.get(l.id) ?? null) : null;
+    const reason = rubricReasonByLadder.get(l.id);
+    return {
+      midByCoin, fundingByCoin, accountEquityUsd, now,
+      signalScore: signal ?? auto,
+      timingScore: timing,
+      signalSource: signal != null ? 'operator' : auto != null ? `rubric ADR-0006, auto${reason ? ` — ${reason}` : ''}` : null,
+    };
+  };
   // First pass for book heat. An OCO group is ONE position (one leg fires → the sibling
   // auto-disarms), so a group contributes only its WORST leg — else a straddle double-counts.
-  const first = ladders.map((l) => reviewLadder(l, { ...baseCtx, otherLaddersWorstCaseUsd: null }));
+  const first = ladders.map((l) => reviewLadder(l, { ...ctxFor(l), otherLaddersWorstCaseUsd: null }));
   const wcById = new Map(first.map((s) => [s.ladderId, s.worstCaseLossWithFundingUsd]));
   const groupWc = new Map<string, number>();
   for (const l of ladders) {
@@ -82,7 +118,7 @@ run(async () => {
 
   for (const l of ladders) {
     const others = bookHeat - (wcById.get(l.id) ?? 0);
-    const sc = ladders.length > 1 ? reviewLadder(l, { ...baseCtx, otherLaddersWorstCaseUsd: others }) : first[0];
+    const sc = ladders.length > 1 ? reviewLadder(l, { ...ctxFor(l), otherLaddersWorstCaseUsd: others }) : first[0];
     printScorecard(sc);
     if (sessionId) {
       await writeAnalysisLog({

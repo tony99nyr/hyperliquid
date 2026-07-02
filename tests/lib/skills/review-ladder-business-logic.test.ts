@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reviewLadder, type LadderReviewContext } from '@/lib/skills/review-ladder-business-logic';
+import { reviewLadder, rubricSignalScore, RUBRIC_SIGNAL_MAX_AGE_MS, type LadderReviewContext } from '@/lib/skills/review-ladder-business-logic';
 import type { LadderRung, LadderWithRungs, RungAction } from '@/lib/ladder/ladder-types';
 
 const NOW = 1_700_000_000_000;
@@ -95,5 +95,28 @@ describe('reviewLadder — judgment pillar', () => {
     const sc = reviewLadder(ladder(CLEAN), { ...ctx, signalScore: 8, timingScore: 6 });
     const t = sc.upsidePillars.find((p) => p.key === 'thesis')!;
     expect(t.score).toBe(7); // mean(8,6)
+  });
+  it('names the signal source in the note', () => {
+    const sc = reviewLadder(ladder(CLEAN), { ...ctx, signalScore: 7, signalSource: 'rubric ADR-0006, auto' });
+    expect(sc.upsidePillars.find((p) => p.key === 'thesis')!.note).toMatch(/rubric ADR-0006/);
+  });
+});
+
+describe('rubricSignalScore (rubric → thesis pillar)', () => {
+  it('maps opportunity 0-100 → 0-10 when fresh', () => {
+    expect(rubricSignalScore(63, NOW - 3_600_000, NOW)).toBe(6.3);
+    expect(rubricSignalScore(100, NOW, NOW)).toBe(10);
+    expect(rubricSignalScore(0, NOW, NOW)).toBe(0);
+  });
+  it('returns null when stale, missing, or from the future', () => {
+    expect(rubricSignalScore(63, NOW - RUBRIC_SIGNAL_MAX_AGE_MS - 1, NOW)).toBeNull();
+    expect(rubricSignalScore(63, null, NOW)).toBeNull();
+    expect(rubricSignalScore(null, NOW, NOW)).toBeNull();
+    expect(rubricSignalScore(63, NOW + 60_000, NOW)).toBeNull();
+  });
+  it("only 'both-gated' (the kill-gates) zeroes the score; advisory reasons keep the number", () => {
+    expect(rubricSignalScore(80, NOW, NOW, 'both-gated')).toBe(0);
+    expect(rubricSignalScore(35, NOW, NOW, 'below-bar')).toBe(3.5);
+    expect(rubricSignalScore(35, NOW, NOW, 'portfolio-cap')).toBe(3.5);
   });
 });

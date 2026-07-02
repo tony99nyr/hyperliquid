@@ -62,7 +62,32 @@ export interface LadderReviewContext {
   /** Optional judgment inputs (0-10) the caller supplies after a market/trader read. */
   signalScore?: number | null;
   timingScore?: number | null;
+  /** Where signalScore came from ('operator', 'rubric (ADR-0006)', …) — shown in the note. */
+  signalSource?: string | null;
   now: number;
+}
+
+/** Freshness window inside which a rubric row may stand in for the signal score. */
+export const RUBRIC_SIGNAL_MAX_AGE_MS = 24 * 3_600_000;
+
+/**
+ * Map a rubric `opportunity` (0-100, ADR-0006) onto the 0-10 signal score — the
+ * deterministic stand-in for the judgment pillar when the operator hasn't hand-scored.
+ * Returns null (⇒ pillar falls back to neutral+owed) when the row is missing or stale.
+ * Only 'both-gated' zeroes the score (the boolean KILL-GATES fired — the rubric says NO
+ * TRADE); the other no-trade reasons (below-bar / margin-too-thin / …) are advisory and
+ * already expressed in the low opportunity number itself. PURE.
+ */
+export function rubricSignalScore(
+  opportunity: number | null,
+  computedAtMs: number | null,
+  now: number,
+  noTradeReason?: string | null,
+): number | null {
+  if (computedAtMs == null || !(now - computedAtMs <= RUBRIC_SIGNAL_MAX_AGE_MS) || !(now >= computedAtMs)) return null;
+  if (noTradeReason === 'both-gated') return 0;
+  if (opportunity == null || !Number.isFinite(opportunity)) return null;
+  return clamp(Math.round((opportunity / 10) * 10) / 10);
 }
 
 const clamp = (n: number, lo = 0, hi = 10): number => Math.max(lo, Math.min(hi, n));
@@ -220,7 +245,8 @@ function thesisTiming(ctx: LadderReviewContext): PillarScore {
   if (ctx.signalScore != null) parts.push(clamp(ctx.signalScore));
   if (ctx.timingScore != null) parts.push(clamp(ctx.timingScore));
   if (parts.length === 0) return { key: 'thesis', label: 'Thesis & timing', lens: 'Judgment (analyze-market / traders)', score: 5, note: 'NOT scored — run analyze-market / analyze-traders and pass signal/timing (0-10).' };
-  return { key: 'thesis', label: 'Thesis & timing', lens: 'Judgment (analyze-market / traders)', score: mean(parts), note: `Signal ${ctx.signalScore ?? '—'}/10, timing ${ctx.timingScore ?? '—'}/10 (caller-supplied).` };
+  const src = ctx.signalSource ?? 'caller-supplied';
+  return { key: 'thesis', label: 'Thesis & timing', lens: 'Judgment (analyze-market / traders)', score: mean(parts), note: `Signal ${ctx.signalScore ?? '—'}/10 (${src}), timing ${ctx.timingScore ?? '—'}/10.` };
 }
 
 /* ----------------------------- compose ----------------------------- */
