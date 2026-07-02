@@ -17,6 +17,7 @@
 import type { LadderWithRungs } from '@/lib/ladder/ladder-types';
 import { STOP_SLIPPAGE_TOL, type LadderRiskRead } from '@/lib/ladder/ladder-risk-business-logic';
 import { resolveArmRung, validateLadderForArm, type ArmRung } from '@/lib/ladder/ladder-arm-business-logic';
+import { stopHygiene } from '@/lib/ladder/ladder-stop-hygiene-business-logic';
 import { resolveCoinMaxLeverage, MMR } from '@/lib/trading/leverage-business-logic';
 
 /** A single scored category. `score` is 0-10 (higher = better: safer for risk pillars,
@@ -64,6 +65,9 @@ export interface LadderReviewContext {
   timingScore?: number | null;
   /** Where signalScore came from ('operator', 'rubric (ADR-0006)', …) — shown in the note. */
   signalSource?: string | null;
+  /** Salient recent wick extremes per coin on the STOP side (lows for a long) — feeds the
+   *  stop-hygiene check. Optional; absent ⇒ only the round-number magnet check runs. */
+  recentWicksByCoin?: Record<string, number[] | null>;
   now: number;
 }
 
@@ -140,9 +144,10 @@ function lossSizing(risk: LadderRiskRead, equity: number | null, capUsd: number 
   return { pillar: { key: 'loss', label: 'Loss cap & sizing', lens: 'Risk (CRO)', score, note: `Slip-aware worst case $${wc.toFixed(0)} = ${pct.toFixed(1)}% of equity${blocker ? ' — EXCEEDS the cap' : ''}.` }, blocker };
 }
 
-/** Stop integrity (Tail-risk lens): every exposure rung stopped on the loss side, and not
- *  pathologically tight (wick-bait). */
-function stopIntegrity(open: ArmRung[], warnings: string[]): { pillar: PillarScore; blocker: string | null } {
+/** Stop integrity (Tail-risk lens): every exposure rung stopped on the loss side, not
+ *  pathologically tight (wick-bait), and not sitting ON liquidity (round numbers / recent
+ *  wick pools — the stop-hygiene check). */
+function stopIntegrity(open: ArmRung[], warnings: string[], recentWicksByCoin?: Record<string, number[] | null>): { pillar: PillarScore; blocker: string | null } {
   const naked = open.some((r) => r.stopPx == null || !(r.stopPx > 0));
   const lossSideWarn = warnings.some((w) => /not on the loss side|must carry a protective stop|UNBOUNDED/i.test(w));
   if (naked || lossSideWarn) {
@@ -152,8 +157,20 @@ function stopIntegrity(open: ArmRung[], warnings: string[]): { pillar: PillarSco
   if (fracs.length === 0) return { pillar: { key: 'stop', label: 'Stop integrity', lens: 'Crypto tail-risk', score: 8, note: 'No new-exposure stops to assess.' }, blocker: null };
   const tightest = Math.min(...fracs);
   // Very tight stops sit inside crypto noise → wick-bait. Heuristic (no ATR here).
-  const score = tightest < 0.02 ? 3 : tightest < 0.04 ? 6 : tightest < 0.07 ? 8 : 10;
-  return { pillar: { key: 'stop', label: 'Stop integrity', lens: 'Crypto tail-risk', score, note: `Tightest stop ${(tightest * 100).toFixed(1)}% from entry${tightest < 0.04 ? ' — tight for a high-vol alt (wick-out risk)' : ''}.` }, blocker: null };
+  let score = tightest < 0.02 ? 3 : tightest < 0.04 ? 6 : tightest < 0.07 ? 8 : 10;
+  let note = `Tightest stop ${(tightest * 100).toFixed(1)}% from entry${tightest < 0.04 ? ' — tight for a high-vol alt (wick-out risk)' : ''}.`;
+  // Placement hygiene: a stop ON a liquidity magnet caps the pillar regardless of width.
+  let worstHygiene = 10;
+  for (const r of open) {
+    if (r.stopPx == null || !(r.stopPx > 0)) continue;
+    const read = stopHygiene({ stopPx: r.stopPx, side: r.side, recentWicks: recentWicksByCoin?.[r.coin.toUpperCase()] ?? null });
+    if (read.score < worstHygiene) {
+      worstHygiene = read.score;
+      if (read.issues[0]) note += ` ${read.issues[0].note}`;
+    }
+  }
+  score = Math.min(score, worstHygiene === 10 ? score : worstHygiene);
+  return { pillar: { key: 'stop', label: 'Stop integrity', lens: 'Crypto tail-risk', score, note }, blocker: null };
 }
 
 /** Pyramiding discipline (Process lens): decreasing add size + aggregate-stop tightening,
@@ -270,7 +287,7 @@ export function reviewLadder(ladder: LadderWithRungs, ctx: LadderReviewContext):
   const blockers: string[] = [];
   const liq = liqSafety(open);
   const loss = lossSizing(risk, ctx.accountEquityUsd ?? null, ladder.maxTotalLossUsd); if (loss.blocker) blockers.push(loss.blocker);
-  const stop = stopIntegrity(open, warnings); if (stop.blocker) blockers.push(stop.blocker);
+  const stop = stopIntegrity(open, warnings, ctx.recentWicksByCoin); if (stop.blocker) blockers.push(stop.blocker);
   const pyr = pyramiding(ladder.rungs, warnings); if (pyr.blocker) blockers.push(pyr.blocker);
   const fund = fundingCarry(risk);
   const ops = operational(ladder, risk, warnings, ctx); if (ops.blocker) blockers.push(ops.blocker);

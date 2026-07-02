@@ -17,6 +17,7 @@ import { listLaddersWithRungs, getLadderWithRungs } from '@/lib/ladder/ladder-se
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import { reviewLadder, rubricSignalScore, type LadderReviewScorecard } from '@/lib/skills/review-ladder-business-logic';
 import { fetchAllMids, fetchMetaAndAssetCtxs } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { fetchCandles } from '@/lib/hyperliquid/candle-service';
 import { validateEnv } from '@/lib/env/env';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 import type { LadderWithRungs } from '@/lib/ladder/ladder-types';
@@ -67,6 +68,23 @@ run(async () => {
   const midByCoin = Object.fromEntries(coins.map((c) => [c, Number.isFinite(mids[c]) ? mids[c] : null]));
   const accountEquityUsd = Number.isFinite(equity) ? equity : null;
 
+  // Salient recent wick extremes per (coin, ladder side) — the 3 deepest stop-side wicks of
+  // the last ~48h of 1h candles — for the stop-hygiene check. Fail-soft: no candles → the
+  // hygiene check degrades to round-number-only.
+  const recentWicksByCoin: Record<string, number[] | null> = {};
+  for (const l of ladders) {
+    const coin = (l.rungs[0]?.coin ?? '').toUpperCase();
+    if (!coin || coin in recentWicksByCoin) continue;
+    const side = l.rungs.find((r) => r.action === 'open')?.side ?? 'long';
+    try {
+      const res = await fetchCandles(coin, '1h', now - 48 * 3_600_000, now);
+      const candles = res.candles ?? [];
+      recentWicksByCoin[coin] = side === 'long'
+        ? candles.map((c) => c.low).sort((a, b) => a - b).slice(0, 3)
+        : candles.map((c) => c.high).sort((a, b) => b - a).slice(0, 3);
+    } catch { recentWicksByCoin[coin] = null; }
+  }
+
   // Auto-signal from the rubric (ADR-0006) when the operator didn't hand-score: the
   // freshest rubric_scores row per (coin, side), ≤24h old, mapped 0-100 → 0-10. A
   // kill-gated rubric is a hard 0 (the rubric says NO TRADE). Fail-soft: no row/stale/
@@ -97,7 +115,7 @@ run(async () => {
     const auto = signal == null ? (rubricSignalByLadder.get(l.id) ?? null) : null;
     const reason = rubricReasonByLadder.get(l.id);
     return {
-      midByCoin, fundingByCoin, accountEquityUsd, now,
+      midByCoin, fundingByCoin, accountEquityUsd, recentWicksByCoin, now,
       signalScore: signal ?? auto,
       timingScore: timing,
       signalSource: signal != null ? 'operator' : auto != null ? `rubric ADR-0006, auto${reason ? ` — ${reason}` : ''}` : null,
