@@ -12,7 +12,7 @@
 
 import 'server-only';
 import { isLadderAutofireEnabled } from './ladder-flags';
-import { listLadders, getLadderWithRungs } from './ladder-service';
+import { listLadders, getLadderWithRungs, markLadderExpired } from './ladder-service';
 import { evaluateLadderRungs, type RungMarketSnapshot } from './ladder-trigger-evaluator';
 import { snapshotFromCandleResult } from './ladder-watch-business-logic';
 import { performLadderRungFire, type LadderFireResult } from './ladder-fire-service';
@@ -45,8 +45,20 @@ export async function runLadderWatchTick(args: { now: number }): Promise<LadderW
   const armedList = await listLadders('armed');
   if (armedList.length === 0) return { ...empty, autofireOff: false };
 
+  // PROACTIVE expiry sweep: an overdue ladder can't fire anyway (the fire path refuses),
+  // but left 'armed' it lies in the UI. Flip it to 'expired' now and skip evaluating it.
+  const live: typeof armedList = [];
+  for (const l of armedList) {
+    if (l.expiresAt && args.now >= Date.parse(l.expiresAt)) {
+      await markLadderExpired(l.id).catch(() => {}); // best-effort; the fire path still refuses
+    } else {
+      live.push(l);
+    }
+  }
+  if (live.length === 0) return { ...empty, autofireOff: false };
+
   // Load rungs for each armed ladder (listLadders omits them).
-  const ladders = (await Promise.all(armedList.map((l) => getLadderWithRungs(l.id)))).filter((l): l is LadderWithRungs => !!l);
+  const ladders = (await Promise.all(live.map((l) => getLadderWithRungs(l.id)))).filter((l): l is LadderWithRungs => !!l);
 
   // Distinct coins across PENDING rungs → one completed-candle snapshot each.
   const coins = new Set<string>();

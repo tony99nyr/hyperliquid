@@ -4,6 +4,7 @@ import {
   rungProximity,
   buildLadderChartLines,
   buildArmedEntryLines,
+  expiryReadout,
 } from '@/lib/ladder/ladder-projection-business-logic';
 import type { LadderRung } from '@/lib/ladder/ladder-types';
 
@@ -139,5 +140,26 @@ describe('buildArmedEntryLines', () => {
     const lines = buildArmedEntryLines(ladders, 'ETH');
     expect(lines).toHaveLength(1);
     expect(lines[0].price).toBe(1620);
+  });
+});
+
+describe('expiryReadout', () => {
+  const NOW = Date.parse('2026-07-01T00:00:00Z');
+  const at = (ms: number) => new Date(NOW + ms).toISOString();
+
+  it('compact units: days ≥48h, hours ≥90m, else minutes', () => {
+    expect(expiryReadout(at(72 * 3_600_000), NOW)).toEqual({ text: 'expires in 3d', urgency: 'ok' });
+    expect(expiryReadout(at(14 * 3_600_000), NOW)).toEqual({ text: 'expires in 14h', urgency: 'ok' });
+    expect(expiryReadout(at(45 * 60_000), NOW)).toEqual({ text: 'expires in 45m', urgency: 'warn' });
+  });
+
+  it('warns inside the final 6h and flags EXPIRED past due', () => {
+    expect(expiryReadout(at(5 * 3_600_000), NOW)?.urgency).toBe('warn');
+    expect(expiryReadout(at(-1), NOW)).toEqual({ text: 'EXPIRED', urgency: 'expired' });
+  });
+
+  it('null for missing/unparseable expiry', () => {
+    expect(expiryReadout(null, NOW)).toBeNull();
+    expect(expiryReadout('not-a-date', NOW)).toBeNull();
   });
 });

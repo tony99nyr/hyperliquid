@@ -45,11 +45,12 @@ describe('snapshotFromCandleResult — completed candle only, fail-closed', () =
 const isLadderAutofireEnabled = vi.fn();
 const listLadders = vi.fn();
 const getLadderWithRungs = vi.fn();
+const markLadderExpired = vi.fn();
 const fetchCandles = vi.fn();
 const performLadderRungFire = vi.fn();
 
 vi.mock('@/lib/ladder/ladder-flags', () => ({ isLadderAutofireEnabled: (...a: unknown[]) => isLadderAutofireEnabled(...a) }));
-vi.mock('@/lib/ladder/ladder-service', () => ({ listLadders: (...a: unknown[]) => listLadders(...a), getLadderWithRungs: (...a: unknown[]) => getLadderWithRungs(...a) }));
+vi.mock('@/lib/ladder/ladder-service', () => ({ listLadders: (...a: unknown[]) => listLadders(...a), getLadderWithRungs: (...a: unknown[]) => getLadderWithRungs(...a), markLadderExpired: (...a: unknown[]) => markLadderExpired(...a) }));
 vi.mock('@/lib/hyperliquid/candle-service', () => ({ fetchCandles: (...a: unknown[]) => fetchCandles(...a) }));
 vi.mock('@/lib/ladder/ladder-fire-service', () => ({ performLadderRungFire: (...a: unknown[]) => performLadderRungFire(...a) }));
 
@@ -66,6 +67,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   isLadderAutofireEnabled.mockReturnValue(true);
   listLadders.mockResolvedValue([{ id: 'L1' }]);
+  markLadderExpired.mockResolvedValue(undefined);
   getLadderWithRungs.mockResolvedValue(ladder([openRung()]));
   fetchCandles.mockResolvedValue({ candles: [candle(1900), candle(2050), candle(9999)], stale: false });
   performLadderRungFire.mockResolvedValue({ fired: true, skipped: null });
@@ -76,6 +78,16 @@ describe('runLadderWatchTick', () => {
     isLadderAutofireEnabled.mockReturnValue(false);
     const s = await runLadderWatchTick({ now: 0 });
     expect(s.autofireOff).toBe(true);
+    expect(fetchCandles).not.toHaveBeenCalled();
+    expect(performLadderRungFire).not.toHaveBeenCalled();
+  });
+
+  it('PROACTIVELY expires an overdue armed ladder and does not evaluate it', async () => {
+    const now = 1_700_000_000_000;
+    listLadders.mockResolvedValue([{ id: 'L1', expiresAt: new Date(now - 60_000).toISOString() }]);
+    const s = await runLadderWatchTick({ now });
+    expect(markLadderExpired).toHaveBeenCalledWith('L1');
+    expect(s.laddersEvaluated).toBe(0);
     expect(fetchCandles).not.toHaveBeenCalled();
     expect(performLadderRungFire).not.toHaveBeenCalled();
   });

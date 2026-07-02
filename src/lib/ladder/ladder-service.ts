@@ -283,6 +283,22 @@ export async function markLadderDone(id: string): Promise<void> {
 }
 
 /**
+ * Mark an ARMED ladder EXPIRED (status → 'expired'). The fire path already refuses +
+ * disarms an expired ladder lazily (when a trigger is met); this is the PROACTIVE sweep
+ * the watcher runs each tick so an overdue ladder never keeps displaying as "armed" in
+ * the UI. Armed-guarded (idempotent; terminal states are left as-is).
+ */
+export async function markLadderExpired(id: string): Promise<void> {
+  const db = getServiceRoleClient();
+  const { error } = await db
+    .from('ladders')
+    .update({ status: 'expired', disarmed_at: new Date().toISOString(), disarm_reason: 'expired', updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('status', 'armed');
+  if (error) throw new Error(`markLadderExpired failed: ${error.message}`);
+}
+
+/**
  * Soft-ARCHIVE a ladder — stamp archived_at so the active UI lists hide it, while the row
  * (+ rungs + ladder_fires) stays for the audit trail. CONDITIONAL on the ladder NOT being
  * 'armed' (an armed ladder is live authorization — never hide it) and not already archived.

@@ -17,7 +17,8 @@ import { css } from '@styled-system/css';
 import { GH, ZONE_COLORS, TERM, fmtPx } from './panel-styles';
 import { usePolledEndpoint } from '@/hooks/usePolledEndpoint';
 import { useHlOrderbook } from '@/hooks/useHlOrderbook';
-import { projectRung, rungProximity } from '@/lib/ladder/ladder-projection-business-logic';
+import { useNow } from '@/hooks/useNow';
+import { projectRung, rungProximity, expiryReadout } from '@/lib/ladder/ladder-projection-business-logic';
 import LadderDetailModal from './ladders/LadderDetailModal';
 import type { LadderWithRungs, LadderRung } from '@/lib/ladder/ladder-types';
 
@@ -63,6 +64,8 @@ export default function ArmedLaddersPanel({ coin = 'ETH' }: ArmedLaddersPanelPro
     setMarks((m) => (m[c] === px ? m : { ...m, [c]: px }));
   }, []);
   const [detailId, setDetailId] = useState<string | null>(null);
+  // Render-safe ticking clock for the expiry chips.
+  const now = useNow();
 
   if (ladders.length === 0) return null; // nothing armed → no panel
 
@@ -84,6 +87,10 @@ export default function ArmedLaddersPanel({ coin = 'ETH' }: ArmedLaddersPanelPro
             className={css({ borderRadius: '9px', padding: '8px', margin: '-8px -8px 0', cursor: 'pointer', transition: 'background .12s', _hover: { background: 'rgba(91,140,255,.09)' }, _focusVisible: { outline: '2px solid token(colors.github.link)', outlineOffset: '1px' } })}>
             <div className={css({ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' })}>
               <span className={css({ fontFamily: 'sans', fontSize: '11px', fontWeight: 'semibold', color: 'github.textBright', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })}>{l.title}</span>
+              {(() => {
+                const exp = expiryReadout(l.expiresAt, now);
+                return exp ? <span className={css({ fontFamily: 'mono', fontSize: '9px', fontWeight: 'semibold', flex: 'none' })} style={{ color: exp.urgency === 'expired' ? ZONE_COLORS.danger : exp.urgency === 'warn' ? ZONE_COLORS.warn : GH.textMuted }}>⏱ {exp.text.replace('expires in ', '')}</span> : null;
+              })()}
               <span aria-hidden className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted', flex: 'none' })}>details ›</span>
             </div>
             <div className={css({ display: 'flex', flexDirection: 'column', gap: '5px' })}>

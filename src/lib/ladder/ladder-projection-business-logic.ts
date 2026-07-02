@@ -130,6 +130,33 @@ export function buildLadderChartLines(rungs: LadderRung[], coin: string): Ladder
   return lines;
 }
 
+/** Operator-facing expiry readout for a ladder. */
+export interface ExpiryReadout {
+  /** Compact label, e.g. "expires in 14h", "expires in 32m", "EXPIRED". */
+  text: string;
+  /** ok (>6h) / warn (≤6h) / expired — drives the display color. */
+  urgency: 'ok' | 'warn' | 'expired';
+}
+
+/**
+ * Time-to-expiry readout (an armed ladder is time-boxed authorization — the operator must
+ * SEE the clock). PURE: `nowMs` is injected. Null when the ladder has no expiry (drafts
+ * may not yet). Compact units: days when ≥48h, hours when ≥90m, else minutes.
+ */
+export function expiryReadout(expiresAt: string | null, nowMs: number): ExpiryReadout | null {
+  if (!expiresAt) return null;
+  const exp = Date.parse(expiresAt);
+  if (!Number.isFinite(exp)) return null;
+  const ms = exp - nowMs;
+  if (ms <= 0) return { text: 'EXPIRED', urgency: 'expired' };
+  const mins = ms / 60_000;
+  const text =
+    mins >= 48 * 60 ? `expires in ${Math.round(mins / (24 * 60))}d`
+    : mins >= 90 ? `expires in ${Math.round(mins / 60)}h`
+    : `expires in ${Math.max(1, Math.round(mins))}m`;
+  return { text, urgency: mins <= 6 * 60 ? 'warn' : 'ok' };
+}
+
 /** The entry (trigger) level of an ARMED, still-PENDING `open` rung, tagged with the
  *  ladder's id8 so the operator can tell which ladder a line belongs to. */
 export interface ArmedEntryLine {

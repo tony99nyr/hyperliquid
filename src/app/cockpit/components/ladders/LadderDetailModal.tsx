@@ -20,9 +20,10 @@ import { css } from '@styled-system/css';
 import { GH, ZONE_COLORS, TERM, fmtPx, fmtUsd, fmtCompactUsd, fmtPctSigned } from '../panel-styles';
 import { SummaryRow } from '../approval-popup-parts';
 import { useHlOrderbook } from '@/hooks/useHlOrderbook';
+import { useNow } from '@/hooks/useNow';
 import { resolveArmRung } from '@/lib/ladder/ladder-arm-business-logic';
 import { computeLadderRisk } from '@/lib/ladder/ladder-risk-business-logic';
-import { projectRung, rungProximity } from '@/lib/ladder/ladder-projection-business-logic';
+import { projectRung, rungProximity, expiryReadout } from '@/lib/ladder/ladder-projection-business-logic';
 import LadderChart from './LadderChart';
 import type { LadderWithRungs, LadderRung } from '@/lib/ladder/ladder-types';
 
@@ -59,6 +60,8 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [marks, setMarks] = useState<Record<string, number | null>>({});
+  // Render-safe ticking clock for the expiry chip.
+  const now = useNow();
 
   const dialogRef = useRef<HTMLElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -187,6 +190,14 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
             <>
               <span className={css({ fontFamily: 'mono', fontSize: '10px', fontWeight: 'bold', borderRadius: '5px', paddingX: '8px', paddingY: '4px' })}
                 style={{ background: isLive ? 'rgba(248,81,73,.16)' : 'rgba(255,255,255,.06)', color: isLive ? ZONE_COLORS.danger : GH.textMuted }}>{ladder.mode.toUpperCase()}</span>
+              {(() => {
+                const exp = expiryReadout(ladder.expiresAt, now);
+                return exp ? (
+                  <span data-testid="ladder-detail-expiry" title={ladder.expiresAt ? `Authorization expires ${new Date(ladder.expiresAt).toLocaleString()}` : undefined}
+                    className={css({ fontFamily: 'mono', fontSize: '10px', fontWeight: 'bold', borderRadius: '5px', paddingX: '7px', paddingY: '4px' })}
+                    style={{ background: exp.urgency === 'expired' ? 'rgba(242,77,94,.16)' : exp.urgency === 'warn' ? 'rgba(217,164,65,.14)' : 'rgba(255,255,255,.06)', color: exp.urgency === 'expired' ? ZONE_COLORS.danger : exp.urgency === 'warn' ? ZONE_COLORS.warn : GH.textMuted }}>⏱ {exp.text}</span>
+                ) : null;
+              })()}
               {ladder.ocoGroupId && (
                 <span data-testid="ladder-oco-badge" title="OCO — the first leg of this straddle to fire auto-disarms the other" className={css({ fontFamily: 'mono', fontSize: '10px', fontWeight: 'bold', borderRadius: '5px', paddingX: '7px', paddingY: '4px' })} style={{ background: 'rgba(91,140,255,.14)', color: TERM.accent }}>⇄ OCO</span>
               )}
@@ -255,7 +266,8 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
                   <SummaryRow label="Total notional" value={risk.totalNotionalUsd > 0 ? fmtCompactUsd(risk.totalNotionalUsd) : '—'} color={GH.textBright} />
                   <SummaryRow label="Total margin" value={risk.totalMarginUsd > 0 ? fmtUsd(risk.totalMarginUsd).replace('+', '') : '—'} color={GH.textBright} />
                   {risk.perCoin.map((c) => <SummaryRow key={`${c.coin}-${c.side}`} label={`${c.coin} ${c.side} liq @ max`} value={c.aggregateLiqPx == null ? '—' : fmtPx(c.aggregateLiqPx)} color={GH.text} />)}
-                  <SummaryRow label="Caps" value={`${ladder.maxTotalNotionalUsd ? fmtCompactUsd(ladder.maxTotalNotionalUsd) : '—'} / ${ladder.maxTotalLossUsd ? fmtUsd(ladder.maxTotalLossUsd).replace('+', '') : '—'} loss`} color={GH.textMuted} last />
+                  <SummaryRow label="Caps" value={`${ladder.maxTotalNotionalUsd ? fmtCompactUsd(ladder.maxTotalNotionalUsd) : '—'} / ${ladder.maxTotalLossUsd ? fmtUsd(ladder.maxTotalLossUsd).replace('+', '') : '—'} loss`} color={GH.textMuted} />
+                  <SummaryRow label="Authorization expires" value={ladder.expiresAt ? new Date(ladder.expiresAt).toLocaleString() : '—'} color={GH.textMuted} last />
                 </div>
               )}
               {risk && risk.breaches.length > 0 && (
