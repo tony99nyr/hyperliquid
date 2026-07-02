@@ -36,8 +36,8 @@ export async function runLeaderGuard(now = Date.now()): Promise<LeaderGuardSumma
 
   const [posRes, actRes] = await Promise.all([
     db.from('leader_positions').select('leader_address,coin,side,updated_at').in('leader_address', addresses),
-    db.from('leader_actions').select('leader_address,coin,kind,created_at').in('leader_address', addresses)
-      .gte('created_at', new Date(now - ACTION_LOOKBACK_MS).toISOString()),
+    db.from('leader_actions').select('leader_address,coin,kind,detected_at').in('leader_address', addresses)
+      .gte('detected_at', new Date(now - ACTION_LOOKBACK_MS).toISOString()),
   ]);
   if (posRes.error) throw new Error(`leader guard positions read failed: ${posRes.error.message}`);
   if (actRes.error) throw new Error(`leader guard actions read failed: ${actRes.error.message}`);
@@ -57,7 +57,7 @@ export async function runLeaderGuard(now = Date.now()): Promise<LeaderGuardSumma
     (actByLeader.get(key) ?? actByLeader.set(key, []).get(key)!).push({
       coin: r.coin as string,
       kind: r.kind as LeaderActionRow['kind'],
-      atMs: Date.parse(r.created_at as string),
+      atMs: Date.parse(r.detected_at as string),
     });
   }
 
