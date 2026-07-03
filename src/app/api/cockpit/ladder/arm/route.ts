@@ -96,6 +96,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // hold's carry can't silently bust maxTotalLossUsd). A funding-fetch failure must NOT
   // block arming: degrade to no-funding (the prior behavior).
   let fundingRateByCoin: Record<string, number | null> = {};
+  let fundingNotice: string | null = null;
   try {
     const ctxs = await fetchMetaAndAssetCtxs(validateEnv().HL_NETWORK);
     fundingRateByCoin = Object.fromEntries(
@@ -103,6 +104,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   } catch {
     fundingRateByCoin = {};
+    // Degrading is correct (funding must never block an arm) — but say so: the loss cap
+    // below was computed WITHOUT the funding carry estimate.
+    fundingNotice = 'funding fetch failed — the loss cap was validated without the funding-carry estimate';
   }
   const validation = validateLadderForArm({
     title: ladder.title,
@@ -161,5 +165,5 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }).catch(() => {});
   }
 
-  return NextResponse.json({ ok: true, ladderId: ladder.id, preconditionHash, riskPreview: validation.risk });
+  return NextResponse.json({ ok: true, ladderId: ladder.id, preconditionHash, notice: fundingNotice, riskPreview: validation.risk });
 }

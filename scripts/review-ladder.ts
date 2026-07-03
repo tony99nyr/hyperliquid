@@ -62,9 +62,15 @@ run(async () => {
   const coins = Array.from(new Set(ladders.flatMap((l) => l.rungs.map((r) => r.coin.toUpperCase()))));
   const mids = await fetchAllMids(network, { uncached: true });
   let fundingByCoin: Record<string, number | null> = {};
+  const oiUsdByCoin: Record<string, number | null> = {};
   try {
     const ctxs = await fetchMetaAndAssetCtxs(network);
     fundingByCoin = Object.fromEntries(coins.map((c) => [c, ctxs[c]?.fundingHourly ?? null]));
+    for (const c of coins) {
+      const oi = ctxs[c]?.openInterest;
+      const mid = Number.isFinite(mids[c]) ? mids[c] : null;
+      oiUsdByCoin[c] = oi != null && mid != null ? oi * mid : null;
+    }
   } catch { fundingByCoin = {}; }
   const midByCoin = Object.fromEntries(coins.map((c) => [c, Number.isFinite(mids[c]) ? mids[c] : null]));
   const accountEquityUsd = Number.isFinite(equity) ? equity : null;
@@ -180,6 +186,9 @@ run(async () => {
     const others = bookHeat - (wcById.get(l.id) ?? 0);
     const sc = ladders.length > 1 ? reviewLadder(l, { ...ctxFor(l), otherLaddersWorstCaseUsd: others }) : first[0];
     printScorecard(sc);
+    const primary = (l.rungs[0]?.coin ?? '').toUpperCase();
+    const oi = oiUsdByCoin[primary];
+    if (oi != null) line(`  context: ${primary} open interest ≈ $${(oi / 1e6).toFixed(1)}M (crowding gauge — big OI swings mark fragile moves)`);
     // Persist the judgment pillar onto the ladder (latest review wins) so the outcome
     // ledger can later slice expectancy by thesis quality. Skill-layer metadata — the
     // fire path never reads these. Fail-soft: a write error never breaks the review.
