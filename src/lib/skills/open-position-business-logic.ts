@@ -69,9 +69,12 @@ function round(n: number, dp: number): number {
 export function buildOpenProposal(input: OpenSetupInput): OpenProposal {
   const warnings: string[] = [];
 
-  if (input.entryPx <= 0) warnings.push('entryPx must be positive.');
-  if (input.riskUsd <= 0) warnings.push('riskUsd must be positive.');
-  if (input.stopDistanceFrac <= 0 || input.stopDistanceFrac >= 1) {
+  // NaN-PROOF: `NaN <= 0` is false, so a missing/NaN entry used to sail past this guard
+  // and silently size against safeEntry=$1 (the headless-scout $5M-notional bug). Every
+  // numeric gate below is written positively so NaN/±Infinity FAIL it.
+  if (!Number.isFinite(input.entryPx) || input.entryPx <= 0) warnings.push('entryPx must be a positive, finite number.');
+  if (!Number.isFinite(input.riskUsd) || input.riskUsd <= 0) warnings.push('riskUsd must be a positive, finite number.');
+  if (!(input.stopDistanceFrac > 0 && input.stopDistanceFrac < 1)) {
     warnings.push('stopDistanceFrac must be in (0, 1).');
   }
   if (!input.thesis.trim()) warnings.push('A thesis is required (it becomes the tracked hypothesis).');

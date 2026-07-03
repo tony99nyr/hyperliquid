@@ -26,6 +26,8 @@ import { buildMarketReduceOnlyClose } from '@/lib/trading/safe-exit-business-log
 import { executeIntent } from '@/lib/trading/fill-source';
 import { openSession } from '@/lib/cockpit/session-service';
 import { loadPosition } from '@/lib/cockpit/fill-persistence-service';
+import { fetchAllMids } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { validateEnv } from '@/lib/env/env';
 import { writeHypothesis, resolveHypothesis } from '@/lib/cockpit/hypothesis-service';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 import { ensureWatchDaemon } from '@/lib/cockpit/watch-spawn';
@@ -50,7 +52,17 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   if (sideRaw !== 'buy' && sideRaw !== 'sell') throw new Error('--side must be buy or sell');
   const side = sideRaw as OrderSide;
   const thesis = requireString(args, 'thesis');
-  const entryPx = optionalNumber(args, 'entry', NaN);
+  let entryPx = optionalNumber(args, 'entry', NaN);
+  // No --entry → size against the LIVE mark (uncached). Previously a missing entry
+  // slipped past the NaN-blind guard and sized against safeEntry=$1 — the headless
+  // $5M-notional bug. Fetch failure leaves NaN, which the proposal now REFUSES.
+  if (!Number.isFinite(entryPx)) {
+    try {
+      const mids = await fetchAllMids(validateEnv().HL_NETWORK, { uncached: true });
+      const mid = mids[coin];
+      if (Number.isFinite(mid) && mid > 0) { entryPx = mid; line(`(no --entry — sized against live mark $${mid})`); }
+    } catch { /* leave NaN → proposal warning refuses */ }
+  }
   const riskUsd = optionalNumber(args, 'risk', NaN);
   const stopDistanceFrac = optionalNumber(args, 'stop-frac', NaN);
   const limitPx = typeof args['limit'] === 'string' ? Number(args['limit']) : undefined;

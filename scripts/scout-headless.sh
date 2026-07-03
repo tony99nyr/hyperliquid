@@ -13,6 +13,7 @@
 # malformed is rejected by parseScoutDecision and NOTHING trades. Most cycles should
 # be stand-downs; that is the system working, not failing.
 set -euo pipefail
+trap 'echo "[scout-headless] FAILED at line $LINENO (see stderr above)" >&2' ERR
 cd "$(dirname "$0")/.."
 
 SNAPSHOT="$(pnpm --silent scout:cycle -- --json)"
@@ -38,6 +39,9 @@ $PLAYBOOK
 EOF
 )
 
-DECISION="$(printf '%s' "$PROMPT" | claude -p --model sonnet 2>/dev/null | tail -1)"
+# stderr stays VISIBLE (expired auth / missing CLI must show up in the cron log).
+# Strip markdown code fences (a fenced reply would fail parse every cycle) and take the
+# last non-empty line — anything malformed is rejected by parseScoutDecision (no trade).
+DECISION="$(printf '%s' "$PROMPT" | claude -p --model sonnet | sed 's/^```.*$//' | grep -v '^[[:space:]]*$' | tail -1)"
 echo "[scout-headless] decision: $DECISION"
 pnpm --silent scout:trade -- --from-json "$DECISION"

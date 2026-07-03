@@ -80,3 +80,18 @@ describe('buildOpenProposal — risk-based sizing', () => {
     expect(p.rationale).toContain('LONG');
   });
 });
+
+describe('buildOpenProposal — NaN-proof guards (the headless $1-entry bug class)', () => {
+  it('REFUSES a NaN/missing entry instead of sizing against safeEntry=$1', () => {
+    const p = buildOpenProposal({
+      sessionId: 's', coin: 'ETH', side: 'buy', entryPx: NaN, riskUsd: 50,
+      stopDistanceFrac: 0.03, clientIntentId: 'c', now: 1_700_000_000_000, thesis: 't',
+    });
+    expect(p.warnings.some((w) => /entryPx/.test(w))).toBe(true);
+  });
+  it('REFUSES non-finite riskUsd and NaN stopDistanceFrac', () => {
+    const base = { sessionId: 's', coin: 'ETH', side: 'buy' as const, entryPx: 2000, clientIntentId: 'c', now: 1_700_000_000_000, thesis: 't' };
+    expect(buildOpenProposal({ ...base, riskUsd: Infinity, stopDistanceFrac: 0.03 }).warnings.length).toBeGreaterThan(0);
+    expect(buildOpenProposal({ ...base, riskUsd: 50, stopDistanceFrac: NaN }).warnings.length).toBeGreaterThan(0);
+  });
+});

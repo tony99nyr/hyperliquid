@@ -22,7 +22,7 @@ import { header, line, run } from './_skill-runtime';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import { fetchMetaAndAssetCtxs } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { gatherScoutInputs, writeScoutHeartbeat } from '@/lib/scout/scout-watch-service';
-import { recentTriggers, markTriggersConsumed, type SinkTrigger } from '@/lib/scout/scout-trigger-sink';
+import { recentTriggers, markTriggersConsumed, pruneConsumedTriggers, type SinkTrigger } from '@/lib/scout/scout-trigger-sink';
 import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
 import { scoutPlaybookPath, summarizeHypotheses, type HypothesisSummaryRow } from '@/lib/scout/scout-cycle-business-logic';
 
@@ -32,12 +32,19 @@ run(async () => {
   const jsonMode = process.argv.includes('--json');
   const now = Date.now();
 
-  // 1) Triggers: UNCONSUMED first (the wake reasons), stamped consumed after this read.
-  const triggers: SinkTrigger[] = await recentTriggers(12, { unconsumedOnly: true });
-  await markTriggersConsumed(triggers.map((t) => t.id), now);
+  // 1) Read UNCONSUMED triggers (the wake reasons) — claimed AFTER the gather succeeds,
+  // so a crash mid-gather leaves them for the next wake (consume-late).
+  const candidates: SinkTrigger[] = await recentTriggers(12, { unconsumedOnly: true });
 
   // 2) Deterministic reads: rubric + marks + open paper positions (+ degradation gate).
   const inputs = await gatherScoutInputs(now);
+
+  // 3) ATOMIC claim: only rows WE stamped are ours (a concurrent consumer gets a disjoint
+  // set — no double-trade on the same signal). Unclaimed rows are dropped from THIS view.
+  const claimed = await markTriggersConsumed(candidates.map((t) => t.id), now);
+  const triggers = candidates.filter((t) => t.id == null || claimed.has(t.id));
+  // Retention: keep the table bounded (consumed rows older than 14d), like JSONL rotation.
+  await pruneConsumedTriggers(14 * 24 * 3_600_000, now);
 
   // 3) Funding / OI / premium context (judgment inputs, not auto-scored).
   const ctxs = await fetchMetaAndAssetCtxs().catch(() => ({} as Record<string, { fundingHourly: number; openInterest: number; premium: number }>));
@@ -77,7 +84,7 @@ run(async () => {
 
   // CONSUMER liveness — distinct from the producer's 'scout-watch' row. A dead consumer
   // is now a stale row in the cockpit, not silence.
-  await writeScoutHeartbeat('ok', `${triggers.length} trigger(s) consumed`, 'scout-cycle', now);
+  await writeScoutHeartbeat(inputs.degraded ? 'degraded' : 'ok', `${triggers.length} trigger(s) consumed${inputs.degraded ? ` — ${inputs.degradedReason}` : ''}`, 'scout-cycle', now);
 
   if (jsonMode) {
     // The HEADLESS contract: one JSON object, stable field names. The decision model
@@ -92,7 +99,7 @@ run(async () => {
       funding: fundingCtx,
       vaults,
       positions: inputs.positions,
-      circuitBreaker: { halted: breaker.blockNewEntries, reason: breaker.reason, equityUsd: breaker.equityUsd, flattenRecommended: breaker.flattenRecommended },
+      circuitBreaker: { halted: breaker.blockNewEntries, reason: breaker.reason, equityUsd: breaker.equityUsd, peakEquityUsd: breaker.peakEquityUsd, dayStartEquityUsd: breaker.dayStartEquityUsd, flattenRecommended: breaker.flattenRecommended },
       trackRecord: { open: summary.open, confirmed: summary.confirmed, invalidated: summary.invalidated, resolved: summary.resolved, lastResolved: summary.lastResolved },
       playbookPath: existsSync(playbookPath) ? playbookPath : null,
     };

@@ -133,14 +133,38 @@ export async function recentTriggers(n: number, opts: { unconsumedOnly?: boolean
   }
 }
 
-/** Stamp the consumer cursor — these Triggers have been seen by a scout cycle and will
- *  not re-surface on the next wake. Best-effort (JSONL adapter has no cursor). */
-export async function markTriggersConsumed(ids: Array<string | null>, now = Date.now()): Promise<void> {
+/**
+ * ATOMICALLY claim the consumer cursor: only rows still unconsumed are stamped, and only
+ * the ids actually claimed are returned. Two concurrent consumers (headless cron +
+ * interactive session, or two boxes) each get a DISJOINT set — the double-consume /
+ * double-trade race is closed at the database. Best-effort (JSONL adapter has no cursor:
+ * every requested id is treated as claimed).
+ */
+export async function markTriggersConsumed(ids: Array<string | null>, now = Date.now()): Promise<Set<string>> {
   const real = ids.filter((x): x is string => typeof x === 'string' && x.length > 0);
-  if (real.length === 0) return;
+  if (real.length === 0) return new Set();
   try {
-    await getServiceRoleClient().from('scout_triggers').update({ consumed_at: new Date(now).toISOString() }).in('id', real);
+    const { data, error } = await getServiceRoleClient()
+      .from('scout_triggers')
+      .update({ consumed_at: new Date(now).toISOString() })
+      .in('id', real)
+      .is('consumed_at', null) // the atomic claim — a concurrently-stamped row is NOT ours
+      .select('id');
+    if (error) throw new Error(error.message);
+    return new Set((data ?? []).map((r) => r.id as string));
   } catch {
-    /* best-effort — worst case the same triggers re-surface next wake */
+    // Table unreachable (or JSONL adapter): treat as claimed so a consumer still acts —
+    // worst case the same triggers re-surface next wake (at-least-once, paper-only).
+    return new Set(real);
+  }
+}
+
+/** Retention: delete consumed Triggers older than the window (fail-soft; keeps the
+ *  table bounded the way rotation bounded the JSONL). Called from the consumer cycle. */
+export async function pruneConsumedTriggers(olderThanMs: number, now = Date.now()): Promise<void> {
+  try {
+    await getServiceRoleClient().from('scout_triggers').delete().lt('consumed_at', new Date(now - olderThanMs).toISOString());
+  } catch {
+    /* best-effort */
   }
 }

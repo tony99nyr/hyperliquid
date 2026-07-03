@@ -60,7 +60,7 @@ async function preflight(): Promise<void> {
 async function oneCycle(state: ScoutState): Promise<ScoutState> {
   const ts = new Date().toISOString();
   try {
-    const { triggers, state: next, degraded, degradedReason } = await runScoutWatchCycle(state);
+    const { triggers, state: next, degraded, degradedReason, sink } = await runScoutWatchCycle(state);
     saveScoutState(next); // persist so a restart resumes from the latest baseline
     if (degraded) {
       line(`[${ts}] ⏸ STAND DOWN — feed degraded: ${degradedReason} (no triggers emitted)`);
@@ -69,7 +69,14 @@ async function oneCycle(state: ScoutState): Promise<ScoutState> {
     } else {
       for (const t of triggers) line(`[${ts}] ⚡ ${t.urgency.toUpperCase()} ${t.kind} — ${t.detail}`);
     }
-    await writeScoutHeartbeat(degraded ? 'degraded' : 'ok', degraded ? (degradedReason ?? 'degraded') : `${triggers.length} trigger(s)`);
+    // Sink adapter matters operationally: 'jsonl' = Supabase unreachable, these triggers
+    // are INVISIBLE to a table-reading consumer on another box; 'none' = both sinks failed.
+    const sinkNote = triggers.length > 0 && sink !== 'supabase' ? ` ⚠ sink=${sink}` : '';
+    if (sinkNote) line(`[${ts}]${sinkNote} — triggers not in the table; a remote consumer cannot see them`);
+    await writeScoutHeartbeat(
+      degraded ? 'degraded' : sink === 'none' && triggers.length > 0 ? 'sink-failed' : 'ok',
+      degraded ? (degradedReason ?? 'degraded') : `${triggers.length} trigger(s)${sinkNote}`,
+    );
     return next;
   } catch (err) {
     line(`[${ts}] WARN cycle error (continuing): ${err instanceof Error ? err.message : String(err)}`);

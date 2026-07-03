@@ -242,16 +242,19 @@ export async function runScoutWatchCycle(
   prev: ScoutState,
   cfg?: ScoutTriggerConfig,
   now: number = Date.now(),
-): Promise<{ triggers: ScoutTrigger[]; state: ScoutState; degraded: boolean; degradedReason: string | null }> {
+): Promise<{ triggers: ScoutTrigger[]; state: ScoutState; degraded: boolean; degradedReason: string | null; sink: 'supabase' | 'jsonl' | 'none' }> {
   const input = await gatherScoutInputs(now);
   // STAND DOWN on a degraded feed: don't emit (and thus don't wake the model to
   // trade) on stale rubric or empty marks. Still advance state so the next good
   // cycle compares against the latest values, not a pre-outage baseline.
   if (input.degraded) {
     const { state } = detectScoutTriggers(input, prev, cfg);
-    return { triggers: [], state, degraded: true, degradedReason: input.degradedReason };
+    return { triggers: [], state, degraded: true, degradedReason: input.degradedReason, sink: 'none' };
   }
   const { triggers, state } = detectScoutTriggers(input, prev, cfg);
-  await appendScoutTriggers(triggers);
-  return { triggers, state, degraded: false, degradedReason: null };
+  // The adapter that took the write matters operationally: 'jsonl' means Supabase was
+  // unreachable and these triggers are INVISIBLE to a table-reading consumer on another
+  // box; 'none' means both sinks failed. The daemon surfaces this in its heartbeat.
+  const sink = await appendScoutTriggers(triggers);
+  return { triggers, state, degraded: false, degradedReason: null, sink };
 }

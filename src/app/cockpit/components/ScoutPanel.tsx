@@ -79,6 +79,10 @@ export default function ScoutPanel({ hypsOverride, positionsOverride, perfOverri
   // Daemon liveness: "watch tick Nm ago", red when silent past the stale window.
   const heartbeat = useScoutHeartbeat({ enabled: hypsOverride === undefined });
   const lastTickMs = (heartbeat.rows.find((r) => r.source === 'scout-watch') ?? heartbeat.rows[0])?.lastTickMs ?? 0;
+  // CONSUMER liveness (source 'scout-cycle'): the half that actually DECIDES. It died
+  // unnoticed for 8 days behind a healthy producer row — render it separately so a dead
+  // consumer is a visible stale age, never silence.
+  const consumerTickMs = heartbeat.rows.find((r) => r.source === 'scout-cycle')?.lastTickMs ?? 0;
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => {
     if (hypsOverride !== undefined) return; // controlled (tests) — don't tick
@@ -89,6 +93,11 @@ export default function ScoutPanel({ hypsOverride, positionsOverride, perfOverri
   const tickStale = tickAgeMs != null && tickAgeMs > HEARTBEAT_STALE_MS;
   const tickLabel =
     tickAgeMs == null ? 'watch: —' : `watch: ${tickAgeMs < 60_000 ? `${Math.round(tickAgeMs / 1000)}s` : `${Math.round(tickAgeMs / 60_000)}m`} ago`;
+  const consumerAgeMs = consumerTickMs > 0 ? clock - consumerTickMs : null;
+  // The consumer runs on a ~30min cron — its stale window is hours, not minutes.
+  const consumerStale = consumerAgeMs != null && consumerAgeMs > 2 * 3_600_000;
+  const consumerLabel =
+    consumerAgeMs == null ? 'cycle: —' : `cycle: ${consumerAgeMs < 3_600_000 ? `${Math.round(consumerAgeMs / 60_000)}m` : `${(consumerAgeMs / 3_600_000).toFixed(1)}h`} ago`;
 
   return (
     <section
@@ -102,6 +111,8 @@ export default function ScoutPanel({ hypsOverride, positionsOverride, perfOverri
         <span className={css({ display: 'inline-flex', alignItems: 'center', gap: '5px', fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted' })}>
           <span className={css({ width: '6px', height: '6px', borderRadius: '50%' })} style={{ background: subscribed ? ZONE_COLORS.ok : GH.textMuted }} />
           <span data-testid="scout-heartbeat" style={{ color: tickStale ? ZONE_COLORS.danger : undefined }}>{tickLabel}</span>
+          {' · '}
+          <span data-testid="scout-consumer-heartbeat" style={{ color: consumerStale ? ZONE_COLORS.danger : undefined }}>{consumerLabel}</span>
           {' · paper'}
         </span>
       </header>

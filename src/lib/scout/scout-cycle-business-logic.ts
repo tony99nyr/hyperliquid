@@ -46,6 +46,10 @@ export function scoutPlaybookPath(cwd: string = process.cwd()): string {
 
 /* ------------------- headless decision contract (C2, 2026-07-03) ------------------- */
 
+/** Hard per-decision paper risk cap for the HEADLESS path — a model that asks for more
+ *  is rejected before anything trades (defense against a runaway/hallucinated size). */
+export const SCOUT_MAX_RISK_USD = 500;
+
 /** The decision the headless scout model returns for ONE cycle. Exactly one action.
  *  'stand-down' is a first-class outcome (most cycles) — it carries the why. */
 export interface ScoutDecision {
@@ -80,17 +84,20 @@ export function parseScoutDecision(raw: string): { kind: 'open' | 'close'; args:
   } catch {
     return { kind: 'error', error: 'decision is not valid JSON' };
   }
+  if (d == null || typeof d !== 'object') return { kind: 'error', error: 'decision must be a JSON object' };
   if (d.action === 'stand-down') return { kind: 'stand-down', note: d.note ?? '(no reason given)' };
   if (d.action === 'open') {
     if (!d.coin || typeof d.coin !== 'string') return { kind: 'error', error: 'open: coin required' };
     if (d.side !== 'buy' && d.side !== 'sell') return { kind: 'error', error: 'open: side must be buy|sell' };
-    if (typeof d.riskUsd !== 'number' || !(d.riskUsd > 0)) return { kind: 'error', error: 'open: riskUsd must be > 0' };
-    if (typeof d.stopFrac !== 'number' || !(d.stopFrac > 0 && d.stopFrac < 1)) return { kind: 'error', error: 'open: stopFrac must be in (0,1)' };
+    if (typeof d.riskUsd !== 'number' || !Number.isFinite(d.riskUsd) || !(d.riskUsd > 0) || d.riskUsd > SCOUT_MAX_RISK_USD) {
+      return { kind: 'error', error: `open: riskUsd must be finite, > 0 and <= ${SCOUT_MAX_RISK_USD} (paper cap)` };
+    }
+    if (typeof d.stopFrac !== 'number' || !Number.isFinite(d.stopFrac) || !(d.stopFrac > 0 && d.stopFrac < 1)) return { kind: 'error', error: 'open: stopFrac must be finite, in (0,1)' };
     if (!d.thesis || typeof d.thesis !== 'string') return { kind: 'error', error: 'open: thesis required (the hypothesis is the product)' };
     const args: Record<string, string | boolean> = {
       coin: d.coin, side: d.side, risk: String(d.riskUsd), 'stop-frac': String(d.stopFrac), thesis: d.thesis,
     };
-    if (typeof d.leverage === 'number' && d.leverage >= 1) args['leverage'] = String(d.leverage);
+    if (typeof d.leverage === 'number' && Number.isFinite(d.leverage) && d.leverage >= 1) args['leverage'] = String(d.leverage);
     if (typeof d.lane === 'string' && d.lane.trim()) args['lane'] = d.lane.trim();
     return { kind: 'open', args };
   }
