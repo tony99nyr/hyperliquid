@@ -73,6 +73,14 @@ run(async () => {
       }
 
       const fires = await fireStatusesByLadder(toResolve.map((l) => l.id));
+      // Persisted thesis scores (review-ladder writes them; migration 0030) — priority:
+      // explicit --ladder annotation > persisted-on-ladder > previously-recorded outcome.
+      const thesisById = new Map<string, { s: number | null; t: number | null }>();
+      try {
+        const { getServiceRoleClient } = await import('@/lib/cockpit/supabase-server');
+        const { data } = await getServiceRoleClient().from('ladders').select('id,signal_score,timing_score').in('id', toResolve.map((l) => l.id));
+        for (const r of data ?? []) thesisById.set(r.id as string, { s: (r.signal_score as number | null) ?? null, t: (r.timing_score as number | null) ?? null });
+      } catch { /* fail-soft */ }
       for (const l of toResolve) {
         const plannedRisk = computeLadderRisk(l.rungs.map(resolveArmRung), { maxTotalNotionalUsd: l.maxTotalNotionalUsd, maxTotalLossUsd: l.maxTotalLossUsd }).worstCaseLossWithFundingUsd;
         const coin = (l.rungs[0]?.coin ?? '').toUpperCase();
@@ -82,8 +90,8 @@ run(async () => {
           hlFills,
           plannedRiskUsd: plannedRisk,
           positionStillOpen: openCoins.has(coin),
-          signalScore: annotateId && l.id.startsWith(annotateId) ? signal : (existing.get(l.id)?.signalScore ?? null),
-          timingScore: annotateId && l.id.startsWith(annotateId) ? timing : (existing.get(l.id)?.timingScore ?? null),
+          signalScore: annotateId && l.id.startsWith(annotateId) ? signal : (thesisById.get(l.id)?.s ?? existing.get(l.id)?.signalScore ?? null),
+          timingScore: annotateId && l.id.startsWith(annotateId) ? timing : (thesisById.get(l.id)?.t ?? existing.get(l.id)?.timingScore ?? null),
           now,
         });
         await upsertLadderOutcome(outcome);

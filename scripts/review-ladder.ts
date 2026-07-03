@@ -180,6 +180,17 @@ run(async () => {
     const others = bookHeat - (wcById.get(l.id) ?? 0);
     const sc = ladders.length > 1 ? reviewLadder(l, { ...ctxFor(l), otherLaddersWorstCaseUsd: others }) : first[0];
     printScorecard(sc);
+    // Persist the judgment pillar onto the ladder (latest review wins) so the outcome
+    // ledger can later slice expectancy by thesis quality. Skill-layer metadata — the
+    // fire path never reads these. Fail-soft: a write error never breaks the review.
+    const c = ctxFor(l);
+    if (c.signalScore != null || c.timingScore != null) {
+      try {
+        await getServiceRoleClient().from('ladders').update({
+          signal_score: c.signalScore, timing_score: c.timingScore, signal_source: c.signalSource ?? null,
+        }).eq('id', l.id);
+      } catch { /* advisory metadata — never block the review */ }
+    }
     if (sessionId) {
       await writeAnalysisLog({
         sessionId,
