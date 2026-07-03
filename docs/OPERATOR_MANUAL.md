@@ -53,7 +53,7 @@ tokens (poke-only), never admin or signing keys.
 | Command | Job | Why you care |
 |---|---|---|
 | `pnpm trader-watch` | Polls top-rated leaders' HL positions → writes `leader_positions` / `leader_actions`. | **The leader guard depends on this feed.** If it's down, a `leader_address`-tagged ladder can't auto-disarm on a leader exit (the guard fails safe: it never disarms blind — you just lose the protection). |
-| `pnpm scout:watch` | FREE deterministic trigger daemon for the paper scout (writes JSONL triggers; never trades). | Scout goes quiet without it. |
+| `pnpm scout:watch` | FREE deterministic trigger daemon for the paper scout — writes triggers to a **machine-local** JSONL (`~/.hl-cockpit-scout-trigger.jsonl`); never trades. | Producer half only. ⚠ The scout DECIDES nothing without the **consumer**: a Sonnet Claude session (`.claude/skills/scout`) running **on the same box as the JSONL**. That session has been unmanned since ~Jun 24 — restart it (or schedule it) or the scout learns nothing. |
 | `pnpm watch` | Crash-safe position watcher: health/pnl snapshots + alerts (incl. the **time-stop** advisory) for open positions. Also auto-spawned on fill wherever a fill executes. | Cockpit health panels go stale; alerts (drawdown / big-move / time-stop) stop. Resting stops unaffected. |
 | `pnpm vault-watch` | Vault-equity snapshots for the scout lanes. | Scout lane scorecards go stale. |
 
@@ -74,7 +74,7 @@ Nothing on the desktop needs to stay running. Two kinds of work:
 | `pnpm skill:ladder-expectancy` | **Weekly + after any ladder closes** — resolve outcomes, get KILL/HOLD/SIZE-UP verdicts. |
 | `pnpm rubric` | Refresh `rubric_scores` (feeds the review-ladder thesis pillar). |
 | `pnpm skill:assess-health / advise-exit / open-position / run-session` | Position management lane (all confirm-gated). |
-| `pnpm scout:review` | Weekly scout playbook curation (Opus-tier). |
+| `pnpm scout:review` | Weekly scout playbook curation (Opus-tier). Has NEVER run as of 2026-07-02 — the playbook is still the empty seed. |
 | `pnpm env:pull` | Refresh `.env.local` from Vercel (after env changes). |
 
 **Dev loop:** `pnpm validate` before every commit; `pnpm smoke` before pushing UI changes;

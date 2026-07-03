@@ -1,5 +1,21 @@
 # Autonomous Paper Scout — runbook
 
+> ## ⚠ STATUS — PRODUCER-ONLY since ~Jun 24 (updated 2026-07-02)
+> The deterministic half is HEALTHY: `scout:watch` writes ~200–300 triggers/day to the
+> **machine-local** JSONL (`~/.hl-cockpit-scout-trigger.jsonl`). What has been DEAD is the
+> **consumer** — the Sonnet Claude scout session that reads the JSONL and makes paper calls
+> was dropped from the operating rituals during the trader-follow/ladder pivot, so no
+> hypotheses have been created since Jun 24. The heartbeat's "0 trigger(s)" is PER-TICK,
+> not cumulative — do not read it as producer silence.
+>
+> Known traps (as-built): the JSONL sink is homedir-local, so a NAS-resident daemon's
+> triggers are INVISIBLE to a desktop scout session (only the heartbeat travels through
+> Supabase); two daemons on different boxes clobber one heartbeat row. Realtime for scout
+> tables was dropped in migration 0024 (the Scout tab polls, ~60s). The playbook has never
+> been curated (`scout:review` has never run). The pre-registered checkpoint verdict was
+> never recorded — the Jun-26 multi-lane refactor reset the book instead.
+
+
 The scout is an **autonomous, paper-only** opportunity finder + position manager
 that runs on the home PC against your Claude **subscription** (no API key). It
 exists to answer one question cheaply: **can Claude find enough trading edge to be
