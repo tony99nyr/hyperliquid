@@ -54,7 +54,7 @@ async function preflight(): Promise<void> {
     throw new Error(`Hyperliquid unreachable (probe ${probe.stale ? 'stale' : 'empty'}) — refusing to start.`);
   }
   line('✓ Hyperliquid reachable.');
-  line(`Trigger sink: ${scoutTriggerFilePath()}`);
+  line(`Trigger sink: supabase scout_triggers (primary) → JSONL fallback ${scoutTriggerFilePath()}`);
 }
 
 async function oneCycle(state: ScoutState): Promise<ScoutState> {

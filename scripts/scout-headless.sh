@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# scout-headless.sh — the ZERO-BABYSITTING scout consumer (C2, 2026-07-03).
+#
+# One cycle: deterministic snapshot (--json) → a headless cheap-model decision
+# (`claude -p`, Sonnet) → strict-JSON execution (scout:trade --from-json, PAPER-ONLY
+# hard guard). Schedule this via cron on WHICHEVER box you like (the trigger sink is
+# the Supabase table, so any box sees the same triggers):
+#
+#   */30 * * * *  cd /path/to/hyperliquid && ./scripts/scout-headless.sh >> ~/.hl-scout-headless.log 2>&1
+#
+# The model NEVER sees a shell; it receives the snapshot + playbook as text and must
+# reply with ONE JSON object: {"action":"open"|"close"|"stand-down", ...} — anything
+# malformed is rejected by parseScoutDecision and NOTHING trades. Most cycles should
+# be stand-downs; that is the system working, not failing.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+SNAPSHOT="$(pnpm --silent scout:cycle -- --json)"
+PLAYBOOK="$(cat docs/scout/playbook.md 2>/dev/null || echo '(no playbook yet)')"
+
+PROMPT=$(cat <<EOF
+You are the autonomous PAPER scout (see .claude/skills/scout/SKILL.md — cheap-model lane,
+paper-only). Below are your decision snapshot (JSON) and your playbook. Decide ONE action
+for this cycle. Rules: manage open positions before opportunities; respect the circuit
+breaker (halted => never 'open'); a degraded feed => never 'open'; only open when a setup
+clearly beats the playbook bar; stand-down is the correct answer most cycles.
+
+Reply with EXACTLY one JSON object on a single line, no prose, one of:
+{"action":"stand-down","note":"<why>"}
+{"action":"open","coin":"ETH","side":"buy|sell","riskUsd":50,"stopFrac":0.03,"leverage":3,"lane":"directional","thesis":"<the hypothesis being tested>"}
+{"action":"close","coin":"ETH","sessionId":"<from snapshot positions>","hypothesisId":"<if known>","fraction":1,"note":"<why>"}
+
+SNAPSHOT:
+$SNAPSHOT
+
+PLAYBOOK:
+$PLAYBOOK
+EOF
+)
+
+DECISION="$(printf '%s' "$PROMPT" | claude -p --model sonnet 2>/dev/null | tail -1)"
+echo "[scout-headless] decision: $DECISION"
+pnpm --silent scout:trade -- --from-json "$DECISION"

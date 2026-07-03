@@ -53,9 +53,13 @@ tokens (poke-only), never admin or signing keys.
 | Command | Job | Why you care |
 |---|---|---|
 | `pnpm trader-watch` | Polls top-rated leaders' HL positions → writes `leader_positions` / `leader_actions`. | **The leader guard depends on this feed.** If it's down, a `leader_address`-tagged ladder can't auto-disarm on a leader exit (the guard fails safe: it never disarms blind — you just lose the protection). |
-| `pnpm scout:watch` | FREE deterministic trigger daemon for the paper scout — writes triggers to a **machine-local** JSONL (`~/.hl-cockpit-scout-trigger.jsonl`); never trades. | Producer half only. ⚠ The scout DECIDES nothing without the **consumer**: a Sonnet Claude session (`.claude/skills/scout`) running **on the same box as the JSONL**. That session has been unmanned since ~Jun 24 — restart it (or schedule it) or the scout learns nothing. |
+| `pnpm scout:watch` | FREE deterministic trigger daemon for the paper scout — writes triggers to the **Supabase `scout_triggers` table** (any-box visibility, consumed-cursor; JSONL fallback only when Supabase is unreachable); never trades. | Producer half. The **consumer** is now schedulable: add a crontab line for `scripts/scout-headless.sh` (~every 30 min, any box) — snapshot → headless Sonnet decision → strict-JSON paper trade. Consumer liveness = the `scout_heartbeat` row `source='scout-cycle'` (stale row = dead consumer, page-able). |
 | `pnpm watch` | Crash-safe position watcher: health/pnl snapshots + alerts (incl. the **time-stop** advisory) for open positions. Also auto-spawned on fill wherever a fill executes. | Cockpit health panels go stale; alerts (drawdown / big-move / time-stop) stop. Resting stops unaffected. |
 | `pnpm vault-watch` | Vault-equity snapshots for the scout lanes. | Scout lane scorecards go stale. |
+
+```cron
+*/30 * * * *  cd /path/to/hyperliquid && ./scripts/scout-headless.sh >> ~/.hl-scout-headless.log 2>&1
+```
 
 **After a NAS reboot:** confirm crontab is live (`crontab -l`) and the daemons are up
 (`pgrep -f trader-watch`, etc.).

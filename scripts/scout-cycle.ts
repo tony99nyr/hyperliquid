@@ -1,43 +1,113 @@
 /**
  * pnpm scout:cycle — gather the decision snapshot for the (cheap-model) scout.
  *
- * NEVER trades + NEVER decides. It assembles everything the scout session needs
- * to reason in ONE place: recent triggers, the latest rubric reads, fresh marks,
- * open paper positions, the recent hypothesis track record (win/loss context for
- * the learning loop), and a pointer to the playbook. The model reads this, decides
- * per `.claude/skills/scout/SKILL.md`, and — only if a setup clears the bar —
- * calls `pnpm scout:trade` (paper). Otherwise it logs a stand-down + sleeps.
+ * NEVER trades + NEVER decides. It assembles everything the scout needs to reason in
+ * ONE place: unconsumed triggers (from the ScoutTriggerSink, cursor-stamped so churn
+ * doesn't re-surface), the latest rubric reads, fresh marks, funding/OI, vaults, open
+ * paper positions, the circuit breaker, the hypothesis track record, and the playbook
+ * pointer.
+ *
+ * Two renderings of the SAME snapshot:
+ *   - default: human/model-readable prose (the interactive scout session).
+ *   - --json:  one machine-readable JSON object on stdout (the HEADLESS contract —
+ *     scripts/scout-headless.sh pipes it to a `claude -p` decision, whose output goes
+ *     to `pnpm scout:trade --from-json`). See .claude/skills/scout/SKILL.md.
+ *
+ * Each run upserts a CONSUMER heartbeat (source 'scout-cycle') — a dead consumer is
+ * visible in the cockpit instead of masquerading as "0 triggers" (the Jun-24 lesson).
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { header, line, run } from './_skill-runtime';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import { fetchMetaAndAssetCtxs } from '@/lib/hyperliquid/hyperliquid-info-service';
-import { gatherScoutInputs, scoutTriggerFilePath } from '@/lib/scout/scout-watch-service';
+import { gatherScoutInputs, writeScoutHeartbeat } from '@/lib/scout/scout-watch-service';
+import { recentTriggers, markTriggersConsumed, type SinkTrigger } from '@/lib/scout/scout-trigger-sink';
 import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
 import { scoutPlaybookPath, summarizeHypotheses, type HypothesisSummaryRow } from '@/lib/scout/scout-cycle-business-logic';
 
-/** Tail the JSONL trigger file (most recent N lines). */
-function recentTriggers(n: number): string[] {
-  const path = scoutTriggerFilePath();
-  if (!existsSync(path)) return [];
-  const lines = readFileSync(path, 'utf8').trim().split('\n').filter(Boolean);
-  return lines.slice(-n);
-}
+interface VaultRow { vault_address: string; name: string; kind: string; nav_usd: number | null; apr_annual: number | null; max_drawdown_pct: number | null; age_days: number | null; leader_fraction: number | null }
 
 run(async () => {
+  const jsonMode = process.argv.includes('--json');
   const now = Date.now();
+
+  // 1) Triggers: UNCONSUMED first (the wake reasons), stamped consumed after this read.
+  const triggers: SinkTrigger[] = await recentTriggers(12, { unconsumedOnly: true });
+  await markTriggersConsumed(triggers.map((t) => t.id), now);
+
+  // 2) Deterministic reads: rubric + marks + open paper positions (+ degradation gate).
+  const inputs = await gatherScoutInputs(now);
+
+  // 3) Funding / OI / premium context (judgment inputs, not auto-scored).
+  const ctxs = await fetchMetaAndAssetCtxs().catch(() => ({} as Record<string, { fundingHourly: number; openInterest: number; premium: number }>));
+  const fundingCtx = inputs.marks
+    .filter((m) => ctxs[m.coin])
+    .map((m) => ({ coin: m.coin, fundingHourly: ctxs[m.coin].fundingHourly, openInterest: ctxs[m.coin].openInterest, premium: ctxs[m.coin].premium }));
+
+  // 4) Vaults (Lane A allocation candidates — newest snapshot per vault).
+  const db = getServiceRoleClient();
+  const { data: vaultRows } = await db
+    .from('vault_snapshots')
+    .select('vault_address, name, kind, nav_usd, apr_annual, max_drawdown_pct, age_days, leader_fraction, fetched_at')
+    .order('fetched_at', { ascending: false })
+    .limit(50);
+  const latestByVault = new Map<string, VaultRow>();
+  for (const v of (vaultRows ?? []) as VaultRow[]) if (!latestByVault.has(v.vault_address)) latestByVault.set(v.vault_address, v);
+  const vaults = [...latestByVault.values()];
+
+  // 5) Circuit breaker (HALTED ⇒ no new entries; exits always allowed).
+  const breaker = await checkCircuitBreaker('scout', now);
+
+  // 6) Track record (scout sessions only — self-assessment excludes manual trades).
+  const { data: scoutSessions } = await db.from('sessions').select('id').eq('title', 'scout');
+  const scoutIds = (scoutSessions ?? []).map((s) => (s as { id: string }).id);
+  let hypRows: HypothesisSummaryRow[] = [];
+  if (scoutIds.length > 0) {
+    const { data } = await db
+      .from('hypotheses')
+      .select('statement, status, resolution_note, created_at, resolved_at')
+      .in('session_id', scoutIds)
+      .order('created_at', { ascending: false })
+      .limit(30);
+    hypRows = (data ?? []) as HypothesisSummaryRow[];
+  }
+  const summary = summarizeHypotheses(hypRows);
+  const playbookPath = scoutPlaybookPath();
+
+  // CONSUMER liveness — distinct from the producer's 'scout-watch' row. A dead consumer
+  // is now a stale row in the cockpit, not silence.
+  await writeScoutHeartbeat('ok', `${triggers.length} trigger(s) consumed`, 'scout-cycle', now);
+
+  if (jsonMode) {
+    // The HEADLESS contract: one JSON object, stable field names. The decision model
+    // replies with {action:'open'|'close'|'stand-down', ...} → scout:trade --from-json.
+    const snapshot = {
+      at: new Date(now).toISOString(),
+      degraded: inputs.degraded,
+      degradedReason: inputs.degradedReason,
+      triggers: triggers.map((t) => ({ kind: t.kind, coin: t.coin, side: t.side ?? null, urgency: t.urgency, detail: t.detail, at: new Date(t.at).toISOString() })),
+      rubric: inputs.rubric.map((r) => ({ coin: r.coin, side: r.side, opportunity: Math.round(r.opportunity), badge: r.badge })),
+      marks: inputs.marks,
+      funding: fundingCtx,
+      vaults,
+      positions: inputs.positions,
+      circuitBreaker: { halted: breaker.blockNewEntries, reason: breaker.reason, equityUsd: breaker.equityUsd, flattenRecommended: breaker.flattenRecommended },
+      trackRecord: { open: summary.open, confirmed: summary.confirmed, invalidated: summary.invalidated, resolved: summary.resolved, lastResolved: summary.lastResolved },
+      playbookPath: existsSync(playbookPath) ? playbookPath : null,
+    };
+    // Raw stdout (no header/line decoration) — this IS the machine contract.
+    console.log(JSON.stringify(snapshot));
+    return;
+  }
+
   header(`scout:cycle — decision snapshot @ ${new Date(now).toISOString()}`);
   line('NEVER trades. Read this, consult the playbook, then decide per the scout skill.');
 
-  // 1) Recent triggers (what woke us / what changed).
-  const triggers = recentTriggers(12);
-  header('TRIGGERS (most recent)');
+  header('TRIGGERS (unconsumed — your wake reasons; now cursor-stamped)');
   if (triggers.length === 0) line('(none — heartbeat wake; do a routine review)');
-  else triggers.forEach((t) => line(t));
+  else triggers.forEach((t) => line(`${new Date(t.at).toISOString()} [${t.urgency}] ${t.kind} ${t.coin}${t.side ? ` ${t.side}` : ''} — ${t.detail}`));
 
-  // 2) Deterministic reads: rubric + marks + open paper positions.
-  const inputs = await gatherScoutInputs(now);
   if (inputs.degraded) {
     header('⏸ FEED DEGRADED — STAND DOWN');
     line(`Reason: ${inputs.degradedReason}. Do NOT open a trade on this snapshot.`);
@@ -52,34 +122,16 @@ run(async () => {
   header('MARKS');
   inputs.marks.forEach((m) => line(`${m.coin} = ${m.markPx}`));
 
-  // Positioning context — funding/OI/premium. Surfaced for the model's JUDGMENT
-  // (e.g. don't short into negative funding; an extreme premium = stretched book).
-  // NOT baked into the deterministic rubric score until a backtest validates it.
-  const ctxs = await fetchMetaAndAssetCtxs().catch(() => ({} as Record<string, { fundingHourly: number; openInterest: number; premium: number }>));
   header('FUNDING / OI / PREMIUM (context — for judgment, not auto-scored)');
-  for (const m of inputs.marks) {
-    const c = ctxs[m.coin];
-    if (!c) continue;
+  for (const c of fundingCtx) {
     const apr = (c.fundingHourly * 24 * 365 * 100).toFixed(1);
     const who = c.fundingHourly >= 0 ? 'longs pay / shorts earn' : 'shorts pay / longs earn';
-    line(`${m.coin}  funding ${(c.fundingHourly * 100).toFixed(4)}%/h (~${apr}% APR; ${who})  OI=${Math.round(c.openInterest)}  premium=${(c.premium * 100).toFixed(3)}%`);
+    line(`${c.coin}  funding ${(c.fundingHourly * 100).toFixed(4)}%/h (~${apr}% APR; ${who})  OI=${Math.round(c.openInterest)}  premium=${(c.premium * 100).toFixed(3)}%`);
   }
 
-  // Lane A — vault allocation candidates. The vault-watch ingester writes NAV here.
-  // NOTE: nav_usd is the vault's TOTAL AUM, not a per-share price — allocate on the
-  // RETURN (apr / per-share), not raw AUM change. See SCOUT_ALPHA_ROADMAP.md.
-  const vaultClient = getServiceRoleClient();
-  const { data: vaultRows } = await vaultClient
-    .from('vault_snapshots')
-    .select('vault_address, name, kind, nav_usd, apr_annual, max_drawdown_pct, age_days, leader_fraction, fetched_at')
-    .order('fetched_at', { ascending: false })
-    .limit(50);
-  type VaultRow = { vault_address: string; name: string; kind: string; nav_usd: number | null; apr_annual: number | null; max_drawdown_pct: number | null; age_days: number | null; leader_fraction: number | null };
-  const latestByVault = new Map<string, VaultRow>();
-  for (const v of (vaultRows ?? []) as VaultRow[]) if (!latestByVault.has(v.vault_address)) latestByVault.set(v.vault_address, v);
   header('VAULTS (Lane A — allocation candidates; nav = total AUM, judge on apr/return)');
-  if (latestByVault.size === 0) line('(no vault snapshots yet — wait for the nas-watch tick / run pnpm vault-watch --once)');
-  else for (const v of latestByVault.values()) {
+  if (vaults.length === 0) line('(no vault snapshots yet — wait for the nas-watch tick / run pnpm vault-watch --once)');
+  else for (const v of vaults) {
     const pct = (x: number | null, d = 2) => (x != null ? `${(x * 100).toFixed(d)}%` : '?');
     line(`${v.name} [${v.kind}]  NAV $${v.nav_usd != null ? Math.round(v.nav_usd).toLocaleString('en-US') : '?'}  apr ${pct(v.apr_annual)}  dd ${pct(v.max_drawdown_pct, 1)}  age ${v.age_days != null ? Math.round(v.age_days) + 'd' : '?'}  leaderStake ${pct(v.leader_fraction)}`);
   }
@@ -88,28 +140,10 @@ run(async () => {
   if (inputs.positions.length === 0) line('(flat — no open positions)');
   else inputs.positions.forEach((p) => line(`${p.coin} ${p.side} health=${p.healthScore ?? '—'} mark=${p.markPx}`));
 
-  // Account-level circuit breaker — if HALTED, do not open new positions.
-  const breaker = await checkCircuitBreaker('scout', now);
   header('CIRCUIT BREAKER');
   line(`equity=$${breaker.equityUsd.toFixed(0)} (peak $${breaker.peakEquityUsd.toFixed(0)}, dayStart $${breaker.dayStartEquityUsd.toFixed(0)})`);
   line(breaker.blockNewEntries ? `⛔ HALTED — ${breaker.reason} → NO new entries${breaker.flattenRecommended ? ' + flatten recommended' : ''}` : `✓ ${breaker.reason}`);
 
-  // 3) Track record for the learning loop (win-rate by recent outcome) — scoped to
-  // SCOUT sessions only, so the scout's self-assessment excludes manual trades.
-  const client = getServiceRoleClient();
-  const { data: scoutSessions } = await client.from('sessions').select('id').eq('title', 'scout');
-  const scoutIds = (scoutSessions ?? []).map((s) => (s as { id: string }).id);
-  let hypRows: HypothesisSummaryRow[] = [];
-  if (scoutIds.length > 0) {
-    const { data } = await client
-      .from('hypotheses')
-      .select('statement, status, resolution_note, created_at, resolved_at')
-      .in('session_id', scoutIds)
-      .order('created_at', { ascending: false })
-      .limit(30);
-    hypRows = (data ?? []) as HypothesisSummaryRow[];
-  }
-  const summary = summarizeHypotheses(hypRows);
   header('TRACK RECORD (recent hypotheses)');
   line(`open=${summary.open}  confirmed=${summary.confirmed}  invalidated=${summary.invalidated}  resolved=${summary.resolved}`);
   if (summary.lastResolved.length > 0) {
@@ -117,10 +151,8 @@ run(async () => {
     summary.lastResolved.forEach((h) => line(`  [${h.status}] ${h.statement}${h.resolutionNote ? ` — ${h.resolutionNote}` : ''}`));
   }
 
-  // 4) Playbook pointer (the durable, curated memory the scout MUST read).
   header('PLAYBOOK');
-  const pb = scoutPlaybookPath();
-  line(existsSync(pb) ? `Read + apply: ${pb}` : `(missing — create ${pb})`);
+  line(existsSync(playbookPath) ? `Read + apply: ${playbookPath}` : `(missing — create ${playbookPath})`);
 
   header('NEXT');
   line('Decide per .claude/skills/scout/SKILL.md. Trade (paper) only if a setup clears the bar; else stand down + note why.');

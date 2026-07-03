@@ -75,3 +75,13 @@ Running Opus in a poll loop would be wasteful. Instead:
 - Graduating to live is NOT automatic: it requires clearing the bar AND the
   separate live gates (ADR-0001 `TRADING_MODE=live` + per-coin allowlist + human
   approval per trade). The scout never flips itself live.
+
+## Addendum (2026-07-03) — sink + consumer hardening
+
+The machine-local JSONL trigger sink let the consumer die unnoticed for 8 days (split-brain:
+a NAS daemon's triggers were invisible to a desktop session). The sink is now the Supabase
+`scout_triggers` table behind the ScoutTriggerSink seam (`src/lib/scout/scout-trigger-sink.ts`,
+JSONL retained as the offline fallback adapter), with `consumed_at` as the consumer cursor.
+The consumer is schedulable headlessly (`scout:cycle --json` → `claude -p` → `scout:trade
+--from-json`, strict-validated by `parseScoutDecision`) and writes its own heartbeat row.
+The inverted-loop design and the paper-only guard are unchanged.

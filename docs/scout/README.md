@@ -1,6 +1,14 @@
 # Autonomous Paper Scout — runbook
 
-> ## ⚠ STATUS — PRODUCER-ONLY since ~Jun 24 (updated 2026-07-02)
+> ## STATUS — repaired 2026-07-03 (C1+C2 of the architecture review)
+> The sink is now the **Supabase `scout_triggers` table** (ScoutTriggerSink: any-box
+> visibility + a consumed-cursor; the JSONL is the offline fallback), and the consumer is
+> **schedulable** (`scripts/scout-headless.sh`: `scout:cycle --json` → headless Sonnet →
+> `scout:trade --from-json`, strict-validated). Consumer liveness is its own heartbeat row
+> (`source='scout-cycle'`). To finish the repair: add the headless cron line (see
+> OPERATOR_MANUAL) — the history below explains why.
+>
+> ### Previous status — PRODUCER-ONLY since ~Jun 24 (found 2026-07-02)
 > The deterministic half is HEALTHY: `scout:watch` writes ~200–300 triggers/day to the
 > **machine-local** JSONL (`~/.hl-cockpit-scout-trigger.jsonl`). What has been DEAD is the
 > **consumer** — the Sonnet Claude scout session that reads the JSONL and makes paper calls

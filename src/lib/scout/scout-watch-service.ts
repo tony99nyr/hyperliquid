@@ -10,11 +10,12 @@
  * this file is the thin Supabase/HL bridge + the trigger-file sink.
  */
 
-import { appendFileSync, readFileSync, writeFileSync, renameSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
+import { appendTriggers } from './scout-trigger-sink';
 import { fetchAllMids } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { listActiveSessions } from '@/lib/cockpit/session-service';
 import { loadOpenPositions } from '@/lib/cockpit/fill-persistence-service';
@@ -29,10 +30,9 @@ import {
   type ScoutTriggerConfig,
 } from './scout-trigger-business-logic';
 
-/** Default trigger sink — overridable via SCOUT_TRIGGER_FILE (e.g. on the home PC). */
-export function scoutTriggerFilePath(): string {
-  return process.env.SCOUT_TRIGGER_FILE ?? join(homedir(), '.hl-cockpit-scout-trigger.jsonl');
-}
+// Trigger persistence lives behind the ScoutTriggerSink seam (scout-trigger-sink.ts):
+// supabase `scout_triggers` primary (any-box visibility + consumer cursor), JSONL fallback.
+export { scoutTriggerFilePath } from './scout-trigger-sink';
 
 /** Persisted trigger-state file — survives a daemon restart so a restart doesn't
  * re-baseline blind (and miss a breakout that happens during the first cycle). */
@@ -65,19 +65,6 @@ export function saveScoutState(state: ScoutState, path = scoutStateFilePath()): 
     const tmp = `${path}.tmp`;
     writeFileSync(tmp, JSON.stringify(state), 'utf8');
     renameSync(tmp, path);
-  } catch {
-    /* best-effort */
-  }
-}
-
-/** Keep the JSONL sink bounded: rotate to the last N lines once it grows past a cap. */
-const TRIGGER_FILE_MAX_BYTES = 512 * 1024;
-const TRIGGER_FILE_KEEP_LINES = 500;
-function rotateTriggerFileIfLarge(path: string): void {
-  try {
-    if (!existsSync(path) || statSync(path).size <= TRIGGER_FILE_MAX_BYTES) return;
-    const kept = readFileSync(path, 'utf8').trim().split('\n').slice(-TRIGGER_FILE_KEEP_LINES);
-    writeFileSync(path, kept.join('\n') + '\n', 'utf8');
   } catch {
     /* best-effort */
   }
@@ -242,12 +229,9 @@ export async function writeScoutHeartbeat(
   }
 }
 
-/** Append triggers as JSONL to the sink the scout session's Monitor watches. */
-export function appendScoutTriggers(triggers: ScoutTrigger[], filePath = scoutTriggerFilePath()): void {
-  if (triggers.length === 0) return;
-  const lines = triggers.map((t) => JSON.stringify(t)).join('\n') + '\n';
-  appendFileSync(filePath, lines, 'utf8');
-  rotateTriggerFileIfLarge(filePath);
+/** Append triggers to the sink (table primary, JSONL fallback — see scout-trigger-sink). */
+export async function appendScoutTriggers(triggers: ScoutTrigger[]): Promise<'supabase' | 'jsonl' | 'none'> {
+  return appendTriggers(triggers);
 }
 
 /**
@@ -258,7 +242,6 @@ export async function runScoutWatchCycle(
   prev: ScoutState,
   cfg?: ScoutTriggerConfig,
   now: number = Date.now(),
-  filePath = scoutTriggerFilePath(),
 ): Promise<{ triggers: ScoutTrigger[]; state: ScoutState; degraded: boolean; degradedReason: string | null }> {
   const input = await gatherScoutInputs(now);
   // STAND DOWN on a degraded feed: don't emit (and thus don't wake the model to
@@ -269,6 +252,6 @@ export async function runScoutWatchCycle(
     return { triggers: [], state, degraded: true, degradedReason: input.degradedReason };
   }
   const { triggers, state } = detectScoutTriggers(input, prev, cfg);
-  appendScoutTriggers(triggers, filePath);
+  await appendScoutTriggers(triggers);
   return { triggers, state, degraded: false, degradedReason: null };
 }

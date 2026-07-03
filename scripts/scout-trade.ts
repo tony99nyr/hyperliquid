@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { parseArgs, requireString, optionalNumber, header, line, run } from './_skill-runtime';
 import { getTradingMode } from '@/lib/env/mode';
 import { assertScoutPaperMode } from '@/lib/scout/scout-execution-guard';
+import { parseScoutDecision } from '@/lib/scout/scout-cycle-business-logic';
 import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
 import { buildOpenProposal } from '@/lib/skills/open-position-business-logic';
 import { buildMarketReduceOnlyClose } from '@/lib/trading/safe-exit-business-logic';
@@ -175,12 +176,31 @@ async function runExit(args: Record<string, string | boolean>): Promise<void> {
 }
 
 run(async () => {
-  const args = parseArgs(process.argv.slice(2));
+  let args = parseArgs(process.argv.slice(2));
 
   // HARD SAFETY BOUNDARY: the scout's popup-less execution is paper-only. This
   // throws in live mode — real-money trades must go through the human approval
   // popup (Tier-1), never this autonomous path.
   assertScoutPaperMode(getTradingMode());
+
+  // Headless contract (C2): --from-json '<decision>' carries the model's decision as
+  // ONE strict JSON object (see parseScoutDecision — malformed NEVER trades). The
+  // stand-down outcome is first-class: log it and exit clean.
+  if (typeof args['from-json'] === 'string') {
+    const parsed = parseScoutDecision(args['from-json']);
+    if (parsed.kind === 'error') {
+      header('⛔ headless decision REJECTED');
+      line(parsed.error);
+      process.exitCode = 1;
+      return;
+    }
+    if (parsed.kind === 'stand-down') {
+      header('stand-down');
+      line(parsed.note);
+      return;
+    }
+    args = parsed.args;
+  }
 
   const isExit = args['exit'] === true || args['exit'] === 'true';
   if (isExit) {

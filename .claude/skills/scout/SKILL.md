@@ -38,8 +38,11 @@ polling and wakes you only when something material happened (the inverted loop).
 
 ## The loop (you, on wake)
 
-You are driven by scheduled wake-ups + a Monitor on the trigger file
-(`~/.hl-cockpit-scout-trigger.jsonl`, or `$SCOUT_TRIGGER_FILE`). On EACH wake:
+You are driven by scheduled wake-ups. Triggers live in the **Supabase `scout_triggers`
+table** (the ScoutTriggerSink — visible from any box, with a consumed-cursor so the same
+trigger never re-surfaces; the JSONL `~/.hl-cockpit-scout-trigger.jsonl` is only the
+offline fallback). `pnpm scout:cycle` reads UNCONSUMED triggers and stamps them. On EACH
+wake:
 
 1. **Snapshot.** Run `pnpm scout:cycle`. It prints recent triggers, the newest
    rubric reads, fresh marks, your open paper positions, your recent
@@ -84,3 +87,18 @@ You are driven by scheduled wake-ups + a Monitor on the trigger file
 - Size every entry by risk (`--risk` + `--stop-frac`), never by raw notional.
 - One paper book: pass the existing scout `--session` so P&L accrues in one place.
 - Don't churn. Re-read the playbook's anti-chop / funding rules before every entry.
+
+## Headless mode (zero babysitting — the scheduled consumer)
+
+The interactive session above is optional. The scheduled path (`scripts/scout-headless.sh`,
+cron every ~30min on any box) runs the SAME loop with a strict contract:
+
+1. `pnpm scout:cycle --json` → ONE JSON snapshot (unconsumed triggers, rubric, marks,
+   funding/OI, vaults, positions, circuit breaker, track record, playbook path). Writes the
+   CONSUMER heartbeat (`scout_heartbeat.source='scout-cycle'`) — a dead consumer is a stale
+   row in the cockpit, never silence.
+2. A headless Sonnet run (`claude -p`) receives snapshot + playbook and replies with EXACTLY
+   one JSON object: `{"action":"stand-down"|"open"|"close", ...}`.
+3. `pnpm scout:trade --from-json '<decision>'` validates STRICTLY (`parseScoutDecision` —
+   malformed NEVER trades) and executes through the same paper-only guard. Stand-down is a
+   first-class, logged outcome — the correct answer most cycles.
