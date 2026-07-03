@@ -29,6 +29,7 @@ function printScorecard(sc: LadderReviewScorecard): void {
   line(`VERDICT: ${sc.verdict}`);
   line(`RISK ${sc.riskScore}/10   UPSIDE ${sc.upsideScore}/10`);
   line(`worst case (slip+funding): $${sc.worstCaseLossWithFundingUsd}  ·  notional $${sc.totalNotionalUsd}${sc.pctOfEquity != null ? `  ·  ${sc.pctOfEquity}% of equity` : ''}`);
+  if (sc.liveWorstCaseUsd != null) line(`LIVE worst case (position @ live stop + pending rungs): $${sc.liveWorstCaseUsd}`);
   if (sc.blockers.length) { line('\n  ⛔ BLOCKERS:'); for (const b of sc.blockers) line(`     - ${b}`); }
   line('\n  RISK pillars (0/10, higher = safer):');
   for (const p of sc.riskPillars) line(`     ${bar(p.score)} ${p.score}/10  ${p.label} · ${p.lens}\n        ${p.note}`);
@@ -92,10 +93,23 @@ run(async () => {
   // pure layer: number = live stop; null = read OK but NO stop (naked — blocker); key
   // absent = unreadable → projection fallback. Fail-soft on any error.
   const liveStopByCoin: Record<string, number | null> = {};
+  const livePositionByCoin: Record<string, { sz: number; entryPx: number; side: 'long' | 'short' } | null> = {};
   const firedCoins = new Set(
     ladders.flatMap((l) => l.rungs.filter((r) => (r.action === 'open' || r.action === 'add') && r.status === 'fired').map((r) => r.coin.toUpperCase())),
   );
   if (firedCoins.size > 0) {
+    // Live positions from the reconciled ledger (kept in lock-step with HL by the
+    // reconcile cron) — the actual size/entry the mark-to-live worst case needs.
+    try {
+      const db = getServiceRoleClient();
+      const { data } = await db.from('positions').select('coin,side,sz,avg_entry_px').gt('sz', 0);
+      for (const p of data ?? []) {
+        const c = (p.coin as string).toUpperCase();
+        if (firedCoins.has(c) && (p.side === 'long' || p.side === 'short')) {
+          livePositionByCoin[c] = { sz: p.sz as number, entryPx: p.avg_entry_px as number, side: p.side };
+        }
+      }
+    } catch { /* fail-soft — live read omitted */ }
     const base = process.env.COCKPIT_BASE_URL ?? 'https://hyperliquid-rouge.vercel.app';
     const adminSecret = process.env.ADMIN_SECRET;
     if (adminSecret) {
@@ -143,7 +157,7 @@ run(async () => {
     const auto = signal == null ? (rubricSignalByLadder.get(l.id) ?? null) : null;
     const reason = rubricReasonByLadder.get(l.id);
     return {
-      midByCoin, fundingByCoin, accountEquityUsd, recentWicksByCoin, liveStopByCoin, now,
+      midByCoin, fundingByCoin, accountEquityUsd, recentWicksByCoin, liveStopByCoin, livePositionByCoin, now,
       signalScore: signal ?? auto,
       timingScore: timing,
       signalSource: signal != null ? 'operator' : auto != null ? `rubric ADR-0006, auto${reason ? ` — ${reason}` : ''}` : null,

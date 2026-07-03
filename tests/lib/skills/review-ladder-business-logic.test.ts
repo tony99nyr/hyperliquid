@@ -134,6 +134,32 @@ describe('reviewLadder — live resting stop supersedes the projection for FIRED
   it('an UNFIRED draft never consults live stops (projection as before)', () => {
     const sc = reviewLadder(ladder(CLEAN), { ...ctx, liveStopByCoin: { HYPE: null } });
     expect(sc.blockers.some((b) => /naked/i.test(b))).toBe(false);
+    expect(sc.liveWorstCaseUsd).toBeNull();
+  });
+
+  it('mark-to-live worst case: live position @ live stop (slipped) + pending rung risk', () => {
+    // Live: 0.62 @ 66.103, stop 59.85 → slipped fill 53.865 → (66.103−53.865)×0.62 ≈ $7.59.
+    // Plus the pending add rung's projected risk: entry 72, stopFrac 0.083 → stop 66.024,
+    // size = 3/(72×0.083) ≈ 0.502 → slipped fill 59.42 → (72−59.42)×0.502 ≈ $6.31.
+    const withAdd = [
+      rung({ seq: 1, action: 'open', triggerPx: 66, riskUsd: 6, stopFrac: 0.144, leverage: 2, status: 'fired' }),
+      rung({ seq: 2, action: 'add', triggerPx: 72, riskUsd: 3, stopFrac: 0.083, leverage: 2, status: 'pending' }),
+    ];
+    const sc = reviewLadder(ladder(withAdd, { status: 'armed' }), {
+      ...ctx,
+      liveStopByCoin: { HYPE: 59.85 },
+      livePositionByCoin: { HYPE: { sz: 0.62, entryPx: 66.103, side: 'long' } },
+    });
+    expect(sc.liveWorstCaseUsd).not.toBeNull();
+    expect(sc.liveWorstCaseUsd!).toBeGreaterThan(13);
+    expect(sc.liveWorstCaseUsd!).toBeLessThan(15); // ≈ 7.59 + 6.31 ≈ 13.9
+    // and the planned consent-surface number is untouched (still the projection)
+    expect(sc.worstCaseLossWithFundingUsd).toBeGreaterThan(sc.liveWorstCaseUsd! - 5);
+  });
+
+  it('live worst case omitted when the live position is unreadable', () => {
+    const sc = reviewLadder(ladder(FIRED, { status: 'armed' }), { ...ctx, liveStopByCoin: { HYPE: 59.85 }, livePositionByCoin: {} });
+    expect(sc.liveWorstCaseUsd).toBeNull();
   });
 });
 

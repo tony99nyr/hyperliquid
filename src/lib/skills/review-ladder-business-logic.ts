@@ -14,8 +14,8 @@
  * neutral 5 and flag that a human/Claude read is owed.
  */
 
-import type { LadderWithRungs } from '@/lib/ladder/ladder-types';
-import { STOP_SLIPPAGE_TOL, type LadderRiskRead } from '@/lib/ladder/ladder-risk-business-logic';
+import type { LadderSide, LadderWithRungs } from '@/lib/ladder/ladder-types';
+import { STOP_SLIPPAGE_TOL, worstStopFill, rungWorstCaseLoss, type LadderRiskRead } from '@/lib/ladder/ladder-risk-business-logic';
 import { resolveArmRung, validateLadderForArm, type ArmRung } from '@/lib/ladder/ladder-arm-business-logic';
 import { stopHygiene } from '@/lib/ladder/ladder-stop-hygiene-business-logic';
 import { resolveCoinMaxLeverage, MMR } from '@/lib/trading/leverage-business-logic';
@@ -49,6 +49,11 @@ export interface LadderReviewScorecard {
   worstCaseLossWithFundingUsd: number;
   totalNotionalUsd: number;
   pctOfEquity: number | null;
+  /** Mark-to-live worst case for a FIRED ladder: the LIVE position against its LIVE
+   *  resting stop (slipped) + the remaining PENDING open/add rungs' projected risk +
+   *  funding cost. null when nothing fired or live data is unreadable. The consent-
+   *  surface number (worstCaseLossWithFundingUsd) stays the planned projection. */
+  liveWorstCaseUsd: number | null;
 }
 
 export interface LadderReviewContext {
@@ -75,6 +80,9 @@ export interface LadderReviewContext {
    *  SUCCEEDED and there is NO resting stop (a naked live position — blocker!); key
    *  absent = unreadable → fall back to the projection, labeled as such. */
   liveStopByCoin?: Record<string, number | null>;
+  /** LIVE position (reconciled ledger) per coin, for fired ladders — feeds the
+   *  mark-to-live worst case. Absent/null = unknown → live read omitted. */
+  livePositionByCoin?: Record<string, { sz: number; entryPx: number; side: LadderSide } | null>;
   now: number;
 }
 
@@ -353,6 +361,35 @@ export function reviewLadder(ladder: LadderWithRungs, ctx: LadderReviewContext):
   else if (riskScore >= 4) verdict = 'CAUTION — fixable risk gaps; tighten before sizing up.';
   else verdict = 'RISKY — material risk gaps; reduce size or rework.';
 
+  // Mark-to-live worst case (FIRED ladders): the LIVE position against its LIVE resting
+  // stop (slipped) + the remaining PENDING open/add rungs' projected risk. The planned
+  // projection stays the consent surface; this is what can ACTUALLY hit the account now
+  // (e.g. after an operator stop-tighten the planned number overstates the live risk).
+  let liveWorstCaseUsd: number | null = null;
+  if (firedCoins.size > 0 && ctx.liveStopByCoin && ctx.livePositionByCoin) {
+    let liveSum = 0;
+    let complete = true;
+    for (const coin of firedCoins) {
+      const pos = ctx.livePositionByCoin[coin];
+      const stopPx = ctx.liveStopByCoin[coin];
+      if (!pos || stopPx == null || !(stopPx > 0) || !(pos.sz > 0)) { complete = false; break; }
+      const fill = worstStopFill(pos.side, stopPx);
+      if (fill == null) { complete = false; break; }
+      const adverse = pos.side === 'long' ? pos.entryPx - fill : fill - pos.entryPx;
+      liveSum += Math.max(0, adverse) * pos.sz;
+    }
+    if (complete) {
+      // Pending (unfired) open/add rungs still carry their projected risk.
+      for (let i = 0; i < armRungs.length; i++) {
+        const raw = ladder.rungs[i];
+        if (!isOpenAdd(raw.action) || raw.status !== 'pending') continue;
+        const a = armRungs[i];
+        liveSum += rungWorstCaseLoss({ side: a.side, action: a.action, entryPx: a.entryPx, sizeCoins: a.sizeCoins, stopPx: a.stopPx });
+      }
+      liveWorstCaseUsd = round1(liveSum + Math.max(0, risk.expectedFundingUsd));
+    }
+  }
+
   return {
     ladderId: ladder.id,
     title: ladder.title,
@@ -368,5 +405,6 @@ export function reviewLadder(ladder: LadderWithRungs, ctx: LadderReviewContext):
     worstCaseLossWithFundingUsd: round1(risk.worstCaseLossWithFundingUsd),
     totalNotionalUsd: round1(risk.totalNotionalUsd),
     pctOfEquity: equity ? round1((risk.worstCaseLossWithFundingUsd / equity) * 100) : null,
+    liveWorstCaseUsd,
   };
 }
