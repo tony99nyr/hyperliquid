@@ -181,3 +181,16 @@ describe('rubricSignalScore (rubric → thesis pillar)', () => {
     expect(rubricSignalScore(35, NOW, NOW, 'portfolio-cap')).toBe(3.5);
   });
 });
+
+describe('rewardRisk — nearest target is side-aware', () => {
+  it('a SHORT measures R to the HIGHEST (nearest) target, not the lowest', () => {
+    const shortLadder = ladder([
+      rung({ seq: 1, action: 'open', side: 'short', triggerKind: 'price_below', triggerPx: 1743, riskUsd: 4, stopFrac: 0.0419, leverage: 2 }),
+      rung({ seq: 2, action: 'reduce', side: 'short', triggerKind: 'price_below', triggerPx: 1670, reduceFrac: 0.5 }),
+      rung({ seq: 3, action: 'reduce', side: 'short', triggerKind: 'price_below', triggerPx: 1590, reduceFrac: 0.5 }),
+    ], { maxTotalLossUsd: 15, maxTotalNotionalUsd: 110 });
+    const sc = reviewLadder(shortLadder, { ...ctx, midByCoin: { HYPE: 1750 } });
+    const rr = sc.upsidePillars.find((p) => p.key === 'rr')!;
+    expect(rr.note).toMatch(/1670/); // nearest, NOT 1590
+  });
+});

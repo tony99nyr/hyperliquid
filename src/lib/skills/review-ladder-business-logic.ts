@@ -277,10 +277,12 @@ function operational(ladder: LadderWithRungs, risk: LadderRiskRead, warnings: st
  *  scale-out target. */
 function rewardRisk(rungs: LadderWithRungs['rungs'], armRungs: ArmRung[]): PillarScore {
   const core = armRungs.find((r) => r.action === 'open') ?? armRungs.find((r) => isOpenAdd(r.action));
+  const side = core?.side ?? 'long';
   const target = rungs
     .filter((r) => (r.action === 'reduce' || r.action === 'close') && r.triggerPx != null && r.triggerPx > 0)
     .map((r) => r.triggerPx as number)
-    .sort((a, b) => a - b)[0]; // nearest target
+    // NEAREST target is side-aware: lowest price for a long, HIGHEST for a short
+    .sort((a, b) => (side === 'long' ? a - b : b - a))[0];
   if (!core || core.entryPx == null || core.stopPx == null || target == null) {
     return { key: 'rr', label: 'Reward : risk', lens: 'Quant volatility', score: 3, note: 'No defined scale-out target to measure R against.' };
   }
