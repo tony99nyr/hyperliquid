@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { isPageActive, onActivityResume } from './page-activity';
 
 export interface PolledState<T> {
   data: T | null;
@@ -31,7 +32,9 @@ export function usePolledEndpoint<T>(
     if (!enabled) return;
     let active = true;
     const load = async () => {
-      if (typeof document !== 'undefined' && document.hidden) return;
+      // Hidden OR idle (no user input for the activity window) ⇒ skip the fetch — an
+      // unattended tab must not bill Vercel all night. Input resumes instantly below.
+      if (!isPageActive()) return;
       try {
         const res = await fetch(url, { credentials: 'same-origin' });
         const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string } & Record<string, unknown>;
@@ -49,9 +52,11 @@ export function usePolledEndpoint<T>(
     const timer = setInterval(load, pollMs);
     const onVis = () => { if (!document.hidden) void load(); };
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVis);
+    const offResume = onActivityResume(() => void load()); // instant refresh on return-from-idle
     return () => {
       active = false;
       clearInterval(timer);
+      offResume();
       if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVis);
     };
   }, [url, enabled, pick, pollMs]);

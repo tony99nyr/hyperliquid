@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { isPageActive } from './page-activity';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { getBrowserClient } from '@/lib/cockpit/supabase-browser';
 import {
@@ -186,7 +187,9 @@ export function useRealtimeChannel<T extends { id: string }>(
             void loadSnapshot();
           }
         });
-      interval = setInterval(() => void loadSnapshot(), REALTIME_REFETCH_MS);
+      // Fallback refetch is idle-aware: an unattended tab keeps its realtime socket
+      // (Supabase, not Vercel-billed) but stops hitting the snapshot endpoint.
+      interval = setInterval(() => { if (isPageActive()) void loadSnapshot(); }, REALTIME_REFETCH_MS);
     };
 
     const unsubscribe = () => {
