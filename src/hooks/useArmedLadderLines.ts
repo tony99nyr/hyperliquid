@@ -30,7 +30,7 @@ export function useArmedLadderLines(coin: string): TradePriceLine[] {
     '/api/cockpit/ladder?status=armed&withRungs=1',
     true,
     pickArmed,
-    8000,
+    60_000, // was 8s — rungs change rarely; the chart overlay doesn't need sub-minute status (CPU trim)
   );
   return useMemo(
     () =>

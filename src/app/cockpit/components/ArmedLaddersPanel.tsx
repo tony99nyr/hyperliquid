@@ -54,7 +54,7 @@ export default function ArmedLaddersPanel({ coin = 'ETH' }: ArmedLaddersPanelPro
     '/api/cockpit/ladder?status=armed&withRungs=1',
     true,
     pickLadders,
-    8000,
+    30_000, // was 8s — live proximity comes from the ws mark; this poll only refreshes rung status (CPU trim)
   );
   const ladders = useMemo(() => (data ?? []).filter((l) => l.rungs.length > 0), [data]);
   const coins = useMemo(() => Array.from(new Set(ladders.flatMap((l) => l.rungs.map((r) => r.coin.toUpperCase())))), [ladders]);

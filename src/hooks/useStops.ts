@@ -19,6 +19,6 @@ export interface UseStopsState {
 const pickStops = (j: { ok?: boolean } & Record<string, unknown>) => j.stops as Record<string, RestingStop> | undefined;
 
 export function useStops(enabled: boolean): UseStopsState {
-  const { data, loaded, error } = usePolledEndpoint('/api/cockpit/stops', enabled, pickStops, 25_000);
+  const { data, loaded, error } = usePolledEndpoint('/api/cockpit/stops', enabled, pickStops, 60_000); // was 25s — each poll is a server-side HL round-trip (CPU trim)
   return { stopsByCoin: data ?? {}, loaded, error };
 }

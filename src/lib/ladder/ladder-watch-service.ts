@@ -24,7 +24,7 @@ import type { CandleInterval } from '@/lib/hyperliquid/candle-service-business-l
  *  completed-bar close across the level — 15m balances responsiveness vs whipsaw. */
 const WATCH_INTERVAL: CandleInterval = '15m';
 const WATCH_INTERVAL_MS = 15 * 60 * 1000;
-const LOOKBACK_MS = 6 * 60 * 60 * 1000; // enough 15m bars for a couple completed candles
+const LOOKBACK_MS = 90 * 60 * 1000; // 6×15m bars — the evaluator needs [len-2] + freshness, not history (CPU trim)
 // Feed-freshness bound: the newest bar must be within 2 intervals of now, else fail closed.
 const MAX_CANDLE_AGE_MS = 2 * WATCH_INTERVAL_MS;
 

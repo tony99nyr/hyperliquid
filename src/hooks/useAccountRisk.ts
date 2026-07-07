@@ -19,6 +19,6 @@ export interface UseAccountRiskState {
 const pickRisk = (j: { ok?: boolean } & Record<string, unknown>) => j.risk as Record<string, AccountRisk> | undefined;
 
 export function useAccountRisk(enabled: boolean): UseAccountRiskState {
-  const { data, loaded, error } = usePolledEndpoint('/api/cockpit/account-risk', enabled, pickRisk, 20_000);
+  const { data, loaded, error } = usePolledEndpoint('/api/cockpit/account-risk', enabled, pickRisk, 60_000); // was 20s — liq/margin at 2x moves slowly; HL round-trip per poll (CPU trim)
   return { riskByCoin: data ?? {}, loaded, error };
 }
