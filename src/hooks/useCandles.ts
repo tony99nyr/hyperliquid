@@ -15,6 +15,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { isPageActive } from './page-activity';
 import { fetchCandlesViaProxy } from '@/lib/hyperliquid/candle-client';
 import type { CandleInterval } from '@/lib/hyperliquid/candle-service-business-logic';
 import type { PriceCandle } from '@/types/trading-core';
@@ -83,7 +84,7 @@ export function useCandles(coin: string, interval: CandleInterval): UseCandlesSt
       setLoading(false);
     };
     void load();
-    const timer = setInterval(load, REFRESH_MS[interval]);
+    const timer = setInterval(() => { if (isPageActive()) void load(); }, REFRESH_MS[interval]); // idle-gated: an unattended tab stops pulling candle payloads
     const onVis = () => { if (!document.hidden) void load(); };
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVis);
     return () => {

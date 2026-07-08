@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { isPageActive } from './page-activity';
 import { fetchRegimeCandlesViaProxy } from '@/lib/hyperliquid/candle-client';
 import {
   buildRegimeStrip,
@@ -59,7 +60,7 @@ export function useRegimeStrip(coin: string): RegimeStripState {
       setLoading(false);
     };
     void load();
-    const timer = setInterval(load, REFRESH_MS);
+    const timer = setInterval(() => { if (isPageActive()) void load(); }, REFRESH_MS); // idle-gated: an unattended tab stops pulling candle payloads
     const onVis = () => { if (!document.hidden) void load(); };
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVis);
     return () => {

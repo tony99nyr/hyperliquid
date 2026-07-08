@@ -34,6 +34,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // it from cache is the bulk of the regime egress saving).
   return NextResponse.json(
     { ok: true, byInterval },
-    { headers: { 'Cache-Control': 'private, max-age=90' } },
+    { headers: { 'Cache-Control': 'public, max-age=90, s-maxage=90, stale-while-revalidate=180' } },
   );
 }

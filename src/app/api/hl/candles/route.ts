@@ -42,12 +42,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const end = Math.floor(Date.now() / WINDOW_GRID_MS) * WINDOW_GRID_MS;
   const result = await fetchCandles(coin, interval, end - lookbackMs, end);
 
-  // Browser holds the response for 30s (the bars are valid for the cache window;
-  // the live price comes from the ws). The URL is stable, so a polling chart reads
-  // from its OWN HTTP cache within the window — near-zero origin transfer (the fix
-  // for the Fast Origin Transfer blowout, paired with dropping client `no-store`).
+  // PUBLIC market data (no auth on this route) → let the EDGE cache it too:
+  // `private` forced every browser cache-miss to origin (Fast Origin Transfer);
+  // with s-maxage the grid-stable URL is served from Vercel's edge for the whole
+  // window — ALL tabs/devices share one origin fetch per 30s. SWR keeps charts
+  // instant while the edge revalidates.
   return NextResponse.json(
     { ok: true, result },
-    { headers: { 'Cache-Control': 'private, max-age=30' } },
+    { headers: { 'Cache-Control': 'public, max-age=30, s-maxage=30, stale-while-revalidate=90' } },
   );
 }
