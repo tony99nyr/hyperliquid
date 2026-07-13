@@ -108,7 +108,7 @@ export function bucketTime(t: number, interval: CandleInterval): number {
 
 /**
  * The 30s grid the candle window snaps to so that all polls within one window
- * share a SINGLE cross-instance Data-Cache key. Matches `HL_REVALIDATE_S.candles`
+ * share a SINGLE transport-memo key. Matches `HL_REVALIDATE_S.candles`
  * (30s) and the grid the regime path already uses. Snapping to 30s (not the
  * interval period) keeps the most-recent forming candle fresh — at worst the
  * fetched `end` lags real time by <30s — while collapsing drifting `Date.now()`

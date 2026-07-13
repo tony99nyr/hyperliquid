@@ -257,14 +257,17 @@ export async function fetchClearinghouseState(rawAddress: string, opts?: { uncac
     };
   }
 
-  const cached = positionCache.get(address);
+  // `uncached` callers (reconcile / liq / risk crons) must see a FRESH read — skip
+  // the per-service Map too, not just the transport memo, so a UI poll that warmed
+  // this cache can never hand a cron a position view up to 15s old.
+  const cached = opts?.uncached ? undefined : positionCache.get(address);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.value;
   }
 
   try {
-    // Cross-instance Data Cache (~25s) + in-flight coalescing keyed by address:
-    // leader/own position polls across all Vercel instances collapse to ~1
+    // Transport TTL memo + in-flight coalescing keyed by address:
+    // leader/own position polls on a warm instance collapse to ~1
     // upstream HL fetch per address per window. Per-instance Map + fail-soft wrap.
     const raw = await cachedHlRead('clearinghouse', [address], async () => {
       const body = await hlInfoPost<RawClearinghouseState>({
@@ -276,7 +279,7 @@ export async function fetchClearinghouseState(rawAddress: string, opts?: { uncac
       // `accountValue`), even when totally flat (no positions, zero value). So we
       // key "soft-failed" on the ABSENCE of that sentinel — NOT on zero
       // value/positions — to avoid rejecting a legitimately-empty account. THROW
-      // on absence so `unstable_cache` doesn't pin emptiness for the ~25s window.
+      // on absence so the transport memo doesn't pin emptiness for the window.
       if (!body || typeof body !== 'object' || body.marginSummary?.accountValue === undefined) {
         throw new Error('clearinghouseState empty: soft failure (no marginSummary)');
       }
@@ -392,7 +395,7 @@ export async function fetchSpotUsdcBalance(rawAddress: string): Promise<number |
       const body = await hlInfoPost<RawSpotState>({ type: 'spotClearinghouseState', user: address });
       // Soft-fail guard: a real response ALWAYS carries a `balances` array (empty
       // when the wallet holds nothing). Its ABSENCE = a 200-with-garbage hiccup —
-      // throw so unstable_cache doesn't pin the bad body for the window.
+      // throw so the transport memo doesn't pin the bad body for the window.
       if (!body || typeof body !== 'object' || !Array.isArray(body.balances)) {
         throw new Error('spotClearinghouseState empty: soft failure (no balances)');
       }
@@ -627,9 +630,9 @@ export async function fetchL2Book(coin: string): Promise<L2Book> {
  * upper-cased coin → number map; throws on failure so the caller can fail-soft.
  */
 export async function fetchAllMids(network: 'mainnet' | 'testnet' = 'mainnet', opts?: { uncached?: boolean }): Promise<Record<string, number>> {
-  // Single shared key, cross-instance Data-Cached ~10s + coalesced: every
-  // Performance-view mark-to-market across all instances rides one HL fetch per
-  // 10s window. Throws on failure so callers can fail-soft (posture unchanged).
+  // Single shared key, memoized ~30s + coalesced: every
+  // Performance-view mark-to-market on a warm instance rides one HL fetch per
+  // ~30s window. Throws on failure so callers can fail-soft (posture unchanged).
   const load = async () => {
     const raw = await hlInfoPost<Record<string, string>>({ type: 'allMids' }, hlInfoUrlFor(network));
     const mids: Record<string, number> = {};
@@ -639,7 +642,7 @@ export async function fetchAllMids(network: 'mainnet' | 'testnet' = 'mainnet', o
     }
     // Soft-fail guard: HL can return `{}` / a garbage body with HTTP 200 on a
     // hiccup. `allMids` for a live exchange is NEVER legitimately empty, so an
-    // empty parse means a soft failure — THROW so `unstable_cache` doesn't pin
+    // empty parse means a soft failure — THROW so the transport memo doesn't pin
     // emptiness for the ~10s window. The caller fail-soft handles the rejection.
     if (Object.keys(mids).length === 0) {
       throw new Error('allMids empty: soft failure (no mids returned)');
@@ -698,7 +701,7 @@ export interface HlPerpAsset {
 /**
  * Fetch the perp universe (HL `meta`) — the ordered asset list whose index is the
  * `a` field in an order action, plus each coin's `szDecimals`. The universe
- * changes very rarely, so it's Data-Cached long (~5min) + coalesced. Throws on an
+ * changes very rarely, so it's memoized long (~10min) + coalesced. Throws on an
  * empty/garbage body (soft failure) so the cache never pins emptiness.
  */
 export async function fetchPerpMeta(network: 'mainnet' | 'testnet' = 'mainnet'): Promise<HlPerpAsset[]> {
@@ -708,7 +711,7 @@ export async function fetchPerpMeta(network: 'mainnet' | 'testnet' = 'mainnet'):
     if (universe.length === 0) throw new Error('meta empty: soft failure (no universe)');
     return universe;
   };
-  // Mainnet is the hot, shared path → Data-Cached. Testnet is a rare rehearsal
+  // Mainnet is the hot, shared path → memoized. Testnet is a rare rehearsal
   // path → direct (uncached) so it never collides with the mainnet cache key.
   return network === 'testnet' ? load() : cachedHlRead('perpMeta', ['all'], load);
 }
@@ -738,7 +741,7 @@ interface RawAssetCtx {
 /**
  * Fetch funding/OI/premium per asset (HL `metaAndAssetCtxs`). The response is
  * `[meta, ctxs]` where `meta.universe[i]` aligns to `ctxs[i]`. Returns a coin →
- * HlAssetCtx map. Data-Cached ~60s (the rubric scan runs ~20min, so staleness is
+ * HlAssetCtx map. Memoized ~120s (the rubric scan runs ~20min, so staleness is
  * bounded). Throws on an empty/garbage body so the cache never pins emptiness.
  */
 export async function fetchMetaAndAssetCtxs(

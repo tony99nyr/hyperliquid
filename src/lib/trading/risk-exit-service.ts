@@ -71,7 +71,7 @@ export async function performRiskExit(args: {
   }
 
   // 2) Fresh mark. A bad mark is itself a risk signal — alert, don't silently pass.
-  // Uncached: the cron reads once per tick; the Data Cache (Blob) gives no benefit here.
+  // Uncached: the cron reads once per tick and must see a fresh mark (never memoized).
   const mids = await fetchAllMids(validateEnv().HL_NETWORK, { uncached: true });
   const markPx = mids[coin];
   if (!Number.isFinite(markPx) || markPx <= 0) {

@@ -63,7 +63,7 @@ describe('candle-service (I/O, mocked fetch)', () => {
 
     // Realistic polling bounds: a recent end + a multi-day lookback. The window is
     // snapped to the 30s grid for BOTH the cache key and the fetched window
-    // (FIX 1) so concurrent polls share one Data-Cache key.
+    // (FIX 1) so concurrent polls share one transport-memo key.
     const grid = 30_000;
     const endTime = 1_700_000_000_000 + 17_345; // not on a grid boundary
     const startTime = endTime - 24 * 60 * 60 * 1000;
@@ -118,7 +118,7 @@ describe('candle-service (I/O, mocked fetch)', () => {
 
     // Real polling: each poll passes start/end derived from Date.now(), a few
     // seconds apart — but all within ONE 30s window grid. Pre-FIX these minted a
-    // distinct Data-Cache key every call (raw start/end), bypassing the
+    // distinct transport-memo key every call (raw start/end), bypassing the
     // cross-instance cache. Post-FIX they snap to the same grid → one key/fetch.
     const grid = 30_000;
     const base = Math.floor(1_700_000_000_000 / grid) * grid + 1_000; // 1s into a grid

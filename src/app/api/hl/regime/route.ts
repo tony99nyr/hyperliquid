@@ -23,7 +23,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const coin = request.nextUrl.searchParams.get('coin')?.trim().toUpperCase() ?? '';
   if (!coin) return NextResponse.json({ ok: false, error: 'coin required' }, { status: 400 });
 
-  // Coin-keyed regime candle set, cross-instance Data-Cached ~45s under its own
+  // Coin-keyed regime candle set, memoized ~120s under its own
   // tag. The window is bucketed to the 30s grid inside the service so concurrent
   // polls share one cache key.
   const end = Math.floor(Date.now() / WINDOW_GRID_MS) * WINDOW_GRID_MS;

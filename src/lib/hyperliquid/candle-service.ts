@@ -133,9 +133,9 @@ export async function fetchCandles(
 
   // Snap the window to the 30s grid (mirrors fetchRegimeCandleSet / the regime
   // route) so that drifting `Date.now()`-derived bounds from polling callers
-  // collapse onto a SINGLE Data-Cache key per 30s window instead of minting a
-  // new key every poll (which bypassed the cross-instance Data Cache entirely —
-  // the layer that exists to kill Vercel 429s). We snap BOTH the cache key and
+  // collapse onto a SINGLE transport-memo key per 30s window instead of minting a
+  // new key every poll (which bypassed the shared transport memo entirely —
+  // the layer that exists to kill HL 429s). We snap BOTH the cache key and
   // the actually-fetched window so the key faithfully identifies the request.
   // Snapping `end` DOWN by <30s never drops needed history (the start lookback is
   // unchanged-or-earlier and HL returns the whole window inclusive).
@@ -157,9 +157,9 @@ export async function fetchCandles(
   }
 
   try {
-    // Cross-instance Data Cache (layer 1) + in-flight coalescing (layer 2): on
-    // Vercel this collapses identical (coin, interval, window) reads across ALL
-    // serverless instances to ~1 upstream HL fetch per revalidate window. The
+    // Transport TTL memo (layer 1) + in-flight coalescing (layer 2): on a warm
+    // Fluid instance this collapses identical (coin, interval, window) reads
+    // to ~1 upstream HL fetch per TTL window. The
     // per-instance Map above and the 429 backoff below wrap around it.
     const candles = await cachedHlRead(
       'candles',
@@ -228,7 +228,7 @@ const REGIME_LOOKBACK_MS = 200 * 24 * 60 * 60 * 1000;
 
 /**
  * Fetch the multi-timeframe candle set the regime strip needs, cross-instance
- * Data-Cached under its OWN tag keyed by COIN at the regime TTL (~45s). Bypasses
+ * Memoized under its OWN key by COIN at the regime TTL (~120s). Bypasses
  * the per-interval candle cache so the whole set collapses to a single shared
  * cache key per coin (instead of four), which is what the regime proxy wants.
  *
@@ -268,9 +268,9 @@ export async function fetchRegimeCandleSet(
       );
       const out: Record<string, CandleResult> = {};
       for (const r of sets) out[r.interval] = r;
-      // Don't let `unstable_cache` memoize an all-failed / empty set: a transient
-      // HL blip on revalidation would otherwise pin an empty stale set across
-      // instances for the whole ~45s window. THROW so the rejection isn't cached
+      // Don't let the transport memo store an all-failed / empty set: a transient
+      // HL blip would otherwise pin an empty stale set for the whole ~120s memo
+      // window. THROW so the rejection isn't cached
       // (mirrors fetchCandles); the outer catch fail-soft handles the render.
       // PARTIAL sets (≥1 interval with usable candles) stay cacheable.
       const hasUsableCandles = sets.some((r) => r.candles.length > 0);
@@ -292,7 +292,7 @@ export async function fetchRegimeCandleSet(
   }
 }
 
-/** Clear the in-process candle cache (test hook). Also isolates the Data Cache. */
+/** Clear the in-process candle cache (test hook). Also isolates the transport memo. */
 export function _clearCandleCache(): void {
   candleCache.clear();
   backoffUntil = 0;
@@ -301,9 +301,9 @@ export function _clearCandleCache(): void {
 }
 
 /**
- * Clear ONLY the per-instance Map + in-flight (NOT the Data Cache generation) —
- * simulates a fresh serverless instance whose module-level Map is cold but the
- * shared cross-instance Data Cache is still warm. Test hook for the collapse proof.
+ * Clear ONLY the per-instance Map + in-flight (NOT the memo generation) —
+ * simulates a caller whose per-service Map is cold but the
+ * shared transport TTL memo is still warm. Test hook for the collapse proof.
  */
 export function _clearCandleCacheMapOnly(): void {
   candleCache.clear();

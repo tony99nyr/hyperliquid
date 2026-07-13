@@ -112,8 +112,8 @@ export async function scanAndAlertLiqProximity(now: number = Date.now()): Promis
   };
 
   const network = validateEnv().HL_NETWORK;
-  // Uncached — this runs once per cron tick; the Blob-backed Data Cache adds Blob
-  // ops with no cross-instance benefit for a single server-side reader.
+  // Uncached — this runs once per cron tick and must see a FRESH read; memoizing
+  // across ticks could mask a position change for a single server-side reader.
   const [ch, mids] = await Promise.all([
     fetchClearinghouseState(address, { uncached: true }),
     fetchAllMids(network, { uncached: true }),

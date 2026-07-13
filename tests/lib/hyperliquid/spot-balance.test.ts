@@ -1,24 +1,11 @@
 /**
  * fetchSpotUsdcBalance — reads the SPOT side so account equity reflects USDC
- * parked in spot between trades (perp clearinghouseState reads $0 then). Mocked
- * Data Cache + fetch.
+ * parked in spot between trades (perp clearinghouseState reads $0 then). Real
+ * transport memo (cleared per test) + mocked fetch.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const dataCacheStore = new Map<string, { value: unknown; expiresAt: number }>();
-vi.mock('next/cache', () => ({
-  unstable_cache: (fn: () => Promise<unknown>, keyParts: string[], opts: { revalidate: number }) => {
-    const key = keyParts.join(' ');
-    return async () => {
-      const hit = dataCacheStore.get(key);
-      if (hit && hit.expiresAt > Date.now()) return hit.value;
-      const value = await fn();
-      dataCacheStore.set(key, { value, expiresAt: Date.now() + opts.revalidate * 1000 });
-      return value;
-    };
-  },
-}));
-
+import { _clearHlMemo, _clearInFlight } from '@/lib/hyperliquid/hl-cached-transport';
 import { fetchSpotUsdcBalance } from '@/lib/hyperliquid/hyperliquid-info-service';
 
 const ADDR = '0x7Ca0E770911DBf68EdC3b8B12829b272A1b4C177';
@@ -27,7 +14,10 @@ function mockFetch(body: unknown) {
   return vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => body } as Response);
 }
 
-beforeEach(() => dataCacheStore.clear());
+beforeEach(() => {
+  _clearHlMemo();
+  _clearInFlight();
+});
 afterEach(() => vi.restoreAllMocks());
 
 describe('fetchSpotUsdcBalance', () => {

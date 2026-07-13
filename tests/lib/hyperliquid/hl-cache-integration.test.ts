@@ -1,32 +1,15 @@
 /**
- * End-to-end cache-collapse verification across the HL read services, with a
- * MOCKED Data Cache (mimicking Vercel's cross-instance unstable_cache) and a
- * mocked HL transport (`fetch`). Proves:
+ * End-to-end cache-collapse verification across the HL read services, exercising
+ * the REAL transport TTL memo (the Blob-backed Data Cache was deliberately
+ * removed — see the transport header) with a mocked HL transport (`fetch`).
+ * Proves:
  *   - candles / regime / allMids / clearinghouseState collapse repeated reads to
  *     ≤1 upstream HL fetch per (key, TTL).
  *   - l2Book is NEVER cached (paper-fill execution path needs a fresh book).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// Mock the Data Cache (see hl-cached-transport.test.ts for rationale).
-const dataCacheStore = new Map<string, { value: unknown; expiresAt: number }>();
-vi.mock('next/cache', () => ({
-  unstable_cache: (
-    fn: () => Promise<unknown>,
-    keyParts: string[],
-    opts: { revalidate: number },
-  ) => {
-    const key = keyParts.join(' ');
-    return async () => {
-      const hit = dataCacheStore.get(key);
-      if (hit && hit.expiresAt > Date.now()) return hit.value;
-      const value = await fn();
-      dataCacheStore.set(key, { value, expiresAt: Date.now() + opts.revalidate * 1000 });
-      return value;
-    };
-  },
-}));
-
+import { _clearHlMemo, _clearInFlight } from '@/lib/hyperliquid/hl-cached-transport';
 import {
   fetchCandles,
   fetchRegimeCandleSet,
@@ -57,19 +40,20 @@ function mockFetch(body: unknown) {
 }
 
 beforeEach(() => {
-  dataCacheStore.clear();
+  _clearHlMemo();
+  _clearInFlight();
   _clearCandleCache();
 });
 afterEach(() => vi.restoreAllMocks());
 
-describe('cross-instance cache collapse (mocked Data Cache + fetch)', () => {
+describe('cache collapse across the HL read services (real transport memo + mocked fetch)', () => {
   it('candles: 20 concurrent + 20 sequential same-window reads → 1 upstream fetch', async () => {
     const f = mockFetch([candleRow(100)]);
     vi.stubGlobal('fetch', f);
 
-    // The per-instance Map collapses sequential calls; the Data Cache+coalesce
+    // The per-instance Map collapses sequential calls; the transport memo+coalesce
     // collapses concurrent calls. To isolate the cross-instance layer we clear the
-    // per-instance Map between each call but keep the Data Cache warm.
+    // per-instance Map between each call but keep the transport memo warm.
     const concurrent = await Promise.all(
       Array.from({ length: 20 }, () => fetchCandles('ETH', '1h', 0, 1000)),
     );
@@ -80,7 +64,7 @@ describe('cross-instance cache collapse (mocked Data Cache + fetch)', () => {
       await fetchCandles('ETH', '1h', 0, 1000);
     }
     // Even after wiping the per-instance Map 20× (simulating fresh serverless
-    // instances), the shared Data Cache served them → 1 upstream HL call total.
+    // instances), the transport TTL memo served them → 1 upstream HL call total.
     expect(f).toHaveBeenCalledTimes(1);
   });
 
@@ -90,8 +74,8 @@ describe('cross-instance cache collapse (mocked Data Cache + fetch)', () => {
 
     // Real cross-instance polling: each poll uses Date.now()-derived bounds a few
     // seconds apart, AND we wipe the per-instance Map before each (simulating a
-    // fresh serverless instance) so ONLY the shared Data Cache can collapse them.
-    // Pre-FIX the raw start/end minted a new Data-Cache key per poll → every call
+    // fresh per-service cache) so ONLY the transport memo can collapse them.
+    // Pre-FIX the raw start/end minted a new memo key per poll → every call
     // missed the cross-instance cache and hit HL. Post-FIX they share ONE key.
     const grid = 30_000;
     const base = Math.floor(1_700_000_000_000 / grid) * grid + 1_000;
@@ -113,7 +97,7 @@ describe('cross-instance cache collapse (mocked Data Cache + fetch)', () => {
     await fetchRegimeCandleSet('ETH', 1_700_000_000_000);
     await fetchRegimeCandleSet('ETH', 1_700_000_000_000);
     expect(callsAfterFirst).toBe(4);
-    // Subsequent identical-coin sets served from the Data Cache: no new fetches.
+    // Subsequent identical-coin sets served from the transport memo: no new fetches.
     expect(f.mock.calls.length).toBe(4);
   });
 
@@ -132,9 +116,24 @@ describe('cross-instance cache collapse (mocked Data Cache + fetch)', () => {
     expect(f).toHaveBeenCalledTimes(1);
   });
 
+  it('clearinghouseState: `uncached` skips BOTH cache layers — a warmed cache never masks a fresh read', async () => {
+    // The reconcile/liq/risk crons pass `uncached: true` and MUST see the real
+    // account every call — a UI poll warming the per-service Map or the transport
+    // memo moments earlier must not hand a cron a stale position view.
+    const f = mockFetch({ assetPositions: [], marginSummary: { accountValue: '100' }, withdrawable: '50' });
+    vi.stubGlobal('fetch', f);
+    const addr = '0x' + 'd'.repeat(40);
+    await fetchClearinghouseState(addr); // warms per-service Map + transport memo
+    await fetchClearinghouseState(addr); // served from cache
+    expect(f).toHaveBeenCalledTimes(1);
+    await fetchClearinghouseState(addr, { uncached: true });
+    await fetchClearinghouseState(addr, { uncached: true });
+    expect(f).toHaveBeenCalledTimes(3); // every uncached call went upstream
+  });
+
   it('regime set: ALL intervals fail → NOT cached (next call retries) — FIX 2', async () => {
     // Every candleSnapshot call returns a non-ok response → all 4 TFs fail → the
-    // cached fn throws → unstable_cache does NOT memoize. The next call retries.
+    // cached fn throws → the transport memo does NOT store errors. The next call retries.
     const f = vi
       .fn()
       .mockResolvedValue({ ok: false, status: 503, json: async () => ({}) } as Response);
@@ -183,7 +182,7 @@ describe('cross-instance cache collapse (mocked Data Cache + fetch)', () => {
     vi.stubGlobal('fetch', f);
 
     // fetchAllMids throws on failure by contract (caller fail-soft handles it).
-    // The soft-empty result must THROW so unstable_cache never memoizes it.
+    // The soft-empty result must THROW so the transport memo never stores it.
     await expect(fetchAllMids()).rejects.toThrow(/soft failure/);
     // Because the throw was NOT cached, the next call retries and gets real data.
     const real = await fetchAllMids();

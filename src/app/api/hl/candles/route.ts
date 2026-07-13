@@ -42,7 +42,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const end = Math.floor(Date.now() / WINDOW_GRID_MS) * WINDOW_GRID_MS;
   const result = await fetchCandles(coin, interval, end - lookbackMs, end);
 
-  // PUBLIC market data (no auth on this route) → let the EDGE cache it too:
+  // Public MARKET data (admin-authed route, but the payload is public candles;
+  // `public` caching is safe and Vercel edge-caches it fine) → let the EDGE serve it:
   // `private` forced every browser cache-miss to origin (Fast Origin Transfer);
   // with s-maxage the grid-stable URL is served from Vercel's edge for the whole
   // window — ALL tabs/devices share one origin fetch per 30s. SWR keeps charts
