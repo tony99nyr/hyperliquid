@@ -10,7 +10,8 @@
 import { fetchMultiTimeframeCandles, type CandleInterval } from '@/lib/hyperliquid/candle-service';
 import { detectMarketRegimeCached, clearIndicatorCache } from '@/lib/strategy/analysis/market-regime-detector-cached';
 import { calculateATR, calculateBollingerBands } from '@/lib/strategy/indicators/indicators';
-import { fetchAllMids, fetchL2Book, fetchMetaAndAssetCtxs, type HlAssetCtx } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { fetchAllMids, fetchL2Book, fetchMetaAndAssetCtxs, fetchRecentTrades, type HlAssetCtx } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { takerFlowFromTrades } from './rubric-scorers-business-logic';
 import { getTopTraders } from '@/lib/hyperliquid/top-traders-service';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import { validateEnv } from '@/lib/env/env';
@@ -127,12 +128,13 @@ export async function assembleInputs(coin: string, now: number): Promise<RubricI
   const cfg = resolveCoinConfig(loadRubricConfig(), upper);
   const network = validateEnv().HL_NETWORK;
 
-  const [mids, book, ctxs, regime, consensus] = await Promise.all([
+  const [mids, book, ctxs, regime, consensus, trades] = await Promise.all([
     fetchAllMids(network).catch(() => ({}) as Record<string, number>),
     fetchL2Book(upper).catch(() => ({ coin: upper, bids: [], asks: [] })),
     fetchMetaAndAssetCtxs(network).catch(() => ({}) as Record<string, HlAssetCtx>),
     regimeByTf(upper, now),
     leaderConsensus(upper, cfg, now),
+    fetchRecentTrades(upper), // fail-soft [] — taker-flow micro input
   ]);
 
   const markPx = mids[upper];
@@ -160,6 +162,7 @@ export async function assembleInputs(coin: string, now: number): Promise<RubricI
     bbBandwidthPctile: bbPctile,
     atr: atr > 0 ? atr : markPx * 0.01, // fallback ~1% if ATR unavailable
     book,
+    takerFlow: takerFlowFromTrades(trades),
     consensus,
     ctx,
   };

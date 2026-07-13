@@ -16,6 +16,8 @@ import { computeRubric } from './rubric-composer-business-logic';
 import { applyPortfolioCaps, type OpenLeg } from './rubric-portfolio-business-logic';
 import { reviewPosition } from './rubric-position-review-business-logic';
 import { buildRubricScoreRows, buildPositionReviewRow } from './rubric-rows-business-logic';
+import { scoreBookImbalance } from './rubric-scorers-business-logic';
+import { fetchSpotCoinBalance } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { computeLeaderDerisk, type DeriskAction } from './leader-derisk-business-logic';
 import type { RubricInputs, RubricResult, Side } from './rubric-types';
 
@@ -39,7 +41,10 @@ async function recentLeaderDerisk(now: number): Promise<Record<string, number>> 
 }
 
 /** Retain ~60 days of market snapshots (enough for momentum/cascade backtests). */
-const SNAPSHOT_RETENTION_MS = 60 * 24 * 60 * 60 * 1000;
+/** Hyperliquid's Assistance Fund system address (public; hypurrscan tracks it). */
+const ASSISTANCE_FUND_ADDRESS = '0xfefefefefefefefefefefefefefefefefefefefe';
+
+const SNAPSHOT_RETENTION_MS = 180 * 24 * 60 * 60 * 1000; // 180d — this series is the desk's free OI/funding/flow history; keep it long
 
 /** Open (non-flat) legs across all active sessions, for the portfolio cap. */
 async function gatherOpenLegs(): Promise<Array<OpenLeg & { sessionId: string }>> {
@@ -86,9 +91,12 @@ export async function runRubricScan(opts: { now: number }): Promise<{ scored: nu
     if (error) throw new Error(`rubric_scores upsert failed: ${error.message}`);
   }
 
-  // Persist a market snapshot per coin (funding/OI/premium/leader-net time series)
-  // for future backtested lanes (cascade-fade, funding/OI momentum). Best-effort:
-  // a snapshot-write failure must never fail the scan.
+  // Persist a market snapshot per coin (funding/OI/premium/leader-net/taker-flow/
+  // book-imbalance time series) for future backtested lanes. The HYPE row also carries
+  // the Assistance Fund's HYPE spot balance — its delta over time IS the fee-funded
+  // buyback run-rate (the structural-bid gauge; address is HL's public system address).
+  // Best-effort: a snapshot-write failure must never fail the scan.
+  const afHypeBalance = await fetchSpotCoinBalance(ASSISTANCE_FUND_ADDRESS, 'HYPE');
   const snapshots = pairs
     .filter((p) => p.inp.ctx)
     .map((p) => ({
@@ -100,6 +108,9 @@ export async function runRubricScan(opts: { now: number }): Promise<{ scored: nu
       premium: p.inp.ctx!.premium,
       leader_net: p.inp.consensus.net,
       leader_derisk: deriskByCoin[p.inp.coin.toUpperCase()] ?? null,
+      taker_flow: p.inp.takerFlow,
+      book_imbalance: scoreBookImbalance(p.inp.book, cfgBase.gates.depthQueryFrac).imbalance,
+      af_hype_balance: p.inp.coin.toUpperCase() === 'HYPE' ? afHypeBalance : null,
       config_version: cfgBase.version,
     }));
   if (snapshots.length > 0) {

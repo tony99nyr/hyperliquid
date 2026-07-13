@@ -304,6 +304,71 @@ export async function fetchClearinghouseState(rawAddress: string, opts?: { uncac
   }
 }
 
+/** One recent trade off the public tape. side = the AGGRESSOR (taker) direction. */
+export interface HlRecentTrade {
+  side: 'buy' | 'sell';
+  px: number;
+  sz: number;
+  time: number;
+}
+
+interface RawRecentTrade { side?: string; px?: string; sz?: string; time?: number }
+
+/**
+ * Fetch the recent public trades for a coin (HL `recentTrades`, taker-side tagged).
+ * Cross-instance cached (~25s) + fail-soft to [] — a tape hiccup must never break a
+ * scan. Feeds the taker-flow (CVD-style) micro input.
+ */
+export async function fetchRecentTrades(coin: string): Promise<HlRecentTrade[]> {
+  const normCoin = coin.trim().toUpperCase();
+  try {
+    const raw = await cachedHlRead('recentTrades', [normCoin], async () => {
+      const body = await hlInfoPost<RawRecentTrade[]>({ type: 'recentTrades', coin: normCoin });
+      if (!Array.isArray(body)) throw new Error('recentTrades: non-array (soft failure)');
+      return body;
+    });
+    return raw
+      .map((t) => ({
+        side: t.side === 'B' || t.side === 'buy' ? ('buy' as const) : ('sell' as const),
+        px: num(t.px),
+        sz: num(t.sz),
+        time: num(t.time),
+      }))
+      .filter((t) => t.px > 0 && t.sz > 0);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * A wallet's SPOT balance of one coin (spotClearinghouseState `total`). Built for the
+ * Assistance Fund buyback tracker (its HYPE balance delta ≈ the fee-funded buy rate),
+ * but generic. Fail-soft null; cross-instance cached (~25s).
+ */
+export async function fetchSpotCoinBalance(rawAddress: string, coin: string): Promise<number | null> {
+  const address = normalizeHlAddress(rawAddress);
+  if (!isValidHlAddress(address)) return null;
+  try {
+    const raw = await cachedHlRead('spot', [address], async () => {
+      const body = await hlInfoPost<RawSpotState>({ type: 'spotClearinghouseState', user: address });
+      if (!body || typeof body !== 'object' || !Array.isArray(body.balances)) {
+        throw new Error('spotClearinghouseState empty: soft failure (no balances)');
+      }
+      return body;
+    });
+    const target = coin.trim().toUpperCase();
+    for (const b of raw.balances ?? []) {
+      if ((b.coin ?? '').toUpperCase() === target) {
+        const v = num(b.total);
+        return Number.isFinite(v) && v >= 0 ? v : null;
+      }
+    }
+    return 0; // real response, coin absent → holds none
+  } catch {
+    return null;
+  }
+}
+
 interface RawSpotState {
   balances?: Array<{ coin?: string; total?: string }>;
 }

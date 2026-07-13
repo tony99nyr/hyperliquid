@@ -39,6 +39,7 @@ export const HL_CACHE_TAGS = {
   spot: 'hl:spot',
   perpMeta: 'hl:perp-meta',
   assetCtxs: 'hl:asset-ctxs',
+  recentTrades: 'hl:recent-trades',
 } as const;
 
 /** Revalidate windows (seconds). Tuned to keep the UI live while cutting HL hard. */
@@ -61,6 +62,7 @@ export const HL_REVALIDATE_S = {
   perpMeta: 600,
   /** Funding/OI context for the rubric scan (~20min cadence). */
   assetCtxs: 120,
+  recentTrades: 30,
 } as const;
 
 // --- Layer 2: in-flight coalescing (per-instance) ---

@@ -28,7 +28,7 @@ function computeSide(inp: RubricInputs, side: Side, cfg: RubricConfig): SideScor
     regime: scoreRegimePillar(inp.regimeByTf, side),
     leaders: scoreLeadersPillar(inp.consensus, side, cfg),
     carry: scoreCarryPillar(inp.ctx, side, cfg),
-    micro: scoreMicroPillar(inp.book, side, cfg),
+    micro: scoreMicroPillar(inp.book, side, cfg, inp.takerFlow),
   };
   const mult = regimeMultiplier(inp.regimeByTf, side, cfg);
 

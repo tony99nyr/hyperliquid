@@ -60,6 +60,8 @@ export interface RubricInputs {
   /** Absolute ATR (price units) for deriving entry/stop/target levels. */
   atr: number;
   book: L2Book;
+  /** Taker-flow (CVD-style) from the recent tape, ∈ [−1,1]; null = tape unavailable. */
+  takerFlow: number | null;
   consensus: LeaderConsensus;
   /** Funding/OI context; null when unavailable → carry pillar is neutral. */
   ctx: AssetCtx | null;

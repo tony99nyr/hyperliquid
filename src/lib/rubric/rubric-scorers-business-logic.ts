@@ -146,11 +146,40 @@ export function scoreBookImbalance(book: L2Book, depthFrac: number): BookImbalan
   return { imbalance, bidDepthUsd: bidN, askDepthUsd: askN, spreadBps };
 }
 
-/** Micro pillar (0–100): order-flow imbalance favoring `side`, penalized by a wide spread. */
-export function scoreMicroPillar(book: L2Book, side: Side, cfg: RubricConfig): number {
+/**
+ * Taker-flow (CVD-style) from the recent tape: (buy − sell notional)/(total), ∈ [−1,1].
+ * + = net aggressive BUYING. null when the tape is empty (pillar falls back to
+ * imbalance-only — additive, never punitive for missing data). PURE.
+ */
+export function takerFlowFromTrades(trades: Array<{ side: 'buy' | 'sell'; px: number; sz: number }>): number | null {
+  let buy = 0;
+  let sell = 0;
+  for (const t of trades) {
+    if (!(t.px > 0) || !(t.sz > 0)) continue;
+    if (t.side === 'buy') buy += t.px * t.sz;
+    else sell += t.px * t.sz;
+  }
+  const total = buy + sell;
+  if (!(total > 0)) return null;
+  return (buy - sell) / total;
+}
+
+/** Flow saturates the same way imbalance does; fixed band (config knob can follow). */
+export const TAKER_FLOW_FULL_SCORE_AT = 0.5;
+
+/** Micro pillar (0–100): book imbalance favoring `side` blended 70/30 with taker-flow
+ *  (when tape data is present), penalized by a wide spread. */
+export function scoreMicroPillar(book: L2Book, side: Side, cfg: RubricConfig, takerFlow?: number | null): number {
   const { imbalance, spreadBps } = scoreBookImbalance(book, cfg.gates.depthQueryFrac);
   const signedForSide = (side === 'long' ? 1 : -1) * imbalance;
   let pillar = toPillar(signedForSide / Math.max(1e-9, cfg.micro.imbalanceFullScoreAt));
+  // Blend the tape (what taker money is DOING) with the book (what resting money says):
+  // 70% resting imbalance / 30% aggressive flow. Missing tape → imbalance-only.
+  if (takerFlow != null && Number.isFinite(takerFlow)) {
+    const signedFlow = (side === 'long' ? 1 : -1) * takerFlow;
+    const flowPillar = toPillar(signedFlow / TAKER_FLOW_FULL_SCORE_AT);
+    pillar = Math.round(0.7 * pillar + 0.3 * flowPillar);
+  }
   // Wide spread drags micro toward neutral-low (poor execution quality).
   if (Number.isFinite(spreadBps) && spreadBps > cfg.micro.maxSpreadBps) {
     const over = clamp((spreadBps - cfg.micro.maxSpreadBps) / cfg.micro.maxSpreadBps, 0, 1);

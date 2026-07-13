@@ -42,6 +42,7 @@ function inputs(over: Partial<RubricInputs> = {}): RubricInputs {
     coin: 'ETH', asOf: 1_000, markPx: 1700, atr: 20,
     regimeByTf: tfAll('neutral'), atrPctile: 0.6, bbBandwidthPctile: 0.6,
     book: book(1700, 5_000_000, 5_000_000),
+  takerFlow: null,
     consensus: { coin: 'ETH', net: 0, longCount: 0, shortCount: 0, topN: 0 },
     ctx: null,
     ...over,
