@@ -16,7 +16,6 @@ import { computeRubric } from './rubric-composer-business-logic';
 import { applyPortfolioCaps, type OpenLeg } from './rubric-portfolio-business-logic';
 import { reviewPosition } from './rubric-position-review-business-logic';
 import { buildRubricScoreRows, buildPositionReviewRow } from './rubric-rows-business-logic';
-import { scoreBookImbalance } from './rubric-scorers-business-logic';
 import { fetchSpotCoinBalance } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { computeLeaderDerisk, type DeriskAction } from './leader-derisk-business-logic';
 import type { RubricInputs, RubricResult, Side } from './rubric-types';
@@ -109,14 +108,17 @@ export async function runRubricScan(opts: { now: number }): Promise<{ scored: nu
       leader_net: p.inp.consensus.net,
       leader_derisk: deriskByCoin[p.inp.coin.toUpperCase()] ?? null,
       taker_flow: p.inp.takerFlow,
-      book_imbalance: scoreBookImbalance(p.inp.book, cfgBase.gates.depthQueryFrac).imbalance,
+      book_imbalance: p.inp.bookImbalance, // resolved per-coin cfg — same number the pillar scored
       af_hype_balance: p.inp.coin.toUpperCase() === 'HYPE' ? afHypeBalance : null,
       config_version: cfgBase.version,
     }));
   if (snapshots.length > 0) {
     try {
       const client = getServiceRoleClient();
-      await client.from('market_snapshots').insert(snapshots);
+      // supabase-js returns {error} without throwing — a bad column would otherwise
+      // kill this series silently forever. The series IS the product; say so.
+      const { error: insErr } = await client.from('market_snapshots').insert(snapshots);
+      if (insErr) console.warn(`[rubric-scan] market_snapshots insert failed: ${insErr.message}`);
       // Bound growth: drop snapshots older than the retention window (the future
       // momentum/cascade lanes only need recent history). Best-effort.
       const cutoff = new Date(opts.now - SNAPSHOT_RETENTION_MS).toISOString();

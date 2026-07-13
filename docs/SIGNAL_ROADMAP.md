@@ -22,7 +22,7 @@ as the build list.
 | **AF buyback gauge** ★new | Assistance Fund spot balance (`0xfefe…fefe`) | Recorded on HYPE rows — balance delta = fee-funded buy run-rate (our research: procyclical, NOT a floor — now measurable) |
 | Leader positioning + actions | trader-watch feed | Rubric leaders pillar · leader guard · flow reviews |
 | Multi-TF regime + divergences | candles + vendored strategy | analyze-market · health engine · thesis pillar |
-| **Time series of ALL of the above** ★ | `market_snapshots` (~20min cadence, **180d retention** — was 60d) | The free history pros pay for; backtest fuel |
+| **Time series of ALL of the above** ★ | `market_snapshots` (~20min cadence, **180d retention** — was 60d) | The free history pros pay for; backtest fuel. ⚠ taker_flow is a POINT sample of the last-N-trades window (width varies per coin), not an interval aggregate; NULL = not measured, never 0 |
 
 ## Tier 1 — next signal builds (HL-native, in order)
 

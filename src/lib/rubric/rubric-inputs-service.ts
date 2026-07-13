@@ -11,7 +11,7 @@ import { fetchMultiTimeframeCandles, type CandleInterval } from '@/lib/hyperliqu
 import { detectMarketRegimeCached, clearIndicatorCache } from '@/lib/strategy/analysis/market-regime-detector-cached';
 import { calculateATR, calculateBollingerBands } from '@/lib/strategy/indicators/indicators';
 import { fetchAllMids, fetchL2Book, fetchMetaAndAssetCtxs, fetchRecentTrades, type HlAssetCtx } from '@/lib/hyperliquid/hyperliquid-info-service';
-import { takerFlowFromTrades } from './rubric-scorers-business-logic';
+import { takerFlowFromTrades, scoreBookImbalance } from './rubric-scorers-business-logic';
 import { getTopTraders } from '@/lib/hyperliquid/top-traders-service';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import { validateEnv } from '@/lib/env/env';
@@ -134,7 +134,7 @@ export async function assembleInputs(coin: string, now: number): Promise<RubricI
     fetchMetaAndAssetCtxs(network).catch(() => ({}) as Record<string, HlAssetCtx>),
     regimeByTf(upper, now),
     leaderConsensus(upper, cfg, now),
-    fetchRecentTrades(upper), // fail-soft [] — taker-flow micro input
+    fetchRecentTrades(upper).catch(() => []), // fail-soft [] (belt: fn also never rejects)
   ]);
 
   const markPx = mids[upper];
@@ -163,6 +163,7 @@ export async function assembleInputs(coin: string, now: number): Promise<RubricI
     atr: atr > 0 ? atr : markPx * 0.01, // fallback ~1% if ATR unavailable
     book,
     takerFlow: takerFlowFromTrades(trades),
+    bookImbalance: scoreBookImbalance(book, cfg.gates.depthQueryFrac).imbalance,
     consensus,
     ctx,
   };

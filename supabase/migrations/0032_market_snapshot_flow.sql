@@ -6,6 +6,13 @@
 -- over time is the fee-funded buyback run-rate, the structural-bid gauge our research
 -- showed is procyclical (NOT a floor). Recorded so the claim becomes measurable.
 --
+-- SEMANTICS (pin these before any consumer is written):
+--   * taker_flow is a POINT SAMPLE of HL's last-N-trades window at scan time — NOT an
+--     interval aggregate. The window's wall-clock width varies with coin activity
+--     (seconds on BTC, possibly hours on a quiet coin) — cross-coin comparisons must
+--     normalize. A backtest treating it as 20-min CVD would be wrong.
+--   * NULL = NOT MEASURED (old writer / fetch failed / empty tape) — never coerce to 0.
+--
 -- Additive + idempotent.
 
 alter table public.market_snapshots add column if not exists taker_flow double precision;

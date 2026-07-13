@@ -62,6 +62,9 @@ export interface RubricInputs {
   book: L2Book;
   /** Taker-flow (CVD-style) from the recent tape, ∈ [−1,1]; null = tape unavailable. */
   takerFlow: number | null;
+  /** Book imbalance at assembly time, computed with the RESOLVED per-coin config — the
+   *  single source both the micro pillar's input band and the recorded series share. */
+  bookImbalance: number;
   consensus: LeaderConsensus;
   /** Funding/OI context; null when unavailable → carry pillar is neutral. */
   ctx: AssetCtx | null;

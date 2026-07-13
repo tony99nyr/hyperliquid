@@ -328,13 +328,15 @@ export async function fetchRecentTrades(coin: string): Promise<HlRecentTrade[]> 
       return body;
     });
     return raw
-      .map((t) => ({
-        side: t.side === 'B' || t.side === 'buy' ? ('buy' as const) : ('sell' as const),
-        px: num(t.px),
-        sz: num(t.sz),
-        time: num(t.time),
-      }))
-      .filter((t) => t.px > 0 && t.sz > 0);
+      .map((t) => {
+        // STRICT side parse: an unrecognized tag (schema drift) must DROP the trade,
+        // not silently count as a sell — a drifted feed would bias flow negative.
+        const side = t.side === 'B' || t.side === 'buy' ? ('buy' as const)
+          : t.side === 'A' || t.side === 'sell' ? ('sell' as const)
+          : null;
+        return side ? { side, px: num(t.px), sz: num(t.sz), time: num(t.time) } : null;
+      })
+      .filter((t): t is HlRecentTrade => t !== null && t.px > 0 && t.sz > 0);
   } catch {
     return [];
   }
