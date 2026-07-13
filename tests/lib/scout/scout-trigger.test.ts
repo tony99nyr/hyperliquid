@@ -152,3 +152,124 @@ describe('detectScoutTriggers — determinism', () => {
     expect(a.triggers).toEqual(b.triggers);
   });
 });
+
+describe('detectScoutTriggers — leader-action (leader-follow lane)', () => {
+  const NOW = 1_800_000_000_000;
+  /** A state whose leader cursor is warmed (baselined) but behind the actions. */
+  const warmed = (): ScoutState => ({ ...emptyScoutState(), lastLeaderActionMs: NOW - 3_600_000 });
+  const act = (over: Partial<import('@/lib/scout/scout-trigger-business-logic').ScoutLeaderActionRead>) => ({
+    id: 'a1',
+    leaderAddress: '0xecb63caa00000000000000000000000000000000',
+    coin: 'BTC',
+    kind: 'open',
+    newSide: 'short',
+    notionalUsd: 15_000_000,
+    sizeDelta: 200,
+    entryPx: 63_853,
+    detectedAtMs: NOW - 60_000,
+    ...over,
+  });
+
+  it('FRESH state baselines silently (no stale-action replay) — cursor set to now', () => {
+    const { triggers, state } = detectScoutTriggers(
+      { rubric: [], marks: [], positions: [], leaderActions: [act({})], now: NOW },
+      emptyScoutState(), // cursor 0 = first-ever cycle or corrupt state file
+    );
+    expect(triggers.filter((t) => t.kind === 'leader-action')).toHaveLength(0);
+    expect(state.lastLeaderActionMs).toBe(NOW);
+  });
+
+  it('fires on a big open from a warmed cursor, advances it, and never re-emits', () => {
+    const first = detectScoutTriggers(
+      { rubric: [], marks: [], positions: [], leaderActions: [act({})], now: NOW },
+      warmed(),
+    );
+    const leader = first.triggers.filter((t) => t.kind === 'leader-action');
+    expect(leader).toHaveLength(1);
+    expect(leader[0].urgency).toBe('info');
+    expect(leader[0].coin).toBe('BTC');
+    expect(leader[0].side).toBe('short');
+    expect(first.state.lastLeaderActionMs).toBe(NOW - 60_000);
+
+    // Same action again next cycle → cursor-deduped, silence.
+    const second = detectScoutTriggers(
+      { rubric: [], marks: [], positions: [], leaderActions: [act({})], now: NOW + 300_000 },
+      first.state,
+    );
+    expect(second.triggers.filter((t) => t.kind === 'leader-action')).toHaveLength(0);
+  });
+
+  it('drops sub-floor notionals, reduces/closes, and shrinking "adds"', () => {
+    const { triggers } = detectScoutTriggers(
+      {
+        rubric: [],
+        marks: [],
+        positions: [],
+        leaderActions: [
+          act({ id: 'small', notionalUsd: 400_000 }), // below the $1M floor
+          act({ id: 'reduce', kind: 'reduce', detectedAtMs: NOW - 50_000 }), // risk-off ≠ wake
+          act({ id: 'close', kind: 'close', detectedAtMs: NOW - 40_000 }),
+          act({ id: 'shrinkadd', kind: 'add', sizeDelta: -5, detectedAtMs: NOW - 30_000 }),
+        ],
+        now: NOW,
+      },
+      warmed(),
+    );
+    expect(triggers.filter((t) => t.kind === 'leader-action')).toHaveLength(0);
+  });
+
+  it('caps a burst at leaderMaxPerCycle keeping the NEWEST, and advances the cursor past ALL of it', () => {
+    const burst = Array.from({ length: 9 }, (_, i) => act({ id: `b${i}`, detectedAtMs: NOW - 90_000 + i * 1_000 }));
+    const { triggers, state } = detectScoutTriggers(
+      { rubric: [], marks: [], positions: [], leaderActions: burst, now: NOW },
+      warmed(),
+    );
+    const emitted = triggers.filter((t) => t.kind === 'leader-action');
+    expect(emitted).toHaveLength(5); // DEFAULT cap
+    // The newest 5 (b4..b8) survive — the most recent action is the most actionable.
+    expect(emitted.map((t) => t.detail)).toEqual(
+      expect.arrayContaining([expect.stringContaining('OPEN')]),
+    );
+    // Cursor covers the whole burst — the overflow (OLDEST) is dropped, not replayed.
+    expect(state.lastLeaderActionMs).toBe(NOW - 90_000 + 8_000);
+    const again = detectScoutTriggers(
+      { rubric: [], marks: [], positions: [], leaderActions: burst, now: NOW + 300_000 },
+      state,
+    );
+    expect(again.triggers.filter((t) => t.kind === 'leader-action')).toHaveLength(0);
+  });
+
+  it('burst overflow drops the OLDEST material actions, not the newest', () => {
+    // 6 material actions, distinguishable by notional; cap 5 → the $1M oldest drops.
+    const burst = Array.from({ length: 6 }, (_, i) =>
+      act({ id: `m${i}`, notionalUsd: 1_000_000 * (i + 1), detectedAtMs: NOW - 60_000 + i * 1_000 }),
+    );
+    const { triggers } = detectScoutTriggers(
+      { rubric: [], marks: [], positions: [], leaderActions: burst, now: NOW },
+      warmed(),
+    );
+    const details = triggers.filter((t) => t.kind === 'leader-action').map((t) => t.detail);
+    expect(details).toHaveLength(5);
+    expect(details.some((d) => d.includes('$1.00M'))).toBe(false); // oldest dropped
+    expect(details.some((d) => d.includes('$6.00M'))).toBe(true); // newest kept
+  });
+
+  it('a flip counts; unknown kinds and unknown sides are dropped', () => {
+    const { triggers } = detectScoutTriggers(
+      {
+        rubric: [],
+        marks: [],
+        positions: [],
+        leaderActions: [
+          act({ id: 'flip', kind: 'flip', newSide: 'long', detectedAtMs: NOW - 20_000 }),
+          act({ id: 'weird', kind: 'liquidated?', detectedAtMs: NOW - 10_000 }),
+        ],
+        now: NOW,
+      },
+      warmed(),
+    );
+    const leader = triggers.filter((t) => t.kind === 'leader-action');
+    expect(leader).toHaveLength(1);
+    expect(leader[0].detail).toContain('FLIP');
+  });
+});

@@ -20,18 +20,25 @@ as the build list.
 | **Taker-flow (CVD-style)** ★new | `recentTrades` tape | Rubric **micro pillar** (30% blend with book imbalance) + recorded |
 | Book imbalance + spread | `l2Book` REST | Rubric micro pillar (70%) + **now recorded** ★ |
 | **AF buyback gauge** ★new | Assistance Fund spot balance (`0xfefe…fefe`) | Recorded on HYPE rows — balance delta = fee-funded buy run-rate (our research: procyclical, NOT a floor — now measurable) |
-| Leader positioning + actions | trader-watch feed | Rubric leaders pillar · leader guard · flow reviews |
+| Leader positioning + actions | trader-watch feed | Rubric leaders pillar · leader guard · flow reviews · **scout `leader-action` trigger + leader-follow paper lane** ★new · scout snapshot context ★new |
 | Multi-TF regime + divergences | candles + vendored strategy | analyze-market · health engine · thesis pillar |
 | **Time series of ALL of the above** ★ | `market_snapshots` (~20min cadence, **180d retention** — was 60d) | The free history pros pay for; backtest fuel. ⚠ taker_flow is a POINT sample of the last-N-trades window (width varies per coin), not an interval aggregate; NULL = not measured, never 0 |
 
 ## Tier 1 — next signal builds (HL-native, in order)
 
-1. **Funding/OI momentum triggers** — the series now accumulates; once ~2-4 weeks deep,
-   add scout trigger kinds: funding-extreme (percentile vs own history, not absolute),
-   OI-spike + price-divergence (squeeze fuel gauge — the BTC June setup, mechanized).
-   Gate: backtest on the recorded series before arming anything.
+1. **Funding/OI momentum triggers** — **first backtest run 2026-07-13 (18d series): NOTHING
+   cleared the pre-registered bar** (≥25bps@4h or ≥50bps@24h net of 9bps, same sign
+   BTC+ETH, n≥20/coin, |t|≥1.5) — every candidate failed on sample size. Two flagged
+   for the re-run (~Aug 1, when the series is 5-6 weeks deep):
+   - *funding-extreme 4h contrarian*: ≥95th-pctile funding → fwd 4h −40bps BTC (t=−2.1,
+     n=12) / −39bps ETH (t=−2.2, n=25), vs ~flat baselines. Sign-consistent.
+   - *OI-spike trend-CONFIRMATION 24h*: OI z≥2 with price trending → +120/+172/+198/+257bps
+     across BTC/ETH/HYPE/SOL (n=4-11 each). The original divergence variant was BTC-only.
+   Caveats held: one regime (range→breakdown), overlapping events thinned crudely,
+   8 signal×horizon cells → multiple-comparison risk. NO trigger wired — the rule worked.
 2. **CVD divergence trigger** — taker_flow persistently opposing price (absorption) is
-   the tape's squeeze tell. Same gate: record first (done), trigger after backtest.
+   the tape's squeeze tell. Same gate: record first (done — recording since 2026-07-13),
+   trigger after backtest (~2 weeks of series needed).
 3. **Enable the `funding` rung trigger kind** — exists in the schema, rejected at arm
    today. Unlock once (1) has calibrated what "extreme" means per coin.
 4. **Depth-at-distance in stop hygiene v2** — size stops beyond thin-book zones, not

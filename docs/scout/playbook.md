@@ -33,6 +33,43 @@ short and concrete; this is operating memory, not a journal.
   don't rationalize a round-trip.
 - Manage open positions BEFORE hunting new ones (risk before opportunity).
 
+## Reading the advisory context (snapshot `tape` / `leaders` / `percentiles` / `afHypePerDay`)
+
+These are CONTEXT, not signals — none of them alone justifies a trade (the roadmap rule:
+signals graduate into gates only after a backtest). How to read them honestly:
+
+- `tape.takerFlow` (−1..+1, notional-weighted aggressor skew) is a POINT sample of the
+  last-trades window — `null` means NOT MEASURED, never "0/neutral". Flow opposing price
+  (heavy selling into a flat/rising mark) = absorption; note which side is absorbing.
+- `tape.bookImbalance` (+ = bid-heavy near mid) goes stale FAST on breakdown days — if a
+  thesis leans on the book, re-check it at decision time, not scan time.
+- `leaders`: DECOMPOSE before trusting (the 0x418aa6 martingale lesson). `topWalletUsd`
+  vs the total tells you one-whale vs consensus; 2 wallets is not a crowd. Whales holding
+  a green position is weak signal (holding-when-green is free).
+- `percentiles`: funding/OI framed against the coin's OWN recorded series. `null` = the
+  series is too thin — say so, don't guess. An OI percentile >90th with price divergence
+  is squeeze fuel worth flagging in the thesis; mid-percentile readings mean NOTHING.
+- `afHypePerDay` (HYPE only): procyclical fee-funded buyback — context for HYPE carry
+  theses, NEVER a floor argument.
+
+## Lane: leader-follow (opened 2026-07-13 — paper, expectancy-gated like every lane)
+
+Wakes: `leader-action` triggers (a RATED whale opened / flipped / added ≥ $1M notional;
+reduces/closes never wake). Rules of engagement:
+
+- **Follow conviction, not existence.** An open/flip by a whale with a clean grade is a
+  candidate; an add-to-loser is a martingale tell (check `leaders` context: is the add
+  above or below their avg entry?). The 0x418aa6 lesson applies IN this lane most of all.
+- **Never mirror size or leverage.** Scout floor risk only (`--risk` per the sizing rules),
+  `--lane leader-follow` on every entry so the scorecard isolates the lane.
+- **The whale's stop is not visible — you still need your own.** Stop-frac per ATR rules;
+  no "they're still in it" as a reason to hold a broken thesis.
+- **Exit triggers**: the leader closing/flipping the position kills the thesis (check the
+  feed before every manage cycle); so does your own stop/health, whichever first.
+- **Tag hypotheses with the leader address** so the weekly review can attribute per-wallet
+  hit rates — the lane's kill/keep verdict may end up per-LEADER, not per-lane.
+- Pre-registered bar: same as every lane (COLLECT until n≥10 closed; kill at ≤−0.05R).
+
 ## Learned rules (curated by scout-review — append below)
 
 <!-- scout-review appends/edits dated, evidence-backed rules here, e.g.:

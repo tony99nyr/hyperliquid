@@ -49,7 +49,8 @@ export type ScoutTriggerKind =
   | 'price-move' // |Δ mark| ≥ moveThresholdPct in ONE cycle (fast spike)
   | 'price-drift' // |Δ mark| ≥ driftThresholdPct vs a rolling anchor (slow trend — either direction)
   | 'position-health-drop' // open position health fell sharply / below the floor
-  | 'position-near-stop'; // open position is within nearStopPct of its stop
+  | 'position-near-stop' // open position is within nearStopPct of its stop
+  | 'leader-action'; // a rated leader opened/flipped/added big (leader-follow lane wake)
 
 /** "info" = a fresh opportunity to consider; "act" = open-position risk (escalate first). */
 export type ScoutUrgency = 'info' | 'act';
@@ -63,6 +64,22 @@ export interface ScoutTrigger {
   detail: string;
   /** Epoch ms — INJECTED (no Date.now() in pure code). */
   at: number;
+}
+
+/** One row from the trader-watch `leader_actions` feed (subset the detector needs). */
+export interface ScoutLeaderActionRead {
+  /** Feed row id (dedup key across restarts is the timestamp cursor, not ids). */
+  id: string | number;
+  leaderAddress: string;
+  coin: string;
+  /** Feed kind: 'open' | 'add' | 'reduce' | 'flip' | 'close' (unknowns are dropped). */
+  kind: string;
+  newSide: string | null;
+  notionalUsd: number;
+  /** Signed size change in coin units (positive = grew). */
+  sizeDelta: number;
+  entryPx: number | null;
+  detectedAtMs: number;
 }
 
 /** Carried between cycles by the daemon so transitions (not levels) drive triggers. */
@@ -81,6 +98,8 @@ export interface ScoutState {
   driftAnchorPx: Record<string, number>;
   /** key `COIN` → epoch ms the drift anchor was set. */
   driftAnchorAt: Record<string, number>;
+  /** Cursor (epoch ms) — leader_actions at or before this were already emitted. */
+  lastLeaderActionMs?: number;
 }
 
 export interface ScoutTriggerConfig {
@@ -100,6 +119,10 @@ export interface ScoutTriggerConfig {
   driftThresholdPct: number;
   /** Anchor max age (ms): if no drift trigger fires within this, re-anchor (rolling window). */
   driftWindowMs: number;
+  /** Leader open/flip/add below this notional (USD) is noise — no wake. */
+  leaderMinNotionalUsd: number;
+  /** Max leader-action triggers per cycle (a whale rebalancing burst ≠ N wakes). */
+  leaderMaxPerCycle: number;
 }
 
 export const DEFAULT_SCOUT_TRIGGER_CONFIG: ScoutTriggerConfig = {
@@ -111,10 +134,12 @@ export const DEFAULT_SCOUT_TRIGGER_CONFIG: ScoutTriggerConfig = {
   nearStopPct: 0.004, // within 0.4% of the stop
   driftThresholdPct: 1.0, // a ≥1% cumulative move (either way) vs the anchor wakes the scout
   driftWindowMs: 4 * 60 * 60 * 1000, // re-anchor every ~4h if no drift trigger fired
+  leaderMinNotionalUsd: 1_000_000, // rated-whale conviction floor (adds below $1M are churn)
+  leaderMaxPerCycle: 5,
 };
 
 export function emptyScoutState(): ScoutState {
-  return { lastOpportunity: {}, lastBadge: {}, lastMark: {}, lastHealth: {}, driftAnchorPx: {}, driftAnchorAt: {} };
+  return { lastOpportunity: {}, lastBadge: {}, lastMark: {}, lastHealth: {}, driftAnchorPx: {}, driftAnchorAt: {}, lastLeaderActionMs: 0 };
 }
 
 const sideKey = (coin: string, side: Side): string => `${coin.toUpperCase()}:${side}`;
@@ -124,6 +149,8 @@ export interface DetectScoutTriggersInput {
   rubric: ScoutRubricRead[];
   marks: ScoutMarketRead[];
   positions: ScoutPositionRead[];
+  /** Recent rated-leader actions (trader-watch feed) — may be empty. */
+  leaderActions?: ScoutLeaderActionRead[];
   /** Epoch ms — INJECTED. */
   now: number;
 }
@@ -147,6 +174,7 @@ export function detectScoutTriggers(
     lastHealth: { ...prev.lastHealth },
     driftAnchorPx: { ...(prev.driftAnchorPx ?? {}) },
     driftAnchorAt: { ...(prev.driftAnchorAt ?? {}) },
+    lastLeaderActionMs: prev.lastLeaderActionMs ?? 0,
   };
 
   // --- Rubric: GO crossing + opportunity jumps (opportunity layer, "info"). ---
@@ -269,6 +297,49 @@ export function detectScoutTriggers(
         });
       }
     }
+  }
+
+  // --- Leader actions (leader-follow lane, "info"): a rated whale opened / flipped /
+  // added ≥ leaderMinNotionalUsd. This is an EVENT cursor over an independent feed —
+  // unlike the level detectors above, a skipped event is LOST, not re-read next
+  // cycle, so the cursor semantics differ deliberately:
+  //   - cursor 0 (first-ever cycle / corrupt state file) BASELINES to `now` and
+  //     emits nothing — a 6h-old whale open is a bad wake, matching how the level
+  //     detectors baseline on first sight;
+  //   - a rebalancing burst emits only the NEWEST leaderMaxPerCycle (most recent =
+  //     most actionable); the cursor still advances past the whole burst;
+  //   - reduces/closes never wake (shrinking risk ≠ opportunity).
+  const cursor = prev.lastLeaderActionMs ?? 0;
+  if (cursor === 0) {
+    state.lastLeaderActionMs = now;
+  } else {
+    let newestSeen = cursor;
+    const fresh = (input.leaderActions ?? []).filter((a) => a.detectedAtMs > cursor);
+    for (const a of fresh) if (a.detectedAtMs > newestSeen) newestSeen = a.detectedAtMs;
+    const qualifies = (a: ScoutLeaderActionRead): boolean => {
+      const k = a.kind === 'open' || a.kind === 'flip' || a.kind === 'add' ? a.kind : null;
+      if (!k) return false;
+      if (!(a.notionalUsd >= cfg.leaderMinNotionalUsd)) return false;
+      if (k === 'add' && !(a.sizeDelta > 0)) return false;
+      return true;
+    };
+    const emit = fresh
+      .filter(qualifies)
+      .sort((a, b) => a.detectedAtMs - b.detectedAtMs)
+      .slice(-cfg.leaderMaxPerCycle); // newest N, kept in ascending order
+    for (const a of emit) {
+      const kind = a.kind === 'open' || a.kind === 'flip' ? a.kind : 'add';
+      const side = a.newSide === 'long' || a.newSide === 'short' ? a.newSide : undefined;
+      triggers.push({
+        kind: 'leader-action',
+        coin: coinKey(a.coin),
+        side: side as Side | undefined,
+        urgency: 'info',
+        detail: `leader ${a.leaderAddress.slice(0, 10)} ${kind.toUpperCase()} ${side ?? '?'} ${coinKey(a.coin)} $${(a.notionalUsd / 1e6).toFixed(2)}M${a.entryPx != null ? ` @ ${a.entryPx}` : ''} (leader-follow lane candidate)`,
+        at: now,
+      });
+    }
+    state.lastLeaderActionMs = newestSeen;
   }
 
   return { triggers, state };

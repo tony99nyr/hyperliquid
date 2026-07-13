@@ -31,6 +31,9 @@ polling and wakes you only when something material happened (the inverted loop).
 - **Bar before trade.** Open a paper position ONLY when a setup clears the
   pre-registered bar in `docs/scout/README.md`. The default action is STAND DOWN.
   Chop, thin edge, fighting funding, no-confluence → do nothing + log why.
+- `leader-action` triggers open the **leader-follow lane** (see the playbook's lane
+  rules): vet the whale's move with the full context (is it conviction or a
+  martingale add?), and if you trade it, tag `--lane leader-follow`.
 - **Honesty.** Record the real thesis. When you close, resolve the hypothesis
   truthfully (confirmed / invalidated / resolved). The track record is the product.
 - **Read the playbook every cycle** (`docs/scout/playbook.md`) and apply its
@@ -94,7 +97,10 @@ The interactive session above is optional. The scheduled path (`scripts/scout-he
 cron every ~30min on any box) runs the SAME loop with a strict contract:
 
 1. `pnpm scout:cycle --json` → ONE JSON snapshot (unconsumed triggers, rubric, marks,
-   funding/OI, vaults, positions, circuit breaker, track record, playbook path). Writes the
+   funding/OI, vaults, positions, circuit breaker, track record, playbook path, plus the
+   ADVISORY context blocks: `tape` (takerFlow/bookImbalance/spreadBps per coin),
+   `leaders` (whale book per coin), `afHypePerDay`, `percentiles` (funding/OI vs the
+   coin's own recorded history)). Writes the
    CONSUMER heartbeat (`scout_heartbeat.source='scout-cycle'`) — a dead consumer is a stale
    row in the cockpit, never silence.
 2. A headless Sonnet run (`claude -p`) receives snapshot + playbook and replies with EXACTLY

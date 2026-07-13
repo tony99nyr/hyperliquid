@@ -31,6 +31,7 @@ import { validateEnv } from '@/lib/env/env';
 import { writeHypothesis, resolveHypothesis } from '@/lib/cockpit/hypothesis-service';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 import { ensureWatchDaemon } from '@/lib/cockpit/watch-spawn';
+import { setAdvisoryStop } from '@/lib/scout/scout-watch-service';
 import type { OrderSide } from '@/types/fill';
 
 const SCOUT_TITLE = 'scout';
@@ -114,6 +115,15 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   if (fill.source !== 'paper') throw new Error(`expected a paper fill, got source=${fill.source}`);
   line(`Filled (paper): ${fill.sz} ${fill.coin} @ $${fill.px} (fee=$${fill.feeUsd.toFixed(4)})`);
 
+  // Persist the ADVISORY stop (migration 0033) so the trigger daemon's
+  // position-near-stop detector has a real level to watch. UNCONDITIONAL write:
+  // the scout reuses one session, so a re-entry must overwrite (or null out) any
+  // stale stop a prior trade left on this (session, coin) row. Best-effort: the
+  // fill is committed; a failed metadata write must not fail the trade.
+  const advisoryStop = Number.isFinite(proposal.stopPx) && proposal.stopPx > 0 ? proposal.stopPx : null;
+  const ok = await setAdvisoryStop(sessionId, coin, advisoryStop).catch(() => false);
+  if (!ok) line('WARN: advisory stop not persisted — near-stop trigger will be silent for this position.');
+
   const hypothesis = await writeHypothesis({ sessionId, statement: thesis, lane });
   await writeAnalysisLog({
     sessionId,
@@ -164,6 +174,11 @@ async function runExit(args: Record<string, string | boolean>): Promise<void> {
   const fill = await executeIntent({ ...intent, origin: 'scout' });
   if (fill.source !== 'paper') throw new Error(`expected a paper fill, got source=${fill.source}`);
   line(`Closed (paper): ${fill.sz} ${fill.coin} @ $${fill.px} (fee=$${fill.feeUsd.toFixed(4)})`);
+
+  // Full close ⇒ the advisory stop no longer describes anything — clear it so the
+  // near-stop trigger can't fire on a flat position. Partial closes keep it.
+  const closedAll = fraction >= 1 || fill.sz >= position.sz - 1e-12;
+  if (closedAll) await setAdvisoryStop(sessionId, coin, null).catch(() => false);
 
   if (hypothesisId) {
     // Resolve the thesis by OUTCOME so the scout's win/loss record is REAL — not a

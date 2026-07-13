@@ -22,6 +22,7 @@ import { loadOpenPositions } from '@/lib/cockpit/fill-persistence-service';
 import {
   detectScoutTriggers,
   emptyScoutState,
+  type ScoutLeaderActionRead,
   type ScoutRubricRead,
   type ScoutMarketRead,
   type ScoutPositionRead,
@@ -52,6 +53,7 @@ export function loadScoutState(path = scoutStateFilePath()): ScoutState {
       lastHealth: s.lastHealth ?? {},
       driftAnchorPx: s.driftAnchorPx ?? {},
       driftAnchorAt: s.driftAnchorAt ?? {},
+      lastLeaderActionMs: s.lastLeaderActionMs ?? 0,
     };
   } catch {
     return emptyScoutState();
@@ -141,6 +143,76 @@ async function readLatestRubric(
   return { reads: pickNewestRubricReads(rows), newestMs: Number.isFinite(newestMs) ? newestMs : 0 };
 }
 
+/**
+ * Advisory stop prices per coin for a session's open positions (positions.stop_px,
+ * written by the scout paper path at entry — see migration 0033). Best-effort:
+ * a read failure just leaves the near-stop trigger silent, never kills the cycle.
+ */
+async function readAdvisoryStops(client: SupabaseClient, sessionId: string): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const { data, error } = await client
+    .from('positions')
+    .select('coin, stop_px')
+    .eq('session_id', sessionId)
+    .not('stop_px', 'is', null);
+  if (error || !data) return out;
+  for (const r of data as Array<{ coin: string; stop_px: unknown }>) {
+    const px = Number(r.stop_px);
+    if (Number.isFinite(px) && px > 0) out.set(r.coin.trim().toUpperCase(), px);
+  }
+  return out;
+}
+
+/**
+ * Persist / clear the advisory stop for a (session, coin) position. Called by the
+ * scout paper path only (entry sets, full close clears). Best-effort by design —
+ * the fill is already committed; a failed stop write must not fail the trade.
+ */
+export async function setAdvisoryStop(
+  sessionId: string,
+  coin: string,
+  stopPx: number | null,
+  client: SupabaseClient = getServiceRoleClient(),
+): Promise<boolean> {
+  const value = stopPx != null && Number.isFinite(stopPx) && stopPx > 0 ? stopPx : null;
+  const { error } = await client
+    .from('positions')
+    .update({ stop_px: value })
+    .eq('session_id', sessionId)
+    .eq('coin', coin.trim().toUpperCase());
+  return !error;
+}
+
+/**
+ * Recent leader actions from the trader-watch feed (bounded window — the pure
+ * detector's timestamp cursor does the exact dedup). Best-effort: [] on failure.
+ */
+async function readRecentLeaderActions(client: SupabaseClient, now: number): Promise<ScoutLeaderActionRead[]> {
+  const since = new Date(now - 6 * 60 * 60 * 1000).toISOString();
+  // NEWEST-first + kind-filtered in SQL: under reduce/close churn an ascending read
+  // would spend the row budget on the oldest noise and starve fresh opens/flips
+  // (review finding). The detector re-sorts ascending and cursor-dedups.
+  const { data, error } = await client
+    .from('leader_actions')
+    .select('id, leader_address, coin, kind, new_side, notional_usd, size_delta, entry_px, detected_at')
+    .gte('detected_at', since)
+    .in('kind', ['open', 'flip', 'add'])
+    .order('detected_at', { ascending: false })
+    .limit(200);
+  if (error || !data) return [];
+  return (data as Array<Record<string, unknown>>).map((r) => ({
+    id: (r.id as string | number) ?? '',
+    leaderAddress: String(r.leader_address ?? ''),
+    coin: String(r.coin ?? ''),
+    kind: String(r.kind ?? ''),
+    newSide: r.new_side == null ? null : String(r.new_side),
+    notionalUsd: Number(r.notional_usd) || 0,
+    sizeDelta: Number(r.size_delta) || 0,
+    entryPx: r.entry_px == null ? null : Number(r.entry_px),
+    detectedAtMs: new Date(String(r.detected_at)).getTime(),
+  }));
+}
+
 /** Latest open-position health score per (session, coin), best-effort (null when absent). */
 async function readLatestHealth(client: SupabaseClient, sessionId: string, coin: string): Promise<number | null> {
   const { data, error } = await client
@@ -160,6 +232,8 @@ export interface ScoutInputs {
   rubric: ScoutRubricRead[];
   marks: ScoutMarketRead[];
   positions: ScoutPositionRead[];
+  /** Recent rated-leader actions (trader-watch feed; cursor-deduped by the detector). */
+  leaderActions: ScoutLeaderActionRead[];
   now: number;
   /** True when the feed can't be trusted (stale rubric or empty marks) → STAND DOWN. */
   degraded: boolean;
@@ -171,10 +245,11 @@ export interface ScoutInputs {
 /** Gather all inputs for the pure detector. Fail-soft per source + a freshness gate. */
 export async function gatherScoutInputs(now: number): Promise<ScoutInputs> {
   const client = getServiceRoleClient();
-  const [rubricRes, mids, sessions] = await Promise.all([
+  const [rubricRes, mids, sessions, leaderActions] = await Promise.all([
     readLatestRubric(client, now).catch(() => ({ reads: [] as ScoutRubricRead[], newestMs: 0 })),
     fetchAllMids().catch(() => ({}) as Record<string, number>),
     listActiveSessions().catch(() => []),
+    readRecentLeaderActions(client, now).catch(() => [] as ScoutLeaderActionRead[]),
   ]);
   const rubric = rubricRes.reads;
 
@@ -185,10 +260,14 @@ export async function gatherScoutInputs(now: number): Promise<ScoutInputs> {
     .filter((m) => Number.isFinite(m.markPx) && m.markPx > 0);
   const markByCoin = new Map(marks.map((m) => [m.coin, m.markPx]));
 
-  // Open paper positions across active sessions, with best-effort health.
+  // Open paper positions across active sessions, with best-effort health + the
+  // advisory stop (positions.stop_px, migration 0033) that arms the near-stop trigger.
   const positions: ScoutPositionRead[] = [];
   for (const s of sessions) {
-    const open = await loadOpenPositions(s.id).catch(() => []);
+    const [open, stops] = await Promise.all([
+      loadOpenPositions(s.id).catch(() => []),
+      readAdvisoryStops(client, s.id).catch(() => new Map<string, number>()),
+    ]);
     for (const p of open) {
       if (p.side === 'flat') continue;
       const coin = p.coin.toUpperCase();
@@ -199,7 +278,7 @@ export async function gatherScoutInputs(now: number): Promise<ScoutInputs> {
         side: p.side,
         healthScore,
         unrealizedPnlUsd: 0, // not needed for triggers; the cycle computes it fresh
-        stopPx: null, // no persisted stop in v1 → near-stop trigger inert (watch daemon + paper auto-exit cover risk)
+        stopPx: stops.get(coin) ?? null,
         markPx,
       });
     }
@@ -209,7 +288,7 @@ export async function gatherScoutInputs(now: number): Promise<ScoutInputs> {
   // unreachable). The cycle/daemon stand down rather than trade on bad data.
   const { degraded, reason: degradedReason, rubricAgeMs } = assessFeedDegradation(rubricRes.newestMs, marks.length, now);
 
-  return { rubric, marks, positions, now, degraded, degradedReason, rubricAgeMs };
+  return { rubric, marks, positions, leaderActions, now, degraded, degradedReason, rubricAgeMs };
 }
 
 /** Upsert a liveness heartbeat so the cockpit can show "scout last tick Nm ago"
@@ -249,6 +328,11 @@ export async function runScoutWatchCycle(
   // cycle compares against the latest values, not a pre-outage baseline.
   if (input.degraded) {
     const { state } = detectScoutTriggers(input, prev, cfg);
+    // LEVEL detectors correctly advance during an outage (next good cycle re-reads
+    // the level). The leader-action EVENT cursor must NOT — advancing it here would
+    // permanently swallow every whale action seen during the degraded window
+    // (review finding). Hold it at the pre-outage cursor so recovery re-emits.
+    state.lastLeaderActionMs = prev.lastLeaderActionMs ?? 0;
     return { triggers: [], state, degraded: true, degradedReason: input.degradedReason, sink: 'none' };
   }
   const { triggers, state } = detectScoutTriggers(input, prev, cfg);

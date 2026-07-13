@@ -25,6 +25,7 @@ import { gatherScoutInputs, writeScoutHeartbeat } from '@/lib/scout/scout-watch-
 import { recentTriggers, markTriggersConsumed, pruneConsumedTriggers, type SinkTrigger } from '@/lib/scout/scout-trigger-sink';
 import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
 import { scoutPlaybookPath, summarizeHypotheses, type HypothesisSummaryRow } from '@/lib/scout/scout-cycle-business-logic';
+import { gatherScoutContext } from '@/lib/scout/scout-context-service';
 
 interface VaultRow { vault_address: string; name: string; kind: string; nav_usd: number | null; apr_annual: number | null; max_drawdown_pct: number | null; age_days: number | null; leader_fraction: number | null }
 
@@ -52,8 +53,19 @@ run(async () => {
     .filter((m) => ctxs[m.coin])
     .map((m) => ({ coin: m.coin, fundingHourly: ctxs[m.coin].fundingHourly, openInterest: ctxs[m.coin].openInterest, premium: ctxs[m.coin].premium }));
 
-  // 4) Vaults (Lane A allocation candidates — newest snapshot per vault).
+  // 3b) Advisory context (tape / leaders / AF / percentiles) — the same signal
+  // surface the human desk uses, framed for judgment. Fail-soft per section:
+  // a missing part is null/[], never a blocked cycle. NOT auto-scored.
   const db = getServiceRoleClient();
+  const context = await gatherScoutContext(
+    inputs.marks.map((m) => m.coin),
+    new Map(fundingCtx.map((c) => [c.coin, c.fundingHourly])),
+    new Map(fundingCtx.map((c) => [c.coin, c.openInterest])),
+    now,
+    db,
+  ).catch(() => ({ tape: [], leaders: [], afHypePerDay: null, percentiles: [] }));
+
+  // 4) Vaults (Lane A allocation candidates — newest snapshot per vault).
   const { data: vaultRows } = await db
     .from('vault_snapshots')
     .select('vault_address, name, kind, nav_usd, apr_annual, max_drawdown_pct, age_days, leader_fraction, fetched_at')
@@ -97,6 +109,13 @@ run(async () => {
       rubric: inputs.rubric.map((r) => ({ coin: r.coin, side: r.side, opportunity: Math.round(r.opportunity), badge: r.badge })),
       marks: inputs.marks,
       funding: fundingCtx,
+      // Advisory context (see docs/SIGNAL_ROADMAP.md): tape flow is a POINT sample
+      // (null = not measured, never 0); percentiles frame funding/OI against the
+      // coin's OWN recorded history; leaders = the trader-watch whale book.
+      tape: context.tape,
+      leaders: context.leaders,
+      afHypePerDay: context.afHypePerDay,
+      percentiles: context.percentiles,
       vaults,
       positions: inputs.positions,
       circuitBreaker: { halted: breaker.blockNewEntries, reason: breaker.reason, equityUsd: breaker.equityUsd, peakEquityUsd: breaker.peakEquityUsd, dayStartEquityUsd: breaker.dayStartEquityUsd, flattenRecommended: breaker.flattenRecommended },
@@ -135,6 +154,28 @@ run(async () => {
     const who = c.fundingHourly >= 0 ? 'longs pay / shorts earn' : 'shorts pay / longs earn';
     line(`${c.coin}  funding ${(c.fundingHourly * 100).toFixed(4)}%/h (~${apr}% APR; ${who})  OI=${Math.round(c.openInterest)}  premium=${(c.premium * 100).toFixed(3)}%`);
   }
+
+  header('TAPE (advisory — flow is a POINT sample; null = not measured, never 0)');
+  if (context.tape.length === 0) line('(unavailable)');
+  else for (const t of context.tape) {
+    const flow = t.takerFlow != null ? (t.takerFlow >= 0 ? '+' : '') + t.takerFlow.toFixed(2) : '—';
+    const imb = t.bookImbalance != null ? (t.bookImbalance >= 0 ? '+' : '') + t.bookImbalance.toFixed(2) : '—';
+    line(`${t.coin}  takerFlow=${flow}  bookImbalance=${imb} (+=bid-heavy)  spread=${t.spreadBps != null ? t.spreadBps.toFixed(1) + 'bps' : '—'}`);
+  }
+
+  header('LEADER BOOK (rated whales, trader-watch feed — decompose before trusting)');
+  if (context.leaders.length === 0) line('(no leader positions in universe)');
+  else for (const l of context.leaders) {
+    line(`${l.coin}  long $${(l.longUsd / 1e6).toFixed(2)}M (${l.longWallets}w)  short $${(l.shortUsd / 1e6).toFixed(2)}M (${l.shortWallets}w)  top=${l.topWalletSide ?? '—'} $${(l.topWalletUsd / 1e6).toFixed(2)}M`);
+  }
+
+  header('FUNDING/OI PERCENTILES (vs the coin\'s own recorded history)');
+  if (context.percentiles.length === 0) line('(series unavailable)');
+  else for (const p of context.percentiles) {
+    const pct = (v: number | null) => (v != null ? Math.round(v * 100) + 'th' : '— (thin series)');
+    line(`${p.coin}  funding ${pct(p.fundingPctile)}  OI ${pct(p.oiPctile)}  (n=${p.sampleCount})`);
+  }
+  if (context.afHypePerDay != null) line(`AF buyback ≈ ${Math.round(context.afHypePerDay).toLocaleString('en-US')} HYPE/24h (procyclical — context only, never a floor)`);
 
   header('VAULTS (Lane A — allocation candidates; nav = total AUM, judge on apr/return)');
   if (vaults.length === 0) line('(no vault snapshots yet — wait for the nas-watch tick / run pnpm vault-watch --once)');
