@@ -69,6 +69,14 @@ export interface RungTriggerMeta {
   /** indicator: the named indicator + threshold (snapshot.indicators[name]). */
   indicatorName?: string;
   indicatorValue?: number;
+  /** price_above/price_below OPEN/ADD rungs (optional): require momentum SUPPORT at the
+   *  price trigger — fires only when `momentum-stall-<side>` shows ≤ momentumMaxFlips
+   *  signals against the direction (default 0: clean tape/book/volume). RESTRICTIVE
+   *  ONLY: it can delay/prevent an entry, never cause one; missing momentum data
+   *  fails closed (no entry on blind data). */
+  momentumConfirm?: boolean;
+  /** Max stall signals against the direction the confirm tolerates (default 0, max 2). */
+  momentumMaxFlips?: number;
   /** indicator (optional): a price FLOOR the completed close must also clear before the
    *  indicator can fire — long reduce: close ≥ floorPx; short reduce: close ≤ floorPx.
    *  This is how a momentum exit is prevented from firing before the move has paid
@@ -100,6 +108,9 @@ export interface Ladder {
   maxTotalNotionalUsd: number | null;
   maxTotalLossUsd: number | null;
   expiresAt: string | null;
+  /** Earliest evaluation/fire time (ISO); null = active immediately on arm. The
+   *  activation window is PURELY RESTRICTIVE — it can only prevent fires. */
+  activeFrom: string | null;
   armedAt: string | null;
   disarmedAt: string | null;
   disarmReason: string | null;

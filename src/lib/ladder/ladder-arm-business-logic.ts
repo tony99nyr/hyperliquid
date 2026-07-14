@@ -48,6 +48,8 @@ export interface ValidateLadderInput {
   thesis?: string | null;
   /** Epoch ms the ladder expires (INJECTED); must be in the future. */
   expiresAtMs: number | null;
+  /** Optional activation-window start (epoch ms); must precede expiry when set. */
+  activeFromMs?: number | null;
   caps: LadderCaps;
   rungs: ArmRung[];
   /** Epoch ms — INJECTED (no Date.now in pure code). */
@@ -73,8 +75,19 @@ const SUPPORTED_INDICATOR_NAMES = ['momentum-stall-long', 'momentum-stall-short'
 function triggerProblem(r: ArmRung): string | null {
   switch (r.triggerKind) {
     case 'price_above':
-    case 'price_below':
-      return r.triggerPx != null && r.triggerPx > 0 ? null : `rung ${r.seq}: ${r.triggerKind} needs a positive triggerPx`;
+    case 'price_below': {
+      if (!(r.triggerPx != null && r.triggerPx > 0)) return `rung ${r.seq}: ${r.triggerKind} needs a positive triggerPx`;
+      if (r.triggerMeta?.momentumConfirm) {
+        if (!INCREASES_EXPOSURE(r.action)) {
+          return `rung ${r.seq}: momentumConfirm is an ENTRY filter (open/add) — exits use indicator rungs instead`;
+        }
+        const mf = r.triggerMeta.momentumMaxFlips;
+        if (mf !== undefined && !(Number.isFinite(mf) && mf >= 0 && mf <= 2)) {
+          return `rung ${r.seq}: momentumMaxFlips must be 0-2 when set`;
+        }
+      }
+      return null;
+    }
     case 'volume':
       return r.triggerMeta?.minVolume != null && r.triggerMeta.minVolume > 0 ? null : `rung ${r.seq}: volume trigger needs minVolume > 0`;
     case 'funding':
@@ -127,6 +140,9 @@ export function validateLadderForArm(input: ValidateLadderInput): ValidateLadder
   if (!input.title.trim()) warnings.push('A ladder title is required.');
   if (rungs.length === 0) warnings.push('A ladder needs at least one rung.');
 
+  if (input.activeFromMs != null && input.expiresAtMs != null && input.activeFromMs >= input.expiresAtMs) {
+    warnings.push('active_from must be BEFORE expiry — the activation window is empty.');
+  }
   if (input.expiresAtMs == null) {
     warnings.push('An expiry is required — an armed ladder is not open-ended authorization.');
   } else if (input.expiresAtMs <= input.now) {

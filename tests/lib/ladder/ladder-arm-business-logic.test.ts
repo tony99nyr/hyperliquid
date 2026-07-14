@@ -235,3 +235,37 @@ describe('indicator rungs — EXIT-ONLY momentum exits (arm-time rules)', () => 
     expect(arm({ triggerMeta: { ...base.triggerMeta, floorPx: -1 } }).warnings.join(' ')).toMatch(/floorPx/);
   });
 });
+
+describe('momentumConfirm (entry filter) + activation window — arm-time rules', () => {
+  const entryRung = (over: Record<string, unknown> = {}) => ({
+    seq: 1, coin: 'HYPE', side: 'long' as const, action: 'open' as const,
+    triggerKind: 'price_above' as const, triggerPx: 66, triggerMeta: { momentumConfirm: true },
+    entryPx: 66, sizeCoins: 1, leverage: 2, stopPx: 63, ...over,
+  });
+  const arm = (rungOver: Record<string, unknown> = {}, inputOver: Record<string, unknown> = {}) =>
+    validateLadderForArm({
+      title: 'momentum entry', expiresAtMs: NOW + 86_400_000, now: NOW,
+      rungs: [entryRung(rungOver)], caps: { maxTotalNotionalUsd: null, maxTotalLossUsd: null },
+      coinMaxLeverage: () => 10, ...inputOver,
+    });
+
+  it('accepts momentumConfirm on an open rung', () => {
+    expect(arm().warnings.filter((w) => w.includes('momentum'))).toEqual([]);
+  });
+
+  it('REJECTS momentumConfirm on a reduce rung (exits use indicator rungs)', () => {
+    const w = arm({ action: 'reduce', entryPx: null, sizeCoins: null, stopPx: null, leverage: null }).warnings.join(' ');
+    expect(w).toMatch(/ENTRY filter/);
+  });
+
+  it('REJECTS an out-of-range momentumMaxFlips', () => {
+    expect(arm({ triggerMeta: { momentumConfirm: true, momentumMaxFlips: 5 } }).warnings.join(' ')).toMatch(/momentumMaxFlips/);
+  });
+
+  it('REJECTS an empty activation window (active_from at/after expiry)', () => {
+    const w = arm({}, { activeFromMs: NOW + 86_400_000 }).warnings.join(' ');
+    expect(w).toMatch(/active_from must be BEFORE expiry/);
+    // A valid window passes.
+    expect(arm({}, { activeFromMs: NOW + 3_600_000 }).warnings.join(' ')).not.toMatch(/active_from/);
+  });
+});

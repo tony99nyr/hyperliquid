@@ -71,7 +71,7 @@ function ladder(over: Partial<LadderWithRungs> = {}, rungs?: LadderRung[]): Ladd
   return {
     id: 'L1', title: 'T', thesis: null, author: 'operator', mode: 'paper', status: 'armed',
     preconditionHash: hash, ocoGroupId: null, leaderAddress: null, maxTotalNotionalUsd: 100_000, maxTotalLossUsd: 5_000,
-    expiresAt: new Date(NOW + 3_600_000).toISOString(), armedAt: null, disarmedAt: null, disarmReason: null, archivedAt: null, expiryAlertAt: null,
+    expiresAt: new Date(NOW + 3_600_000).toISOString(), activeFrom: null, armedAt: null, disarmedAt: null, disarmReason: null, archivedAt: null, expiryAlertAt: null,
     createdAt: '', updatedAt: '', rungs: r, ...over,
   };
 }
@@ -123,6 +123,19 @@ describe('performLadderRungFire — guard stack', () => {
     expect((await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW })).skipped).toBe('expired');
     expect(disarmLadder).toHaveBeenCalledWith('L1', 'expired');
     expect(claimRungFire).not.toHaveBeenCalled();
+  });
+
+  it('refuses (but keeps ARMED) a ladder whose activation window has not opened', async () => {
+    getLadderWithRungs.mockResolvedValue(ladder({ activeFrom: new Date(NOW + 60_000).toISOString() }));
+    expect((await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW })).skipped).toBe('before-active-from');
+    expect(disarmLadder).not.toHaveBeenCalled(); // restrictive only — authorization stands
+    expect(claimRungFire).not.toHaveBeenCalled();
+  });
+
+  it('fires normally once the activation window is open', async () => {
+    getLadderWithRungs.mockResolvedValue(ladder({ activeFrom: new Date(NOW - 60_000).toISOString() }));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).not.toBe('before-active-from');
   });
 
   it('refuses a scout-authored ladder (defense-in-depth)', async () => {

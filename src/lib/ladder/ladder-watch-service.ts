@@ -55,6 +55,10 @@ export async function runLadderWatchTick(args: { now: number }): Promise<LadderW
   for (const l of armedList) {
     if (l.expiresAt && args.now >= Date.parse(l.expiresAt)) {
       await markLadderExpired(l.id).catch(() => {}); // best-effort; the fire path still refuses
+    } else if (l.activeFrom && args.now < Date.parse(l.activeFrom)) {
+      // Activation window not open yet — armed authorization stands, triggers don't
+      // evaluate. Purely restrictive; the fire path re-checks this too.
+      continue;
     } else {
       live.push(l);
     }
@@ -73,7 +77,7 @@ export async function runLadderWatchTick(args: { now: number }): Promise<LadderW
     for (const r of l.rungs)
       if (r.status === 'pending') {
         coins.add(r.coin.toUpperCase());
-        if (r.triggerKind === 'indicator') indicatorCoins.add(r.coin.toUpperCase());
+        if (r.triggerKind === 'indicator' || r.triggerMeta?.momentumConfirm) indicatorCoins.add(r.coin.toUpperCase());
       }
 
   const snapshots: Record<string, RungMarketSnapshot> = {};

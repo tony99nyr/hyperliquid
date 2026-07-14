@@ -170,6 +170,43 @@ describe('evaluateRungTrigger — indicator', () => {
   });
 });
 
+describe('evaluateRungTrigger — momentumConfirm (entry filter on price triggers)', () => {
+  const confirmRung = (over: Partial<LadderRung> = {}) =>
+    rung({ action: 'open', side: 'long', triggerKind: 'price_above', triggerPx: 1950, triggerMeta: { momentumConfirm: true }, ...over });
+
+  it('price met + zero signals against → fires, with the confirmation in the reason', () => {
+    const res = evaluateRungTrigger(confirmRung(), snap({ completedClose: 2000, indicators: { 'momentum-stall-long': 0 } }));
+    expect(res.conditionMet).toBe(true);
+    expect(res.reason).toContain('momentum supportive');
+  });
+
+  it('price met but momentum against → HOLDS (restrictive only)', () => {
+    const res = evaluateRungTrigger(confirmRung(), snap({ completedClose: 2000, indicators: { 'momentum-stall-long': 2 } }));
+    expect(res.conditionMet).toBe(false);
+    expect(res.reason).toContain('not supportive');
+  });
+
+  it('momentumMaxFlips loosens the filter deliberately', () => {
+    const r = confirmRung({ triggerMeta: { momentumConfirm: true, momentumMaxFlips: 1 } });
+    expect(evaluateRungTrigger(r, snap({ completedClose: 2000, indicators: { 'momentum-stall-long': 1 } })).conditionMet).toBe(true);
+    expect(evaluateRungTrigger(r, snap({ completedClose: 2000, indicators: { 'momentum-stall-long': 2 } })).conditionMet).toBe(false);
+  });
+
+  it('missing momentum data fails CLOSED — no entry on blind data', () => {
+    expect(evaluateRungTrigger(confirmRung(), snap({ completedClose: 2000 })).conditionMet).toBe(false);
+  });
+
+  it('short side reads momentum-stall-short', () => {
+    const r = confirmRung({ side: 'short', triggerKind: 'price_below', triggerPx: 2050 });
+    expect(evaluateRungTrigger(r, snap({ completedClose: 2000, indicators: { 'momentum-stall-short': 0 } })).conditionMet).toBe(true);
+    expect(evaluateRungTrigger(r, snap({ completedClose: 2000, indicators: { 'momentum-stall-short': 3 } })).conditionMet).toBe(false);
+  });
+
+  it('without momentumConfirm the price trigger behaves exactly as before', () => {
+    expect(evaluateRungTrigger(rung({ triggerPx: 1950 }), snap({ completedClose: 2000 })).conditionMet).toBe(true);
+  });
+});
+
 describe('evaluateLadderRungs — only PENDING rungs, snapshot-by-coin', () => {
   it('skips non-pending rungs and matches snapshots case-insensitively', () => {
     const rungs: LadderRung[] = [

@@ -44,6 +44,31 @@ export interface RungConditionResult {
 const KINDS_NEEDING_PRICE: RungTriggerKind[] = ['price_above', 'price_below'];
 
 /**
+ * Optional momentum CONFIRMATION on a price trigger (entry filter): the price
+ * condition already passed; additionally require the momentum-stall composite to
+ * show ≤ momentumMaxFlips (default 0) signals AGAINST the rung's direction.
+ * RESTRICTIVE ONLY — this can only turn a met condition into not-met. Missing
+ * momentum data fails closed: no entry on blind data.
+ */
+function applyMomentumConfirm(
+  rung: LadderRung,
+  snapshot: RungMarketSnapshot,
+  met: RungConditionResult,
+): RungConditionResult {
+  if (!rung.triggerMeta?.momentumConfirm) return met;
+  const name = rung.side === 'long' ? 'momentum-stall-long' : 'momentum-stall-short';
+  const flips = snapshot.indicators?.[name];
+  if (flips == null || !Number.isFinite(flips)) {
+    return { ...met, conditionMet: false, reason: `${met.reason} BUT momentum data unavailable — fail-closed` };
+  }
+  const maxFlips = rung.triggerMeta.momentumMaxFlips ?? 0;
+  if (flips > maxFlips) {
+    return { ...met, conditionMet: false, reason: `${met.reason} BUT momentum not supportive (${flips} signal(s) against, max ${maxFlips}) — holding` };
+  }
+  return { ...met, reason: `${met.reason} + momentum supportive (${flips} against ≤ ${maxFlips})` };
+}
+
+/**
  * Evaluate ONE rung against its coin's snapshot. PURE. Returns conditionMet=false
  * (with a reason) whenever the snapshot is stale, missing, or the trigger params are
  * incomplete — fail-closed, never throw.
@@ -75,14 +100,16 @@ export function evaluateRungTrigger(rung: LadderRung, snapshot: RungMarketSnapsh
         return { ...base, conditionMet: false, reason: 'price_above missing triggerPx — fail-closed' };
       }
       const met = snapshot.completedClose >= rung.triggerPx;
-      return { ...base, conditionMet: met, reason: `${rung.coin} close ${snapshot.completedClose} ${met ? '≥' : '<'} ${rung.triggerPx} (break up)` };
+      if (!met) return { ...base, conditionMet: false, reason: `${rung.coin} close ${snapshot.completedClose} < ${rung.triggerPx} (break up)` };
+      return applyMomentumConfirm(rung, snapshot, { ...base, conditionMet: true, reason: `${rung.coin} close ${snapshot.completedClose} ≥ ${rung.triggerPx} (break up)` });
     }
     case 'price_below': {
       if (rung.triggerPx == null || !(rung.triggerPx > 0)) {
         return { ...base, conditionMet: false, reason: 'price_below missing triggerPx — fail-closed' };
       }
       const met = snapshot.completedClose <= rung.triggerPx;
-      return { ...base, conditionMet: met, reason: `${rung.coin} close ${snapshot.completedClose} ${met ? '≤' : '>'} ${rung.triggerPx} (break down)` };
+      if (!met) return { ...base, conditionMet: false, reason: `${rung.coin} close ${snapshot.completedClose} > ${rung.triggerPx} (break down)` };
+      return applyMomentumConfirm(rung, snapshot, { ...base, conditionMet: true, reason: `${rung.coin} close ${snapshot.completedClose} ≤ ${rung.triggerPx} (break down)` });
     }
     case 'volume': {
       const minVolume = rung.triggerMeta?.minVolume;

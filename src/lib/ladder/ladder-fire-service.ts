@@ -114,6 +114,11 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
     await disarmLadder(ladder.id, 'expired');
     return skip('expired');
   }
+  // 1b) Activation window: an armed ladder is NOT yet fireable before active_from.
+  // (Restrictive only — refuse and leave it armed for when the window opens.)
+  if (ladder.activeFrom && now < Date.parse(ladder.activeFrom)) {
+    return skip('before-active-from');
+  }
   // 2) Defense-in-depth with the §3.6 DB CHECK: a scout ladder can NEVER fire.
   if (ladder.author !== 'operator') return skip('not-operator');
 
