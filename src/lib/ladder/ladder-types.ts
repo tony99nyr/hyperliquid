@@ -23,6 +23,26 @@ export type RungAction = 'open' | 'add' | 'reduce' | 'close';
  *  price-on-mark only). All evaluated on COMPLETED candles (never the in-progress bar). */
 export type RungTriggerKind = 'price_above' | 'price_below' | 'volume' | 'funding' | 'indicator';
 
+// --- Momentum indicator names: the SINGLE source of truth (pure — importable by the
+// evaluator, arm validation, AND the server-only publisher without a purity violation).
+// Rename here and every producer/consumer moves together; a stray literal elsewhere
+// would fail closed (indicator absent → no fire), so keep them ALL on these exports. ---
+export const MOMENTUM_STALL_LONG = 'momentum-stall-long';
+export const MOMENTUM_STALL_SHORT = 'momentum-stall-short';
+export const SUPPORTED_INDICATOR_NAMES: readonly string[] = [MOMENTUM_STALL_LONG, MOMENTUM_STALL_SHORT];
+/** The stall indicator measuring signals AGAINST a position of `side`. */
+export const momentumStallIndicatorName = (side: LadderSide): string =>
+  side === 'long' ? MOMENTUM_STALL_LONG : MOMENTUM_STALL_SHORT;
+
+/** Where `now` sits relative to an armed ladder's evaluation window. ONE predicate for
+ *  the watcher + the fire path (their ACTIONS differ; the time semantics must not). */
+export type LadderWindowState = 'expired' | 'before-window' | 'active';
+export function ladderWindowState(l: { expiresAt: string | null; activeFrom: string | null }, now: number): LadderWindowState {
+  if (l.expiresAt && now >= Date.parse(l.expiresAt)) return 'expired';
+  if (l.activeFrom && now < Date.parse(l.activeFrom)) return 'before-window';
+  return 'active';
+}
+
 export type RungStatus = 'pending' | 'fired' | 'skipped' | 'failed' | 'cancelled';
 
 /** A single pre-authorized order within a ladder. */

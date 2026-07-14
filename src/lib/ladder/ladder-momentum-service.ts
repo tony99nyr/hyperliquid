@@ -23,17 +23,15 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import type { PriceCandle } from '@/types/trading-core';
+import { MOMENTUM_STALL_LONG, MOMENTUM_STALL_SHORT } from './ladder-types';
 import {
   momentumStallVerdict,
   type MomentumCandle,
   type MomentumSeriesPoint,
 } from '@/lib/health/momentum-stall-business-logic';
 
-export const MOMENTUM_STALL_LONG = 'momentum-stall-long';
-export const MOMENTUM_STALL_SHORT = 'momentum-stall-short';
-
-/** The names the arm validator accepts — a rung naming anything else would sit dead. */
-export const SUPPORTED_INDICATORS = [MOMENTUM_STALL_LONG, MOMENTUM_STALL_SHORT] as const;
+// Indicator names live in ladder-types (the pure SSOT shared with the evaluator +
+// arm validation); this service just publishes values under them.
 
 /** Snapshot series window backing the tape/book signals (~5 min cadence → ~18 points). */
 const SERIES_WINDOW_MS = 90 * 60 * 1000;
@@ -44,11 +42,14 @@ async function readSeries(client: SupabaseClient, coin: string, now: number): Pr
     .select('taker_flow, book_imbalance, captured_at')
     .eq('coin', coin.toUpperCase())
     .gte('captured_at', new Date(now - SERIES_WINDOW_MS).toISOString())
-    .order('captured_at', { ascending: true })
+    .order('captured_at', { ascending: false })
     .limit(60);
   if (error || !data) return [];
+  // Newest-60 then restored to ascending: an ascending LIMIT would keep the OLDEST
+  // rows if the window ever out-grows the limit (review nit — harmless at the ~5min
+  // cadence today, wrong the day the cadence tightens).
   // NULL = not measured (0032 rule) — preserve null, never coerce to 0.
-  return (data as Array<{ taker_flow: unknown; book_imbalance: unknown }>).map((r) => ({
+  return (data as Array<{ taker_flow: unknown; book_imbalance: unknown }>).reverse().map((r) => ({
     takerFlow: r.taker_flow == null ? null : Number(r.taker_flow),
     bookImbalance: r.book_imbalance == null ? null : Number(r.book_imbalance),
   }));

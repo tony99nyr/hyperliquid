@@ -75,6 +75,15 @@ describe('ladder arm route', () => {
     expect(armLadder).toHaveBeenCalledWith('abcd1234-0000-0000', expect.objectContaining({ preconditionHash: expect.any(String) }));
   });
 
+  it('422 for an EMPTY activation window persisted on the row (active_from >= expiry)', async () => {
+    const exp = new Date(Date.now() + 3_600_000).toISOString();
+    getLadderWithRungs.mockResolvedValue(draftLadder({ expiresAt: exp, activeFrom: exp }));
+    const res = await POST(postReq({ ladderId: 'abcd1234-0000-0000' }));
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(JSON.stringify(body.warnings)).toContain('active_from must be BEFORE expiry');
+  });
+
   it('401 unauthenticated', async () => {
     verifyAdminAuth.mockResolvedValue(false);
     expect((await POST(postReq({ ladderId: 'x' }))).status).toBe(401);

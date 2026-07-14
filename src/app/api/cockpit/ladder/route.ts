@@ -61,7 +61,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   let body: {
     title?: unknown; thesis?: unknown; mode?: unknown; ocoGroupId?: unknown;
-    maxTotalNotionalUsd?: unknown; maxTotalLossUsd?: unknown; expiresAtMs?: unknown; rungs?: unknown;
+    maxTotalNotionalUsd?: unknown; maxTotalLossUsd?: unknown; expiresAtMs?: unknown;
+    activeFromMs?: unknown; rungs?: unknown;
   };
   try { body = (await request.json()) as typeof body; } catch { return NextResponse.json({ ok: false, error: 'Invalid body' }, { status: 400 }); }
 
@@ -117,6 +118,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       maxTotalNotionalUsd: num(body.maxTotalNotionalUsd),
       maxTotalLossUsd: num(body.maxTotalLossUsd),
       expiresAtMs: num(body.expiresAtMs),
+      // Optional activation window (0034): triggers evaluate only from here.
+      activeFromMs: num(body.activeFromMs),
       rungs,
     });
     return NextResponse.json({ ok: true, id });

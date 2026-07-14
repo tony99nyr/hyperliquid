@@ -17,6 +17,7 @@
  */
 
 import type { Ladder, LadderRung, LadderSide, RungAction, RungTriggerKind, RungTriggerMeta } from './ladder-types';
+import { SUPPORTED_INDICATOR_NAMES, momentumStallIndicatorName } from './ladder-types';
 import {
   computeLadderRisk,
   rungEntryPx,
@@ -68,8 +69,7 @@ export interface ValidateLadderResult {
 
 const INCREASES_EXPOSURE = (a: RungAction): boolean => a === 'open' || a === 'add';
 
-/** Indicator names the watcher publishes (ladder-momentum-service) — kept in sync by tests. */
-const SUPPORTED_INDICATOR_NAMES = ['momentum-stall-long', 'momentum-stall-short'];
+
 
 /** Validate trigger params for a rung's kind. Returns a reason when invalid, else null. */
 function triggerProblem(r: ArmRung): string | null {
@@ -109,7 +109,7 @@ function triggerProblem(r: ArmRung): string | null {
         return `rung ${r.seq}: unknown indicator '${r.triggerMeta.indicatorName}' (supported: ${SUPPORTED_INDICATOR_NAMES.join(', ')})`;
       }
       // Side-consistency: a long position stalls via momentum-stall-long, a short via -short.
-      const wanted = r.side === 'long' ? 'momentum-stall-long' : 'momentum-stall-short';
+      const wanted = momentumStallIndicatorName(r.side);
       if (r.triggerMeta.indicatorName !== wanted) {
         return `rung ${r.seq}: ${r.side} exit must watch '${wanted}', not '${r.triggerMeta.indicatorName}'`;
       }
@@ -156,6 +156,11 @@ export function validateLadderForArm(input: ValidateLadderInput): ValidateLadder
   for (const r of rungs) {
     const tp = triggerProblem(r);
     if (tp) warnings.push(tp);
+    // Hygiene: momentumConfirm only means something on price triggers — a stray flag on
+    // volume/funding/indicator rungs would silently do nothing; reject so intent is honest.
+    if (r.triggerMeta?.momentumConfirm && r.triggerKind !== 'price_above' && r.triggerKind !== 'price_below') {
+      warnings.push(`rung ${r.seq}: momentumConfirm only applies to price triggers`);
+    }
     // The autofire watcher builds price + volume snapshots, and (since the momentum
     // exits landed) computes the SUPPORTED_INDICATOR_NAMES for coins with pending
     // indicator rungs — so indicator triggers are now armable (validated exit-only,

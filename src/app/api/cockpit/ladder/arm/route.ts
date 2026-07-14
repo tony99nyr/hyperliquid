@@ -112,6 +112,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     title: ladder.title,
     thesis: ladder.thesis,
     expiresAtMs: Number.isFinite(expiresAtMs) ? expiresAtMs : null,
+    // From the PERSISTED row (never the request): the empty-window reject must run
+    // against whatever is actually stored — including a direct DB write.
+    activeFromMs: ladder.activeFrom ? Date.parse(ladder.activeFrom) : null,
     caps: { maxTotalNotionalUsd: ladder.maxTotalNotionalUsd, maxTotalLossUsd: ladder.maxTotalLossUsd },
     rungs: armRungs,
     now: Date.now(),

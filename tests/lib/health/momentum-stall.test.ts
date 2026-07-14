@@ -4,6 +4,12 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
+  MOMENTUM_STALL_LONG,
+  MOMENTUM_STALL_SHORT,
+  SUPPORTED_INDICATOR_NAMES,
+  momentumStallIndicatorName,
+} from '@/lib/ladder/ladder-types';
+import {
   momentumStallVerdict,
   volumeFade,
   cvdNonConfirmation,
@@ -125,5 +131,17 @@ describe('momentumStallVerdict — 2-of-3 composite', () => {
     const v = momentumStallVerdict({ side: 'long', candles: [], series: [] });
     expect(v.stalled).toBe(false);
     expect(v.flipped).toEqual([]);
+  });
+});
+
+describe('indicator-name SSOT (ladder-types) — producer/consumer sync pin', () => {
+  it('the helper, the constants, and the supported list all agree', () => {
+    expect(momentumStallIndicatorName('long')).toBe(MOMENTUM_STALL_LONG);
+    expect(momentumStallIndicatorName('short')).toBe(MOMENTUM_STALL_SHORT);
+    expect(SUPPORTED_INDICATOR_NAMES).toEqual([MOMENTUM_STALL_LONG, MOMENTUM_STALL_SHORT]);
+    // The literal wire format is part of the persisted rung contract (triggerMeta
+    // .indicatorName in armed ladders) — a rename is a MIGRATION, not a refactor.
+    expect(MOMENTUM_STALL_LONG).toBe('momentum-stall-long');
+    expect(MOMENTUM_STALL_SHORT).toBe('momentum-stall-short');
   });
 });

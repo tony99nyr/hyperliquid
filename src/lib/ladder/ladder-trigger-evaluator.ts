@@ -16,6 +16,7 @@
  */
 
 import type { LadderRung, RungTriggerKind } from './ladder-types';
+import { momentumStallIndicatorName } from './ladder-types';
 
 /** Market read for one coin, built from the most recent COMPLETED candle + live funding.
  *  `stale` is set by the daemon when the feed is lagged/missing — fail-closed. */
@@ -56,7 +57,7 @@ function applyMomentumConfirm(
   met: RungConditionResult,
 ): RungConditionResult {
   if (!rung.triggerMeta?.momentumConfirm) return met;
-  const name = rung.side === 'long' ? 'momentum-stall-long' : 'momentum-stall-short';
+  const name = momentumStallIndicatorName(rung.side);
   const flips = snapshot.indicators?.[name];
   if (flips == null || !Number.isFinite(flips)) {
     return { ...met, conditionMet: false, reason: `${met.reason} BUT momentum data unavailable — fail-closed` };

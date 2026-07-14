@@ -15,6 +15,7 @@ import { isLadderAutofireEnabled } from './ladder-flags';
 import { listLadders, getLadderWithRungs, markLadderExpired } from './ladder-service';
 import { evaluateLadderRungs, type RungMarketSnapshot } from './ladder-trigger-evaluator';
 import { snapshotFromCandleResult } from './ladder-watch-business-logic';
+import { ladderWindowState } from './ladder-types';
 import { computeMomentumIndicators } from './ladder-momentum-service';
 import { performLadderRungFire, type LadderFireResult } from './ladder-fire-service';
 import type { LadderWithRungs } from './ladder-types';
@@ -53,11 +54,12 @@ export async function runLadderWatchTick(args: { now: number }): Promise<LadderW
   // but left 'armed' it lies in the UI. Flip it to 'expired' now and skip evaluating it.
   const live: typeof armedList = [];
   for (const l of armedList) {
-    if (l.expiresAt && args.now >= Date.parse(l.expiresAt)) {
+    const window = ladderWindowState(l, args.now);
+    if (window === 'expired') {
       await markLadderExpired(l.id).catch(() => {}); // best-effort; the fire path still refuses
-    } else if (l.activeFrom && args.now < Date.parse(l.activeFrom)) {
-      // Activation window not open yet — armed authorization stands, triggers don't
-      // evaluate. Purely restrictive; the fire path re-checks this too.
+    } else if (window === 'before-window') {
+      // Armed authorization stands; triggers don't evaluate yet. Purely restrictive;
+      // the fire path re-checks the same predicate.
       continue;
     } else {
       live.push(l);
