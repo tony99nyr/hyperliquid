@@ -44,6 +44,24 @@ as the build list.
 4. **Depth-at-distance in stop hygiene v2** — size stops beyond thin-book zones, not
    just wick pools/round numbers (l2Book already fetched).
 
+## Graduated (backtest passed → live template, floor size)
+
+- **Event-straddle template (2026-07-14):** pre-registered study over 18 prints (7 CPI /
+  4 FOMC / 7 NFP, Jan–Jul 2026, 1h bars — HL keeps only ~52d of 15m): CPI @1.0% gate OCO
+  cleared the bar on BOTH decision coins (BTC +0.27R, ETH +0.43R mean; HYPE +0.92R at its
+  1.5% gate). HONESTY: means are tail-carried (ETH median −0.28R) — a long-vol profile;
+  n=7/type. FOMC was the best type (+0.6..+3.4R, n=4). RE-ARM-ON-STOP consistently
+  SUBTRACTED ~0.2R on event days — use plain OCO for event straddles (the re-arm standing
+  order applies to structural straddles only). Template: auto-draft pre-event (gates 1.0%
+  majors / 1.5% HYPE-SOL from the pre-print close, stop at the reference, 24h time exit,
+  floor $4-5/side), operator-armed, ledger setup `event-straddle`. Collect → judge at n≥10.
+- **Momentum-exit rung kind (2026-07-14):** `indicator` triggers are now armable,
+  EXIT-ONLY (arm + evaluator + fire path all refuse open/add), publishing the 2-of-3
+  momentum-stall composite (volume fade / CVD non-confirmation / book-against) as
+  `momentum-stall-long|short` with optional `floorPx`. NOTE: the exit-policy backtest
+  says dynamic exits ≈ wash vs fixed banks — this ships as an operator OPTION whose
+  ledger outcomes will judge it, not as a proven edge.
+
 ## Tier 2 — on-chain (HyperEVM), in order
 
 1. **AF buyback rate alerting** — recorded now; add a scout trigger / review context

@@ -15,6 +15,7 @@ import { isLadderAutofireEnabled } from './ladder-flags';
 import { listLadders, getLadderWithRungs, markLadderExpired } from './ladder-service';
 import { evaluateLadderRungs, type RungMarketSnapshot } from './ladder-trigger-evaluator';
 import { snapshotFromCandleResult } from './ladder-watch-business-logic';
+import { computeMomentumIndicators } from './ladder-momentum-service';
 import { performLadderRungFire, type LadderFireResult } from './ladder-fire-service';
 import type { LadderWithRungs } from './ladder-types';
 import { fetchCandles } from '@/lib/hyperliquid/candle-service';
@@ -25,6 +26,9 @@ import type { CandleInterval } from '@/lib/hyperliquid/candle-service-business-l
 const WATCH_INTERVAL: CandleInterval = '15m';
 const WATCH_INTERVAL_MS = 15 * 60 * 1000;
 const LOOKBACK_MS = 90 * 60 * 1000; // 6×15m bars — the evaluator needs [len-2] + freshness, not history (CPU trim)
+/** Deeper window for coins with pending INDICATOR rungs: the momentum composite needs
+ *  CANDLES_REQUIRED (12) completed bars + the in-progress bar + margin. */
+const INDICATOR_LOOKBACK_MS = 4 * 60 * 60 * 1000; // 16×15m bars
 // Feed-freshness bound: the newest bar must be within 2 intervals of now, else fail closed.
 const MAX_CANDLE_AGE_MS = 2 * WATCH_INTERVAL_MS;
 
@@ -60,16 +64,34 @@ export async function runLadderWatchTick(args: { now: number }): Promise<LadderW
   // Load rungs for each armed ladder (listLadders omits them).
   const ladders = (await Promise.all(live.map((l) => getLadderWithRungs(l.id)))).filter((l): l is LadderWithRungs => !!l);
 
-  // Distinct coins across PENDING rungs → one completed-candle snapshot each.
+  // Distinct coins across PENDING rungs → one completed-candle snapshot each. Coins
+  // with a pending INDICATOR rung additionally get the momentum indicators computed
+  // (from the same candle fetch + the recorded market_snapshots series).
   const coins = new Set<string>();
-  for (const l of ladders) for (const r of l.rungs) if (r.status === 'pending') coins.add(r.coin.toUpperCase());
+  const indicatorCoins = new Set<string>();
+  for (const l of ladders)
+    for (const r of l.rungs)
+      if (r.status === 'pending') {
+        coins.add(r.coin.toUpperCase());
+        if (r.triggerKind === 'indicator') indicatorCoins.add(r.coin.toUpperCase());
+      }
 
   const snapshots: Record<string, RungMarketSnapshot> = {};
   await Promise.all(
     [...coins].map(async (coin) => {
       try {
-        const res = await fetchCandles(coin, WATCH_INTERVAL, args.now - LOOKBACK_MS, args.now);
+        // Indicator coins need a DEEPER window: the momentum composite requires 12
+        // completed 15m bars (CANDLES_REQUIRED) — the price-trigger lookback (~6 bars)
+        // starves it and the exit would silently never reach 2-of-3 (review F1).
+        const lookback = indicatorCoins.has(coin) ? INDICATOR_LOOKBACK_MS : LOOKBACK_MS;
+        const res = await fetchCandles(coin, WATCH_INTERVAL, args.now - lookback, args.now);
         snapshots[coin] = snapshotFromCandleResult(coin, res.candles, res.stale, { now: args.now, maxAgeMs: MAX_CANDLE_AGE_MS });
+        if (indicatorCoins.has(coin) && !snapshots[coin].stale) {
+          // Fail-soft: null leaves snapshot.indicators undefined → indicator rungs
+          // fail closed this tick (never a phantom exit on missing data).
+          const ind = await computeMomentumIndicators(coin, res.candles, args.now);
+          if (ind) snapshots[coin].indicators = ind;
+        }
       } catch {
         snapshots[coin] = { coin, completedClose: 0, stale: true }; // fail closed
       }

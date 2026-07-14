@@ -31,6 +31,7 @@ and the still-paper subsystem is the *scout*, not ladders.
 |---|---|
 | `ladder-types.ts` | The shared shape (mirror of migration 0023). ONE contract for persistence, evaluator, routes, watcher, UI. |
 | `ladder-trigger-evaluator.ts` | **PURE, authority-free.** `evaluateLadderRungs` → `{rungId, conditionMet, reason}` and nothing else. Holds zero execution authority by design. |
+| `ladder-momentum-service.ts` | Publishes the momentum-stall composite (pure math in `src/lib/health/momentum-stall-business-logic.ts`) as snapshot indicators `momentum-stall-long`/`-short` (0–3 flipped signals: volume fade, CVD non-confirmation, book-against). **Indicator rungs are EXIT-ONLY** (arm-time enforced: reduce/close, supported name, side-consistent) and support `triggerMeta.floorPx` — "exit on stall, but only beyond this price". Missing series data → indicator absent → evaluator fails closed. Funding triggers remain rejected at arm (nothing publishes them). |
 | `ladder-risk-business-logic.ts` | **PURE** consent math: `computeLadderRisk` (no-netting worst-case w/ 10% stop slippage), per-(coin,side) liq, `addRiskCoveredByProfit`, `buildPreconditionSnapshot`/`hashPreconditionSnapshot`. |
 | `ladder-arm-business-logic.ts` | **PURE** arm-readiness: `validateLadderForArm` (pyramiding guardrails), `resolveArmRung` (the canonical sizing), `ladderArmConfirmPhrase`. |
 | `ladder-projection-business-logic.ts` | **PURE** display math: `projectRung`, `rungProximity`, `buildLadderChartLines`. UI-only — see the parity rule below. |

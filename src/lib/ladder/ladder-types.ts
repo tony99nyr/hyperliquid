@@ -69,6 +69,11 @@ export interface RungTriggerMeta {
   /** indicator: the named indicator + threshold (snapshot.indicators[name]). */
   indicatorName?: string;
   indicatorValue?: number;
+  /** indicator (optional): a price FLOOR the completed close must also clear before the
+   *  indicator can fire — long reduce: close ≥ floorPx; short reduce: close ≤ floorPx.
+   *  This is how a momentum exit is prevented from firing before the move has paid
+   *  ("exit on stall, but only above X"). Absent = indicator alone decides. */
+  floorPx?: number;
 }
 
 /** The armed plan. */

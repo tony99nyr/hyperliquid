@@ -66,6 +66,9 @@ export interface ValidateLadderResult {
 
 const INCREASES_EXPOSURE = (a: RungAction): boolean => a === 'open' || a === 'add';
 
+/** Indicator names the watcher publishes (ladder-momentum-service) — kept in sync by tests. */
+const SUPPORTED_INDICATOR_NAMES = ['momentum-stall-long', 'momentum-stall-short'];
+
 /** Validate trigger params for a rung's kind. Returns a reason when invalid, else null. */
 function triggerProblem(r: ArmRung): string | null {
   switch (r.triggerKind) {
@@ -78,10 +81,30 @@ function triggerProblem(r: ArmRung): string | null {
       return (r.triggerMeta?.op === 'above' || r.triggerMeta?.op === 'below') && r.triggerMeta?.fundingRate != null && Number.isFinite(r.triggerMeta.fundingRate)
         ? null
         : `rung ${r.seq}: funding trigger needs op + a finite fundingRate`;
-    case 'indicator':
-      return (r.triggerMeta?.op === 'above' || r.triggerMeta?.op === 'below') && !!r.triggerMeta?.indicatorName && r.triggerMeta?.indicatorValue != null && Number.isFinite(r.triggerMeta.indicatorValue)
-        ? null
-        : `rung ${r.seq}: indicator trigger needs op + name + a finite value`;
+    case 'indicator': {
+      if (!((r.triggerMeta?.op === 'above' || r.triggerMeta?.op === 'below') && !!r.triggerMeta?.indicatorName && r.triggerMeta?.indicatorValue != null && Number.isFinite(r.triggerMeta.indicatorValue))) {
+        return `rung ${r.seq}: indicator trigger needs op + name + a finite value`;
+      }
+      // EXIT-ONLY: an indicator may reduce/close, never open/add — a signal-driven
+      // trigger must be structurally incapable of adding exposure.
+      if (INCREASES_EXPOSURE(r.action)) {
+        return `rung ${r.seq}: indicator triggers are EXIT-ONLY (reduce/close) — never open/add`;
+      }
+      // Only names the watcher actually publishes — anything else is a dead rung that
+      // looks armed but can never fire.
+      if (!SUPPORTED_INDICATOR_NAMES.includes(r.triggerMeta.indicatorName)) {
+        return `rung ${r.seq}: unknown indicator '${r.triggerMeta.indicatorName}' (supported: ${SUPPORTED_INDICATOR_NAMES.join(', ')})`;
+      }
+      // Side-consistency: a long position stalls via momentum-stall-long, a short via -short.
+      const wanted = r.side === 'long' ? 'momentum-stall-long' : 'momentum-stall-short';
+      if (r.triggerMeta.indicatorName !== wanted) {
+        return `rung ${r.seq}: ${r.side} exit must watch '${wanted}', not '${r.triggerMeta.indicatorName}'`;
+      }
+      if (r.triggerMeta.floorPx !== undefined && !(Number.isFinite(r.triggerMeta.floorPx) && r.triggerMeta.floorPx > 0)) {
+        return `rung ${r.seq}: indicator floorPx must be a positive price when set`;
+      }
+      return null;
+    }
     default:
       return `rung ${r.seq}: unknown trigger kind`;
   }
@@ -117,10 +140,13 @@ export function validateLadderForArm(input: ValidateLadderInput): ValidateLadder
   for (const r of rungs) {
     const tp = triggerProblem(r);
     if (tp) warnings.push(tp);
-    // The autofire watcher only builds price + volume snapshots; funding/indicator
-    // triggers would arm but NEVER fire (fail-closed) — reject so an armed rung is honest.
-    if (r.triggerKind === 'funding' || r.triggerKind === 'indicator') {
-      warnings.push(`rung ${r.seq}: ${r.triggerKind} triggers aren't yet evaluated by the watcher — use a price or volume trigger.`);
+    // The autofire watcher builds price + volume snapshots, and (since the momentum
+    // exits landed) computes the SUPPORTED_INDICATOR_NAMES for coins with pending
+    // indicator rungs — so indicator triggers are now armable (validated exit-only,
+    // supported-name, side-consistent in triggerProblem above). FUNDING triggers are
+    // still not published by the watcher — they'd arm but never fire; keep rejecting.
+    if (r.triggerKind === 'funding') {
+      warnings.push(`rung ${r.seq}: funding triggers aren't yet evaluated by the watcher — use a price or volume trigger.`);
     }
 
     if (INCREASES_EXPOSURE(r.action)) {

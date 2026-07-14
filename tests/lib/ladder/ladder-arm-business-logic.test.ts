@@ -188,3 +188,50 @@ describe('validateLadderForArm — caps via the risk read', () => {
     expect(res.risk.aggregateWorstCaseLossUsd).toBeCloseTo(1450, 4);
   });
 });
+
+describe('indicator rungs — EXIT-ONLY momentum exits (arm-time rules)', () => {
+  const base = {
+    seq: 1,
+    coin: 'HYPE',
+    side: 'long' as const,
+    action: 'reduce' as const,
+    triggerKind: 'indicator' as const,
+    triggerPx: null,
+    triggerMeta: { op: 'above' as const, indicatorName: 'momentum-stall-long', indicatorValue: 2, floorPx: 67 },
+    entryPx: null,
+    sizeCoins: null,
+    leverage: null,
+    stopPx: null,
+  };
+  const arm = (rungOver: Record<string, unknown>) =>
+    validateLadderForArm({
+      title: 'momentum exit',
+      expiresAtMs: NOW + 86_400_000,
+      now: NOW,
+      rungs: [{ ...base, ...rungOver }],
+      caps: { maxTotalNotionalUsd: null, maxTotalLossUsd: null },
+      coinMaxLeverage: () => 10,
+    });
+
+  it('accepts a well-formed momentum exit (reduce + supported name + side-consistent)', () => {
+    const res = arm({});
+    expect(res.warnings.filter((w) => w.includes('indicator'))).toEqual([]);
+  });
+
+  it('REJECTS indicator triggers on exposure-increasing rungs (open/add)', () => {
+    expect(arm({ action: 'open', entryPx: 65, sizeCoins: 1, stopPx: 63 }).warnings.join(' ')).toMatch(/EXIT-ONLY/);
+    expect(arm({ action: 'add', entryPx: 66, sizeCoins: 1, stopPx: 64 }).warnings.join(' ')).toMatch(/EXIT-ONLY/);
+  });
+
+  it('REJECTS unknown indicator names (a dead rung must not look armed)', () => {
+    expect(arm({ triggerMeta: { ...base.triggerMeta, indicatorName: 'rsi14' } }).warnings.join(' ')).toMatch(/unknown indicator/);
+  });
+
+  it('REJECTS a side-inconsistent name (long exit watching the short stall)', () => {
+    expect(arm({ triggerMeta: { ...base.triggerMeta, indicatorName: 'momentum-stall-short' } }).warnings.join(' ')).toMatch(/must watch/);
+  });
+
+  it('REJECTS a non-positive floorPx when set', () => {
+    expect(arm({ triggerMeta: { ...base.triggerMeta, floorPx: -1 } }).warnings.join(' ')).toMatch(/floorPx/);
+  });
+});

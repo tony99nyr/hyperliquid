@@ -172,6 +172,14 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
     if (rung.action === 'reduce' || rung.action === 'close') {
       return await fireReduce(ladder, rung, session.id, coin, fireId, forcePaper);
     }
+    // Defense-in-depth (arm validation is the first gate): a SIGNAL-driven trigger must
+    // be structurally incapable of opening/adding — refuse here too, so a direct DB
+    // insert or a future arm-validation regression can never invert exit-only into entry.
+    if (rung.triggerKind === 'indicator') {
+      await markFireOutcome(fireId, 'failed', 'indicator-cannot-open');
+      await setRungStatus(rung.id, 'failed');
+      return skip('indicator triggers are exit-only — refusing open/add');
+    }
     return await fireOpenOrAdd(ladder, rung, session.id, coin, markPx, fireId, forcePaper);
   } catch (e) {
     await markFireOutcome(fireId, 'failed', e instanceof Error ? e.message : String(e));

@@ -112,13 +112,61 @@ describe('evaluateRungTrigger — funding', () => {
 });
 
 describe('evaluateRungTrigger — indicator', () => {
-  const ir = rung({ triggerKind: 'indicator', triggerMeta: { op: 'above', indicatorName: 'rsi14', indicatorValue: 70 } });
+  // Indicator triggers are EXIT-ONLY — the fixture must be a reduce rung (an open/add
+  // indicator rung now fails closed by design; pinned below).
+  const ir = rung({ action: 'reduce', triggerKind: 'indicator', triggerMeta: { op: 'above', indicatorName: 'rsi14', indicatorValue: 70 } });
   it('met when the named indicator crosses the threshold', () => {
     expect(evaluateRungTrigger(ir, snap({ indicators: { rsi14: 72 } })).conditionMet).toBe(true);
     expect(evaluateRungTrigger(ir, snap({ indicators: { rsi14: 65 } })).conditionMet).toBe(false);
   });
   it('fail-closed when the indicator is absent from the snapshot', () => {
     expect(evaluateRungTrigger(ir, snap({ indicators: { macd: 1 } })).conditionMet).toBe(false);
+  });
+
+  it('fail-closed for indicator triggers on exposure-INCREASING rungs (exit-only, in depth)', () => {
+    const openRung = rung({ action: 'open', triggerKind: 'indicator', triggerMeta: { op: 'above', indicatorName: 'rsi14', indicatorValue: 70 } });
+    expect(evaluateRungTrigger(openRung, snap({ indicators: { rsi14: 99 } })).conditionMet).toBe(false);
+    const addRung = rung({ action: 'add', triggerKind: 'indicator', triggerMeta: { op: 'above', indicatorName: 'rsi14', indicatorValue: 70 } });
+    expect(evaluateRungTrigger(addRung, snap({ indicators: { rsi14: 99 } })).conditionMet).toBe(false);
+  });
+
+  describe('floorPx gate (momentum exits: "only beyond this price")', () => {
+    const stall = (floorPx?: number) =>
+      rung({
+        side: 'long',
+        action: 'reduce',
+        triggerKind: 'indicator',
+        triggerPx: null,
+        triggerMeta: { op: 'above', indicatorName: 'momentum-stall-long', indicatorValue: 2, ...(floorPx !== undefined ? { floorPx } : {}) },
+      });
+
+    it('fires only when the indicator crosses AND the close is beyond the floor', () => {
+      const indicators = { 'momentum-stall-long': 2 };
+      // Below the floor: stall present but gated.
+      expect(evaluateRungTrigger(stall(2050), snap({ completedClose: 2000, indicators })).conditionMet).toBe(false);
+      // Beyond the floor: fires.
+      expect(evaluateRungTrigger(stall(2050), snap({ completedClose: 2060, indicators })).conditionMet).toBe(true);
+      // No floor: indicator alone decides.
+      expect(evaluateRungTrigger(stall(), snap({ completedClose: 1900, indicators })).conditionMet).toBe(true);
+    });
+
+    it('short side: floor is a CEILING (close must be at or below it)', () => {
+      const shortStall = rung({
+        side: 'short',
+        action: 'reduce',
+        triggerKind: 'indicator',
+        triggerPx: null,
+        triggerMeta: { op: 'above', indicatorName: 'momentum-stall-short', indicatorValue: 2, floorPx: 1950 },
+      });
+      const indicators = { 'momentum-stall-short': 3 };
+      expect(evaluateRungTrigger(shortStall, snap({ completedClose: 1940, indicators })).conditionMet).toBe(true);
+      expect(evaluateRungTrigger(shortStall, snap({ completedClose: 1990, indicators })).conditionMet).toBe(false);
+    });
+
+    it('fail-closed on an invalid floor or a missing completed close', () => {
+      expect(evaluateRungTrigger(stall(NaN), snap({ completedClose: 2000, indicators: { 'momentum-stall-long': 3 } })).conditionMet).toBe(false);
+      expect(evaluateRungTrigger(stall(2050), snap({ completedClose: 0, indicators: { 'momentum-stall-long': 3 } })).conditionMet).toBe(false);
+    });
   });
 });
 

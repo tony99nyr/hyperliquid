@@ -108,6 +108,11 @@ export function evaluateRungTrigger(rung: LadderRung, snapshot: RungMarketSnapsh
       return { ...base, conditionMet: met, reason: `${rung.coin} funding ${snapshot.fundingRate} ${op} ${threshold} → ${met}` };
     }
     case 'indicator': {
+      // EXIT-ONLY, enforced in depth: arm validation rejects it, the fire path refuses
+      // it, and the evaluator never reports an exposure-increasing indicator rung met.
+      if (rung.action === 'open' || rung.action === 'add') {
+        return { ...base, conditionMet: false, reason: 'indicator triggers are exit-only — fail-closed on open/add' };
+      }
       const op = rung.triggerMeta?.op;
       const name = rung.triggerMeta?.indicatorName;
       const threshold = rung.triggerMeta?.indicatorValue;
@@ -118,8 +123,23 @@ export function evaluateRungTrigger(rung: LadderRung, snapshot: RungMarketSnapsh
       if (actual == null || !Number.isFinite(actual)) {
         return { ...base, conditionMet: false, reason: `${rung.coin} has no indicator '${name}' — fail-closed` };
       }
+      // Optional price floor: the exit only becomes eligible beyond floorPx (side-aware).
+      // A present-but-invalid floor fails CLOSED — never fire on a malformed guard.
+      const floorPx = rung.triggerMeta?.floorPx;
+      if (floorPx !== undefined) {
+        if (!(Number.isFinite(floorPx) && floorPx > 0)) {
+          return { ...base, conditionMet: false, reason: 'indicator floorPx invalid — fail-closed' };
+        }
+        if (!(Number.isFinite(snapshot.completedClose) && snapshot.completedClose > 0)) {
+          return { ...base, conditionMet: false, reason: `${rung.coin} has no finite completed close for floorPx — fail-closed` };
+        }
+        const beyondFloor = rung.side === 'long' ? snapshot.completedClose >= floorPx : snapshot.completedClose <= floorPx;
+        if (!beyondFloor) {
+          return { ...base, conditionMet: false, reason: `${rung.coin} close ${snapshot.completedClose} not beyond floor ${floorPx} (${rung.side}) — indicator gated` };
+        }
+      }
       const met = op === 'above' ? actual >= threshold : actual <= threshold;
-      return { ...base, conditionMet: met, reason: `${rung.coin} ${name} ${actual} ${op} ${threshold} → ${met}` };
+      return { ...base, conditionMet: met, reason: `${rung.coin} ${name} ${actual} ${op} ${threshold} → ${met}${floorPx !== undefined ? ` (floor ${floorPx} cleared)` : ''}` };
     }
     default: {
       // Exhaustive — an unknown kind fails closed rather than throwing.
