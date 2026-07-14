@@ -35,7 +35,9 @@ export async function sendDiscord(content: string, username = 'HL Cockpit'): Pro
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: content.slice(0, MAX_CONTENT), username }),
+      // allowed_mentions.parse: [] — model-authored content (steward proposals) must
+      // never be able to ping @everyone/@here/roles; templated callers lose nothing.
+      body: JSON.stringify({ content: content.slice(0, MAX_CONTENT), username, allowed_mentions: { parse: [] } }),
       // Discord webhooks are fast; bound it so a hung POST can't stall a cron tick.
       signal: AbortSignal.timeout(8000),
     });

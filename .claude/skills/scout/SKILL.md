@@ -34,6 +34,16 @@ polling and wakes you only when something material happened (the inverted loop).
 - `leader-action` triggers open the **leader-follow lane** (see the playbook's lane
   rules): vet the whale's move with the full context (is it conviction or a
   martingale add?), and if you trade it, tag `--lane leader-follow`.
+- **STEWARD LANE (live book, READ-ONLY):** the snapshot's `liveBook` shows the LIVE
+  positions + armed ladders. You may NEVER trade/touch them — but when the context
+  says a ladder deserves management (momentum stalled on a green live position, an
+  entry rung armed into deteriorating tape, an approaching binary with an entry-class
+  rung pending, an expiring ladder with pending rungs), reply
+  `{action:'propose', title, body, coin?}`: a concrete, ladder-literate proposal
+  (speak in rungs — stop_move/reduce/disarm/re-arm windows, per
+  docs/LADDER_BUILDER_GUIDE.md). It pages Discord + logs; the operator decides.
+  Propose sparingly: one clear improvement beats a nag. stand-down remains correct
+  when the book needs nothing.
 - **Honesty.** Record the real thesis. When you close, resolve the hypothesis
   truthfully (confirmed / invalidated / resolved). The track record is the product.
 - **Read the playbook every cycle** (`docs/scout/playbook.md`) and apply its

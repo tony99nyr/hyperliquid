@@ -53,7 +53,11 @@ export const SCOUT_MAX_RISK_USD = 500;
 /** The decision the headless scout model returns for ONE cycle. Exactly one action.
  *  'stand-down' is a first-class outcome (most cycles) — it carries the why. */
 export interface ScoutDecision {
-  action: 'open' | 'close' | 'stand-down';
+  action: 'open' | 'close' | 'stand-down' | 'propose';
+  /** propose: short headline for the Discord page. */
+  title?: string;
+  /** propose: the concrete ladder change + rationale (goes to the operator verbatim). */
+  body?: string;
   /** open/close */
   coin?: string;
   /** open: buy|sell */
@@ -77,7 +81,7 @@ export interface ScoutDecision {
  * shape the CLI flags produce), or a stand-down/error. PURE — fixture-tested; the thin
  * script routes the result. Validation is strict: a malformed decision NEVER trades.
  */
-export function parseScoutDecision(raw: string): { kind: 'open' | 'close'; args: Record<string, string | boolean> } | { kind: 'stand-down'; note: string } | { kind: 'error'; error: string } {
+export function parseScoutDecision(raw: string): { kind: 'open' | 'close'; args: Record<string, string | boolean> } | { kind: 'stand-down'; note: string } | { kind: 'propose'; title: string; body: string; coin: string | null } | { kind: 'error'; error: string } {
   let d: ScoutDecision;
   try {
     d = JSON.parse(raw) as ScoutDecision;
@@ -86,6 +90,14 @@ export function parseScoutDecision(raw: string): { kind: 'open' | 'close'; args:
   }
   if (d == null || typeof d !== 'object') return { kind: 'error', error: 'decision must be a JSON object' };
   if (d.action === 'stand-down') return { kind: 'stand-down', note: d.note ?? '(no reason given)' };
+  // STEWARD lane: a ladder-management PROPOSAL — pages the operator + logs; NEVER
+  // executes anything. This is how the scout advises on the LIVE book it can see
+  // read-only but must never touch.
+  if (d.action === 'propose') {
+    if (!d.title || typeof d.title !== 'string') return { kind: 'error', error: 'propose: title required' };
+    if (!d.body || typeof d.body !== 'string') return { kind: 'error', error: 'propose: body required (the concrete ladder change + rationale)' };
+    return { kind: 'propose', title: d.title.slice(0, 120), body: d.body.slice(0, 1200), coin: typeof d.coin === 'string' ? d.coin.toUpperCase() : null };
+  }
   if (d.action === 'open') {
     if (!d.coin || typeof d.coin !== 'string') return { kind: 'error', error: 'open: coin required' };
     if (d.side !== 'buy' && d.side !== 'sell') return { kind: 'error', error: 'open: side must be buy|sell' };

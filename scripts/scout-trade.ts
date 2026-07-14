@@ -32,6 +32,8 @@ import { writeHypothesis, resolveHypothesis } from '@/lib/cockpit/hypothesis-ser
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 import { ensureWatchDaemon } from '@/lib/cockpit/watch-spawn';
 import { setAdvisoryStop } from '@/lib/scout/scout-watch-service';
+import { sendDiscord } from '@/lib/infrastructure/notify/discord-notify';
+import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import type { OrderSide } from '@/types/fill';
 
 const SCOUT_TITLE = 'scout';
@@ -239,6 +241,42 @@ run(async () => {
     if (parsed.kind === 'stand-down') {
       header('stand-down');
       line(parsed.note);
+      return;
+    }
+    if (parsed.kind === 'propose') {
+      // STEWARD proposal: page + log, NEVER execute. The operator (or the main desk
+      // agent) drafts/amends the actual ladder per docs/LADDER_BUILDER_GUIDE.md.
+      header('💡 STEWARD PROPOSAL (no execution)');
+      line(parsed.title);
+      line(parsed.body);
+      // Mechanical rate-limit (review F3): the same title within 2h is a repeat — a
+      // stuck model must not page every cron cycle. Evidence-strengthened proposals
+      // should carry a NEW title (the playbook says so).
+      let isRepeat = false;
+      try {
+        const db = getServiceRoleClient();
+        const { data } = await db
+          .from('analysis_log')
+          .select('id')
+          .eq('source', 'scout')
+          .ilike('message', `STEWARD PROPOSAL%${parsed.title.slice(0, 60)}%`)
+          .gte('created_at', new Date(Date.now() - 2 * 3_600_000).toISOString())
+          .limit(1);
+        isRepeat = (data?.length ?? 0) > 0;
+      } catch { /* dedupe unavailable → page anyway (fail-open for an advisory) */ }
+      if (isRepeat) {
+        line('(repeat within 2h — logged, not paged)');
+        return;
+      }
+      await sendDiscord(`💡 **STEWARD PROPOSAL**${parsed.coin ? ` [${parsed.coin}]` : ''} — ${parsed.title}
+${parsed.body}
+_(advisory only — nothing was executed; draft/arm per the builder guide)_`, 'HL Ladder Steward').catch(() => {});
+      try {
+        const db = getServiceRoleClient();
+        const { data: sess } = await db.from('sessions').select('id').eq('status', 'active').order('created_at', { ascending: false }).limit(1);
+        const sid = (sess?.[0] as { id: string } | undefined)?.id;
+        if (sid) await writeAnalysisLog({ sessionId: sid, source: 'scout', severity: 'info', message: `STEWARD PROPOSAL${parsed.coin ? ` [${parsed.coin}]` : ''}: ${parsed.title} — ${parsed.body.slice(0, 300)}` });
+      } catch { /* best-effort */ }
       return;
     }
     args = parsed.args;

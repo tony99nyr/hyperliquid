@@ -26,6 +26,9 @@ import { recentTriggers, markTriggersConsumed, pruneConsumedTriggers, type SinkT
 import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
 import { scoutPlaybookPath, summarizeHypotheses, type HypothesisSummaryRow } from '@/lib/scout/scout-cycle-business-logic';
 import { gatherScoutContext } from '@/lib/scout/scout-context-service';
+import { listLaddersWithRungs } from '@/lib/ladder/ladder-service';
+import { fetchClearinghouseState } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
 
 interface VaultRow { vault_address: string; name: string; kind: string; nav_usd: number | null; apr_annual: number | null; max_drawdown_pct: number | null; age_days: number | null; leader_fraction: number | null }
 
@@ -64,6 +67,26 @@ run(async () => {
     now,
     db,
   ).catch(() => ({ tape: [], leaders: [], afHypePerDay: null, percentiles: [] }));
+
+  // 3c) READ-ONLY live book (the STEWARD lane): the scout may SEE the live positions
+  // + armed ladders to PROPOSE ladder management — it can never touch them (the
+  // execution path asserts paper sessions; proposals go to Discord + the log only).
+  let liveBook: { positions: Array<{ coin: string; side: string; sz: number; entryPx: number | null; unrealizedPnl: number }>; armedLadders: Array<{ id8: string; title: string; rungs: Array<{ seq: number; action: string; triggerKind: string; triggerPx: number | null; status: string }> }> } = { positions: [], armedLadders: [] };
+  try {
+    const addr = getHlAccountAddress();
+    const [ch, armed] = await Promise.all([
+      addr ? fetchClearinghouseState(addr) : Promise.resolve(null),
+      listLaddersWithRungs('armed'),
+    ]);
+    liveBook = {
+      positions: (ch?.positions ?? []).map((pos) => ({ coin: pos.coin, side: pos.side, sz: pos.size, entryPx: pos.entryPx, unrealizedPnl: pos.unrealizedPnl })),
+      armedLadders: (armed ?? []).map((l) => ({
+        id8: l.id.slice(0, 8),
+        title: l.title.slice(0, 60),
+        rungs: l.rungs.map((r) => ({ seq: r.seq, action: r.action, triggerKind: r.triggerKind, triggerPx: r.triggerPx, status: r.status })),
+      })),
+    };
+  } catch { /* fail-soft: steward context absent → the scout just doesn't propose */ }
 
   // 4) Vaults (Lane A allocation candidates — newest snapshot per vault).
   const { data: vaultRows } = await db
@@ -116,6 +139,9 @@ run(async () => {
       leaders: context.leaders,
       afHypePerDay: context.afHypePerDay,
       percentiles: context.percentiles,
+      // READ-ONLY steward context: the LIVE book. You may PROPOSE ladder changes
+      // ({action:'propose', title, body, coin?}) — you can NEVER trade/touch these.
+      liveBook,
       vaults,
       positions: inputs.positions,
       circuitBreaker: { halted: breaker.blockNewEntries, reason: breaker.reason, equityUsd: breaker.equityUsd, peakEquityUsd: breaker.peakEquityUsd, dayStartEquityUsd: breaker.dayStartEquityUsd, flattenRecommended: breaker.flattenRecommended },
@@ -176,6 +202,11 @@ run(async () => {
     line(`${p.coin}  funding ${pct(p.fundingPctile)}  OI ${pct(p.oiPctile)}  (n=${p.sampleCount})`);
   }
   if (context.afHypePerDay != null) line(`AF buyback ≈ ${Math.round(context.afHypePerDay).toLocaleString('en-US')} HYPE/24h (procyclical — context only, never a floor)`);
+
+  header('LIVE BOOK (READ-ONLY — steward lane: PROPOSE ladder changes, never touch)');
+  if (liveBook.positions.length === 0 && liveBook.armedLadders.length === 0) line('(flat, no armed ladders)');
+  for (const pos of liveBook.positions) line(`${pos.coin} ${pos.side} ${pos.sz} @ ${pos.entryPx ?? '?'} uPnL $${pos.unrealizedPnl.toFixed(2)}`);
+  for (const l of liveBook.armedLadders) line(`ladder ${l.id8} "${l.title}" — ${l.rungs.map((r) => `${r.seq}:${r.action}${r.triggerPx != null ? `@${r.triggerPx}` : ''}(${r.status})`).join(' ')}`);
 
   header('VAULTS (Lane A — allocation candidates; nav = total AUM, judge on apr/return)');
   if (vaults.length === 0) line('(no vault snapshots yet — wait for the nas-watch tick / run pnpm vault-watch --once)');

@@ -70,6 +70,17 @@ reduces/closes never wake). Rules of engagement:
   hit rates — the lane's kill/keep verdict may end up per-LEADER, not per-lane.
 - Pre-registered bar: same as every lane (COLLECT until n≥10 closed; kill at ≤−0.05R).
 
+## Lane: steward (opened 2026-07-14 — PROPOSE-ONLY, no ledger)
+
+The scout reads the LIVE book (snapshot `liveBook`, read-only) and may emit
+`{action:'propose', ...}` — a Discord page + log, never an execution. Ground rules:
+- Propose LADDER language: a specific rung change (stop_move to X, bank N% at Y,
+  disarm across the Wed 12:30-16:00 binary window, re-arm the OCO sibling), with the
+  2-3 numbers that justify it. See docs/LADDER_BUILDER_GUIDE.md.
+- Momentum/stall/tape claims must cite the snapshot fields (tape/percentiles/leaders).
+- Never propose loosening a stop, adding to a loser, or removing protection.
+- Rate-limit yourself: repeat a proposal only if the evidence STRENGTHENED.
+
 ## Learned rules (curated by scout-review — append below)
 
 <!-- scout-review appends/edits dated, evidence-backed rules here, e.g.:
