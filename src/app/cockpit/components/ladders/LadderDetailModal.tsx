@@ -353,7 +353,9 @@ function RungCard({ rung, markPx }: { rung: LadderRung; markPx: number | null })
       <div className={css({ display: 'flex', alignItems: 'center', gap: '9px', marginBottom: '11px' })}>
         <span className={css({ fontFamily: 'mono', fontSize: '10.5px', color: 'github.textMuted', flex: 'none' })}>#{rung.seq}</span>
         <span className={css({ fontFamily: 'mono', fontSize: '11px', fontWeight: 'bold', borderRadius: '5px', paddingX: '7px', paddingY: '3px', flex: 'none' })} style={{ background: sideBg, color: sideColor }}>{rung.coin} {long ? 'LONG' : 'SHORT'}</span>
-        <span className={css({ fontFamily: 'mono', fontSize: '10.5px', color: 'github.textMuted', textTransform: 'uppercase', letterSpacing: '0.06em', flex: 1 })}>{rung.action}</span>
+        <span className={css({ fontFamily: 'mono', fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.06em', flex: 1 })} style={{ color: rung.action === 'stop_move' ? '#e3b341' : undefined }}>
+          <span className={css({ color: rung.action === 'stop_move' ? undefined : 'github.textMuted' })}>{rung.action === 'stop_move' ? '🔒 stop ratchet' : rung.action}</span>
+        </span>
         <span data-testid={`rung-card-status-${rung.id}`} className={css({ fontFamily: 'mono', fontSize: '10px', fontWeight: 'bold', letterSpacing: '0.06em', borderRadius: '4px', paddingX: '6px', paddingY: '2px', flex: 'none' })}
           style={{ color: prox?.primed ? ZONE_COLORS.ok : st.color, background: prox?.primed ? 'rgba(25,201,138,.12)' : 'rgba(255,255,255,.04)' }}>{prox?.primed ? '● PRIMED' : st.label}</span>
       </div>

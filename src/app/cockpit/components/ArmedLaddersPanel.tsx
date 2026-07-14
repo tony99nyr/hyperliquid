@@ -110,6 +110,10 @@ function RungRow({ rung, accent, markPx }: { rung: LadderRung; accent: boolean; 
   const p = projectRung(rung); // entry (= trigger), risk-sized size, derived stop
   const st = RUNG_STATUS[rung.status];
   const dir = rung.triggerKind === 'price_above' ? '▲' : rung.triggerKind === 'price_below' ? '▼' : '•';
+  // stop_move = a RATCHET, not a trade: visually distinct (amber lock) so a risk-
+  // reducing rung never reads like an entry/exit in the list.
+  const isRatchet = rung.action === 'stop_move';
+  const moveTo = rung.triggerMeta?.moveTo;
   // "Is it close?" — only meaningful while still WAITING to trigger.
   const prox = rung.status === 'pending' ? rungProximity(rung, markPx) : null;
   return (
@@ -118,13 +122,19 @@ function RungRow({ rung, accent, markPx }: { rung: LadderRung; accent: boolean; 
       <div className={css({ display: 'flex', alignItems: 'center', gap: '8px' })}>
         <span className={css({ fontFamily: 'mono', fontSize: '10.5px', fontWeight: 'bold', borderRadius: '4px', paddingX: '6px', paddingY: '2px', flex: 'none' })} style={{ background: long ? 'rgba(63,185,80,.16)' : 'rgba(248,81,73,.16)', color: long ? ZONE_COLORS.ok : ZONE_COLORS.danger }}>{rung.coin} {long ? 'L' : 'S'}</span>
         <div className={css({ display: 'flex', flexDirection: 'column', gap: '1px', flex: 1, minWidth: 0 })}>
-          <span className={css({ fontFamily: 'mono', fontSize: '11px', color: 'github.textBright', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })} style={{ fontFeatureSettings: '"tnum"' }}>
-            {rung.triggerPx != null ? `${dir} ${fmtPx(rung.triggerPx)}` : rung.triggerKind} {rung.action !== 'open' && `· ${rung.action}`}
+          <span className={css({ fontFamily: 'mono', fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })} style={{ fontFeatureSettings: '"tnum"', color: isRatchet ? '#e3b341' : undefined }}>
+            {isRatchet
+              ? `${dir} ${rung.triggerPx != null ? fmtPx(rung.triggerPx) : rung.triggerKind} · 🔒 ratchet → ${moveTo === 'breakeven' ? 'BE' : typeof moveTo === 'number' ? fmtPx(moveTo) : '?'}`
+              : <span className={css({ color: 'github.textBright' })}>{rung.triggerPx != null ? `${dir} ${fmtPx(rung.triggerPx)}` : rung.triggerKind} {rung.action !== 'open' && `· ${rung.action}`}</span>}
           </span>
           <span className={css({ fontFamily: 'mono', fontSize: '9.5px', color: 'github.textMuted' })} style={{ fontFeatureSettings: '"tnum"' }}>
-            {p.sizeCoins != null ? `${p.sizeCoins.toLocaleString('en-US', { maximumFractionDigits: 4 })} ${rung.coin}` : '—'}
-            {p.stopPx != null && ` · stop ${fmtPx(p.stopPx)}`}
-            {rung.leverage != null && ` · ${rung.leverage}×`}
+            {isRatchet
+              ? 'moves the resting stop · risk-reducing only'
+              : <>
+                  {p.sizeCoins != null ? `${p.sizeCoins.toLocaleString('en-US', { maximumFractionDigits: 4 })} ${rung.coin}` : '—'}
+                  {p.stopPx != null && ` · stop ${fmtPx(p.stopPx)}`}
+                  {rung.leverage != null && ` · ${rung.leverage}×`}
+                </>}
           </span>
         </div>
         <span className={css({ fontFamily: 'mono', fontSize: '9.5px', fontWeight: 'bold', letterSpacing: '0.04em', flex: 'none' })} style={{ color: prox?.primed ? ZONE_COLORS.ok : st.color }}>{prox?.primed ? '● PRIMED' : st.label}</span>
