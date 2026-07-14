@@ -24,7 +24,7 @@ import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
 import { buildOpenProposal } from '@/lib/skills/open-position-business-logic';
 import { buildMarketReduceOnlyClose } from '@/lib/trading/safe-exit-business-logic';
 import { executeIntent } from '@/lib/trading/fill-source';
-import { openSession } from '@/lib/cockpit/session-service';
+import { openSession, listActiveSessions } from '@/lib/cockpit/session-service';
 import { loadPosition } from '@/lib/cockpit/fill-persistence-service';
 import { fetchAllMids } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { validateEnv } from '@/lib/env/env';
@@ -76,6 +76,7 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   let sessionId: string;
   if (typeof args['session'] === 'string') {
     sessionId = args['session'];
+    await assertPaperSession(sessionId);
   } else {
     const s = await openSession({ mode: 'paper', title: SCOUT_TITLE, leaderAddress: null });
     sessionId = s.id;
@@ -144,8 +145,22 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   }
 }
 
+/**
+ * HARD LANE BOUNDARY: the scout may only execute against a PAPER session it owns.
+ * A paper fill written into a LIVE session's ledger doesn't move money, but it
+ * corrupts the live position row (the Jul-14 incident: a scout "close" flattened
+ * the live HYPE row while the exchange still held the position). Fail loudly.
+ */
+async function assertPaperSession(sessionId: string): Promise<void> {
+  const sessions = await listActiveSessions();
+  const target = sessions.find((s) => s.id === sessionId);
+  if (!target) throw new Error(`scout: session ${sessionId} is not an ACTIVE session — refusing`);
+  if (target.mode !== 'paper') throw new Error(`scout: session ${sessionId} is mode='${target.mode}' — the scout may only touch PAPER sessions`);
+}
+
 async function runExit(args: Record<string, string | boolean>): Promise<void> {
   const sessionId = requireString(args, 'session');
+  await assertPaperSession(sessionId);
   const coin = requireString(args, 'coin').toUpperCase();
   const hypothesisId = typeof args['hypothesis'] === 'string' ? args['hypothesis'] : null;
   const note = typeof args['note'] === 'string' ? args['note'] : null;

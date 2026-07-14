@@ -260,10 +260,14 @@ export async function gatherScoutInputs(now: number): Promise<ScoutInputs> {
     .filter((m) => Number.isFinite(m.markPx) && m.markPx > 0);
   const markByCoin = new Map(marks.map((m) => [m.coin, m.markPx]));
 
-  // Open paper positions across active sessions, with best-effort health + the
-  // advisory stop (positions.stop_px, migration 0033) that arms the near-stop trigger.
+  // Open paper positions across active PAPER sessions ONLY, with best-effort health +
+  // the advisory stop (positions.stop_px, migration 0033) for the near-stop trigger.
+  // HARD LANE BOUNDARY (Jul 14 incident): listActiveSessions returns LIVE sessions
+  // too, and an unfiltered scout once "managed" a live ladder position — its paper
+  // close flattened the live ledger row. The scout must only ever SEE its own lane.
+  const paperSessions = sessions.filter((sess) => sess.mode === 'paper');
   const positions: ScoutPositionRead[] = [];
-  for (const s of sessions) {
+  for (const s of paperSessions) {
     const [open, stops] = await Promise.all([
       loadOpenPositions(s.id).catch(() => []),
       readAdvisoryStops(client, s.id).catch(() => new Map<string, number>()),
