@@ -50,6 +50,7 @@ import { getTradingMode } from '@/lib/env/mode';
 import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
 import { validateEnv } from '@/lib/env/env';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
+import { sendDiscord } from '@/lib/infrastructure/notify/discord-notify';
 import type { CanonicalFill, OrderSide } from '@/types/fill';
 import type { Position } from '@/types/position';
 
@@ -93,6 +94,9 @@ function unrealizedProfitUsd(posSide: string, avgEntryPx: number, sz: number, ma
 
 async function alert(sessionId: string, message: string): Promise<void> {
   try { await writeAnalysisLog({ sessionId, source: 'ladder-fire', severity: 'danger', message }); } catch { /* never mask the outcome */ }
+  // Operator page: danger-class fire events (fault-flattens, unstopped positions) go to
+  // Discord too. Best-effort — a webhook failure must never mask or break the outcome.
+  await sendDiscord(`🚨 ${message}`, 'HL Ladder Watch').catch(() => {});
 }
 
 export async function performLadderRungFire(args: { ladderId: string; rungId: string; now: number }): Promise<LadderFireResult> {
@@ -273,6 +277,11 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
     await markLadderDone(ladder.id).catch(() => {});
   }
   await writeAnalysisLog({ sessionId, source: 'ladder-fire', severity: 'info', message: `FIRED ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: ${rung.action} ${side} ${filledSize} ${coin} @ ~${markPx} (${ladder.mode}${forcePaper ? ' · paper' : ''}).` }).catch(() => {});
+  // Operator push: every committed fire pages Discord (the operator asked for ALL hits).
+  await sendDiscord(
+    `🔥 **LADDER FIRE** ${ladder.title.slice(0, 60)} — rung ${rung.seq} ${rung.action.toUpperCase()} ${side} ${filledSize} ${coin} @ ~$${fill.px} (${ladder.mode}${forcePaper ? ' · paper' : ''}). Stop ~$${proposal.stopPx}.`,
+    'HL Ladder Watch',
+  ).catch(() => {});
   return { fired: true, skipped: null, fill };
 }
 
@@ -353,5 +362,9 @@ async function fireReduce(ladder: LadderWithRungs, rung: LadderRung, sessionId: 
   await markFireOutcome(fireId, 'filled');
   await setRungStatus(rung.id, 'fired');
   await writeAnalysisLog({ sessionId, source: 'ladder-fire', severity: 'info', message: `FIRED ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: ${rung.action} ${coin} (frac ${fraction.toFixed(2)}, ${ladder.mode}${forcePaper ? ' · paper' : ''}).` }).catch(() => {});
+  await sendDiscord(
+    `💰 **LADDER BANK** ${ladder.title.slice(0, 60)} — rung ${rung.seq} ${rung.action.toUpperCase()} ${(fraction * 100).toFixed(0)}% of ${coin} (${ladder.mode}${forcePaper ? ' · paper' : ''}).`,
+    'HL Ladder Watch',
+  ).catch(() => {});
   return { fired: true, skipped: null, fill };
 }

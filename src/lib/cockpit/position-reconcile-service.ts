@@ -16,6 +16,7 @@ import { getServiceRoleClient } from './supabase-server';
 import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
 import { fetchClearinghouseState } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { writeAnalysisLog } from './analysis-log-service';
+import { sendDiscord } from '@/lib/infrastructure/notify/discord-notify';
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 import { reconcilePositions, type CockpitPos, type HlPos } from './position-reconcile-business-logic';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -115,6 +116,14 @@ export async function reconcileLivePositions(client: SupabaseClient = getService
         severity: 'info',
         message: `RECONCILE: ${a.coin} ${a.reason === 'flatten' ? 'flattened (HL holds none)' : `resynced to HL (${a.target.side} ${a.target.sz}${a.target.leverage != null ? ` @ ${Math.round(a.target.leverage)}x` : ''})`} — drift $${a.deltaUsd.toFixed(2)}.`,
       });
+      // A flatten here is how the cockpit learns an EXCHANGE-side close happened (a
+      // resting stop filled, a manual app close, a liquidation) — page the operator.
+      if (a.reason === 'flatten') {
+        await sendDiscord(
+          `🛑 **POSITION CLOSED ON HL** — ${a.coin}: the exchange holds none (resting stop hit, manual close, or liquidation). Cockpit row flattened; check fills for the exit price/P&L.`,
+          'HL Reconcile',
+        ).catch(() => {});
+      }
     } catch {
       /* non-critical */
     }
