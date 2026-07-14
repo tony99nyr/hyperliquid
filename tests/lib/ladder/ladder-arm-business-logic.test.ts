@@ -269,3 +269,45 @@ describe('momentumConfirm (entry filter) + activation window — arm-time rules'
     expect(arm({}, { activeFromMs: NOW + 3_600_000 }).warnings.join(' ')).not.toMatch(/active_from/);
   });
 });
+
+describe('stop_move rungs — arm-time rules', () => {
+  const smRung = (over: Record<string, unknown> = {}) => ({
+    seq: 2, coin: 'HYPE', side: 'long' as const, action: 'stop_move' as const,
+    triggerKind: 'price_above' as const, triggerPx: 66.85,
+    triggerMeta: { moveTo: 'breakeven' as const },
+    entryPx: null, sizeCoins: null, leverage: null, stopPx: null, ...over,
+  });
+  const arm = (rungOver: Record<string, unknown> = {}) =>
+    validateLadderForArm({
+      title: 'ratchet', expiresAtMs: NOW + 86_400_000, now: NOW,
+      rungs: [smRung(rungOver)], caps: { maxTotalNotionalUsd: 200, maxTotalLossUsd: 25 },
+      coinMaxLeverage: () => 10,
+    });
+
+  it("accepts a breakeven ratchet and a numeric protective destination", () => {
+    expect(arm().warnings).toEqual([]);
+    expect(arm({ triggerMeta: { moveTo: 65.0 } }).warnings).toEqual([]); // 65 < trigger 66.85 (long) ✓
+  });
+
+  it('REJECTS a missing/invalid moveTo', () => {
+    expect(arm({ triggerMeta: {} }).warnings.join(' ')).toMatch(/moveTo/);
+    expect(arm({ triggerMeta: { moveTo: -3 } }).warnings.join(' ')).toMatch(/moveTo/);
+  });
+
+  it('REJECTS a destination on the WRONG side of the trigger (would loosen or insta-fire)', () => {
+    expect(arm({ triggerMeta: { moveTo: 70 } }).warnings.join(' ')).toMatch(/protective side/); // long: 70 > trigger
+    expect(
+      arm({ side: 'short', triggerKind: 'price_below', triggerPx: 60, triggerMeta: { moveTo: 58 } }).warnings.join(' '),
+    ).toMatch(/protective side/); // short: dest must be ABOVE the trigger
+  });
+
+  it('REJECTS non-price triggers on stop_move', () => {
+    const w = arm({ triggerKind: 'indicator', triggerMeta: { op: 'above', indicatorName: 'momentum-stall-long', indicatorValue: 2, moveTo: 'breakeven' } }).warnings.join(' ');
+    expect(w).toMatch(/price trigger/);
+  });
+
+  it('contributes ZERO to the risk read (it can only reduce risk)', () => {
+    const res = arm();
+    expect(res.risk.aggregateWorstCaseLossUsd).toBe(0);
+  });
+});

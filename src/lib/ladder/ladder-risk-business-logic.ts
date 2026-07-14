@@ -55,7 +55,7 @@ export function rungWorstCaseLoss(rung: {
   sizeCoins: number | null;
   stopPx: number | null;
 }): number {
-  if (rung.action === 'reduce' || rung.action === 'close') return 0;
+  if (rung.action === 'reduce' || rung.action === 'close' || rung.action === 'stop_move') return 0;
   if (rung.entryPx == null || !(rung.entryPx > 0) || rung.sizeCoins == null || !(rung.sizeCoins > 0)) return 0;
   if (rung.stopPx == null || !(rung.stopPx > 0)) return 0;
   const fill = worstStopFill(rung.side, rung.stopPx);
@@ -140,7 +140,7 @@ export interface PerCoinExposure {
 export function perCoinExposure(rungs: RungRisk[]): PerCoinExposure[] {
   const groups = new Map<string, RungRisk[]>();
   for (const r of rungs) {
-    if (r.action === 'reduce' || r.action === 'close') continue;
+    if (r.action === 'reduce' || r.action === 'close' || r.action === 'stop_move') continue;
     if (r.entryPx == null || !(r.entryPx > 0) || r.sizeCoins == null || !(r.sizeCoins > 0)) continue;
     const key = `${r.coin.toUpperCase()}|${r.side}`;
     (groups.get(key) ?? groups.set(key, []).get(key)!).push(r);
@@ -210,7 +210,7 @@ export function computeLadderRisk(
   const levsByCoin = new Map<string, Set<number | null>>();
 
   for (const r of rungs) {
-    if (r.action === 'reduce' || r.action === 'close') continue;
+    if (r.action === 'reduce' || r.action === 'close' || r.action === 'stop_move') continue;
     const coin = r.coin.toUpperCase();
     (sidesByCoin.get(coin) ?? sidesByCoin.set(coin, new Set()).get(coin)!).add(r.side);
     (levsByCoin.get(coin) ?? levsByCoin.set(coin, new Set()).get(coin)!).add(r.leverage ?? null);
@@ -317,7 +317,7 @@ export function buildPreconditionSnapshot(rungs: Pick<LadderRung, 'coin' | 'acti
   const selfOpenedCoins = new Set(rungs.filter((r) => r.action === 'open').map((r) => r.coin.toUpperCase()));
   const dependentCoins = new Set(
     rungs
-      .filter((r) => (r.action === 'add' || r.action === 'reduce' || r.action === 'close') && !selfOpenedCoins.has(r.coin.toUpperCase()))
+      .filter((r) => (r.action === 'add' || r.action === 'reduce' || r.action === 'close' || r.action === 'stop_move') && !selfOpenedCoins.has(r.coin.toUpperCase()))
       .map((r) => r.coin.toUpperCase()),
   );
   const liveByCoin = new Map(live.map((l) => [l.coin.toUpperCase(), l]));

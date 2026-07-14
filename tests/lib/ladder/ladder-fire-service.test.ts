@@ -21,6 +21,9 @@ const fetchClearinghouseState = vi.fn();
 const executeIntent = vi.fn();
 const placeBracketOnHl = vi.fn();
 const placeStopOnHl = vi.fn();
+const findOpenStop = vi.fn();
+const cancelStopOnHl = vi.fn();
+const setAdvisoryStop = vi.fn();
 const loadPosition = vi.fn();
 const getTradingMode = vi.fn();
 const getHlAccountAddress = vi.fn();
@@ -44,7 +47,13 @@ vi.mock('@/lib/ladder/ladder-service', () => ({
 vi.mock('@/lib/cockpit/session-service', () => ({ getActiveSession: (...a: unknown[]) => getActiveSession(...a), openSession: (...a: unknown[]) => openSession(...a) }));
 vi.mock('@/lib/hyperliquid/hyperliquid-info-service', () => ({ fetchAllMids: (...a: unknown[]) => fetchAllMids(...a), fetchClearinghouseState: (...a: unknown[]) => fetchClearinghouseState(...a) }));
 vi.mock('@/lib/trading/fill-source', () => ({ executeIntent: (...a: unknown[]) => executeIntent(...a) }));
-vi.mock('@/lib/trading/stop-order-service', () => ({ placeBracketOnHl: (...a: unknown[]) => placeBracketOnHl(...a), placeStopOnHl: (...a: unknown[]) => placeStopOnHl(...a) }));
+vi.mock('@/lib/trading/stop-order-service', () => ({
+  placeBracketOnHl: (...a: unknown[]) => placeBracketOnHl(...a),
+  placeStopOnHl: (...a: unknown[]) => placeStopOnHl(...a),
+  findOpenStop: (...a: unknown[]) => findOpenStop(...a),
+  cancelStopOnHl: (...a: unknown[]) => cancelStopOnHl(...a),
+}));
+vi.mock('@/lib/scout/scout-watch-service', () => ({ setAdvisoryStop: (...a: unknown[]) => setAdvisoryStop(...a) }));
 vi.mock('@/lib/cockpit/fill-persistence-service', () => ({ loadPosition: (...a: unknown[]) => loadPosition(...a) }));
 vi.mock('@/lib/env/mode', () => ({ getTradingMode: (...a: unknown[]) => getTradingMode(...a) }));
 vi.mock('@/lib/auto-exit/auto-exit-config', () => ({ getHlAccountAddress: (...a: unknown[]) => getHlAccountAddress(...a) }));
@@ -95,6 +104,9 @@ beforeEach(() => {
   placeBracketOnHl.mockResolvedValue({ pushed: false });
   placeStopOnHl.mockResolvedValue({ pushed: false });
   loadPosition.mockResolvedValue(null);
+  setAdvisoryStop.mockResolvedValue(true);
+  findOpenStop.mockResolvedValue(null);
+  cancelStopOnHl.mockResolvedValue({ pushed: true });
   getTradingMode.mockReturnValue('paper');
   writeAnalysisLog.mockResolvedValue(undefined);
   getHlAccountAddress.mockReturnValue(null);
@@ -297,5 +309,54 @@ describe('performLadderRungFire — execution', () => {
     expect(res.skipped).toBe('add-risk-not-covered');
     expect(executeIntent).not.toHaveBeenCalled();
     expect(setRungStatus).toHaveBeenCalledWith('r1', 'skipped');
+  });
+});
+
+describe('performLadderRungFire — stop_move (paper path + guards)', () => {
+  const smRung = (over: Partial<LadderRung> = {}): LadderRung =>
+    openRung({
+      id: 'r1', action: 'stop_move', side: 'long',
+      triggerKind: 'price_above', triggerPx: 66.85,
+      triggerMeta: { moveTo: 'breakeven' },
+      riskUsd: null, stopFrac: null, leverage: null,
+      ...over,
+    });
+  const smLadder = (rung: LadderRung) => ladder({}, [rung]);
+
+  it('paper: ratchets the ADVISORY stop to breakeven and marks fired', async () => {
+    getLadderWithRungs.mockResolvedValue(smLadder(smRung()));
+    loadPosition.mockResolvedValue({ coin: 'ETH', side: 'long', sz: 2, avgEntryPx: 65.0, realizedPnlUsd: 0, feesPaidUsd: 0 });
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.fired).toBe(true);
+    expect(setAdvisoryStop).toHaveBeenCalledWith('s1', 'ETH', 65.0);
+    expect(setRungStatus).toHaveBeenCalledWith('r1', 'fired');
+    expect(placeStopOnHl).not.toHaveBeenCalled(); // paper NEVER touches the exchange
+  });
+
+  it('skips (rung → skipped) when the position is flat', async () => {
+    getLadderWithRungs.mockResolvedValue(smLadder(smRung()));
+    loadPosition.mockResolvedValue(null);
+  setAdvisoryStop.mockResolvedValue(true);
+  findOpenStop.mockResolvedValue(null);
+  cancelStopOnHl.mockResolvedValue({ pushed: true });
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toBe('flat');
+    expect(setRungStatus).toHaveBeenCalledWith('r1', 'skipped');
+  });
+
+  it('refuses a stop that would trigger instantly (not protective vs the mark)', async () => {
+    // mark is 2000 (mock default); a long stop_move to 2050 is at/through the mark.
+    getLadderWithRungs.mockResolvedValue(smLadder(smRung({ triggerMeta: { moveTo: 2050 } })));
+    loadPosition.mockResolvedValue({ coin: 'ETH', side: 'long', sz: 2, avgEntryPx: 1900, realizedPnlUsd: 0, feesPaidUsd: 0 });
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toBe('stop-would-trigger');
+    expect(setAdvisoryStop).not.toHaveBeenCalled();
+  });
+
+  it('fails closed on an invalid moveTo', async () => {
+    getLadderWithRungs.mockResolvedValue(smLadder(smRung({ triggerMeta: { moveTo: -5 } })));
+    loadPosition.mockResolvedValue({ coin: 'ETH', side: 'long', sz: 2, avgEntryPx: 1900, realizedPnlUsd: 0, feesPaidUsd: 0 });
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toBe('invalid-moveTo');
   });
 });

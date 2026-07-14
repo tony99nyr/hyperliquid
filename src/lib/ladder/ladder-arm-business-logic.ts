@@ -156,6 +156,25 @@ export function validateLadderForArm(input: ValidateLadderInput): ValidateLadder
   for (const r of rungs) {
     const tp = triggerProblem(r);
     if (tp) warnings.push(tp);
+    // stop_move rungs: price trigger + a valid, risk-reducing destination. The full
+    // tighter-than-current check needs the LIVE resting stop, so it lives at fire;
+    // arm-time validates shape + the side-relative ordering that IS knowable.
+    if (r.action === 'stop_move') {
+      if (r.triggerKind !== 'price_above' && r.triggerKind !== 'price_below') {
+        warnings.push(`rung ${r.seq}: stop_move needs a price trigger.`);
+      }
+      const mv = r.triggerMeta?.moveTo;
+      if (mv !== 'breakeven' && !(typeof mv === 'number' && Number.isFinite(mv) && mv > 0)) {
+        warnings.push(`rung ${r.seq}: stop_move needs triggerMeta.moveTo (a positive price or 'breakeven').`);
+      } else if (typeof mv === 'number' && r.triggerPx != null && r.triggerPx > 0) {
+        // The destination must be on the PROTECTIVE side of the trigger that fires it:
+        // long ratchets to below the trigger, short to above (else it would either
+        // instantly fire the stop or loosen protection).
+        const protective = r.side === 'long' ? mv < r.triggerPx : mv > r.triggerPx;
+        if (!protective) warnings.push(`rung ${r.seq}: stop_move destination ${mv} is not on the protective side of trigger ${r.triggerPx} for a ${r.side}.`);
+      }
+    }
+
     // Hygiene: momentumConfirm only means something on price triggers — a stray flag on
     // volume/funding/indicator rungs would silently do nothing; reject so intent is honest.
     if (r.triggerMeta?.momentumConfirm && r.triggerKind !== 'price_above' && r.triggerKind !== 'price_below') {

@@ -129,3 +129,15 @@ enforced:
 2. **A live position:** manage it from Open Positions / the safe-exit path — it's a normal
    HL position with a resting stop, independent of ladder status.
 3. **A specific ladder:** disarm it (instant; the row/panel Disarm button).
+
+## stop_move ratchet ladders (0035)
+
+A `stop_move` rung moves the RESTING stop to `triggerMeta.moveTo` (price or `'breakeven'`)
+when its price trigger prints. Risk-reducing only; new stop is placed BEFORE the old is
+canceled.
+
+**Arm ratchet ladders only AFTER the position exists.** The arm-time precondition
+snapshot records the coin's live state; a ratchet armed while the coin is FLAT will
+auto-disarm with `precondition-drift` the moment the position appears (correct fail-closed
+behavior — the ladder was authorized against a different world). Sequence: position fills →
+create + arm the ratchet.

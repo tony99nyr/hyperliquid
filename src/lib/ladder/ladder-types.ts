@@ -16,7 +16,7 @@ export type LadderSide = 'long' | 'short';
 
 /** What a rung DOES when it fires. open/add INCREASE exposure (gated by the
  *  pyramiding guardrails); reduce/close DECREASE it (reduce-only). */
-export type RungAction = 'open' | 'add' | 'reduce' | 'close';
+export type RungAction = 'open' | 'add' | 'reduce' | 'close' | 'stop_move';
 
 /** The deterministic trigger kind. price_above/price_below are natively
  *  HL-expressible; volume/funding/indicator need the watcher (HL triggers are
@@ -97,6 +97,10 @@ export interface RungTriggerMeta {
   momentumConfirm?: boolean;
   /** Max stall signals against the direction the confirm tolerates (default 0, max 2). */
   momentumMaxFlips?: number;
+  /** stop_move rungs: where the resting stop ratchets to when the trigger fires —
+   *  a price, or 'breakeven' (the live position's avg entry at fire time). The move
+   *  must be RISK-REDUCING (tighter than the current stop, right side of the mark). */
+  moveTo?: number | 'breakeven';
   /** indicator (optional): a price FLOOR the completed close must also clear before the
    *  indicator can fire — long reduce: close ≥ floorPx; short reduce: close ≤ floorPx.
    *  This is how a momentum exit is prevented from firing before the move has paid

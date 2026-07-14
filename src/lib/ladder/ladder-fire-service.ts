@@ -42,7 +42,8 @@ import type { LadderRung, LadderWithRungs } from './ladder-types';
 import { buildOpenProposal } from '@/lib/skills/open-position-business-logic';
 import { buildMarketReduceOnlyClose } from '@/lib/trading/safe-exit-business-logic';
 import { executeIntent } from '@/lib/trading/fill-source';
-import { placeBracketOnHl, placeStopOnHl } from '@/lib/trading/stop-order-service';
+import { placeBracketOnHl, placeStopOnHl, findOpenStop, cancelStopOnHl } from '@/lib/trading/stop-order-service';
+import { setAdvisoryStop } from '@/lib/scout/scout-watch-service';
 import { loadPosition } from '@/lib/cockpit/fill-persistence-service';
 import { getActiveSession, openSession } from '@/lib/cockpit/session-service';
 import { fetchAllMids, fetchClearinghouseState, type HlPosition } from '@/lib/hyperliquid/hyperliquid-info-service';
@@ -75,7 +76,7 @@ const skip = (reason: string): LadderFireResult => ({ fired: false, skipped: rea
  * ladder, or one with only `open` rungs (no live dependency), legitimately returns [].
  */
 async function liveStateForLadder(ladder: LadderWithRungs): Promise<LivePositionState[]> {
-  const dependsOnLive = ladder.rungs.some((r) => r.action === 'add' || r.action === 'reduce' || r.action === 'close');
+  const dependsOnLive = ladder.rungs.some((r) => r.action === 'add' || r.action === 'reduce' || r.action === 'close' || r.action === 'stop_move');
   if (ladder.mode !== 'live' || !dependsOnLive) return [];
   const address = getHlAccountAddress();
   if (!address) throw new Error('cannot verify precondition: no HL account address for a live position-dependent ladder');
@@ -178,6 +179,9 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
 
     if (rung.action === 'reduce' || rung.action === 'close') {
       return await fireReduce(ladder, rung, session.id, coin, fireId, forcePaper);
+    }
+    if (rung.action === 'stop_move') {
+      return await fireStopMove(ladder, rung, session.id, coin, fireId, forcePaper, markPx);
     }
     // Defense-in-depth (arm validation is the first gate): a SIGNAL-driven trigger must
     // be structurally incapable of opening/adding — refuse here too, so a direct DB
@@ -344,6 +348,111 @@ async function loadEffectivePosition(sessionId: string, coin: string, forcePaper
   const hl = ch.positions.find((p) => p.coin.toUpperCase() === coin.toUpperCase());
   if (!hl || !(hl.size > 0)) return null; // read succeeded, genuinely flat
   return { coin: coin.toUpperCase(), side: hl.side, sz: hl.size, avgEntryPx: hl.entryPx ?? 0, realizedPnlUsd: 0, feesPaidUsd: 0 };
+}
+
+/**
+ * STOP_MOVE — ratchet the position's RESTING stop to triggerMeta.moveTo. RISK-REDUCING
+ * ONLY, enforced live at fire: the new stop must be tighter than the current one and on
+ * the protective side of the fresh mark. Ordering is place-NEW-then-cancel-OLD so the
+ * position is never unstopped mid-move (both stops are reduce-only; a brief overlap is
+ * harmless, an unstopped gap is not). Paper ladders simulate by updating the advisory
+ * stop column. Never places an entry/exit order.
+ */
+async function fireStopMove(ladder: LadderWithRungs, rung: LadderRung, sessionId: string, coin: string, fireId: string, forcePaper: boolean, markPx: number): Promise<LadderFireResult> {
+  let pos: Position | null;
+  try {
+    pos = await loadEffectivePosition(sessionId, coin, forcePaper);
+  } catch (e) {
+    await markFireOutcome(fireId, 'failed', `cannot-read-position: ${e instanceof Error ? e.message : String(e)}`);
+    await setRungStatus(rung.id, 'skipped');
+    return skip('cannot-read-position');
+  }
+  if (!pos || pos.side === 'flat' || pos.sz <= 0) {
+    await markFireOutcome(fireId, 'failed', 'flat');
+    await setRungStatus(rung.id, 'skipped');
+    return skip('flat');
+  }
+  const mv = rung.triggerMeta?.moveTo;
+  const newStop = mv === 'breakeven' ? pos.avgEntryPx : typeof mv === 'number' ? mv : NaN;
+  if (!(Number.isFinite(newStop) && newStop > 0)) {
+    await markFireOutcome(fireId, 'failed', 'invalid-moveTo');
+    await setRungStatus(rung.id, 'failed');
+    return skip('invalid-moveTo');
+  }
+  // Protective-side check vs the FRESH mark: a stop at/through the mark would fire
+  // instantly (a disguised market close — that's a reduce rung's job, not ours).
+  const rightSideOfMark = pos.side === 'long' ? newStop < markPx : newStop > markPx;
+  if (!rightSideOfMark) {
+    await markFireOutcome(fireId, 'failed', `stop ${newStop} not protective vs mark ${markPx}`);
+    await setRungStatus(rung.id, 'skipped');
+    return skip('stop-would-trigger');
+  }
+
+  if (forcePaper) {
+    // Paper: no exchange orders — simulate the ratchet on the advisory stop column.
+    // (No tighter-than-old check here: the advisory column has no authoritative "old"
+    // to compare against exchange-side; paper exists to exercise the flow, not P&L.)
+    await setAdvisoryStop(sessionId, coin, newStop).catch(() => false);
+    await markFireOutcome(fireId, 'filled', `paper stop→${newStop}`);
+    await setRungStatus(rung.id, 'fired').catch(() => {});
+    const PAPER_TERMINAL = new Set(['fired', 'skipped', 'failed', 'cancelled']);
+    if (ladder.rungs.every((r) => r.id === rung.id || PAPER_TERMINAL.has(r.status))) {
+      await markLadderDone(ladder.id).catch(() => {});
+    }
+    await writeAnalysisLog({ sessionId, source: 'ladder-fire', severity: 'info', message: `STOP-MOVE (paper) ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: ${coin} advisory stop → ${newStop}.` }).catch(() => {});
+    return { fired: true, skipped: null };
+  }
+
+  // RISK-REDUCING vs the current resting stop (if any): long may only RAISE, short only LOWER.
+  let oldStop: Awaited<ReturnType<typeof findOpenStop>> = null;
+  try {
+    oldStop = await findOpenStop(coin);
+  } catch (e) {
+    await markFireOutcome(fireId, 'failed', `cannot-read-resting-stop: ${e instanceof Error ? e.message : String(e)}`);
+    await setRungStatus(rung.id, 'skipped');
+    return skip('cannot-read-resting-stop');
+  }
+  const oldPx = oldStop?.triggerPx != null ? Number(oldStop.triggerPx) : null;
+  if (oldPx != null && Number.isFinite(oldPx)) {
+    const tighter = pos.side === 'long' ? newStop > oldPx + 1e-9 : newStop < oldPx - 1e-9;
+    if (!tighter) {
+      await markFireOutcome(fireId, 'failed', `not-risk-reducing (old ${oldPx} → new ${newStop}, ${pos.side})`);
+      await setRungStatus(rung.id, 'skipped');
+      return skip('not-risk-reducing');
+    }
+  }
+
+  // Place the NEW stop first (full current size), THEN cancel the old — never unstopped.
+  try {
+    const placed = await placeStopOnHl(coin, newStop, pos.sz, pos.side);
+    if (!placed.pushed) throw new Error('placeStopOnHl not pushed');
+  } catch (e) {
+    await markFireOutcome(fireId, 'failed', `stop-place-failed: ${e instanceof Error ? e.message : String(e)}`);
+    await setRungStatus(rung.id, 'failed');
+    await alert(sessionId, `Ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: stop_move FAILED to place the new ${coin} stop @ ${newStop} — the OLD stop still rests (position protected; ratchet lost).`);
+    return skip('stop-place-failed');
+  }
+  if (oldStop?.oid != null) {
+    try {
+      await cancelStopOnHl(coin, oldStop.oid);
+    } catch {
+      // Both stops rest (both reduce-only — the tighter one governs economically).
+      // Not a fault; page the operator to clean up the stale order.
+      await alert(sessionId, `Ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: new ${coin} stop @ ${newStop} placed but the OLD stop (oid ${oldStop.oid}) failed to cancel — cancel it manually; the tighter stop governs.`);
+    }
+  }
+  await markFireOutcome(fireId, 'filled', `stop→${newStop}${oldPx != null ? ` (from ${oldPx})` : ' (no prior stop)'}`).catch(() => {});
+  await setRungStatus(rung.id, 'fired').catch(() => {});
+  const TERMINAL_RUNG = new Set(['fired', 'skipped', 'failed', 'cancelled']);
+  if (ladder.rungs.every((r) => r.id === rung.id || TERMINAL_RUNG.has(r.status))) {
+    await markLadderDone(ladder.id).catch(() => {});
+  }
+  await writeAnalysisLog({ sessionId, source: 'ladder-fire', severity: 'info', message: `STOP-MOVE ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: ${coin} ${pos.side} resting stop → ${newStop}${oldPx != null ? ` (from ${oldPx})` : ''}.` }).catch(() => {});
+  await sendDiscord(
+    `🔒 **STOP RATCHET** ${ladder.title.slice(0, 60)} — ${coin} ${pos.side} stop moved to $${newStop}${oldPx != null ? ` (from $${oldPx})` : ''}${mv === 'breakeven' ? ' (breakeven)' : ''}. Worst case now locked.`,
+    'HL Ladder Watch',
+  ).catch(() => {});
+  return { fired: true, skipped: null };
 }
 
 /** REDUCE / CLOSE — reduce-only, sized from the EFFECTIVE (live-when-live) position so a
