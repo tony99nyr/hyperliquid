@@ -235,6 +235,10 @@ fade even slightly underwater; the impulse dying = the thesis dying).
 
 ## 8. Tooling
 
+- **Event-straddle prep**: `pnpm straddle:prep --coin ETH --event "CPI" --print <ISO> [--gate-pct] [--risk] [--dry]`
+  — builds both OCO template legs (management rungs inside, per the Jul-15 lessons) from the LIVE
+  pre-print reference and pings Discord for the arm decision. Schedule it ~1h before the print;
+  never build event gates from a stale reference.
 - **Score every draft**: `pnpm skill:review-ladder --ladder <id> --equity <usd> --signal <0-10> --timing <0-10>`
   (0/10 RISK + UPSIDE scorecard; warnings there = fix the geometry). Blockers gate arming.
 - **Expectancy ledger**: `pnpm skill:ladder-expectancy` (+ `--resolve` flows) — the judge.
