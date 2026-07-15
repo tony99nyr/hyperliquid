@@ -208,6 +208,11 @@ grows. Armed only after the position existed.
 **Event straddle template** (graduated 2026-07-14, ledger `event-straddle`): OCO pair,
 gates ±1.0% (majors) / ±1.5% (HYPE/SOL) from the pre-print reference close, stop at the
 reference, 24h time exit, floor $4–5/side, `activeFromMs` = print − 15 min, plain OCO.
+LESSONS (Jul 15, first live run): build the management rungs INSIDE each leg (a
+single-open leg completes at fill and orphans its position); ratchet triggers belong at
+~+0.6–0.8R (a +1.2R trigger never armed on a +0.7R move); event fills are fade-prone by
+construction → include a momentum stall-exit rung (indicator ≥2, NO floorPx — cut the
+fade even slightly underwater; the impulse dying = the thesis dying).
 
 ---
 
