@@ -84,6 +84,27 @@ describe('ladder arm route', () => {
     expect(JSON.stringify(body.warnings)).toContain('active_from must be BEFORE expiry');
   });
 
+  it('stop_move-only ladder snapshots the LIVE position at arm (the Jul-15 drift bug)', async () => {
+    validateEnv.mockReturnValue({ LADDER_LIVE_ENABLED: true });
+    fetchClearinghouseState.mockResolvedValue({ positions: [{ coin: 'HYPE', side: 'long', leverage: 2 }] });
+    getLadderWithRungs.mockResolvedValue(draftLadder({
+      mode: 'live',
+      rungs: [{
+        id: 'r1', ladderId: 'abcd1234-0000-0000', seq: 1, coin: 'HYPE', side: 'long', action: 'stop_move',
+        triggerKind: 'price_above', triggerPx: 68.62, triggerMeta: { moveTo: 66.82 },
+        sizeCoins: null, reduceFrac: null, riskUsd: null, stopFrac: null, leverage: null, stopPx: null, targetPx: null,
+        status: 'pending', cloid: null,
+      }],
+    }));
+    const res = await POST(postReq({ ladderId: 'abcd1234-0000-0000', confirmPhrase: 'arm abcd1234' }));
+    expect(res.status).toBe(200);
+    // The live read MUST have happened (dependsOnLive now includes stop_move) — an
+    // empty-live snapshot ('HYPE:none') would drift-disarm at first fire.
+    expect(fetchClearinghouseState).toHaveBeenCalled();
+    const hashArg = armLadder.mock.calls[0][1].preconditionHash;
+    expect(hashArg).not.toBe('811c9dc5'); // not the empty-snapshot hash
+  });
+
   it('401 unauthenticated', async () => {
     verifyAdminAuth.mockResolvedValue(false);
     expect((await POST(postReq({ ladderId: 'x' }))).status).toBe(401);

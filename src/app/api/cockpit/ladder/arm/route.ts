@@ -33,6 +33,7 @@ import {
   type ArmRung,
 } from '@/lib/ladder/ladder-arm-business-logic';
 import { buildPreconditionSnapshot, hashPreconditionSnapshot, type LivePositionState } from '@/lib/ladder/ladder-risk-business-logic';
+import { ACTS_ON_LIVE_POSITION } from '@/lib/ladder/ladder-types';
 import { resolveCoinMaxLeverage } from '@/lib/trading/leverage-business-logic';
 import { fetchClearinghouseState, fetchMetaAndAssetCtxs } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
@@ -48,7 +49,7 @@ const ARM_MAX_PER_MIN = 10;
  *  ladder we read the real HL account; a PAPER ladder gets an empty set here (paper
  *  preconditions are re-derived from paper positions at fire — P1d). */
 async function liveStateForLadder(mode: string, rungs: ArmRung[]): Promise<LivePositionState[]> {
-  const dependsOnLive = rungs.some((r) => r.action === 'add' || r.action === 'reduce' || r.action === 'close');
+  const dependsOnLive = rungs.some((r) => ACTS_ON_LIVE_POSITION(r.action));
   if (mode !== 'live' || !dependsOnLive) return [];
   const address = getHlAccountAddress();
   if (!address) return [];

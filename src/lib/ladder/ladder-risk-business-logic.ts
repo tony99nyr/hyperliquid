@@ -15,6 +15,7 @@
 
 import { isolatedLiqPx, MMR } from '@/lib/trading/leverage-business-logic';
 import type { LadderRung, LadderSide, RungAction } from './ladder-types';
+import { ACTS_ON_LIVE_POSITION } from './ladder-types';
 
 /** HL stop orders are market-on-trigger with a 10% slippage tolerance. Worst-case
  *  preview assumes the FULL adverse tolerance — the loud, conservative number. */
@@ -317,7 +318,7 @@ export function buildPreconditionSnapshot(rungs: Pick<LadderRung, 'coin' | 'acti
   const selfOpenedCoins = new Set(rungs.filter((r) => r.action === 'open').map((r) => r.coin.toUpperCase()));
   const dependentCoins = new Set(
     rungs
-      .filter((r) => (r.action === 'add' || r.action === 'reduce' || r.action === 'close' || r.action === 'stop_move') && !selfOpenedCoins.has(r.coin.toUpperCase()))
+      .filter((r) => ACTS_ON_LIVE_POSITION(r.action) && !selfOpenedCoins.has(r.coin.toUpperCase()))
       .map((r) => r.coin.toUpperCase()),
   );
   const liveByCoin = new Map(live.map((l) => [l.coin.toUpperCase(), l]));

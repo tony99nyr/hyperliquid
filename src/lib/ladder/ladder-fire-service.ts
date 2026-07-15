@@ -52,7 +52,7 @@ import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
 import { validateEnv } from '@/lib/env/env';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 import { sendDiscord } from '@/lib/infrastructure/notify/discord-notify';
-import { ladderWindowState } from './ladder-types';
+import { ladderWindowState, ACTS_ON_LIVE_POSITION } from './ladder-types';
 import type { CanonicalFill, OrderSide } from '@/types/fill';
 import type { Position } from '@/types/position';
 
@@ -76,7 +76,7 @@ const skip = (reason: string): LadderFireResult => ({ fired: false, skipped: rea
  * ladder, or one with only `open` rungs (no live dependency), legitimately returns [].
  */
 async function liveStateForLadder(ladder: LadderWithRungs): Promise<LivePositionState[]> {
-  const dependsOnLive = ladder.rungs.some((r) => r.action === 'add' || r.action === 'reduce' || r.action === 'close' || r.action === 'stop_move');
+  const dependsOnLive = ladder.rungs.some((r) => ACTS_ON_LIVE_POSITION(r.action));
   if (ladder.mode !== 'live' || !dependsOnLive) return [];
   const address = getHlAccountAddress();
   if (!address) throw new Error('cannot verify precondition: no HL account address for a live position-dependent ladder');

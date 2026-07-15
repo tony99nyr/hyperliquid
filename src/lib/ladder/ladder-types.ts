@@ -34,6 +34,14 @@ export const SUPPORTED_INDICATOR_NAMES: readonly string[] = [MOMENTUM_STALL_LONG
 export const momentumStallIndicatorName = (side: LadderSide): string =>
   side === 'long' ? MOMENTUM_STALL_LONG : MOMENTUM_STALL_SHORT;
 
+/** Does this action read/mutate an EXISTING live position at fire time? (add sizes off
+ *  profit; reduce/close trim it; stop_move relocates its resting stop.) ONE predicate —
+ *  the arm route's precondition snapshot and the fire path's live-read gate MUST agree,
+ *  or a ladder arms against one world and fires against another (the Jul-15 ratchet
+ *  drift-disarm bug: a duplicated copy of this list missed stop_move). */
+export const ACTS_ON_LIVE_POSITION = (a: RungAction): boolean =>
+  a === 'add' || a === 'reduce' || a === 'close' || a === 'stop_move';
+
 /** Where `now` sits relative to an armed ladder's evaluation window. ONE predicate for
  *  the watcher + the fire path (their ACTIONS differ; the time semantics must not). */
 export type LadderWindowState = 'expired' | 'before-window' | 'active';
