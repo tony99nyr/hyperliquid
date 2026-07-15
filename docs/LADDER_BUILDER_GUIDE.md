@@ -110,13 +110,20 @@ Run: `pnpm tsx --tsconfig tsconfig.scripts.json scripts/_yourscript.ts` (then de
   BEFORE the old is canceled (never unstopped). Contributes $0 to arm-time worst case.
   **Arm ratchet ladders only AFTER the position exists** (a ratchet armed against a
   flat coin auto-disarms with `precondition-drift` when the position appears).
-  UI renders these amber with a 🔒.
+  UI renders these amber with a 🔒. `moveTo:'trail'` + `trailDistancePx` = a TRUE
+  TRAILING ratchet: each completed candle beyond the trigger, the stop follows the
+  mark by the distance (only ever tightens; the rung stays PENDING and re-fires per
+  candle until expiry or a flat position — trail rungs claim per-candle, not one-shot).
+  Prefer trail over stacked fixed ratchets for trend exits (the Jul-15 lesson: fixed
+  +1.2R triggers never arm on +0.7R moves).
 
 ---
 
 ## 4. Trigger extras (`triggerMeta`) + ladder-level windows
 
-- **`momentumConfirm: true`** (+ optional `momentumMaxFlips: 0..2`, default 0) — on
+- **`momentumConfirm: true`** (+ `momentumMaxFlips: 0..2` default 0, + `momentumSustain:
+  1|2` default 1 — sustain 2 also requires the PREVIOUS candle's read clean, filtering
+  one-candle head-fakes like the Jul-15 BTC top-tick fill; recommended for breakouts) — on
   price-triggered **open/add ONLY**: the entry fires only when the momentum-stall
   composite shows ≤ maxFlips signals AGAINST the direction (volume fade / CVD
   non-confirmation / book-against, computed from live candles + the recorded
@@ -140,6 +147,16 @@ Run: `pnpm tsx --tsconfig tsconfig.scripts.json scripts/_yourscript.ts` (then de
   fire on pre-print wander. Empty windows (active_from ≥ expiry) are rejected at arm.
 
 ---
+
+## 4b. Fire-time exposure gates (automatic — no rung config)
+
+Every LIVE open/add passes two gates BEFORE the claim (skips are retryable; reduce/
+close/stop_move are NEVER gated): (1) the LIVE circuit breaker — a daily-loss/drawdown
+trip freezes autonomous entries account-wide; (2) the BOOK-HEAT ceiling — slip-aware
+worst case of all open positions + this rung must stay under `LADDER_BOOK_HEAT_MAX_FRAC`
+(default 10%) of live equity. Unstopped positions are priced punitively in the heat sum.
+Both fail CLOSED on unreadable account state. Design ladders assuming the gate exists:
+an over-heated book silently skips your entry until room frees up.
 
 ## 5. What the arm validation will REJECT (build to pass honestly)
 

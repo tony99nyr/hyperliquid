@@ -124,7 +124,7 @@ function RungRow({ rung, accent, markPx }: { rung: LadderRung; accent: boolean; 
         <div className={css({ display: 'flex', flexDirection: 'column', gap: '1px', flex: 1, minWidth: 0 })}>
           <span className={css({ fontFamily: 'mono', fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })} style={{ fontFeatureSettings: '"tnum"', color: isRatchet ? '#e3b341' : undefined }}>
             {isRatchet
-              ? `${dir} ${rung.triggerPx != null ? fmtPx(rung.triggerPx) : rung.triggerKind} · 🔒 ratchet → ${moveTo === 'breakeven' ? 'BE' : typeof moveTo === 'number' ? fmtPx(moveTo) : '?'}`
+              ? `${dir} ${rung.triggerPx != null ? fmtPx(rung.triggerPx) : rung.triggerKind} · 🔒 ratchet → ${moveTo === 'breakeven' ? 'BE' : moveTo === 'trail' ? `trail(−${rung.triggerMeta?.trailDistancePx ?? '?'})` : typeof moveTo === 'number' ? fmtPx(moveTo) : '?'}`
               : <span className={css({ color: 'github.textBright' })}>{rung.triggerPx != null ? `${dir} ${fmtPx(rung.triggerPx)}` : rung.triggerKind} {rung.action !== 'open' && `· ${rung.action}`}</span>}
           </span>
           <span className={css({ fontFamily: 'mono', fontSize: '9.5px', color: 'github.textMuted' })} style={{ fontFeatureSettings: '"tnum"' }}>

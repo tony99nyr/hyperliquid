@@ -15,8 +15,9 @@ import { isLadderAutofireEnabled } from './ladder-flags';
 import { listLadders, getLadderWithRungs, markLadderExpired } from './ladder-service';
 import { evaluateLadderRungs, type RungMarketSnapshot } from './ladder-trigger-evaluator';
 import { snapshotFromCandleResult } from './ladder-watch-business-logic';
-import { ladderWindowState } from './ladder-types';
+import { ladderWindowState, WATCH_CANDLE_MS } from './ladder-types';
 import { computeMomentumIndicators } from './ladder-momentum-service';
+import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
 import { performLadderRungFire, type LadderFireResult } from './ladder-fire-service';
 import type { LadderWithRungs } from './ladder-types';
 import { fetchCandles } from '@/lib/hyperliquid/candle-service';
@@ -26,7 +27,7 @@ import type { CandleInterval } from '@/lib/hyperliquid/candle-service-business-l
  *  completed-bar close across the level — 15m balances responsiveness vs whipsaw. */
 const WATCH_INTERVAL: CandleInterval = '15m';
 const WATCH_INTERVAL_MS = 15 * 60 * 1000;
-const LOOKBACK_MS = 90 * 60 * 1000; // 6×15m bars — the evaluator needs [len-2] + freshness, not history (CPU trim)
+const LOOKBACK_MS = 6 * WATCH_CANDLE_MS; // 6×15m bars — the evaluator needs [len-2] + freshness, not history (CPU trim)
 /** Deeper window for coins with pending INDICATOR rungs: the momentum composite needs
  *  CANDLES_REQUIRED (12) completed bars + the in-progress bar + margin. */
 const INDICATOR_LOOKBACK_MS = 4 * 60 * 60 * 1000; // 16×15m bars
@@ -49,6 +50,14 @@ export async function runLadderWatchTick(args: { now: number }): Promise<LadderW
 
   const armedList = await listLadders('armed');
   if (armedList.length === 0) return { ...empty, autofireOff: false };
+
+  // Roll the LIVE circuit-breaker state every tick (best-effort): peak/day-start must
+  // track equity CONTINUOUSLY, not only at fire moments — otherwise a peak that
+  // reverses between fires is never recorded and drawdown-from-peak understates
+  // (review M2). Only when a live ladder is armed (no idle reads).
+  if (armedList.some((l) => l.mode === 'live')) {
+    await checkCircuitBreaker('live', args.now).catch(() => {});
+  }
 
   // PROACTIVE expiry sweep: an overdue ladder can't fire anyway (the fire path refuses),
   // but left 'armed' it lies in the UI. Flip it to 'expired' now and skip evaluating it.

@@ -237,3 +237,21 @@ describe('evaluateLadderRungs — only PENDING rungs, snapshot-by-coin', () => {
     expect(results[0].conditionMet).toBe(true);
   });
 });
+
+describe('momentumConfirm — sustained (N=2 candles)', () => {
+  const sustained = rung({
+    action: 'open', side: 'long', triggerKind: 'price_above', triggerPx: 1950,
+    triggerMeta: { momentumConfirm: true, momentumSustain: 2 },
+  });
+  it('fires only when BOTH current and previous candle reads are clean', () => {
+    expect(evaluateRungTrigger(sustained, snap({ completedClose: 2000, indicators: { 'momentum-stall-long': 0, 'momentum-stall-long@prev': 0 } })).conditionMet).toBe(true);
+    expect(evaluateRungTrigger(sustained, snap({ completedClose: 2000, indicators: { 'momentum-stall-long': 0, 'momentum-stall-long@prev': 2 } })).conditionMet).toBe(false);
+  });
+  it('fail-closed when the previous read is missing', () => {
+    expect(evaluateRungTrigger(sustained, snap({ completedClose: 2000, indicators: { 'momentum-stall-long': 0 } })).conditionMet).toBe(false);
+  });
+  it('sustain 1 (default) behaves exactly as before', () => {
+    const single = rung({ action: 'open', side: 'long', triggerKind: 'price_above', triggerPx: 1950, triggerMeta: { momentumConfirm: true } });
+    expect(evaluateRungTrigger(single, snap({ completedClose: 2000, indicators: { 'momentum-stall-long': 0 } })).conditionMet).toBe(true);
+  });
+});

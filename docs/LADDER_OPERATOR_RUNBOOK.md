@@ -130,6 +130,12 @@ enforced:
    HL position with a resting stop, independent of ladder status.
 3. **A specific ladder:** disarm it (instant; the row/panel Disarm button).
 
+## Env: LADDER_BOOK_HEAT_MAX_FRAC
+
+Fire-time book-heat ceiling (fraction of live equity; default 0.10). Every LIVE open/add
+is skipped while the slip-aware worst case of the whole book + the firing rung exceeds
+it. NaN-proof: a malformed value falls back to 0.10 (never disables the gate).
+
 ## stop_move ratchet ladders (0035)
 
 A `stop_move` rung moves the RESTING stop to `triggerMeta.moveTo` (price or `'breakeven'`)

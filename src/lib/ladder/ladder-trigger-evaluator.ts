@@ -16,7 +16,7 @@
  */
 
 import type { LadderRung, RungTriggerKind } from './ladder-types';
-import { momentumStallIndicatorName } from './ladder-types';
+import { momentumStallIndicatorName, prevIndicatorName } from './ladder-types';
 
 /** Market read for one coin, built from the most recent COMPLETED candle + live funding.
  *  `stale` is set by the daemon when the feed is lagged/missing — fail-closed. */
@@ -66,7 +66,20 @@ function applyMomentumConfirm(
   if (flips > maxFlips) {
     return { ...met, conditionMet: false, reason: `${met.reason} BUT momentum not supportive (${flips} signal(s) against, max ${maxFlips}) — holding` };
   }
-  return { ...met, reason: `${met.reason} + momentum supportive (${flips} against ≤ ${maxFlips})` };
+  // Sustained confirm: N=2 also requires the PREVIOUS candle's read — a single clean
+  // close at a local top (the Jul-15 BTC fill) no longer fires alone. Missing prev
+  // data fails CLOSED like everything else here.
+  const sustain = rung.triggerMeta.momentumSustain ?? 1;
+  if (sustain >= 2) {
+    const prev = snapshot.indicators?.[prevIndicatorName(name)];
+    if (prev == null || !Number.isFinite(prev)) {
+      return { ...met, conditionMet: false, reason: `${met.reason} BUT no previous-candle momentum read — fail-closed (sustain ${sustain})` };
+    }
+    if (prev > maxFlips) {
+      return { ...met, conditionMet: false, reason: `${met.reason} BUT momentum only clean for 1 candle (prev ${prev} > ${maxFlips}) — holding for sustain ${sustain}` };
+    }
+  }
+  return { ...met, reason: `${met.reason} + momentum supportive (${flips} against ≤ ${maxFlips}${sustain >= 2 ? ', sustained' : ''})` };
 }
 
 /**

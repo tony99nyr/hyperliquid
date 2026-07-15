@@ -34,6 +34,15 @@ export const SUPPORTED_INDICATOR_NAMES: readonly string[] = [MOMENTUM_STALL_LONG
 export const momentumStallIndicatorName = (side: LadderSide): string =>
   side === 'long' ? MOMENTUM_STALL_LONG : MOMENTUM_STALL_SHORT;
 
+/** The PREVIOUS-candle variant of an indicator key (sustained confirms). ONE helper —
+ *  producer (momentum service) and consumer (evaluator) must never hardcode '@prev'. */
+export const prevIndicatorName = (name: string): string => `${name}@prev`;
+
+/** The candle-bar duration the watcher evaluates on. Trail-rung claim buckets MUST
+ *  equal this (one claim per completed candle) — if the watch interval ever changes,
+ *  this constant moves every dependent site together. */
+export const WATCH_CANDLE_MS = 15 * 60 * 1000;
+
 /** Does this action read/mutate an EXISTING live position at fire time? (add sizes off
  *  profit; reduce/close trim it; stop_move relocates its resting stop.) ONE predicate —
  *  the arm route's precondition snapshot and the fire path's live-read gate MUST agree,
@@ -105,10 +114,17 @@ export interface RungTriggerMeta {
   momentumConfirm?: boolean;
   /** Max stall signals against the direction the confirm tolerates (default 0, max 2). */
   momentumMaxFlips?: number;
+  /** Consecutive completed candles the confirm must hold (1 = current only, 2 = also
+   *  the previous candle's read — filters one-candle head-fakes; default 1). */
+  momentumSustain?: number;
   /** stop_move rungs: where the resting stop ratchets to when the trigger fires —
-   *  a price, or 'breakeven' (the live position's avg entry at fire time). The move
-   *  must be RISK-REDUCING (tighter than the current stop, right side of the mark). */
-  moveTo?: number | 'breakeven';
+   *  a price, 'breakeven' (live avg entry at fire), or 'trail' (stop follows the
+   *  mark by trailDistancePx each completed candle; only ever tightens; the rung
+   *  stays PENDING and re-fires per candle until expiry/flat). The move must be
+   *  RISK-REDUCING (tighter than the current stop, right side of the mark). */
+  moveTo?: number | 'breakeven' | 'trail';
+  /** trail: the fixed distance (px) the stop follows behind the mark. */
+  trailDistancePx?: number;
   /** indicator (optional): a price FLOOR the completed close must also clear before the
    *  indicator can fire — long reduce: close ≥ floorPx; short reduce: close ≤ floorPx.
    *  This is how a momentum exit is prevented from firing before the move has paid

@@ -6,6 +6,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  bookHeatUsd,
   worstStopFill,
   rungWorstCaseLoss,
   perCoinExposure,
@@ -189,5 +190,24 @@ describe('precondition snapshot (§3.7)', () => {
     expect(hashPreconditionSnapshot(a)).toBe(hashPreconditionSnapshot(a)); // stable
     expect(hashPreconditionSnapshot(a)).not.toBe(hashPreconditionSnapshot(b)); // side flip
     expect(hashPreconditionSnapshot(a)).not.toBe(hashPreconditionSnapshot(c)); // leverage drift
+  });
+});
+
+describe('bookHeatUsd — fire-time book heat (EDGE_ROADMAP 3a)', () => {
+  it('prices stopped positions as |mark−stop| + slip×mark, per unit', () => {
+    // long 2 units, mark 100, stop 95 → (5 + 10) × 2 = 30
+    expect(bookHeatUsd([{ sz: 2, markPx: 100, stopPx: 95 }])).toBeCloseTo(30, 6);
+  });
+  it('prices UNSTOPPED positions punitively (never $0 for a missing stop)', () => {
+    expect(bookHeatUsd([{ sz: 1, markPx: 100, stopPx: null }])).toBeCloseTo(30, 6); // 3×slip×notional
+  });
+  it('sums the book and ignores garbage rows', () => {
+    const heat = bookHeatUsd([
+      { sz: 2, markPx: 100, stopPx: 95 },
+      { sz: 1, markPx: 100, stopPx: null },
+      { sz: 0, markPx: 100, stopPx: 90 },
+      { sz: 1, markPx: 0, stopPx: 90 },
+    ]);
+    expect(heat).toBeCloseTo(60, 6);
   });
 });

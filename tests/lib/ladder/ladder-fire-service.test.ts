@@ -23,6 +23,9 @@ const placeBracketOnHl = vi.fn();
 const placeStopOnHl = vi.fn();
 const findOpenStop = vi.fn();
 const cancelStopOnHl = vi.fn();
+const findAllStops = vi.fn();
+const checkCircuitBreaker = vi.fn();
+const computeLiveEquity = vi.fn();
 const setAdvisoryStop = vi.fn();
 const loadPosition = vi.fn();
 const getTradingMode = vi.fn();
@@ -52,8 +55,13 @@ vi.mock('@/lib/trading/stop-order-service', () => ({
   placeStopOnHl: (...a: unknown[]) => placeStopOnHl(...a),
   findOpenStop: (...a: unknown[]) => findOpenStop(...a),
   cancelStopOnHl: (...a: unknown[]) => cancelStopOnHl(...a),
+  findAllStops: (...a: unknown[]) => findAllStops(...a),
 }));
 vi.mock('@/lib/scout/scout-watch-service', () => ({ setAdvisoryStop: (...a: unknown[]) => setAdvisoryStop(...a) }));
+vi.mock('@/lib/risk/circuit-breaker-service', () => ({
+  checkCircuitBreaker: (...a: unknown[]) => checkCircuitBreaker(...a),
+  computeLiveEquity: (...a: unknown[]) => computeLiveEquity(...a),
+}));
 vi.mock('@/lib/cockpit/fill-persistence-service', () => ({ loadPosition: (...a: unknown[]) => loadPosition(...a) }));
 vi.mock('@/lib/env/mode', () => ({ getTradingMode: (...a: unknown[]) => getTradingMode(...a) }));
 vi.mock('@/lib/auto-exit/auto-exit-config', () => ({ getHlAccountAddress: (...a: unknown[]) => getHlAccountAddress(...a) }));
@@ -107,6 +115,9 @@ beforeEach(() => {
   setAdvisoryStop.mockResolvedValue(true);
   findOpenStop.mockResolvedValue(null);
   cancelStopOnHl.mockResolvedValue({ pushed: true });
+  findAllStops.mockResolvedValue({});
+  checkCircuitBreaker.mockResolvedValue({ blockNewEntries: false, reason: 'ok', tripped: false, equityUsd: 10_000, peakEquityUsd: 10_000, dayStartEquityUsd: 10_000 }); // fixtures risk $50/rung — equity high enough that the heat gate stays out of unrelated tests
+  computeLiveEquity.mockResolvedValue(10_000); // fixtures risk $50/rung — keep the heat gate out of unrelated tests
   getTradingMode.mockReturnValue('paper');
   writeAnalysisLog.mockResolvedValue(undefined);
   getHlAccountAddress.mockReturnValue(null);
@@ -232,6 +243,7 @@ describe('performLadderRungFire — execution', () => {
 
   it('a LIVE ladder on a LIVE deployment fills live (forcePaper false)', async () => {
     getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc'); // heat gate needs the live account
     getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }));
     await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(executeIntent).toHaveBeenCalledWith(expect.anything(), { forcePaper: false });
@@ -239,6 +251,7 @@ describe('performLadderRungFire — execution', () => {
 
   it('a LIVE ladder with a target places a real BRACKET', async () => {
     getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc');
     getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }, [openRung({ targetPx: 2200 })]));
     await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(placeBracketOnHl).toHaveBeenCalledWith('ETH', expect.closeTo(1920, 1), 2200, 0.625, 'long');
@@ -339,6 +352,9 @@ describe('performLadderRungFire — stop_move (paper path + guards)', () => {
   setAdvisoryStop.mockResolvedValue(true);
   findOpenStop.mockResolvedValue(null);
   cancelStopOnHl.mockResolvedValue({ pushed: true });
+  findAllStops.mockResolvedValue({});
+  checkCircuitBreaker.mockResolvedValue({ blockNewEntries: false, reason: 'ok', tripped: false, equityUsd: 10_000, peakEquityUsd: 10_000, dayStartEquityUsd: 10_000 }); // fixtures risk $50/rung — equity high enough that the heat gate stays out of unrelated tests
+  computeLiveEquity.mockResolvedValue(10_000); // fixtures risk $50/rung — keep the heat gate out of unrelated tests
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(res.skipped).toBe('flat');
     expect(setRungStatus).toHaveBeenCalledWith('r1', 'skipped');
@@ -358,5 +374,59 @@ describe('performLadderRungFire — stop_move (paper path + guards)', () => {
     loadPosition.mockResolvedValue({ coin: 'ETH', side: 'long', sz: 2, avgEntryPx: 1900, realizedPnlUsd: 0, feesPaidUsd: 0 });
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(res.skipped).toBe('invalid-moveTo');
+  });
+});
+
+describe('performLadderRungFire — exposure gates (EDGE_ROADMAP 3a/3c)', () => {
+  beforeEach(() => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc');
+  });
+
+  it('a tripped LIVE circuit breaker blocks opens (before the claim — retryable)', async () => {
+    checkCircuitBreaker.mockResolvedValue({ blockNewEntries: true, reason: 'daily loss', tripped: true, equityUsd: 900, peakEquityUsd: 1000, dayStartEquityUsd: 1000 });
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toMatch(/circuit-breaker/);
+    expect(claimRungFire).not.toHaveBeenCalled();
+  });
+
+  it('book heat over the ceiling blocks opens', async () => {
+    checkCircuitBreaker.mockResolvedValue({ blockNewEntries: false, reason: 'ok', tripped: false, equityUsd: 500, peakEquityUsd: 500, dayStartEquityUsd: 500 }); // rung worst ≈ $175 > 10% of 500
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toMatch(/book-heat-exceeded/);
+    expect(claimRungFire).not.toHaveBeenCalled();
+  });
+
+  it('risk-reducing rungs are NEVER gated (a LIVE reduce passes a tripped breaker)', async () => {
+    checkCircuitBreaker.mockResolvedValue({ blockNewEntries: true, reason: 'daily loss', tripped: true, equityUsd: 900, peakEquityUsd: 1000, dayStartEquityUsd: 1000 });
+    const r = openRung({ id: 'r1', action: 'reduce', reduceFrac: 0.5, riskUsd: null, stopFrac: null, triggerPx: 2000 });
+    getTradingMode.mockReturnValue('live'); // LIVE path — the exemption itself is what's tested
+    getHlAccountAddress.mockReturnValue('0xabc');
+    fetchClearinghouseState.mockResolvedValue({ positions: [], stale: false }); // flat on HL
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }, [r]));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toBe('flat'); // reached fireReduce — the gates never ran
+    expect(checkCircuitBreaker).not.toHaveBeenCalled();
+  });
+
+  it('TRAIL stop_move: fires per candle (bucketed claim), stays PENDING, never marks the ladder done', async () => {
+    const trail = openRung({
+      id: 'r1', action: 'stop_move', side: 'long', triggerKind: 'price_above', triggerPx: 1950,
+      triggerMeta: { moveTo: 'trail', trailDistancePx: 30 }, riskUsd: null, stopFrac: null,
+    });
+    getTradingMode.mockReturnValue('paper'); // paper ladder on paper deployment (mode-match)
+    getLadderWithRungs.mockResolvedValue(ladder({}, [trail])); // paper ladder — advisory path
+    loadPosition.mockResolvedValue({ coin: 'ETH', side: 'long', sz: 1, avgEntryPx: 1900, realizedPnlUsd: 0, feesPaidUsd: 0 });
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.fired).toBe(true);
+    // per-candle claim: the dedupe suffix is the 15m bucket
+    expect(claimRungFire).toHaveBeenCalledWith('L1', 'r1', String(Math.floor(NOW / (15 * 60 * 1000))));
+    // stays pending: never marked fired, ladder never done
+    expect(setRungStatus).not.toHaveBeenCalledWith('r1', 'fired');
+    expect(markLadderDone).not.toHaveBeenCalled();
+    // advisory stop trailed to mark − distance = 2000 − 30
+    expect(setAdvisoryStop).toHaveBeenCalledWith('s1', 'ETH', 1970);
   });
 });

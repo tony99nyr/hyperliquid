@@ -85,6 +85,10 @@ function triggerProblem(r: ArmRung): string | null {
         if (mf !== undefined && !(Number.isFinite(mf) && mf >= 0 && mf <= 2)) {
           return `rung ${r.seq}: momentumMaxFlips must be 0-2 when set`;
         }
+        const ms = r.triggerMeta.momentumSustain;
+        if (ms !== undefined && !(ms === 1 || ms === 2)) {
+          return `rung ${r.seq}: momentumSustain must be 1 or 2 when set`;
+        }
       }
       return null;
     }
@@ -164,8 +168,15 @@ export function validateLadderForArm(input: ValidateLadderInput): ValidateLadder
         warnings.push(`rung ${r.seq}: stop_move needs a price trigger.`);
       }
       const mv = r.triggerMeta?.moveTo;
-      if (mv !== 'breakeven' && !(typeof mv === 'number' && Number.isFinite(mv) && mv > 0)) {
-        warnings.push(`rung ${r.seq}: stop_move needs triggerMeta.moveTo (a positive price or 'breakeven').`);
+      if (mv === 'trail') {
+        const d = r.triggerMeta?.trailDistancePx;
+        if (!(typeof d === 'number' && Number.isFinite(d) && d > 0)) {
+          warnings.push(`rung ${r.seq}: moveTo 'trail' needs a positive trailDistancePx.`);
+        } else if (r.triggerPx != null && r.triggerPx > 0 && d >= r.triggerPx) {
+          warnings.push(`rung ${r.seq}: trailDistancePx ${d} is not smaller than the trigger price — nonsense geometry.`);
+        }
+      } else if (mv !== 'breakeven' && !(typeof mv === 'number' && Number.isFinite(mv) && mv > 0)) {
+        warnings.push(`rung ${r.seq}: stop_move needs triggerMeta.moveTo (a positive price, 'breakeven', or 'trail').`);
       } else if (typeof mv === 'number' && r.triggerPx != null && r.triggerPx > 0) {
         // The destination must be on the PROTECTIVE side of the trigger that fires it:
         // long ratchets to below the trigger, short to above (else it would either

@@ -52,7 +52,10 @@ import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
 import { validateEnv } from '@/lib/env/env';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 import { sendDiscord } from '@/lib/infrastructure/notify/discord-notify';
-import { ladderWindowState, ACTS_ON_LIVE_POSITION } from './ladder-types';
+import { ladderWindowState, ACTS_ON_LIVE_POSITION, WATCH_CANDLE_MS } from './ladder-types';
+import { bookHeatUsd } from './ladder-risk-business-logic';
+import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
+import { findAllStops } from '@/lib/trading/stop-order-service';
 import type { CanonicalFill, OrderSide } from '@/types/fill';
 import type { Position } from '@/types/position';
 
@@ -67,6 +70,14 @@ export interface LadderFireResult {
 
 const orderSideOf = (side: 'long' | 'short'): OrderSide => (side === 'long' ? 'buy' : 'sell');
 const skip = (reason: string): LadderFireResult => ({ fired: false, skipped: reason });
+
+/** Fire-time book-heat ceiling as a fraction of live equity (EDGE_ROADMAP gap 3a).
+ *  NaN-PROOF: a typo'd env value must fail CLOSED to the default, never disable the
+ *  gate (bare Number('x') = NaN and `heat > NaN` is always false — the fail-open trap). */
+const BOOK_HEAT_MAX_FRAC = (() => {
+  const f = Number(process.env.LADDER_BOOK_HEAT_MAX_FRAC);
+  return Number.isFinite(f) && f > 0 && f <= 1 ? f : 0.10;
+})();
 
 /**
  * Live position state for the coins a rung depends on. FAIL-CLOSED: for a LIVE ladder
@@ -165,8 +176,54 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
   const markPx = mids[coin];
   if (!Number.isFinite(markPx) || markPx <= 0) return skip('bad-mark');
 
-  // 6) ATOMIC claim — the double-fire guard. Only the inserter proceeds.
-  const claim = await claimRungFire(ladder.id, rung.id);
+  // 5b) EXPOSURE GATES (live opens/adds only; risk-reducing rungs are NEVER blocked).
+  // Both fail CLOSED on unreadable state and sit BEFORE the claim (skip = retryable).
+  if ((rung.action === 'open' || rung.action === 'add') && ladder.mode === 'live' && getTradingMode() === 'live') {
+    // (i) LIVE circuit breaker — a daily-loss/drawdown trip freezes autonomous
+    // entries (EDGE_ROADMAP gap 3c). Exits/ratchets always pass.
+    let equity: number;
+    try {
+      const breaker = await checkCircuitBreaker('live', now);
+      if (breaker.blockNewEntries) return skip(`circuit-breaker: ${breaker.reason}`);
+      equity = breaker.equityUsd; // reuse — a second computeLiveEquity would double the reads
+    } catch (e) {
+      return skip(`cannot-verify-breaker: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    // (ii) BOOK HEAT ceiling (gap 3a): slip-aware worst case of everything open +
+    // THIS rung must stay under the ceiling fraction of live equity.
+    try {
+      const address = getHlAccountAddress();
+      if (!address) return skip('cannot-verify-heat: no account address');
+      const ch = await fetchClearinghouseState(address, { uncached: true });
+      if (ch.stale || ch.error) return skip('cannot-verify-heat: clearinghouse unreadable');
+      const stops = await findAllStops();
+      const heatPositions = ch.positions.map((p) => ({
+        sz: p.size,
+        markPx: mids[p.coin.toUpperCase()] ?? p.entryPx ?? 0,
+        stopPx: stops[p.coin.toUpperCase()]?.triggerPx ?? null,
+      }));
+      const gateSizeCoins =
+        rung.riskUsd != null && rung.stopFrac != null && rung.stopFrac > 0
+          ? rung.riskUsd / (markPx * rung.stopFrac)
+          : rung.sizeCoins; // absolute-coin rungs must still weigh in (review L6)
+      const gateStopPx = rung.stopFrac != null ? (rung.side === 'long' ? markPx * (1 - rung.stopFrac) : markPx * (1 + rung.stopFrac)) : rung.stopPx;
+      const rungWorst = rungWorstCaseLoss({ side: rung.side, action: rung.action, entryPx: markPx, sizeCoins: gateSizeCoins ?? null, stopPx: gateStopPx ?? null });
+      const heat = bookHeatUsd(heatPositions) + rungWorst;
+      const ceiling = BOOK_HEAT_MAX_FRAC * equity;
+      if (heat > ceiling) {
+        await writeAnalysisLog({ sessionId: (await getActiveSession())?.id ?? '', source: 'ladder-fire', severity: 'warn', message: `HEAT GATE: skipped ${coin} ${rung.action} — book heat $${heat.toFixed(0)} > ceiling $${ceiling.toFixed(0)} (${(BOOK_HEAT_MAX_FRAC * 100).toFixed(0)}% of $${equity.toFixed(0)})` }).catch(() => {});
+        return skip(`book-heat-exceeded ($${heat.toFixed(0)} > $${ceiling.toFixed(0)})`);
+      }
+    } catch (e) {
+      return skip(`cannot-verify-heat: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  // 6) ATOMIC claim — the double-fire guard. Only the inserter proceeds. TRAIL
+  // stop_move rungs claim PER COMPLETED CANDLE (they re-fire as price advances);
+  // everything else stays strictly one-shot.
+  const isTrail = rung.action === 'stop_move' && rung.triggerMeta?.moveTo === 'trail';
+  const claim = await claimRungFire(ladder.id, rung.id, isTrail ? String(Math.floor(now / WATCH_CANDLE_MS)) : undefined);
   if (!claim.claimed || !claim.fireId) return skip('already-fired');
   const fireId = claim.fireId;
 
@@ -373,8 +430,14 @@ async function fireStopMove(ladder: LadderWithRungs, rung: LadderRung, sessionId
     return skip('flat');
   }
   const mv = rung.triggerMeta?.moveTo;
-  const newStop = mv === 'breakeven' ? pos.avgEntryPx : typeof mv === 'number' ? mv : NaN;
+  const isTrail = mv === 'trail';
+  const trailD = rung.triggerMeta?.trailDistancePx;
+  const newStop = isTrail
+    ? (typeof trailD === 'number' && trailD > 0 ? (pos.side === 'long' ? markPx - trailD : markPx + trailD) : NaN)
+    : mv === 'breakeven' ? pos.avgEntryPx : typeof mv === 'number' ? mv : NaN;
   if (!(Number.isFinite(newStop) && newStop > 0)) {
+    // An invalid destination is a PERMANENT config error — terminate the rung even for
+    // trails (only the benign not-tighter-yet case may keep a trail pending; review L5).
     await markFireOutcome(fireId, 'failed', 'invalid-moveTo');
     await setRungStatus(rung.id, 'failed');
     return skip('invalid-moveTo');
@@ -393,12 +456,14 @@ async function fireStopMove(ladder: LadderWithRungs, rung: LadderRung, sessionId
     // (No tighter-than-old check here: the advisory column has no authoritative "old"
     // to compare against exchange-side; paper exists to exercise the flow, not P&L.)
     await setAdvisoryStop(sessionId, coin, newStop).catch(() => false);
-    await markFireOutcome(fireId, 'filled', `paper stop→${newStop}`);
-    await setRungStatus(rung.id, 'fired').catch(() => {});
-    const PAPER_TERMINAL = new Set(['fired', 'skipped', 'failed', 'cancelled']);
-    if (ladder.rungs.every((r) => r.id === rung.id || PAPER_TERMINAL.has(r.status))) {
-      await markLadderDone(ladder.id).catch(() => {});
-    }
+    await markFireOutcome(fireId, 'filled', `paper stop→${newStop}${isTrail ? ' (trail)' : ''}`);
+    if (!isTrail) {
+      await setRungStatus(rung.id, 'fired').catch(() => {});
+      const PAPER_TERMINAL = new Set(['fired', 'skipped', 'failed', 'cancelled']);
+      if (ladder.rungs.every((r) => r.id === rung.id || PAPER_TERMINAL.has(r.status))) {
+        await markLadderDone(ladder.id).catch(() => {});
+      }
+    } // trail rungs stay PENDING on paper too — they re-fire per candle
     await writeAnalysisLog({ sessionId, source: 'ladder-fire', severity: 'info', message: `STOP-MOVE (paper) ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: ${coin} advisory stop → ${newStop}.` }).catch(() => {});
     return { fired: true, skipped: null };
   }
@@ -416,8 +481,10 @@ async function fireStopMove(ladder: LadderWithRungs, rung: LadderRung, sessionId
   if (oldPx != null && Number.isFinite(oldPx)) {
     const tighter = pos.side === 'long' ? newStop > oldPx + 1e-9 : newStop < oldPx - 1e-9;
     if (!tighter) {
-      await markFireOutcome(fireId, 'failed', `not-risk-reducing (old ${oldPx} → new ${newStop}, ${pos.side})`);
-      await setRungStatus(rung.id, 'skipped');
+      await markFireOutcome(fireId, 'failed', isTrail ? `trail-noop (stop ${oldPx} already tighter than ${newStop} — benign, waiting)` : `not-risk-reducing (old ${oldPx} → new ${newStop}, ${pos.side})`);
+      // A TRAIL that isn't tighter this candle simply waits for the next one (the rung
+      // stays pending); a fixed-destination move that isn't tighter is done for good.
+      if (!isTrail) await setRungStatus(rung.id, 'skipped');
       return skip('not-risk-reducing');
     }
   }
@@ -441,12 +508,14 @@ async function fireStopMove(ladder: LadderWithRungs, rung: LadderRung, sessionId
       await alert(sessionId, `Ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: new ${coin} stop @ ${newStop} placed but the OLD stop (oid ${oldStop.oid}) failed to cancel — cancel it manually; the tighter stop governs.`);
     }
   }
-  await markFireOutcome(fireId, 'filled', `stop→${newStop}${oldPx != null ? ` (from ${oldPx})` : ' (no prior stop)'}`).catch(() => {});
-  await setRungStatus(rung.id, 'fired').catch(() => {});
-  const TERMINAL_RUNG = new Set(['fired', 'skipped', 'failed', 'cancelled']);
-  if (ladder.rungs.every((r) => r.id === rung.id || TERMINAL_RUNG.has(r.status))) {
-    await markLadderDone(ladder.id).catch(() => {});
-  }
+  await markFireOutcome(fireId, 'filled', `stop→${newStop}${oldPx != null ? ` (from ${oldPx})` : ' (no prior stop)'}${isTrail ? ' (trail)' : ''}`).catch(() => {});
+  if (!isTrail) {
+    await setRungStatus(rung.id, 'fired').catch(() => {});
+    const TERMINAL_RUNG = new Set(['fired', 'skipped', 'failed', 'cancelled']);
+    if (ladder.rungs.every((r) => r.id === rung.id || TERMINAL_RUNG.has(r.status))) {
+      await markLadderDone(ladder.id).catch(() => {});
+    }
+  } // trail rungs stay PENDING — they re-fire per candle until expiry or a flat position
   await writeAnalysisLog({ sessionId, source: 'ladder-fire', severity: 'info', message: `STOP-MOVE ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: ${coin} ${pos.side} resting stop → ${newStop}${oldPx != null ? ` (from ${oldPx})` : ''}.` }).catch(() => {});
   await sendDiscord(
     `🔒 **STOP RATCHET** ${ladder.title.slice(0, 60)} — ${coin} ${pos.side} stop moved to $${newStop}${oldPx != null ? ` (from $${oldPx})` : ''}${mv === 'breakeven' ? ' (breakeven)' : ''}. Worst case now locked.`,

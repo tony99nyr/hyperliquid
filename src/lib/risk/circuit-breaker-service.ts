@@ -6,6 +6,8 @@
  */
 
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
+import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
+import { fetchSpotUsdcBalance, fetchClearinghouseState } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { fetchAllMids } from '@/lib/hyperliquid/hyperliquid-info-service';
 import {
   evaluateCircuitBreaker,
@@ -77,9 +79,31 @@ export interface CircuitBreakerStatus extends CircuitBreakerDecision {
  * Compute equity, roll + persist the breaker state, and return the decision. The
  * `now` is injectable for tests; production passes Date.now().
  */
+/**
+ * LIVE account equity under the unified-account model: spot USDC (the collateral
+ * pool) + Σ open-position unrealized PnL. Perp marginSummary reads 0 by design
+ * (see memory: hl-unified-account) — never use accountValue here. THROWS on an
+ * unreadable account so breaker callers fail CLOSED rather than compute from $0.
+ */
+export async function computeLiveEquity(): Promise<number> {
+  const addr = getHlAccountAddress();
+  if (!addr) throw new Error('live equity: HL_ACCOUNT_ADDRESS not set');
+  const [spot, ch] = await Promise.all([
+    fetchSpotUsdcBalance(addr),
+    fetchClearinghouseState(addr, { uncached: true }),
+  ]);
+  if (spot == null) throw new Error('live equity: spot balance unreadable');
+  if (ch.stale || ch.error) throw new Error(`live equity: clearinghouse unreadable (${ch.error ?? 'stale'})`);
+  const upnl = ch.positions.reduce((a, p) => a + (Number(p.unrealizedPnl) || 0), 0);
+  return spot + upnl;
+}
+
 export async function checkCircuitBreaker(scope = 'scout', now: number = Date.now()): Promise<CircuitBreakerStatus> {
   const client = getServiceRoleClient();
-  const equityUsd = await computeScoutEquity();
+  // scope='live' tracks the REAL account (unified equity); anything else keeps the
+  // original paper-scout computation. THROWS for live when the account is unreadable
+  // — the fire path treats that as skip-don't-fire (fail closed).
+  const equityUsd = scope === 'live' ? await computeLiveEquity() : await computeScoutEquity();
 
   const { data: row } = await client.from('circuit_breaker_state').select('*').eq('scope', scope).maybeSingle();
   const prev: CircuitBreakerState | null = row

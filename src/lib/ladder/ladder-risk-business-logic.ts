@@ -358,3 +358,31 @@ export function hashPreconditionSnapshot(snapshot: string): string {
   }
   return (h >>> 0).toString(16).padStart(8, '0');
 }
+
+/** One live position for the fire-time book-heat read. */
+export interface HeatPosition {
+  sz: number;
+  markPx: number;
+  /** The RESTING protective stop, or null when the position is unstopped. */
+  stopPx: number | null;
+}
+
+/**
+ * Fire-time BOOK heat: the slip-aware worst case of everything already open.
+ * Per position: (|mark − stop| + slipTol×mark) × sz — the house model (stops
+ * fill slipTol of price worse). An UNSTOPPED position is priced as a full
+ * slipTol×3 gap of its notional (self-defending: never $0 for missing stops).
+ * PURE — the fire path feeds live reads. Fixed-heat safety per EDGE_ROADMAP 3a.
+ */
+export function bookHeatUsd(positions: HeatPosition[], slipTol = STOP_SLIPPAGE_TOL): number {
+  let heat = 0;
+  for (const p of positions) {
+    if (!(p.sz > 0) || !(p.markPx > 0)) continue;
+    if (p.stopPx != null && p.stopPx > 0) {
+      heat += (Math.abs(p.markPx - p.stopPx) + slipTol * p.markPx) * p.sz;
+    } else {
+      heat += 3 * slipTol * p.markPx * p.sz; // unstopped: assume a brutal gap
+    }
+  }
+  return heat;
+}

@@ -23,7 +23,7 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import type { PriceCandle } from '@/types/trading-core';
-import { MOMENTUM_STALL_LONG, MOMENTUM_STALL_SHORT } from './ladder-types';
+import { MOMENTUM_STALL_LONG, MOMENTUM_STALL_SHORT, prevIndicatorName } from './ladder-types';
 import {
   momentumStallVerdict,
   type MomentumCandle,
@@ -79,9 +79,20 @@ export async function computeMomentumIndicators(
     const series = await readSeries(client, coin, now);
     const long = momentumStallVerdict({ side: 'long', candles: completed, series });
     const short = momentumStallVerdict({ side: 'short', candles: completed, series });
+    // PREVIOUS-candle reads (drop the newest completed bar + ~one bar of series) for
+    // sustained confirms: `<name>@prev`. Approximation disclosed: the series is the
+    // 5-min snapshot cadence, so we trim 3 points ≈ one 15m candle. KNOWN SOFTNESS:
+    // near cold-start a too-thin prev window reads 0 flips ("clean") — sustain 2
+    // degrades toward sustain 1 there rather than failing closed (review L3).
+    const prevCandles = completed.slice(0, -1);
+    const prevSeries = series.slice(0, Math.max(0, series.length - 3));
+    const longPrev = momentumStallVerdict({ side: 'long', candles: prevCandles, series: prevSeries });
+    const shortPrev = momentumStallVerdict({ side: 'short', candles: prevCandles, series: prevSeries });
     return {
       [MOMENTUM_STALL_LONG]: long.flipped.length,
       [MOMENTUM_STALL_SHORT]: short.flipped.length,
+      [prevIndicatorName(MOMENTUM_STALL_LONG)]: longPrev.flipped.length,
+      [prevIndicatorName(MOMENTUM_STALL_SHORT)]: shortPrev.flipped.length,
     };
   } catch {
     return null; // fail closed at the evaluator

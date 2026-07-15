@@ -262,6 +262,11 @@ describe('momentumConfirm (entry filter) + activation window — arm-time rules'
     expect(arm({ triggerMeta: { momentumConfirm: true, momentumMaxFlips: 5 } }).warnings.join(' ')).toMatch(/momentumMaxFlips/);
   });
 
+  it('REJECTS an out-of-range momentumSustain (only 1 or 2)', () => {
+    expect(arm({ triggerMeta: { momentumConfirm: true, momentumSustain: 3 } }).warnings.join(' ')).toMatch(/momentumSustain/);
+    expect(arm({ triggerMeta: { momentumConfirm: true, momentumSustain: 2 } }).warnings.filter((w) => w.includes('momentumSustain'))).toEqual([]);
+  });
+
   it('REJECTS an empty activation window (active_from at/after expiry)', () => {
     const w = arm({}, { activeFromMs: NOW + 86_400_000 }).warnings.join(' ');
     expect(w).toMatch(/active_from must be BEFORE expiry/);
@@ -299,6 +304,13 @@ describe('stop_move rungs — arm-time rules', () => {
     expect(
       arm({ side: 'short', triggerKind: 'price_below', triggerPx: 60, triggerMeta: { moveTo: 58 } }).warnings.join(' '),
     ).toMatch(/protective side/); // short: dest must be ABOVE the trigger
+  });
+
+  it("REJECTS a trail without a positive distance, and a distance ≥ the trigger", () => {
+    expect(arm({ triggerMeta: { moveTo: 'trail' } }).warnings.join(' ')).toMatch(/trailDistancePx/);
+    expect(arm({ triggerMeta: { moveTo: 'trail', trailDistancePx: -2 } }).warnings.join(' ')).toMatch(/trailDistancePx/);
+    expect(arm({ triggerPx: 66.85, triggerMeta: { moveTo: 'trail', trailDistancePx: 70 } }).warnings.join(' ')).toMatch(/nonsense geometry/);
+    expect(arm({ triggerMeta: { moveTo: 'trail', trailDistancePx: 1.5 } }).warnings).toEqual([]); // valid trail
   });
 
   it('REJECTS non-price triggers on stop_move', () => {
