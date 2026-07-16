@@ -16,6 +16,7 @@ import { verifyCronBearer } from '@/lib/infrastructure/auth/auth';
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 import { getAutoExitCronSecret } from '@/lib/auto-exit/auto-exit-config';
 import { reconcileLivePositions } from '@/lib/cockpit/position-reconcile-service';
+import { backfillExchangeFills } from '@/lib/cockpit/fill-backfill-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,8 +25,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
   }
   try {
+    // Backfill FIRST: booking the exchange-side fills the ledger missed lets the
+    // position fold correct rows WITH their history; the reconciler then only
+    // handles residual drift (and its freshness guards still apply).
+    const backfill = await backfillExchangeFills();
     const summary = await reconcileLivePositions();
-    return NextResponse.json({ ok: true, ...summary });
+    return NextResponse.json({ ok: true, ...summary, backfill });
   } catch (e) {
     return NextResponse.json({ ok: false, error: extractErrorMessage(e) }, { status: 500 });
   }

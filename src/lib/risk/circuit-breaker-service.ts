@@ -86,16 +86,35 @@ export interface CircuitBreakerStatus extends CircuitBreakerDecision {
  * unreadable account so breaker callers fail CLOSED rather than compute from $0.
  */
 export async function computeLiveEquity(): Promise<number> {
+  return (await computeLiveEquityBreakdown()).totalUsd;
+}
+
+/**
+ * THE one live-equity definition, with its components. Under HL's unified
+ * account the spot USDC balance IS the collateral (perp accountValue reads ~0
+ * between/behind positions by design), so equity = spot USDC + Σ open uPnL.
+ * Every consumer — circuit breaker, ladder heat gate, Performance header —
+ * must derive from THIS, never re-implement (a second definition is how the
+ * Performance tab once omitted Σ uPnL). THROWS when unreadable; callers that
+ * need fail-soft wrap it.
+ */
+export async function computeLiveEquityBreakdown(
+  /** fresh=true (default) forces an uncached clearinghouse read — REQUIRED for
+   *  anything that gates money (breaker, heat gate; fail-closed on stale).
+   *  Display surfaces (the 30s cockpit poll) pass fresh:false to ride the
+   *  15s cache instead of hammering HL once per open tab per poll. */
+  opts: { fresh?: boolean } = {},
+): Promise<{ totalUsd: number; spotUsd: number; upnlUsd: number }> {
   const addr = getHlAccountAddress();
   if (!addr) throw new Error('live equity: HL_ACCOUNT_ADDRESS not set');
   const [spot, ch] = await Promise.all([
     fetchSpotUsdcBalance(addr),
-    fetchClearinghouseState(addr, { uncached: true }),
+    fetchClearinghouseState(addr, { uncached: opts.fresh !== false }),
   ]);
   if (spot == null) throw new Error('live equity: spot balance unreadable');
   if (ch.stale || ch.error) throw new Error(`live equity: clearinghouse unreadable (${ch.error ?? 'stale'})`);
   const upnl = ch.positions.reduce((a, p) => a + (Number(p.unrealizedPnl) || 0), 0);
-  return spot + upnl;
+  return { totalUsd: spot + upnl, spotUsd: spot, upnlUsd: upnl };
 }
 
 export async function checkCircuitBreaker(scope = 'scout', now: number = Date.now()): Promise<CircuitBreakerStatus> {

@@ -31,7 +31,8 @@ import {
   type MarkMap,
   type PerformanceKpis,
 } from './performance-business-logic';
-import { fetchAllMids, fetchClearinghouseState, fetchRecentFills, fetchSpotUsdcBalance, isValidHlAddress } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { fetchAllMids, fetchRecentFills, isValidHlAddress } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { computeLiveEquityBreakdown } from '@/lib/risk/circuit-breaker-service';
 import type { CanonicalFill, TradingMode } from '@/types/fill';
 
 /**
@@ -56,7 +57,8 @@ export interface PerformanceSummary {
    */
   equityUsd: number | null;
   /**
-   * Breakdown of `equityUsd` into its HL components, so the headline number is
+   * Breakdown of `equityUsd` into its HL components (spot USDC collateral +
+   * Σ open uPnL — the ONE live-equity definition), so the headline number is
    * legible (it blends spot cash + the margin on any open perp position):
    *   - spotUsd: USDC sitting in the SPOT wallet (free cash).
    *   - perpUsd: PERP account value = margin backing open positions + their uPnL
@@ -104,15 +106,13 @@ interface LiveEquity {
 }
 
 async function fetchLiveAccountValue(): Promise<LiveEquity> {
-  const addr = process.env.HL_ACCOUNT_ADDRESS?.trim();
-  if (!addr || !isValidHlAddress(addr)) return { totalUsd: null, perpUsd: null, spotUsd: null };
   try {
-    const [ch, spotUsdc] = await Promise.all([fetchClearinghouseState(addr), fetchSpotUsdcBalance(addr)]);
-    // Perp value: known only on a FRESH read (stale/garbage → unknown). >= 0 (not
-    // > 0) so a flat-but-funded account counts as a real 0, not "unknown".
-    const perpVal = !ch.stale && Number.isFinite(ch.accountValueUsd) && ch.accountValueUsd >= 0 ? ch.accountValueUsd : null;
-    const totalUsd = perpVal === null && spotUsdc === null ? null : (perpVal ?? 0) + (spotUsdc ?? 0);
-    return { totalUsd, perpUsd: perpVal, spotUsd: spotUsdc };
+    // THE one live-equity definition (shared with the circuit breaker + ladder
+    // heat gate): spot USDC (the unified account's collateral) + Σ open uPnL.
+    // The old perp-accountValue read omitted uPnL under the unified account
+    // (accountValue reads ~0 by design when collateral sits in spot).
+    const b = await computeLiveEquityBreakdown({ fresh: false });
+    return { totalUsd: b.totalUsd, perpUsd: b.upnlUsd, spotUsd: b.spotUsd };
   } catch {
     return { totalUsd: null, perpUsd: null, spotUsd: null };
   }

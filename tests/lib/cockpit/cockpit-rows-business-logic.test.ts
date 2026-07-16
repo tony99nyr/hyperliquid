@@ -133,6 +133,7 @@ describe('fill / position / pnl rows', () => {
       reduce_only: false,
       partial: false,
       source: 'paper',
+      filled_at: new Date(1700000000000).toISOString(),
       hl_order_id: null,
       hl_raw: null,
     });

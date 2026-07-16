@@ -172,6 +172,10 @@ export interface FillInsertRow {
   source: TradingMode;
   hl_order_id: string | null;
   hl_raw: Record<string, unknown> | null;
+  /** ISO timestamp of the ACTUAL fill. Without this the column defaults to the
+   *  INSERT time — indistinguishable for real-time executions, wrong for
+   *  backfilled exchange-side fills (and it silently re-orders the fold). */
+  filled_at: string;
 }
 
 export function buildFillRow(fill: CanonicalFill): FillInsertRow {
@@ -190,6 +194,7 @@ export function buildFillRow(fill: CanonicalFill): FillInsertRow {
     source: fill.source,
     hl_order_id: fill.hlOrderId,
     hl_raw: fill.hlRaw,
+    filled_at: new Date(fill.filledAt).toISOString(),
   };
 }
 

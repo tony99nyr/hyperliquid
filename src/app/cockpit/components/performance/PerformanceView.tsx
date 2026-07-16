@@ -283,7 +283,7 @@ function EquityCard({ summary }: { summary: PerformanceSummary }) {
             </span>
           </span>
           <span style={{ color: '#586273' }}>
-            perp (margin + uPnL){' '}
+            perp (open uPnL){' '}
             <span style={{ color: '#9aa4b5', ...TNUM }}>
               {summary.equityBreakdown.perpUsd == null ? '—' : `$${fmtMoney(summary.equityBreakdown.perpUsd)}`}
             </span>

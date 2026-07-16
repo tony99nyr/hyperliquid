@@ -43,6 +43,9 @@ tokens (poke-only), never admin or signing keys.
 ```cron
 */5 * * * *  curl -s -H "Authorization: Bearer $CRON_SECRET" https://hyperliquid-rouge.vercel.app/api/cron/auto-exit
 */5 * * * *  curl -s -H "Authorization: Bearer $CRON_SECRET" https://hyperliquid-rouge.vercel.app/api/cron/reconcile-positions
+# ^ reconcile also BACKFILLS exchange-side fills (resting stop/bracket fills, manual
+#   HL-app closes) into the `fills` ledger — dedupe by hl_order_id (unique index,
+#   0036), attributed to the holding live session. Discord 🚨 on any shortfall.
 ```
 - **auto-exit** — the Layer-1 risk-exit detector (no-ops while `AUTO_EXIT_ENABLED=false`).
 - **reconcile-positions** — keeps cockpit positions in lock-step with the REAL HL account

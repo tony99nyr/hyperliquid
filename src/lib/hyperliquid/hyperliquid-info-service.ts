@@ -76,6 +76,9 @@ export interface HlFill {
   /** Exchange fee on this fill (USD; HL sends it — needed for honest NET outcome math). */
   fee: number | null;
   dir: string | null;
+  /** HL order id this fill belongs to (several partial fills can share one oid).
+   *  Optional so long-lived test fixtures stay valid; absent ≡ unknown. */
+  oid?: number | null;
 }
 
 export interface HlFillsResult {
@@ -428,7 +431,11 @@ export async function fetchRecentFills(
     return { address, fills: [], fetchedAt: Date.now(), stale: false, error: 'Invalid Hyperliquid address' };
   }
 
-  const cached = fillsCache.get(address);
+  // Cache key includes the window: callers with different lookbacks (the 30s
+  // performance poll vs the 48h backfill cron) must not serve each other a
+  // shorter window than they asked for.
+  const cacheKey = `${address}:${lookbackMs}:${limit}`;
+  const cached = fillsCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.value;
   }
@@ -446,7 +453,7 @@ export async function fetchRecentFills(
       .slice(0, limit);
 
     const result: HlFillsResult = { address, fills, fetchedAt: Date.now(), stale: false };
-    fillsCache.set(address, { value: result, expiresAt: Date.now() + FILLS_CACHE_TTL_MS });
+    fillsCache.set(cacheKey, { value: result, expiresAt: Date.now() + FILLS_CACHE_TTL_MS });
     return result;
   } catch (err) {
     const message = extractErrorMessage(err);
@@ -468,6 +475,7 @@ function mapRawFill(f: Record<string, unknown>): HlFill {
     closedPnl: numOrNull(f.closedPnl),
     fee: numOrNull(f.fee),
     dir: typeof f.dir === 'string' ? f.dir : null,
+    oid: numOrNull(f.oid),
   };
 }
 

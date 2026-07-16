@@ -113,7 +113,7 @@ src/hooks/                                           # realtime hooks (useRealti
 src/app/cockpit/{page,CockpitClient}.tsx + components/  # PIN-gated cockpit shell + panels (4 tabs)
 src/lib/cockpit/{supabase-server,supabase-browser}.ts
 src/lib/infrastructure/{auth,logging,config}/        # vendored admin-PIN + stubs
-supabase/migrations/0001_init.sql … 0024_*.sql       # migrations (RLS + realtime publication; idempotent; 0023 = ladders)
+supabase/migrations/0001_init.sql … 0036_*.sql       # migrations (RLS + realtime publication; idempotent; 0023 = ladders)
 data/{backups/wallet-rating/rated-wallets.json,auto-exit/}  # vendored dataset + versioned auto-exit thresholds
 docs/{CONTEXT.md, CODE_ORGANIZATION.md, adr/, scout/, LIVE_*.md, OPERATOR_MANUAL.md,
       ARMED_LADDER_ARCHITECTURE.md, LADDER_OPERATOR_RUNBOOK.md,

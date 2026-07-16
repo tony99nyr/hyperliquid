@@ -44,7 +44,7 @@ export default function TopBar({ view, onViewChange, mode, equityUsd, equityBrea
   const fmt2 = (n: number) => `$${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
   const equityTitle =
     equityBreakdown && (equityBreakdown.spotUsd != null || equityBreakdown.perpUsd != null)
-      ? `Total account equity${equityBreakdown.spotUsd != null ? ` · cash (spot) ${fmt2(equityBreakdown.spotUsd)}` : ''}${equityBreakdown.perpUsd != null ? ` · perp (margin + uPnL) ${fmt2(equityBreakdown.perpUsd)}` : ''}`
+      ? `Total account equity${equityBreakdown.spotUsd != null ? ` · cash (spot) ${fmt2(equityBreakdown.spotUsd)}` : ''}${equityBreakdown.perpUsd != null ? ` · open uPnL ${fmt2(equityBreakdown.perpUsd)}` : ''}`
       : undefined;
   return (
     <header
