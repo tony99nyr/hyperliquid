@@ -9,7 +9,6 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { timingSafeEqual } from 'node:crypto';
 import { verifyAdminAuth, getClientIdentifier } from '@/lib/infrastructure/auth/auth';
 import { checkRateLimit } from '@/lib/infrastructure/rate-limiting/in-memory-rate-limit';
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
@@ -20,24 +19,8 @@ export const dynamic = 'force-dynamic';
 /** The consumers are crons (8h + 30min) — 10/min per client is generous. */
 const MAX_PER_MIN = 10;
 
-/**
- * Dedicated READ-scoped bearer (ADVISORY_READ_TOKEN) so the consuming system
- * never has to hold this cockpit's ADMIN_SECRET — a compromise over there must
- * not be able to hit approve/arm/exit routes here. Constant-time compare;
- * unset/short token disables the path (admin auth still works).
- */
-function hasAdvisoryReadToken(request: NextRequest): boolean {
-  const expected = process.env.ADVISORY_READ_TOKEN;
-  if (!expected || expected.length < 16) return false;
-  const auth = request.headers.get('authorization');
-  const token = auth?.startsWith('Bearer ') ? auth.slice(7) : '';
-  const a = Buffer.from(token);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!hasAdvisoryReadToken(request) && !(await verifyAdminAuth(request))) {
+  if (!(await verifyAdminAuth(request))) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
   }
   const limit = checkRateLimit(`advisory:${getClientIdentifier(request)}`, MAX_PER_MIN, 60_000);
