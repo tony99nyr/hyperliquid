@@ -14,6 +14,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
+import { scoutSessionIds } from './scout-session-service';
 import { fetchMetaAndAssetCtxs, fetchVaultDetails, HLP_VAULT_ADDRESS } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { fetchFundingHistory } from '@/lib/hyperliquid/candle-service';
 import { fundingCostUsd } from '@/lib/trading/paper-funding-business-logic';
@@ -105,18 +106,24 @@ export async function computeScoutLaneCards(
   now: number = Date.now(),
   client: SupabaseClient = getServiceRoleClient(),
 ): Promise<ScoutLaneResult> {
-  const { data: sessions } = await client.from('sessions').select('id').eq('title', 'scout');
-  const sessionIds = (sessions ?? []).map((s) => (s as { id: string }).id);
+  // Robust identity: the old `.eq('title','scout')` matched ZERO sessions after the
+  // scout session was archived — the kill/graduate bar read $0 forever (Jul-16 review).
+  const sessionIds = await scoutSessionIds(client);
   const queryIds = sessionIds.length > 0 ? sessionIds : ['00000000-0000-0000-0000-000000000000'];
 
   const { data: positions } = await client
     .from('positions').select('coin, side, lane, realized_pnl_usd, fees_paid_usd').in('session_id', queryIds);
   let realizedGrossUsd = 0;
   let openCount = 0;
+  let feesPaidUsd = 0;
+  let grossWinsUsd = 0;
   for (const p of positions ?? []) {
     const r = p as { side: string; realized_pnl_usd: number; fees_paid_usd: number };
     if (r.side !== 'flat') openCount++;
     realizedGrossUsd += (Number(r.realized_pnl_usd) || 0) - (Number(r.fees_paid_usd) || 0);
+    feesPaidUsd += Number(r.fees_paid_usd) || 0;
+    // Per-position positive realized as the gross-wins proxy (fee-drag denominator).
+    grossWinsUsd += Math.max(0, Number(r.realized_pnl_usd) || 0);
   }
 
   const ctxs = await fetchMetaAndAssetCtxs().catch(() => ({}) as Record<string, { fundingHourly: number }>);
@@ -128,7 +135,11 @@ export async function computeScoutLaneCards(
   const { fundingHaircutUsd, earliestMs, fundingHaircutByCoin } = estimateFromFills((fills ?? []) as FillRow[], fundingByCoin);
   const periodDays = Number.isFinite(earliestMs) ? Math.max(1, (now - earliestMs) / 86_400_000) : 1;
 
-  const { data: hyps } = await client.from('hypotheses').select('status, lane').in('session_id', queryIds);
+  const { data: hyps } = await client
+    .from('hypotheses')
+    .select('status, lane')
+    .eq('excluded', false) // janitorial/reaped rows are NOT trades (Jul-16 quarantine)
+    .in('session_id', queryIds);
   let wins = 0, losses = 0, closed = 0;
   for (const h of hyps ?? []) {
     const st = (h as { status: string }).status;
@@ -138,7 +149,7 @@ export async function computeScoutLaneCards(
   }
 
   // Account-level (ALL lanes) — the bar the circuit breaker + graduation gate on.
-  const accountInput: ScorecardInput = { realizedGrossUsd, slippageHaircutUsd: 0, fundingHaircutUsd, tradeCount: closed, wins, losses, periodDays };
+  const accountInput: ScorecardInput = { realizedGrossUsd, slippageHaircutUsd: 0, fundingHaircutUsd, tradeCount: closed, wins, losses, periodDays, feesPaidUsd, grossWinsUsd };
   const acc = buildScorecard(accountInput);
   const account: LaneCard = {
     lane: 'ALL', kind: 'account', netUsd: acc.netUsd, realizedUsd: acc.realizedGrossUsd, fundingUsd: acc.fundingHaircutUsd,

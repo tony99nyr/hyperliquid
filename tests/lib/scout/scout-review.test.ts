@@ -76,13 +76,38 @@ describe('buildScorecard — KILL', () => {
 });
 
 describe('buildScorecard — GRADUATE gating', () => {
+  // Post-Jul-16 bar: graduation demands the DECAY-ADJUSTED run-rate (bar/(1−0.5) = 2x
+  // nominal — published signals lose ~43-58% of edge out of sample) AND a fee-drag
+  // check (fees/grossWins ≤ 35% — overtrading is the measured LLM-agent killer).
   const graduating = (over: Partial<ScorecardInput> = {}) =>
-    input({ realizedGrossUsd: 3300, slippageHaircutUsd: 100, fundingHaircutUsd: 50, tradeCount: 60, wins: 36, losses: 24, periodDays: 90, maxDrawdownUsd: 800, equityUsd: 10_000, ...over });
+    input({ realizedGrossUsd: 6600, slippageHaircutUsd: 200, fundingHaircutUsd: 100, tradeCount: 60, wins: 36, losses: 24, periodDays: 90, maxDrawdownUsd: 800, equityUsd: 10_000, feesPaidUsd: 300, grossWinsUsd: 8000, ...over });
 
-  it('GRADUATE when run-rate ≥ bar over ≥90d with enough trades + low DD', () => {
+  it('GRADUATE when decay-adjusted run-rate clears over ≥90d with enough trades + low DD + sane fee drag', () => {
     const s = buildScorecard(graduating());
     expect(s.verdict).toBe('graduate');
-    expect(s.monthlyRunRateUsd).toBeGreaterThan(DEFAULT_SCORECARD_CONFIG.monthlyBarUsd);
+    expect(s.monthlyRunRateUsd).toBeGreaterThan(
+      DEFAULT_SCORECARD_CONFIG.monthlyBarUsd / (1 - DEFAULT_SCORECARD_CONFIG.liveDecayHaircut),
+    );
+    expect(s.reason).toMatch(/regime coverage still needs a HUMAN check/);
+  });
+
+  it('does NOT graduate on the OLD bar alone — decay adjustment doubles the hurdle', () => {
+    // clears $1000/mo nominal but not the $2000/mo decay-adjusted bar
+    const s = buildScorecard(graduating({ realizedGrossUsd: 3300, slippageHaircutUsd: 100, fundingHaircutUsd: 50 }));
+    expect(s.verdict).toBe('continue');
+    expect(s.reason).toMatch(/decay-adjusted/);
+  });
+
+  it('does NOT graduate on excessive fee drag (overtrading)', () => {
+    const s = buildScorecard(graduating({ feesPaidUsd: 4000, grossWinsUsd: 8000 })); // 50% > 35%
+    expect(s.verdict).toBe('continue');
+    expect(s.reason).toMatch(/overtrading/);
+  });
+
+  it('fee drag defaults to 0 (never blocks) when the legacy caller omits fees/wins', () => {
+    const s = buildScorecard(graduating({ feesPaidUsd: undefined, grossWinsUsd: undefined }));
+    expect(s.feeDragFrac).toBe(0);
+    expect(s.verdict).toBe('graduate');
   });
 
   it('does NOT graduate without enough TRADES even if days + run-rate clear', () => {

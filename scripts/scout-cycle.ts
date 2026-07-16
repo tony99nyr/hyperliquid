@@ -102,13 +102,16 @@ run(async () => {
   const breaker = await checkCircuitBreaker('scout', now);
 
   // 6) Track record (scout sessions only — self-assessment excludes manual trades).
-  const { data: scoutSessions } = await db.from('sessions').select('id').eq('title', 'scout');
-  const scoutIds = (scoutSessions ?? []).map((s) => (s as { id: string }).id);
+  // Robust identity (Jul-16 review): the archived title made this return [] — every
+  // cycle ran with NO self-memory. Resolve scout sessions properly.
+  const { scoutSessionIds } = await import('@/lib/scout/scout-session-service');
+  const scoutIds = await scoutSessionIds(db);
   let hypRows: HypothesisSummaryRow[] = [];
   if (scoutIds.length > 0) {
     const { data } = await db
       .from('hypotheses')
       .select('statement, status, resolution_note, created_at, resolved_at')
+      .eq('excluded', false) // janitorial rows poison self-memory (Jul-16 quarantine)
       .in('session_id', scoutIds)
       .order('created_at', { ascending: false })
       .limit(30);

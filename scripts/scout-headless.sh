@@ -28,7 +28,7 @@ clearly beats the playbook bar; stand-down is the correct answer most cycles.
 
 Reply with EXACTLY one JSON object on a single line, no prose, one of:
 {"action":"stand-down","note":"<why>"}
-{"action":"open","coin":"ETH","side":"buy|sell","riskUsd":50,"stopFrac":0.03,"leverage":3,"lane":"directional","thesis":"<the hypothesis being tested>"}
+{"action":"open","coin":"ETH","side":"buy|sell","riskUsd":50,"stopFrac":0.03,"leverage":3,"lane":"directional","setupType":"breakout|breakdown|reclaim|range-fade|carry|leader-follow|other","regime":"<one word from the snapshot regime>","thesis":"<the hypothesis being tested>"}
 {"action":"close","coin":"ETH","sessionId":"<from snapshot positions>","hypothesisId":"<if known>","fraction":1,"note":"<why>"}
 
 SNAPSHOT:
@@ -45,3 +45,12 @@ EOF
 DECISION="$(printf '%s' "$PROMPT" | claude -p --model sonnet | sed 's/^```.*$//' | grep -v '^[[:space:]]*$' | tail -1)"
 echo "[scout-headless] decision: $DECISION"
 pnpm --silent scout:trade -- --from-json "$DECISION"
+
+# Dead-man ping (healthchecks.io or similar): silence past the grace period pages
+# the operator even if this whole box dies. Optional — unset env is a no-op.
+# SEMANTIC (deliberate): the ping fires only when the WHOLE cycle succeeded
+# (set -e means any failure above skips it) — a crashing claude CLI, a parse
+# reject, or a scout-trade error ALSO pages via the missed ping.
+if [ -n "${SCOUT_HEADLESS_HEALTHCHECK_URL:-}" ]; then
+  curl -fsS -m 10 --retry 2 "$SCOUT_HEADLESS_HEALTHCHECK_URL" >/dev/null || true
+fi

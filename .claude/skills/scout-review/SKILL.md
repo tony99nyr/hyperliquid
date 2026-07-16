@@ -16,6 +16,25 @@ This closes the learning loop: the scout *writes* theses and *resolves* them eve
 cycle; this review turns that record into a sharper playbook + a verdict against
 the pre-registered bar. Run it as Opus — it's the rare, high-value pass.
 
+
+## Evidence-based judgment rules (Jul-16 review — verified literature)
+
+Beyond the deterministic scorecard (which now enforces the decay-adjusted bar and
+the fee-drag ceiling in code), the Opus review MUST apply these judgment checks:
+
+- **Multiplicity**: every re-test of a tweaked setup counts as a TRIAL. Track the
+  trial count per setup family; a marginal edge after many looks is noise (after
+  ~20 looks a false positive is EXPECTED, not unlikely). Demand stronger evidence
+  the more variants were tried — the t≈3 spirit, not t≈2.
+- **Regime coverage**: paper validation in ONE regime does not transfer (LLM agents
+  measurably fail regime-dependently). No graduation opinion without coverage of at
+  least one full bull-bear cycle, or an explicit regime gate in the setup itself.
+- **Survivorship**: the playbook may only gain a rule from the RESOLVED-hypothesis
+  record (cite the hypothesis ids), never from a single memorable anecdote. The
+  scout_decisions trial ledger (incl. stand-downs) is part of the record.
+- **Janitorial rows**: hypotheses with `excluded=true` are NOT trades — never count
+  them in win-rate or expectancy.
+
 ## Steps
 
 1. **Score (deterministic).** Run `pnpm scout:review`. It prints the scorecard:

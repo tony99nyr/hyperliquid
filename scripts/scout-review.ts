@@ -38,4 +38,24 @@ run(async () => {
   }
   line('');
   line('Next: the scout-review skill (Opus) reads this + the resolved hypotheses and curates docs/scout/playbook.md.');
+
+  // Persist the run (Jul-16 review: the judge had NEVER run and left no evidence
+  // when it did — now every run writes a scout_reviews row). Best-effort.
+  try {
+    const { getServiceRoleClient } = await import('@/lib/cockpit/supabase-server');
+    const report = [
+      `period ${account.periodDays.toFixed(1)}d · trades ${account.tradeCount} · win-rate ${(account.winRate * 100).toFixed(0)}%`,
+      `net $${account.netUsd.toFixed(2)} · run-rate $${account.monthlyRunRateUsd.toFixed(0)}/mo`,
+      ...lanes.map((l) => `[${l.lane}] net $${l.netUsd.toFixed(2)} → ${l.verdict}: ${l.label}`),
+    ].join('\n');
+    await getServiceRoleClient().from('scout_reviews').insert({
+      verdict: account.verdict,
+      trade_count: account.tradeCount,
+      net_usd: account.netUsd,
+      report,
+    });
+    line('(review persisted to scout_reviews)');
+  } catch (e) {
+    line(`WARN: review not persisted: ${e instanceof Error ? e.message : String(e)}`);
+  }
 });

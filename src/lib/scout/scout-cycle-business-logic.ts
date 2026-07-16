@@ -74,6 +74,8 @@ export interface ScoutDecision {
   fraction?: number;
   /** stand-down / close: the reason (logged). */
   note?: string;
+  setupType?: string;
+  regime?: string;
 }
 
 /**
@@ -111,6 +113,9 @@ export function parseScoutDecision(raw: string): { kind: 'open' | 'close'; args:
     };
     if (typeof d.leverage === 'number' && Number.isFinite(d.leverage) && d.leverage >= 1) args['leverage'] = String(d.leverage);
     if (typeof d.lane === 'string' && d.lane.trim()) args['lane'] = d.lane.trim();
+    // Structured trial fields (Jul-16 review) — optional, bounded, advisory metadata.
+    if (typeof d.setupType === 'string' && d.setupType.trim()) args['setup-type'] = d.setupType.trim().slice(0, 40);
+    if (typeof d.regime === 'string' && d.regime.trim()) args['regime'] = d.regime.trim().slice(0, 40);
     return { kind: 'open', args };
   }
   if (d.action === 'close') {

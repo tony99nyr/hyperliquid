@@ -33,6 +33,10 @@ export interface ScorecardInput {
    * layered by the lane, not here; this only makes the headline number honest.)
    */
   unrealizedPnlUsd?: number;
+  /** Total fees paid (USD, ≥0) — with grossWinsUsd feeds the fee-drag gate. Optional (legacy callers omit). */
+  feesPaidUsd?: number;
+  /** Σ P&L of WINNING closed trades before fees (USD, ≥0). Optional. */
+  grossWinsUsd?: number;
   /** Closed round-trips. */
   tradeCount: number;
   wins: number;
@@ -53,6 +57,8 @@ export interface ScorecardConfig {
   minTradesToGraduate: number; // GRADUATE needs at least this many closed trades (sample size)
   maxDrawdownPct: number; // graduation DD ceiling (e.g. 0.15)
   graduationDays: number; // min track-record length before "graduate" (e.g. 90)
+  feeDragMaxFrac: number; // graduation gate: fees/grossWins must stay below this (overtrading kill)
+  liveDecayHaircut: number; // expected paper→live decay; graduation demands bar/(1−haircut)
 }
 
 export const DEFAULT_SCORECARD_CONFIG: ScorecardConfig = {
@@ -63,9 +69,20 @@ export const DEFAULT_SCORECARD_CONFIG: ScorecardConfig = {
   minTradesToGraduate: 30,
   maxDrawdownPct: 0.15,
   graduationDays: 90,
+  // Evidence additions (Jul-16 review, verified literature):
+  //  - feeDragMaxFrac: overtrading was THE measurable value-destroyer in the
+  //    FINSABER LLM-agent study (commission ratio 5-9x ⇒ negative alpha). If
+  //    fees eat more than this fraction of gross wins, the lane can't graduate.
+  //  - liveDecayHaircut: published signals lose ~43-58% of Sharpe out of sample
+  //    (Falck/Rej/Thesmar; McLean-Pontiff). Graduation demands the bar at ~2x —
+  //    paper edge that only just clears the bar won't survive live.
+  feeDragMaxFrac: 0.35,
+  liveDecayHaircut: 0.5,
 };
 
 export interface Scorecard {
+  /** fees / gross wins (0 when no wins) — the overtrading tell. */
+  feeDragFrac: number;
   tradeCount: number;
   winRate: number; // 0–1
   realizedGrossUsd: number;
@@ -86,8 +103,18 @@ export function buildScorecard(input: ScorecardInput, cfg: ScorecardConfig = DEF
   const decided = input.wins + input.losses;
   const winRate = decided > 0 ? input.wins / decided : 0;
 
+  // Fee drag: fees as a fraction of gross wins — the overtrading tell (FINSABER).
+  // 0 when unknown/no wins so legacy callers and empty lanes are unaffected.
+  const feeDragFrac =
+    input.feesPaidUsd !== undefined && input.grossWinsUsd !== undefined && input.grossWinsUsd > 0
+      ? Math.max(0, input.feesPaidUsd) / input.grossWinsUsd
+      : 0;
+
   const periodDays = Math.max(1, input.periodDays);
   const monthlyRunRateUsd = (netUsd / periodDays) * 30;
+  // Live-decay-adjusted graduation bar: paper edge must clear the bar with the
+  // expected out-of-sample haircut applied (≈2x at the default 50% haircut).
+  const effectiveBarUsd = cfg.monthlyBarUsd / Math.max(0.01, 1 - cfg.liveDecayHaircut);
   const vsBarUsd = monthlyRunRateUsd - cfg.monthlyBarUsd;
 
   const ddPct =
@@ -106,18 +133,20 @@ export function buildScorecard(input: ScorecardInput, cfg: ScorecardConfig = DEF
     verdict = 'kill';
     reason = `net $${netUsd.toFixed(0)} over ${periodDays.toFixed(0)}d (${input.tradeCount} trades) — slow bleed past ${cfg.slowBleedDays}d; kill the lane.`;
   } else if (
-    monthlyRunRateUsd >= cfg.monthlyBarUsd &&
+    monthlyRunRateUsd >= effectiveBarUsd &&
     periodDays >= cfg.graduationDays &&
     input.tradeCount >= cfg.minTradesToGraduate &&
     ddPct != null &&
-    ddPct < cfg.maxDrawdownPct
+    ddPct < cfg.maxDrawdownPct &&
+    feeDragFrac <= cfg.feeDragMaxFrac
   ) {
     verdict = 'graduate';
-    reason = `run-rate $${monthlyRunRateUsd.toFixed(0)}/mo over ${periodDays.toFixed(0)}d, ${input.tradeCount} trades, DD ${(ddPct * 100).toFixed(1)}% < ${(cfg.maxDrawdownPct * 100).toFixed(0)}% — clears the bar; consider the live seam.`;
+    reason = `run-rate $${monthlyRunRateUsd.toFixed(0)}/mo ≥ decay-adjusted bar $${effectiveBarUsd.toFixed(0)}/mo over ${periodDays.toFixed(0)}d, ${input.tradeCount} trades, DD ${(ddPct * 100).toFixed(1)}% < ${(cfg.maxDrawdownPct * 100).toFixed(0)}%, fee drag ${(feeDragFrac * 100).toFixed(0)}% ≤ ${(cfg.feeDragMaxFrac * 100).toFixed(0)}% — clears the bar; regime coverage still needs a HUMAN check (≥1 full bull-bear cycle or explicit regime gating) before the live seam.`;
   } else {
     verdict = 'continue';
     const gates: string[] = [];
-    if (monthlyRunRateUsd < cfg.monthlyBarUsd) gates.push(`run-rate $${monthlyRunRateUsd.toFixed(0)}<$${cfg.monthlyBarUsd}/mo`);
+    if (monthlyRunRateUsd < effectiveBarUsd) gates.push(`run-rate $${monthlyRunRateUsd.toFixed(0)}<$${effectiveBarUsd.toFixed(0)}/mo (decay-adjusted)`);
+    if (feeDragFrac > cfg.feeDragMaxFrac) gates.push(`fee drag ${(feeDragFrac * 100).toFixed(0)}%>${(cfg.feeDragMaxFrac * 100).toFixed(0)}% (overtrading)`);
     if (periodDays < cfg.graduationDays) gates.push(`${periodDays.toFixed(0)}<${cfg.graduationDays}d`);
     if (input.tradeCount < cfg.minTradesToGraduate) gates.push(`${input.tradeCount}<${cfg.minTradesToGraduate} trades`);
     if (ddPct == null) gates.push('DD unknown');
@@ -127,6 +156,7 @@ export function buildScorecard(input: ScorecardInput, cfg: ScorecardConfig = DEF
   return {
     tradeCount: input.tradeCount,
     winRate,
+    feeDragFrac,
     realizedGrossUsd: input.realizedGrossUsd,
     slippageHaircutUsd: input.slippageHaircutUsd,
     fundingHaircutUsd: input.fundingHaircutUsd,

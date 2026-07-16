@@ -19,6 +19,7 @@ import { runLadderWatchTick } from '@/lib/ladder/ladder-watch-service';
 import { runLeaderGuard } from '@/lib/ladder/ladder-leader-guard-service';
 import { runExpiryAlerts } from '@/lib/ladder/ladder-expiry-alert-service';
 import { checkPriceAlerts } from '@/lib/ladder/price-alert-service';
+import { checkScoutHeartbeats } from '@/lib/scout/scout-heartbeat-alert-service';
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 import { validateEnv } from '@/lib/env/env';
 import { pingHealthcheck } from '@/lib/infrastructure/monitoring/healthcheck';
@@ -42,8 +43,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const expiryAlerts = await runExpiryAlerts(Date.now()).catch((e) => ({ checked: -1, alerted: [], error: extractErrorMessage(e) }));
     //  - price alerts: ADVISORY one-shot operator pings; independent of armed ladders.
     const priceAlerts = await checkPriceAlerts().catch(() => ({ checked: -1, fired: 0 }));
+    //  - scout watchdog: pages when the scout producer/consumer heartbeat goes stale
+    //    (a dead scout box can't report itself; production must). Fail-soft.
+    const scoutHeartbeats = await checkScoutHeartbeats().catch(() => ({ checked: -1, paged: 0 }));
     await pingHealthcheck(hcUrl, 'success');
-    return NextResponse.json({ ok: true, ...summary, leaderGuard, expiryAlerts, priceAlerts });
+    return NextResponse.json({ ok: true, ...summary, leaderGuard, expiryAlerts, priceAlerts, scoutHeartbeats });
   } catch (e) {
     await pingHealthcheck(hcUrl, 'fail');
     return NextResponse.json({ ok: false, error: extractErrorMessage(e) }, { status: 500 });

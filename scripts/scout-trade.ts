@@ -29,6 +29,7 @@ import { loadPosition } from '@/lib/cockpit/fill-persistence-service';
 import { fetchAllMids } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { validateEnv } from '@/lib/env/env';
 import { writeHypothesis, resolveHypothesis } from '@/lib/cockpit/hypothesis-service';
+import { isDiscordConfigured } from '@/lib/infrastructure/notify/discord-notify';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 import { ensureWatchDaemon } from '@/lib/cockpit/watch-spawn';
 import { setAdvisoryStop } from '@/lib/scout/scout-watch-service';
@@ -117,6 +118,9 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   });
   if (fill.source !== 'paper') throw new Error(`expected a paper fill, got source=${fill.source}`);
   line(`Filled (paper): ${fill.sz} ${fill.coin} @ $${fill.px} (fee=$${fill.feeUsd.toFixed(4)})`);
+  // The fill is COMMITTED — mark the trial-ledger row executed NOW (review F5): any
+  // later bookkeeping throw must not leave a real fill ledgered as non-executed.
+  await markPendingDecisionExecuted(sessionId).catch(() => {});
 
   // Persist the ADVISORY stop (migration 0033) so the trigger daemon's
   // position-near-stop detector has a real level to watch. UNCONDITIONAL write:
@@ -127,7 +131,16 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   const ok = await setAdvisoryStop(sessionId, coin, advisoryStop).catch(() => false);
   if (!ok) line('WARN: advisory stop not persisted — near-stop trigger will be silent for this position.');
 
-  const hypothesis = await writeHypothesis({ sessionId, statement: thesis, lane });
+  const hypothesis = await writeHypothesis({
+    sessionId,
+    statement: thesis,
+    lane,
+    // Structured trial fields (Jul-16 review): risk at open makes realized R
+    // computable at close; setupType/regime make per-setup expectancy queryable.
+    riskUsd: Number.isFinite(riskUsd) ? riskUsd : undefined,
+    setupType: typeof args['setup-type'] === 'string' ? String(args['setup-type']) : undefined,
+    regime: typeof args['regime'] === 'string' ? String(args['regime']) : undefined,
+  });
   await writeAnalysisLog({
     sessionId,
     source: 'scout',
@@ -192,12 +205,24 @@ async function runExit(args: Record<string, string | boolean>): Promise<void> {
   if (fill.source !== 'paper') throw new Error(`expected a paper fill, got source=${fill.source}`);
   line(`Closed (paper): ${fill.sz} ${fill.coin} @ $${fill.px} (fee=$${fill.feeUsd.toFixed(4)})`);
 
+  // The fill is COMMITTED here — mark the trial-ledger row executed NOW, before any
+  // later bookkeeping write can throw and leave a real fill ledgered as non-executed
+  // (review F5). Best-effort.
+  await markPendingDecisionExecuted(sessionId).catch(() => {});
+
   // Full close ⇒ the advisory stop no longer describes anything — clear it so the
   // near-stop trigger can't fire on a flat position. Partial closes keep it.
   const closedAll = fraction >= 1 || fill.sz >= position.sz - 1e-12;
   if (closedAll) await setAdvisoryStop(sessionId, coin, null).catch(() => false);
 
-  if (hypothesisId) {
+  if (hypothesisId && !closedAll) {
+    // Partial close: the hypothesis stays OPEN — resolving it here would record a
+    // fraction's P&L as the whole outcome and a later full close would overwrite it
+    // (review F3). The final close resolves with the full-position economics folded
+    // into the positions row.
+    line(`Partial close (${(fraction * 100).toFixed(0)}%) — hypothesis ${hypothesisId} stays open until the final close.`);
+  }
+  if (hypothesisId && closedAll) {
     // Resolve the thesis by OUTCOME so the scout's win/loss record is REAL — not a
     // flat "resolved" for every close (which pinned W/L at 0/0 and win-rate blank on
     // the panel). Net realized P&L on the closed portion: dir*(exit−entry)*sz − fee.
@@ -205,10 +230,21 @@ async function runExit(args: Record<string, string | boolean>): Promise<void> {
     const netPnl = dir * (fill.px - position.avgEntryPx) * fill.sz - fill.feeUsd;
     const status = netPnl > 0 ? 'confirmed' : netPnl < 0 ? 'invalidated' : 'resolved';
     const pnlLabel = `${netPnl >= 0 ? '+' : '-'}$${Math.abs(netPnl).toFixed(2)}`;
+    // Realized R = net P&L / risk taken at open (null when the open predates the
+    // structured fields — R stays uncomputable for legacy rows, never guessed).
+    let realizedR: number | undefined;
+    try {
+      const db = getServiceRoleClient();
+      const { data: hrow } = await db.from('hypotheses').select('risk_usd').eq('id', hypothesisId).maybeSingle();
+      const riskAtOpen = Number((hrow as { risk_usd: number | null } | null)?.risk_usd);
+      if (Number.isFinite(riskAtOpen) && riskAtOpen > 0) realizedR = netPnl / riskAtOpen;
+    } catch { /* best-effort */ }
     await resolveHypothesis({
       hypothesisId,
       status,
       resolutionNote: `${note ?? `scout closed ${coin}`} · realized ${pnlLabel}`,
+      realizedPnlUsd: netPnl,
+      realizedR,
     });
     line(`Resolved hypothesis ${hypothesisId} → ${status} (realized ${pnlLabel}).`);
   }
@@ -217,6 +253,48 @@ async function runExit(args: Record<string, string | boolean>): Promise<void> {
     source: 'scout',
     message: `SCOUT closed ${fill.sz} ${coin} @ $${fill.px} (paper).${note ? ` ${note}` : ''}`,
   });
+}
+
+
+/** The from-json decision row awaiting an execution confirmation (module-scoped:
+ *  runEntry/runExit mark it executed only when they reach their success tail). */
+let pendingDecisionId: string | null = null;
+
+/** Flip the pending trial-ledger row to executed + attach the session, called the
+ *  moment the fill COMMITS (never before executeIntent, so a guard-refused open
+ *  never gets marked; never after later bookkeeping, so a bookkeeping throw can't
+ *  leave a real fill ledgered as non-executed — review F5/F10). */
+async function markPendingDecisionExecuted(sessionId: string): Promise<void> {
+  if (!pendingDecisionId) return;
+  const id = pendingDecisionId;
+  pendingDecisionId = null;
+  await getServiceRoleClient().from('scout_decisions').update({ executed: true, session_id: sessionId }).eq('id', id);
+}
+
+/** Persist one headless decision into the scout_decisions trial ledger (append-only,
+ *  informational). `executed:false` at write — flipped by markPendingDecisionExecuted
+ *  only if execution actually happened, so a guard-refused open stays honest. */
+async function recordScoutDecision(
+  parsed: ReturnType<typeof parseScoutDecision>,
+): Promise<void> {
+  const db = getServiceRoleClient();
+  const row: { kind: string; coin?: string | null; lane?: string | null; reasoning: string } =
+    parsed.kind === 'error'
+      ? { kind: 'error', reasoning: parsed.error.slice(0, 2000) }
+      : parsed.kind === 'stand-down'
+        ? { kind: 'stand-down', reasoning: parsed.note.slice(0, 2000) }
+        : parsed.kind === 'propose'
+          ? { kind: 'propose', coin: parsed.coin, reasoning: `${parsed.title} — ${parsed.body}`.slice(0, 2000) }
+          : {
+              kind: parsed.kind,
+              coin: typeof parsed.args['coin'] === 'string' ? String(parsed.args['coin']).toUpperCase() : null,
+              lane: typeof parsed.args['lane'] === 'string' ? String(parsed.args['lane']) : null,
+              reasoning: String(parsed.args['thesis'] ?? parsed.args['note'] ?? '').slice(0, 2000),
+            };
+  const { data } = await db.from('scout_decisions').insert(row).select('id').maybeSingle();
+  if ((parsed.kind === 'open' || parsed.kind === 'close') && data) {
+    pendingDecisionId = String((data as { id: string }).id);
+  }
 }
 
 run(async () => {
@@ -232,6 +310,11 @@ run(async () => {
   // stand-down outcome is first-class: log it and exit clean.
   if (typeof args['from-json'] === 'string') {
     const parsed = parseScoutDecision(args['from-json']);
+    // TRIAL LEDGER (Jul-16 review): persist EVERY decision — including stand-downs
+    // and parse errors. Stand-downs are trials; an unlogged search makes the track
+    // record uninterpretable (Bailey/López de Prado). Best-effort: ledger failure
+    // must never block or fail the decision path.
+    await recordScoutDecision(parsed).catch(() => {});
     if (parsed.kind === 'error') {
       header('⛔ headless decision REJECTED');
       line(parsed.error);
@@ -267,6 +350,17 @@ run(async () => {
       if (isRepeat) {
         line('(repeat within 2h — logged, not paged)');
         return;
+      }
+      if (!isDiscordConfigured()) {
+        // Jul-16 review: an unconfigured webhook silently ate proposals. Be LOUD —
+        // the whole steward lane is decorative if this env is missing in the cron.
+        line('⚠ DISCORD_WEBHOOK_URL not set in this environment — proposal logged but NOT paged.');
+        try {
+          const db = getServiceRoleClient();
+          const { data: sess } = await db.from('sessions').select('id').eq('status', 'active').order('created_at', { ascending: false }).limit(1);
+          const sid = (sess?.[0] as { id: string } | undefined)?.id;
+          if (sid) await writeAnalysisLog({ sessionId: sid, source: 'scout', severity: 'warn', message: 'STEWARD PROPOSAL DROPPED FROM DISCORD — DISCORD_WEBHOOK_URL is not exported in the scout cron env.' });
+        } catch { /* best-effort */ }
       }
       await sendDiscord(`💡 **STEWARD PROPOSAL**${parsed.coin ? ` [${parsed.coin}]` : ''} — ${parsed.title}
 ${parsed.body}
