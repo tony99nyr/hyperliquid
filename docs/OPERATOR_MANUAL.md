@@ -46,9 +46,6 @@ tokens (poke-only), never admin or signing keys.
 # ^ reconcile also BACKFILLS exchange-side fills (resting stop/bracket fills, manual
 #   HL-app closes) into the `fills` ledger — dedupe by hl_order_id (unique index,
 #   0036), attributed to the holding live session. Discord 🚨 on any shortfall.
-# Advisory bridge: GET /api/advisory/market-state?coins=ETH,BTC (Bearer ADMIN_SECRET)
-#   serves momentum-stall + macro event window + leader flow to the iamrossi trend
-#   system. READ-ONLY, fail-soft; calendar curated in data/events/macro-calendar.json.
 ```
 - **auto-exit** — the Layer-1 risk-exit detector (no-ops while `AUTO_EXIT_ENABLED=false`).
 - **reconcile-positions** — keeps cockpit positions in lock-step with the REAL HL account
