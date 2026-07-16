@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "note": "Curated macro event calendar — feeds the advisory market-state endpoint (cross-system event-window warnings) and the straddle-prep workflow. Times are the PRINT instant, UTC. Curate at the weekly checkpoint; a stale calendar fails soft (no window = no warning, never a wrong block).",
+  "events": [
+    { "name": "FOMC rate decision + statement", "printAt": "2026-07-29T18:00:00Z", "severity": "high" },
+    { "name": "FOMC press conference", "printAt": "2026-07-29T18:30:00Z", "severity": "high" },
+    { "name": "NFP (July jobs report)", "printAt": "2026-08-07T12:30:00Z", "severity": "high" },
+    { "name": "CPI (July)", "printAt": "2026-08-12T12:30:00Z", "severity": "high" },
+    { "name": "PPI (July)", "printAt": "2026-08-13T12:30:00Z", "severity": "medium" },
+    { "name": "Retail Sales (July)", "printAt": "2026-08-14T12:30:00Z", "severity": "medium" }
+  ]
+}
