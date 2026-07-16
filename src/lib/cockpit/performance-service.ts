@@ -24,12 +24,14 @@ import {
   buildLedger,
   buildEquitySeries,
   computeKpis,
+  localDayStart,
+  realizedPnlSince,
   type EquityPoint,
   type LedgerTrade,
   type MarkMap,
   type PerformanceKpis,
 } from './performance-business-logic';
-import { fetchAllMids, fetchClearinghouseState, fetchSpotUsdcBalance, isValidHlAddress } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { fetchAllMids, fetchClearinghouseState, fetchRecentFills, fetchSpotUsdcBalance, isValidHlAddress } from '@/lib/hyperliquid/hyperliquid-info-service';
 import type { CanonicalFill, TradingMode } from '@/types/fill';
 
 /**
@@ -116,6 +118,29 @@ async function fetchLiveAccountValue(): Promise<LiveEquity> {
   }
 }
 
+/**
+ * Exchange-truth "Today" realized P&L: fold HL's OWN fill history (per-fill
+ * `closedPnl`, venue-stamped) since the operator-local midnight. The internal
+ * session `fills` ledger cannot compute this correctly — exits filled by RESTING
+ * HL stops/brackets never pass through `executeIntent`, so the DB ledger shows
+ * phantom open trades and an empty closed-today set. Fail-soft → null (callers
+ * keep the ledger-derived value). Rides fetchRecentFills' 60s cache, so header
+ * polling adds no extra HL load.
+ */
+async function fetchHlTodayPnl(now: number): Promise<number | null> {
+  const addr = process.env.HL_ACCOUNT_ADDRESS?.trim();
+  if (!addr || !isValidHlAddress(addr)) return null;
+  try {
+    const dayStartMs = localDayStart(now, operatorTz());
+    const res = await fetchRecentFills(addr, now - dayStartMs + 60_000, 1000);
+    // A hard fetch failure with nothing cached must not masquerade as "$0 today".
+    if (res.error && res.fills.length === 0) return null;
+    return realizedPnlSince(res.fills, dayStartMs);
+  } catch {
+    return null;
+  }
+}
+
 /** Breakdown for the summary, or null when no live component is known. */
 function equityBreakdownOf(live: LiveEquity): { perpUsd: number | null; spotUsd: number | null } | null {
   return live.perpUsd === null && live.spotUsd === null ? null : { perpUsd: live.perpUsd, spotUsd: live.spotUsd };
@@ -130,14 +155,14 @@ export async function getPerformanceSummary(sessionId: string): Promise<Performa
   // Live HL equity (real balance) takes precedence over the static env anchor for
   // the displayed value. Resolved once, fail-soft. Even with no trades this lets a
   // funded account show its real balance instead of "—".
-  const live = await fetchLiveAccountValue();
+  const [live, hlTodayPnl] = await Promise.all([fetchLiveAccountValue(), fetchHlTodayPnl(now)]);
   const liveEquityUsd = live.totalUsd;
   const equityBreakdown = equityBreakdownOf(live);
   const emptyEquityUsd = liveEquityUsd ?? realAccountBalance();
   const empty: PerformanceSummary = {
     sessionId,
     ledger: [],
-    kpis: computeKpis([], {}, []),
+    kpis: { ...computeKpis([], {}, []), ...(hlTodayPnl !== null ? { todayPnlUsd: hlTodayPnl } : {}) },
     equity: [],
     equityUsd: emptyEquityUsd,
     equityBreakdown,
@@ -196,7 +221,9 @@ export async function getPerformanceSummary(sessionId: string): Promise<Performa
   const realBalance = realAccountBalance();
   const curveAnchor = liveEquityUsd ?? (realBalance ?? 0) + netPnlUsd;
   const equity = buildEquitySeries(ledger, curveAnchor, now, 30);
-  const kpis = computeKpis(ledger, marks, equity);
+  // "Today" prefers the exchange-truth fold (see fetchHlTodayPnl); the ledger
+  // number stands in only when HL is unreachable.
+  const kpis = { ...computeKpis(ledger, marks, equity), ...(hlTodayPnl !== null ? { todayPnlUsd: hlTodayPnl } : {}) };
   // Card value: the LIVE account equity (perp + spot, includes open uPnL), else
   // the env balance ALONE — never env + netPnl (double-count). null → "—".
   const equityUsd = liveEquityUsd ?? realBalance;

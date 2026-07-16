@@ -117,6 +117,28 @@ export function localDayStart(ms: number, tz = 'UTC'): number {
   return Math.floor((ms + offsetMs) / 86_400_000) * 86_400_000 - offsetMs;
 }
 
+/**
+ * Realized P&L (net of ALL fees) since `sinceMs`, folded from the EXCHANGE's own
+ * fill history (HL `userFillsByTime` rows). This is the ground-truth source for
+ * the "Today" KPI: exits that fill on RESTING HL stops/brackets never pass
+ * through `executeIntent`, so the internal session `fills` ledger under-counts
+ * closes (phantom open trades, zero closed-today). HL's `closedPnl` is stamped
+ * per closing fill by the venue itself; opening fills carry 0/null. Fees are
+ * subtracted for every fill in the window (entries included) — "what did I make
+ * today" is net of the costs paid today. PURE.
+ */
+export function realizedPnlSince(
+  fills: ReadonlyArray<{ time: number; closedPnl: number | null; fee: number | null }>,
+  sinceMs: number,
+): number {
+  let sum = 0;
+  for (const f of fills) {
+    if (f.time < sinceMs) continue;
+    sum += (f.closedPnl ?? 0) - (f.fee ?? 0);
+  }
+  return sum;
+}
+
 /** UTC offset (ms, +east) of `tz` at instant `ms`, via Intl (DST-correct). */
 function tzOffsetMs(ms: number, tz: string): number {
   const dtf = new Intl.DateTimeFormat('en-US', {

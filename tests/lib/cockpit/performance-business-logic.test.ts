@@ -6,6 +6,7 @@ import {
   buildEquitySeries,
   localDayStart,
   type EquityPoint,
+  realizedPnlSince,
 } from '@/lib/cockpit/performance-business-logic';
 import type { CanonicalFill } from '@/types/fill';
 
@@ -298,6 +299,29 @@ describe('performance-business-logic', () => {
       expect(series[series.length - 1].equity).toBeCloseTo(50_010);
       // before the win landed, equity should be lower by the realized net.
       expect(series[0].equity).toBeLessThan(50_010);
+    });
+  });
+
+  describe('realizedPnlSince (exchange-truth today fold)', () => {
+    const hl = (time: number, closedPnl: number | null, fee: number | null) => ({ time, closedPnl, fee });
+
+    it('sums closedPnl net of ALL fees inside the window, ignores earlier fills', () => {
+      const fills = [
+        hl(1_000, 50, 1),        // before the window — excluded entirely
+        hl(2_000, null, 0.5),    // opening fill today: no closedPnl, fee still counts
+        hl(3_000, 10, 0.25),     // closing fill today
+      ];
+      expect(realizedPnlSince(fills, 1_500)).toBeCloseTo(10 - 0.5 - 0.25);
+    });
+
+    it('treats null closedPnl/fee as 0 and returns 0 for an empty day', () => {
+      expect(realizedPnlSince([], 0)).toBe(0);
+      expect(realizedPnlSince([hl(5, null, null)], 0)).toBe(0);
+    });
+
+    it('a losing close nets negative (the ledger-fragmentation regression case)', () => {
+      // Exit filled by a RESTING exchange stop: only HL sees it. −1.42 loss + fees.
+      expect(realizedPnlSince([hl(10, -1.4232, 0.0355)], 0)).toBeCloseTo(-1.4587);
     });
   });
 });
