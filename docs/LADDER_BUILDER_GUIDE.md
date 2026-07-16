@@ -235,6 +235,10 @@ fade even slightly underwater; the impulse dying = the thesis dying).
 
 ## 8. Tooling
 
+- **Price alerts** (`price_alerts` table, checked every watch tick, 🔔 Discord, one-shot):
+  the mechanization for SWEEP-AND-RECLAIM entries — a reclaim gate cannot be armed while
+  price is above it (it would fire instantly), so the ladder stays DRAFT and an alert at
+  the tag level pings the operator to arm. Insert via SQL/script; NEVER trades.
 - **Event-straddle prep**: `pnpm straddle:prep --coin ETH --event "CPI" --print <ISO> [--gate-pct] [--risk] [--dry]`
   — builds both OCO template legs (management rungs inside, per the Jul-15 lessons) from the LIVE
   pre-print reference and pings Discord for the arm decision. Schedule it ~1h before the print;

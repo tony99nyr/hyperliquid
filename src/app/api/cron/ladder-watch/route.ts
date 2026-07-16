@@ -18,6 +18,7 @@ import { getLadderCronSecret } from '@/lib/ladder/ladder-flags';
 import { runLadderWatchTick } from '@/lib/ladder/ladder-watch-service';
 import { runLeaderGuard } from '@/lib/ladder/ladder-leader-guard-service';
 import { runExpiryAlerts } from '@/lib/ladder/ladder-expiry-alert-service';
+import { checkPriceAlerts } from '@/lib/ladder/price-alert-service';
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 import { validateEnv } from '@/lib/env/env';
 import { pingHealthcheck } from '@/lib/infrastructure/monitoring/healthcheck';
@@ -39,8 +40,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     //  - expiry alert: ADVISORY — one page when an armed ladder nears expiry unfired.
     const leaderGuard = await runLeaderGuard(Date.now()).catch((e) => ({ checked: -1, disarmed: [], error: extractErrorMessage(e) }));
     const expiryAlerts = await runExpiryAlerts(Date.now()).catch((e) => ({ checked: -1, alerted: [], error: extractErrorMessage(e) }));
+    //  - price alerts: ADVISORY one-shot operator pings; independent of armed ladders.
+    const priceAlerts = await checkPriceAlerts().catch(() => ({ checked: -1, fired: 0 }));
     await pingHealthcheck(hcUrl, 'success');
-    return NextResponse.json({ ok: true, ...summary, leaderGuard, expiryAlerts });
+    return NextResponse.json({ ok: true, ...summary, leaderGuard, expiryAlerts, priceAlerts });
   } catch (e) {
     await pingHealthcheck(hcUrl, 'fail');
     return NextResponse.json({ ok: false, error: extractErrorMessage(e) }, { status: 500 });
