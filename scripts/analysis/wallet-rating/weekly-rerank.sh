@@ -1,4 +1,7 @@
-#!/usr/bin/env bash
+#!/bin/sh
+# POSIX-leaning: runs under busybox ash on the NAS (nas-rerank.sh execs it via
+# /bin/sh, ignoring this shebang anyway). Uses only ash-supported extensions
+# (local, pipefail) — do not introduce bash-only constructs ([[ ]], arrays, ERR traps).
 #
 # WEEKLY RE-RANK — the full "discover + rank" pipeline that feeds the hl-cockpit.
 #
