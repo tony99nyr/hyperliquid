@@ -19,6 +19,9 @@
  *   pnpm scout:watch --once          # single cycle (verification)
  */
 
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { parseArgs, optionalNumber, header, line, run } from './_skill-runtime';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import { fetchCandles } from '@/lib/hyperliquid/candle-service';
@@ -33,6 +36,56 @@ import { type ScoutState } from '@/lib/scout/scout-trigger-business-logic';
 
 const DEFAULT_INTERVAL_SECONDS = 60;
 const MIN_INTERVAL_SECONDS = 15;
+
+/**
+ * EMBEDDED CONSUMER (operator ask, Jul-17): the daemon self-schedules the headless
+ * decision cycle (scripts/scout-headless.sh) so ONE supervised process replaces the
+ * daemon + a separate cron. Every SCOUT_CONSUMER_INTERVAL_MIN (default 30, 0 =
+ * disabled) it spawns the script DETACHED with a hard timeout — a hung model call
+ * can never stall trigger production (the 60s loop never awaits it). Requirements
+ * unchanged: the box needs the claude CLI on the operator's SUBSCRIPTION (never an
+ * API key — desk policy) — set CLAUDE_BIN when cron/daemon PATH can't find it.
+ */
+const CONSUMER_INTERVAL_MS = (() => {
+  const m = Number(process.env.SCOUT_CONSUMER_INTERVAL_MIN ?? '30');
+  return Number.isFinite(m) && m >= 0 ? m * 60_000 : 30 * 60_000;
+})();
+const CONSUMER_TIMEOUT_MS = 10 * 60_000;
+let consumerRunning = false;
+let lastConsumerAt = 0;
+
+function maybeSpawnConsumer(now: number): void {
+  if (CONSUMER_INTERVAL_MS === 0) return; // explicitly disabled
+  if (consumerRunning || now - lastConsumerAt < CONSUMER_INTERVAL_MS) return;
+  const script = path.join(process.cwd(), 'scripts', 'scout-headless.sh');
+  if (!existsSync(script)) {
+    line(`WARN embedded consumer: ${script} not found — skipping`);
+    lastConsumerAt = now; // don't re-warn every 60s
+    return;
+  }
+  consumerRunning = true;
+  lastConsumerAt = now;
+  line(`[${new Date(now).toISOString()}] ▶ embedded consumer cycle (scout-headless.sh)`);
+  const child = spawn('sh', [script], { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
+  let out = '';
+  child.stdout.on('data', (d: Buffer) => { out += d.toString(); });
+  child.stderr.on('data', (d: Buffer) => { out += d.toString(); });
+  const killer = setTimeout(() => {
+    line('WARN embedded consumer timed out (10min) — killing');
+    child.kill('SIGKILL');
+  }, CONSUMER_TIMEOUT_MS);
+  child.on('exit', (code) => {
+    clearTimeout(killer);
+    consumerRunning = false;
+    const tail = out.trim().split('\n').slice(-3).join(' | ');
+    line(`[${new Date().toISOString()}] ◀ consumer exit=${code} :: ${tail.slice(0, 300)}`);
+  });
+  child.on('error', (err) => {
+    clearTimeout(killer);
+    consumerRunning = false;
+    line(`WARN embedded consumer spawn failed: ${err.message}`);
+  });
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -114,10 +167,12 @@ run(async () => {
   process.on('SIGINT', () => requestStop('SIGINT'));
   process.on('SIGTERM', () => requestStop('SIGTERM'));
 
+  if (CONSUMER_INTERVAL_MS > 0) line(`Embedded consumer: every ${CONSUMER_INTERVAL_MS / 60000}min (SCOUT_CONSUMER_INTERVAL_MIN=0 to disable).`);
   const intervalMs = interval * 1000;
   while (!stopping) {
     const cycleStart = Date.now();
     state = await oneCycle(state);
+    maybeSpawnConsumer(Date.now()); // fire-and-forget; never awaited by the tick loop
     if (stopping) break;
     const wakeAt = cycleStart + intervalMs;
     while (!stopping && Date.now() < wakeAt) await sleep(Math.min(250, wakeAt - Date.now()));

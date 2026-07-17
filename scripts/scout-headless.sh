@@ -3,10 +3,15 @@
 #
 # One cycle: deterministic snapshot (--json) → a headless cheap-model decision
 # (`claude -p`, Sonnet) → strict-JSON execution (scout:trade --from-json, PAPER-ONLY
-# hard guard). Schedule this via cron on WHICHEVER box you like (the trigger sink is
-# the Supabase table, so any box sees the same triggers):
+# hard guard).
 #
+# SCHEDULING: `pnpm scout:watch` now runs this EMBEDDED (every
+# SCOUT_CONSUMER_INTERVAL_MIN, default 30 — one supervised process, no cron
+# needed). A standalone cron on any box still works too (the trigger sink is the
+# Supabase table, so any box sees the same queue):
 #   */30 * * * *  cd /path/to/hyperliquid && ./scripts/scout-headless.sh >> ~/.hl-scout-headless.log 2>&1
+# Don't run BOTH on the same queue — the atomic consumed_at claim makes it safe,
+# but it doubles model spend for nothing.
 #
 # The model NEVER sees a shell; it receives the snapshot + playbook as text and must
 # reply with ONE JSON object: {"action":"open"|"close"|"stand-down", ...} — anything
