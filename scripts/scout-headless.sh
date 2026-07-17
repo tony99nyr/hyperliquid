@@ -46,6 +46,13 @@ Reply with EXACTLY one JSON object on a single line, no prose, one of:
 {"action":"stand-down","note":"<why>"}
 {"action":"open","coin":"ETH","side":"buy|sell","riskUsd":50,"stopFrac":0.03,"leverage":3,"lane":"directional","setupType":"breakout|breakdown|reclaim|range-fade|carry|leader-follow|other","regime":"<one word from the snapshot regime>","thesis":"<the hypothesis being tested>"}
 {"action":"close","coin":"ETH","sessionId":"<from snapshot positions>","hypothesisId":"<if known>","fraction":1,"note":"<why>"}
+{"action":"propose","coin":"HYPE","title":"<short specific headline>","body":"<the concrete ladder amendment + the evidence: stall/health/tape numbers>"}
+
+The propose action is the STEWARD lane: advisory-only review of the LIVE BOOK section
+(you can never touch live positions/ladders — a proposal pages the operator on Discord).
+Use it when the snapshot's STEWARD REVIEW DUTY finds 2+ signals that a live trade is
+turning out of (or into) favor. Repeat titles within 2h are deduped — new evidence
+needs a NEW title.
 
 SNAPSHOT:
 $SNAPSHOT

@@ -71,7 +71,10 @@ run(async () => {
   // 3c) READ-ONLY live book (the STEWARD lane): the scout may SEE the live positions
   // + armed ladders to PROPOSE ladder management — it can never touch them (the
   // execution path asserts paper sessions; proposals go to Discord + the log only).
-  let liveBook: { positions: Array<{ coin: string; side: string; sz: number; entryPx: number | null; unrealizedPnl: number }>; armedLadders: Array<{ id8: string; title: string; rungs: Array<{ seq: number; action: string; triggerKind: string; triggerPx: number | null; status: string }> }> } = { positions: [], armedLadders: [] };
+  let liveBook: {
+    positions: Array<{ coin: string; side: string; sz: number; entryPx: number | null; unrealizedPnl: number; momentumStallLong?: number | null; momentumStallShort?: number | null; healthScore?: number | null; healthAgeMin?: number | null }>;
+    armedLadders: Array<{ id8: string; title: string; coins: string[]; rungs: Array<{ seq: number; action: string; triggerKind: string; triggerPx: number | null; status: string }> }>;
+  } = { positions: [], armedLadders: [] };
   try {
     const addr = getHlAccountAddress();
     const [ch, armed] = await Promise.all([
@@ -83,9 +86,55 @@ run(async () => {
       armedLadders: (armed ?? []).map((l) => ({
         id8: l.id.slice(0, 8),
         title: l.title.slice(0, 60),
+        coins: [...new Set(l.rungs.map((r) => r.coin.toUpperCase()))],
         rungs: l.rungs.map((r) => ({ seq: r.seq, action: r.action, triggerKind: r.triggerKind, triggerPx: r.triggerPx, status: r.status })),
       })),
     };
+    // MID-TRADE INSPECTION (Jul-17, operator ask): give the steward the SAME
+    // momentum composite the ladder engine trades on + the health engine's read,
+    // per live-book coin — so "turning out of favor / into favor" is evidence,
+    // not vibes. READ-ONLY enrichment; every piece fail-soft to null.
+    const bookCoins = [...new Set([...liveBook.positions.map((p) => p.coin.toUpperCase()), ...liveBook.armedLadders.flatMap((l) => l.coins)])].slice(0, 5);
+    if (bookCoins.length > 0) {
+      const { fetchCandles } = await import('@/lib/hyperliquid/candle-service');
+      const { computeMomentumIndicators } = await import('@/lib/ladder/ladder-momentum-service');
+      const { MOMENTUM_STALL_LONG, MOMENTUM_STALL_SHORT } = await import('@/lib/ladder/ladder-types');
+      const stallByCoin: Record<string, { long: number | null; short: number | null }> = {};
+      for (const coin of bookCoins) {
+        try {
+          const res = await fetchCandles(coin, '15m', now - 4 * 3_600_000, now);
+          const ind = res.stale ? null : await computeMomentumIndicators(coin, res.candles, now);
+          stallByCoin[coin] = { long: ind?.[MOMENTUM_STALL_LONG] ?? null, short: ind?.[MOMENTUM_STALL_SHORT] ?? null };
+        } catch { stallByCoin[coin] = { long: null, short: null }; }
+      }
+      // Latest health-engine read per coin (any LIVE session — the watch daemon
+      // writes these; stale/absent → null. Session ids never leave this scope.)
+      const healthByCoin: Record<string, { score: number; ageMin: number }> = {};
+      try {
+        const { data: liveSess } = await db.from('sessions').select('id').eq('mode', 'live');
+        const liveIds = (liveSess ?? []).map((x) => (x as { id: string }).id);
+        if (liveIds.length > 0) {
+          const { data: hs } = await db
+            .from('health_snapshots')
+            .select('coin, score, created_at')
+            .in('session_id', liveIds)
+            .order('created_at', { ascending: false })
+            .limit(30);
+          for (const h of hs ?? []) {
+            const row = h as { coin: string; score: number; created_at: string };
+            const c = row.coin.toUpperCase();
+            if (!healthByCoin[c]) healthByCoin[c] = { score: Number(row.score), ageMin: (now - Date.parse(row.created_at)) / 60_000 };
+          }
+        }
+      } catch { /* health absent → null */ }
+      for (const p of liveBook.positions) {
+        const c = p.coin.toUpperCase();
+        p.momentumStallLong = stallByCoin[c]?.long ?? null;
+        p.momentumStallShort = stallByCoin[c]?.short ?? null;
+        p.healthScore = healthByCoin[c]?.score ?? null;
+        p.healthAgeMin = healthByCoin[c] ? Math.round(healthByCoin[c].ageMin) : null;
+      }
+    }
   } catch { /* fail-soft: steward context absent → the scout just doesn't propose */ }
 
   // 4) Vaults (Lane A allocation candidates — newest snapshot per vault).
@@ -208,8 +257,20 @@ run(async () => {
 
   header('LIVE BOOK (READ-ONLY — steward lane: PROPOSE ladder changes, never touch)');
   if (liveBook.positions.length === 0 && liveBook.armedLadders.length === 0) line('(flat, no armed ladders)');
-  for (const pos of liveBook.positions) line(`${pos.coin} ${pos.side} ${pos.sz} @ ${pos.entryPx ?? '?'} uPnL $${pos.unrealizedPnl.toFixed(2)}`);
+  for (const pos of liveBook.positions) {
+    const stall = pos.momentumStallLong != null || pos.momentumStallShort != null
+      ? `  stall L${pos.momentumStallLong ?? '?'}/S${pos.momentumStallShort ?? '?'} (2+ = that side's momentum dying)` : '';
+    const health = pos.healthScore != null ? `  health ${Math.round(pos.healthScore)}/100 (${pos.healthAgeMin}m old)` : '';
+    line(`${pos.coin} ${pos.side} ${pos.sz} @ ${pos.entryPx ?? '?'} uPnL $${pos.unrealizedPnl.toFixed(2)}${stall}${health}`);
+  }
   for (const l of liveBook.armedLadders) line(`ladder ${l.id8} "${l.title}" — ${l.rungs.map((r) => `${r.seq}:${r.action}${r.triggerPx != null ? `@${r.triggerPx}` : ''}(${r.status})`).join(' ')}`);
+  if (liveBook.positions.length > 0 || liveBook.armedLadders.length > 0) {
+    line('STEWARD REVIEW DUTY: for EACH live position/armed ladder above, weigh stall counts,');
+    line('health, tape/percentiles: is the trade turning OUT of favor (stall 2+ against it,');
+    line('health <40 and falling, tape flipped) or INTO favor (momentum clean, health rising)?');
+    line('If 2+ signals agree, PROPOSE a CONCRETE amendment (tighten ratchet to X / bank early');
+    line('at Y / disarm Z / widen target W) — a specific 💡 beats silence. One proposal max.');
+  }
 
   header('VAULTS (Lane A — allocation candidates; nav = total AUM, judge on apr/return)');
   if (vaults.length === 0) line('(no vault snapshots yet — wait for the nas-watch tick / run pnpm vault-watch --once)');
