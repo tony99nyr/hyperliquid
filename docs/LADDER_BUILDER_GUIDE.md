@@ -247,7 +247,11 @@ fade even slightly underwater; the impulse dying = the thesis dying).
   (0/10 RISK + UPSIDE scorecard; warnings there = fix the geometry). Blockers gate arming.
 - **Expectancy ledger**: `pnpm skill:ladder-expectancy` (+ `--resolve` flows) — the judge.
 - **Arm/disarm**: operator-only, cockpit UI or `POST /api/cockpit/ladder/arm` with the
-  typed phrase. Disarm: `POST /api/cockpit/ladder/disarm`.
+  typed phrase. **INSTANT-FIRE GUARD**: the arm route REFUSES when an entry
+  rung's price gate is already satisfied at the current mark (arming would place a
+  near-market order on the next tick, not a resting trap — bit the desk twice on
+  Jul 16-17). Design gates on the far side of price, or pass `allowInstantFire: true`
+  only when a near-market fill is genuinely intended. Disarm: `POST /api/cockpit/ladder/disarm`.
 - **Hit notifications**: fires 🔥, banks 💰, ratchets 🔒, faults 🚨, exchange-side stop
   fills 🛑 all page Discord automatically.
 - **After any engine change**: `pnpm validate`, and read `src/lib/ladder/CLAUDE.md` first.
