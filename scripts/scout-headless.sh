@@ -12,6 +12,13 @@
 # reply with ONE JSON object: {"action":"open"|"close"|"stand-down", ...} — anything
 # malformed is rejected by parseScoutDecision and NOTHING trades. Most cycles should
 # be stand-downs; that is the system working, not failing.
+#
+# AUTH POLICY (operator rule): the claude CLI runs on the operator's SUBSCRIPTION
+# (one-time `claude` login on the box; credentials live in ~/.claude). NEVER set
+# ANTHROPIC_API_KEY for this — API billing is not allowed on this desk.
+# Cron PATH is minimal: set CLAUDE_BIN to the absolute path if `claude` isn't found
+# (find it with `which claude` in an interactive shell; often ~/.npm-global/bin or
+# $(npm prefix -g)/bin).
 # POSIX sh (busybox ash on the ASUSTOR NAS — no bash there). pipefail is
 # supported by busybox ash but guarded for strict-POSIX shells; the bash-only
 # ERR trap is gone (set -e still aborts on any failure, and the dead-man ping
@@ -46,7 +53,8 @@ EOF
 # stderr stays VISIBLE (expired auth / missing CLI must show up in the cron log).
 # Strip markdown code fences (a fenced reply would fail parse every cycle) and take the
 # last non-empty line — anything malformed is rejected by parseScoutDecision (no trade).
-DECISION="$(printf '%s' "$PROMPT" | claude -p --model sonnet | sed 's/^```.*$//' | grep -v '^[[:space:]]*$' | tail -1)"
+CLAUDE_BIN="${CLAUDE_BIN:-claude}"
+DECISION="$(printf '%s' "$PROMPT" | "$CLAUDE_BIN" -p --model sonnet | sed 's/^```.*$//' | grep -v '^[[:space:]]*$' | tail -1)"
 echo "[scout-headless] decision: $DECISION"
 pnpm --silent scout:trade -- --from-json "$DECISION"
 
