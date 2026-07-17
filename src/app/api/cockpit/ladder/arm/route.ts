@@ -35,7 +35,7 @@ import {
 import { buildPreconditionSnapshot, hashPreconditionSnapshot, type LivePositionState } from '@/lib/ladder/ladder-risk-business-logic';
 import { ACTS_ON_LIVE_POSITION } from '@/lib/ladder/ladder-types';
 import { resolveCoinMaxLeverage } from '@/lib/trading/leverage-business-logic';
-import { fetchClearinghouseState, fetchMetaAndAssetCtxs } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { fetchAllMids, fetchClearinghouseState, fetchMetaAndAssetCtxs } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
 import { validateEnv } from '@/lib/env/env';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const limit = checkRateLimit(`ladder-arm:${getClientIdentifier(request)}`, ARM_MAX_PER_MIN, 60_000);
   if (!limit.allowed) return NextResponse.json({ ok: false, error: 'Too many requests' }, { status: 429 });
 
-  let body: { ladderId?: unknown; confirmPhrase?: unknown };
+  let body: { ladderId?: unknown; confirmPhrase?: unknown; allowInstantFire?: unknown };
   try { body = (await request.json()) as typeof body; } catch { return NextResponse.json({ ok: false, error: 'Invalid body' }, { status: 400 }); }
   const ladderId = typeof body.ladderId === 'string' ? body.ladderId.trim() : '';
   if (!ladderId) return NextResponse.json({ ok: false, error: 'ladderId required' }, { status: 400 });
@@ -124,6 +124,39 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   });
   if (validation.warnings.length > 0) {
     return NextResponse.json({ ok: false, error: 'Ladder is not safe to arm', warnings: validation.warnings }, { status: 422 });
+  }
+
+  // INSTANT-FIRE GUARD (Jul-17, after the second occurrence): an entry rung whose
+  // price gate is ALREADY satisfied by the current mark fires on the next watcher
+  // tick — the operator thinks they armed a resting trap and instead placed a
+  // near-market order. Refuse unless the request explicitly acknowledges it
+  // (body.allowInstantFire: the UI surfaces the warning and re-posts on confirm).
+  if (body.allowInstantFire !== true) {
+    try {
+      const mids = await fetchAllMids();
+      const instant = armRungs.filter((r) => {
+        if (r.action !== 'open' && r.action !== 'add') return false;
+        if (r.triggerPx == null || !(r.triggerPx > 0)) return false;
+        const mark = Number(mids[r.coin.toUpperCase()]);
+        if (!Number.isFinite(mark) || mark <= 0) return false;
+        return r.triggerKind === 'price_above' ? mark >= r.triggerPx : r.triggerKind === 'price_below' ? mark <= r.triggerPx : false;
+      });
+      if (instant.length > 0) {
+        const lines = instant.map((r) => `rung ${r.seq}: ${r.action} ${r.coin} ${r.triggerKind} ${r.triggerPx} is ALREADY met at mark ${Number(mids[r.coin.toUpperCase()])}`);
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              'INSTANT-FIRE: entry gate(s) already satisfied at the current mark — arming now places a near-market order on the next watcher tick, not a resting trap. Re-send with allowInstantFire: true only if that is genuinely intended.',
+            warnings: lines,
+          },
+          { status: 422 },
+        );
+      }
+    } catch {
+      // A mids outage must not block arming a genuinely-resting ladder; the guard
+      // degrades to the pre-Jul-17 behavior (no instant-fire check).
+    }
   }
 
   // LIVE arm needs the exact typed phrase (the authorization moment).
