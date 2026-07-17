@@ -39,6 +39,20 @@ run(async () => {
   line('');
   line('Next: the scout-review skill (Opus) reads this + the resolved hypotheses and curates docs/scout/playbook.md.');
 
+  // Steward counterfactual score — "would its advice have helped?" (Jul-17).
+  try {
+    const { getServiceRoleClient } = await import('@/lib/cockpit/supabase-server');
+    const { stewardScore } = await import('@/lib/scout/steward-proposal-business-logic');
+    const { data: props } = await getServiceRoleClient()
+      .from('steward_proposals')
+      .select('status, helped_usd')
+      .limit(500);
+    const sc = stewardScore((props ?? []).map((r) => ({ status: String((r as { status: string }).status), helpedUsd: (r as { helped_usd: number | null }).helped_usd })));
+    header('STEWARD COUNTERFACTUALS (proposals scored against what actually happened)');
+    if (sc.resolved === 0) line('(no resolved proposals yet)');
+    else line(`resolved ${sc.resolved} (scorable ${sc.scorable}) · helped ${sc.helpedCount} / hurt ${sc.hurtCount} · net if-followed $${sc.netHelpedUsd.toFixed(2)}`);
+  } catch { /* advisory display only */ }
+
   // Persist the run (Jul-16 review: the judge had NEVER run and left no evidence
   // when it did — now every run writes a scout_reviews row). Best-effort.
   try {

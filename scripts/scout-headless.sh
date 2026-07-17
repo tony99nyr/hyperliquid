@@ -46,7 +46,13 @@ Reply with EXACTLY one JSON object on a single line, no prose, one of:
 {"action":"stand-down","note":"<why>"}
 {"action":"open","coin":"ETH","side":"buy|sell","riskUsd":50,"stopFrac":0.03,"leverage":3,"lane":"directional","setupType":"breakout|breakdown|reclaim|range-fade|carry|leader-follow|other","regime":"<one word from the snapshot regime>","thesis":"<the hypothesis being tested>"}
 {"action":"close","coin":"ETH","sessionId":"<from snapshot positions>","hypothesisId":"<if known>","fraction":1,"note":"<why>"}
-{"action":"propose","coin":"HYPE","title":"<short specific headline>","body":"<the concrete ladder amendment + the evidence: stall/health/tape numbers>"}
+{"action":"propose","coin":"HYPE","title":"<short specific headline>","body":"<the concrete ladder amendment + the evidence: stall/health/tape numbers>","proposalKind":"exit|bank|stop-tighten|disarm|widen-target","paramPx":63.4}
+
+proposalKind makes your advice SCORABLE: a resolver later computes "would acting on it
+have helped?" against what actually happened, and your counterfactual track record is
+the only path to more authority. 'exit'/'bank' = get out/take profit at the current
+mark; 'stop-tighten' REQUIRES paramPx (the new stop). Omit proposalKind only for pure
+observations (scored as unscorable 'info').
 
 The propose action is the STEWARD lane: advisory-only review of the LIVE BOOK section
 (you can never touch live positions/ladders — a proposal pages the operator on Discord).

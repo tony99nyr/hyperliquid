@@ -76,6 +76,8 @@ export interface ScoutDecision {
   note?: string;
   setupType?: string;
   regime?: string;
+  proposalKind?: string;
+  paramPx?: number;
 }
 
 /**
@@ -83,7 +85,7 @@ export interface ScoutDecision {
  * shape the CLI flags produce), or a stand-down/error. PURE — fixture-tested; the thin
  * script routes the result. Validation is strict: a malformed decision NEVER trades.
  */
-export function parseScoutDecision(raw: string): { kind: 'open' | 'close'; args: Record<string, string | boolean> } | { kind: 'stand-down'; note: string } | { kind: 'propose'; title: string; body: string; coin: string | null } | { kind: 'error'; error: string } {
+export function parseScoutDecision(raw: string): { kind: 'open' | 'close'; args: Record<string, string | boolean> } | { kind: 'stand-down'; note: string } | { kind: 'propose'; title: string; body: string; coin: string | null; proposalKind: 'exit' | 'bank' | 'stop-tighten' | 'disarm' | 'widen-target' | 'info'; paramPx: number | null } | { kind: 'error'; error: string } {
   let d: ScoutDecision;
   try {
     d = JSON.parse(raw) as ScoutDecision;
@@ -98,7 +100,16 @@ export function parseScoutDecision(raw: string): { kind: 'open' | 'close'; args:
   if (d.action === 'propose') {
     if (!d.title || typeof d.title !== 'string') return { kind: 'error', error: 'propose: title required' };
     if (!d.body || typeof d.body !== 'string') return { kind: 'error', error: 'propose: body required (the concrete ladder change + rationale)' };
-    return { kind: 'propose', title: d.title.slice(0, 120), body: d.body.slice(0, 1200), coin: typeof d.coin === 'string' ? d.coin.toUpperCase() : null };
+    // Counterfactual contract (Jul-17): a scorable proposal declares its KIND and
+    // (for stop-tighten/widen-target) the concrete price. Missing/unknown kind
+    // degrades to 'info' — recorded, never scored, never rejected.
+    const KINDS = ['exit', 'bank', 'stop-tighten', 'disarm', 'widen-target', 'info'] as const;
+    const proposalKind = KINDS.includes(d.proposalKind as (typeof KINDS)[number]) ? (d.proposalKind as (typeof KINDS)[number]) : 'info';
+    const paramPx = typeof d.paramPx === 'number' && Number.isFinite(d.paramPx) && d.paramPx > 0 ? d.paramPx : null;
+    if ((proposalKind === 'stop-tighten' || proposalKind === 'widen-target') && paramPx == null) {
+      return { kind: 'error', error: `propose: ${proposalKind} requires a concrete paramPx` };
+    }
+    return { kind: 'propose', title: d.title.slice(0, 120), body: d.body.slice(0, 1200), coin: typeof d.coin === 'string' ? d.coin.toUpperCase() : null, proposalKind, paramPx };
   }
   if (d.action === 'open') {
     if (!d.coin || typeof d.coin !== 'string') return { kind: 'error', error: 'open: coin required' };

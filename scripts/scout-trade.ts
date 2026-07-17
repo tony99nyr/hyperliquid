@@ -362,9 +362,42 @@ run(async () => {
           if (sid) await writeAnalysisLog({ sessionId: sid, source: 'scout', severity: 'warn', message: 'STEWARD PROPOSAL DROPPED FROM DISCORD — DISCORD_WEBHOOK_URL is not exported in the scout cron env.' });
         } catch { /* best-effort */ }
       }
-      await sendDiscord(`💡 **STEWARD PROPOSAL**${parsed.coin ? ` [${parsed.coin}]` : ''} — ${parsed.title}
+      // COUNTERFACTUAL LEDGER (Jul-17): freeze the market state so the resolver can
+      // later answer "would acting on this have helped?" even if the operator slept
+      // through it. Read-only reads; a failed freeze still pages (advisory first).
+      try {
+        const db = getServiceRoleClient();
+        let side: 'long' | 'short' | null = null;
+        let positionSz: number | null = null;
+        let markPx: number | null = null;
+        if (parsed.coin) {
+          const { fetchAllMids, fetchClearinghouseState } = await import('@/lib/hyperliquid/hyperliquid-info-service');
+          const { getHlAccountAddress } = await import('@/lib/auto-exit/auto-exit-config');
+          const mids = await fetchAllMids().catch(() => ({}) as Record<string, string>);
+          markPx = Number.isFinite(Number(mids[parsed.coin])) ? Number(mids[parsed.coin]) : null;
+          const addr = getHlAccountAddress();
+          const ch = addr ? await fetchClearinghouseState(addr).catch(() => null) : null;
+          const pos = (ch?.positions ?? []).find((x) => x.coin.toUpperCase() === parsed.coin && x.size > 0);
+          if (pos) { side = pos.side === 'short' ? 'short' : 'long'; positionSz = pos.size; }
+        }
+        await db.from('steward_proposals').insert({
+          coin: parsed.coin ?? '?',
+          title: parsed.title,
+          body: parsed.body,
+          proposal_kind: parsed.proposalKind,
+          side,
+          position_sz: positionSz,
+          mark_px: markPx,
+          param_px: parsed.paramPx,
+          horizon_at: new Date(Date.now() + 24 * 3_600_000).toISOString(),
+        });
+        line(`(counterfactual ledger: ${parsed.proposalKind}${parsed.paramPx ? ` @ ${parsed.paramPx}` : ''}, mark ${markPx ?? '?'}, ${side ?? 'no position'})`);
+      } catch (e) {
+        line(`WARN: proposal not ledgered: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      await sendDiscord(`💡 **STEWARD PROPOSAL**${parsed.coin ? ` [${parsed.coin}]` : ''} — ${parsed.title} (${parsed.proposalKind}${parsed.paramPx ? ` @ ${parsed.paramPx}` : ''})
 ${parsed.body}
-_(advisory only — nothing was executed; draft/arm per the builder guide)_`, 'HL Ladder Steward').catch(() => {});
+_(advisory only — nothing was executed; the counterfactual resolver will score this within 24h)_`, 'HL Ladder Steward').catch(() => {});
       try {
         const db = getServiceRoleClient();
         const { data: sess } = await db.from('sessions').select('id').eq('status', 'active').order('created_at', { ascending: false }).limit(1);
