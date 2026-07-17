@@ -185,6 +185,45 @@ describe('performLadderRungFire — guard stack', () => {
   });
 });
 
+describe('performLadderRungFire — pre-opener guard (Jul-17)', () => {
+  const mgmtRung = (over: Partial<LadderRung> = {}): LadderRung =>
+    openRung({ id: 'r2', seq: 2, action: 'reduce', reduceFrac: 0.5, triggerKind: 'indicator', triggerPx: null, triggerMeta: { op: 'above', indicatorName: 'momentum-stall-long', indicatorValue: 2 }, cloid: 'L1:r2', ...over });
+
+  it('a management rung on a FLAT coin with the own opener still PENDING waits — no claim, no status change', async () => {
+    const lad = ladder({}, [openRung(), mgmtRung()]);
+    getLadderWithRungs.mockResolvedValue(lad);
+    getActiveSession.mockResolvedValue({ id: 's1', mode: 'paper' });
+    loadPosition.mockResolvedValue(null); // flat
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r2', now: NOW });
+    expect(res.fired).toBe(false);
+    expect(res.skipped).toContain('awaiting-own-opener');
+    expect(claimRungFire).not.toHaveBeenCalled(); // claim UNSPENT — retries next candle
+    expect(setRungStatus).not.toHaveBeenCalled(); // rung stays PENDING (the whole point)
+  });
+
+  it('once the opener has FIRED, a flat coin terminal-skips as before (trade really over)', async () => {
+    const lad = ladder({}, [openRung({ status: 'fired' }), mgmtRung()]);
+    getLadderWithRungs.mockResolvedValue(lad);
+    getActiveSession.mockResolvedValue({ id: 's1', mode: 'paper' });
+    loadPosition.mockResolvedValue(null); // flat — position stopped out for real
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r2', now: NOW });
+    expect(res.fired).toBe(false);
+    expect(claimRungFire).toHaveBeenCalled(); // normal path: claim then flat-skip
+    expect(setRungStatus).toHaveBeenCalledWith('r2', 'skipped');
+  });
+
+  it('an unreadable position with a pending opener also waits (fail toward pending)', async () => {
+    const lad = ladder({}, [openRung(), mgmtRung()]);
+    getLadderWithRungs.mockResolvedValue(lad);
+    getActiveSession.mockResolvedValue({ id: 's1', mode: 'paper' });
+    loadPosition.mockRejectedValue(new Error('db down'));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r2', now: NOW });
+    expect(res.fired).toBe(false);
+    expect(res.skipped).toContain('awaiting-own-opener');
+    expect(claimRungFire).not.toHaveBeenCalled();
+  });
+});
+
 describe('performLadderRungFire — execution', () => {
   it('fires a PAPER open: simulates the fill and places NO real exchange order', async () => {
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });

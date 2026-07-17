@@ -219,6 +219,32 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
     }
   }
 
+  // 5c) PRE-OPENER GUARD (Jul-17, after the THIRD occurrence): a management rung
+  // (add/reduce/close/stop_move — anything that acts on the position this ladder
+  // will open) whose condition prints BEFORE the ladder's own opener fills must
+  // WAIT, not die. Placed BEFORE the claim so nothing is spent: the rung stays
+  // PENDING and re-evaluates next candle. Without this, a stall signal during
+  // pre-entry chop terminally killed the stall-exit rung — the position later
+  // filled and ran the event WITHOUT its momentum exit (ETH straddle, Jul 16).
+  // Once the opener has FIRED, a flat position means the trade really ended and
+  // the old terminal-skip behavior below stays correct.
+  if (rung.action !== 'open') {
+    const ownOpenerPending = ladder.rungs.some((r) => r.action === 'open' && r.status === 'pending');
+    if (ownOpenerPending) {
+      try {
+        const preForcePaper = !(ladder.mode === 'live' && getTradingMode() === 'live');
+        const preSession = await getActiveSession();
+        const prePos = preSession ? await loadEffectivePosition(preSession.id, coin, preForcePaper) : null;
+        if (!prePos || prePos.side === 'flat' || prePos.sz <= 0) {
+          return skip('awaiting-own-opener (management rung stays pending, no claim spent)');
+        }
+      } catch {
+        // Unreadable position + pending opener → wait as well (fail toward pending).
+        return skip('awaiting-own-opener (position unreadable)');
+      }
+    }
+  }
+
   // 6) ATOMIC claim — the double-fire guard. Only the inserter proceeds. TRAIL
   // stop_move rungs claim PER COMPLETED CANDLE (they re-fire as price advances);
   // everything else stays strictly one-shot.
