@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # scout-headless.sh — the ZERO-BABYSITTING scout consumer (C2, 2026-07-03).
 #
 # One cycle: deterministic snapshot (--json) → a headless cheap-model decision
@@ -12,8 +12,12 @@
 # reply with ONE JSON object: {"action":"open"|"close"|"stand-down", ...} — anything
 # malformed is rejected by parseScoutDecision and NOTHING trades. Most cycles should
 # be stand-downs; that is the system working, not failing.
-set -euo pipefail
-trap 'echo "[scout-headless] FAILED at line $LINENO (see stderr above)" >&2' ERR
+# POSIX sh (busybox ash on the ASUSTOR NAS — no bash there). pipefail is
+# supported by busybox ash but guarded for strict-POSIX shells; the bash-only
+# ERR trap is gone (set -e still aborts on any failure, and the dead-man ping
+# at the tail only fires on full success, so failures page via the missed ping).
+set -eu
+(set -o pipefail) 2>/dev/null && set -o pipefail || true
 cd "$(dirname "$0")/.."
 
 SNAPSHOT="$(pnpm --silent scout:cycle -- --json)"
