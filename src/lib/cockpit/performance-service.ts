@@ -357,8 +357,10 @@ export async function getScoutPerformanceSummary(): Promise<PerformanceSummary> 
   const leverageByCoin: Record<string, number | null> = {};
   try {
     const supabase = getServiceRoleClient();
-    const { data: sessRows } = await supabase.from('sessions').select('id').eq('title', 'scout');
-    const ids = (sessRows ?? []).map((r) => (r as { id: string }).id);
+    // ONE identity resolver (Jul-16 review: three copies of title='scout' went
+    // blind when the session was archived — never fork this query again).
+    const { scoutSessionIds } = await import('@/lib/scout/scout-session-service');
+    const ids = await scoutSessionIds(supabase);
     if (ids.length === 0) return empty;
     const { data: fillRows } = await supabase
       .from('fills')

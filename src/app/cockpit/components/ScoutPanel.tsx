@@ -14,6 +14,7 @@ import { useEffect, useState } from 'react';
 import { css } from '@styled-system/css';
 import { ResponsiveContainer, AreaChart, Area, YAxis } from 'recharts';
 import { useScoutHypotheses } from '@/hooks/useScoutHypotheses';
+import { useScoutDecisions, type ScoutDecisionRow } from '@/hooks/useScoutDecisions';
 import { useScoutHeartbeat } from '@/hooks/useScoutHeartbeat';
 import { useScoutSessionIds } from '@/hooks/useScoutSessionIds';
 import { useScoutPerformance, type ScoutLanes } from '@/hooks/useScoutPerformance';
@@ -33,6 +34,8 @@ const HEARTBEAT_STALE_MS = 5 * 60 * 1000;
 export interface ScoutPanelProps {
   /** Test/RSC seed: render fixed theses instead of subscribing. */
   hypsOverride?: Hypothesis[];
+  /** Test/RSC seed: render fixed cycle decisions instead of polling. */
+  decisionsOverride?: ScoutDecisionRow[];
   /** Test/RSC seed: render fixed open positions instead of subscribing. */
   positionsOverride?: { positions: PositionRow[]; latestPnlByCoin: Record<string, PnlSnapshot> };
   /** Test/RSC seed: render this scout track record instead of fetching. */
@@ -41,10 +44,12 @@ export interface ScoutPanelProps {
   lanesOverride?: ScoutLanes | null;
 }
 
-export default function ScoutPanel({ hypsOverride, positionsOverride, perfOverride, lanesOverride }: ScoutPanelProps) {
+export default function ScoutPanel({ hypsOverride, positionsOverride, perfOverride, lanesOverride, decisionsOverride }: ScoutPanelProps) {
   const controlled = hypsOverride !== undefined;
   const live = useScoutHypotheses({ enabled: !controlled });
   const hyps = hypsOverride ?? live.rows;
+  const decisionsLive = useScoutDecisions({ enabled: decisionsOverride === undefined && !controlled });
+  const decisions = decisionsOverride ?? decisionsLive.rows;
   const stats = scoutStats(hyps);
 
   // The scout's REAL trading track record (net paper P&L + win rate + a 30d
@@ -196,6 +201,21 @@ export default function ScoutPanel({ hypsOverride, positionsOverride, perfOverri
         )}
       </div>
 
+      {/* per-cycle decision ledger — what the scout is CONSIDERING right now (incl. stand-downs) */}
+      <div data-testid="scout-decisions" className={css({ display: 'flex', flexDirection: 'column', gap: '5px', borderTop: '1px solid token(colors.github.borderSubtle)', paddingTop: '9px' })}>
+        <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' })}>
+          <span className={css({ fontFamily: 'label', fontSize: '9px', fontWeight: 'bold', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'github.textMuted' })}>
+            Cycle decisions <span style={{ color: GH.textBright }}>· {decisions.length}</span>
+          </span>
+          <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'cockpit.faint' })}>every ~30m · stand-down = discipline</span>
+        </div>
+        {decisions.length === 0 ? (
+          <span className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>no cycles recorded yet</span>
+        ) : (
+          decisions.map((d) => <ScoutDecisionLine key={d.id} d={d} nowMs={clock} />)
+        )}
+      </div>
+
       {/* recent theses feed — the scout's reasoning (distinct from trade P&L above) */}
       <div className={css({ display: 'flex', flexDirection: 'column', gap: '5px', borderTop: '1px solid token(colors.github.borderSubtle)', paddingTop: '9px' })}>
         <div className={css({ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' })}>
@@ -270,6 +290,29 @@ function ScoutPositionRow({ pos, pnl }: { pos: PositionRow; pnl: PnlSnapshot | u
       <span className={css({ color: 'cockpit.faint', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })}>@ {fmtPx(d.entryPx)}</span>
       <span data-testid="scout-pos-upnl" style={{ color: upnlColor, fontFeatureSettings: '"tnum"', flexShrink: 0 }}>
         {upnl == null ? '—' : fmtUsd(upnl)}{pct == null ? '' : ` (${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%)`}
+      </span>
+    </div>
+  );
+}
+
+
+/** One trial-ledger line: when · kind chip · coin · reasoning. */
+function ScoutDecisionLine({ d, nowMs }: { d: ScoutDecisionRow; nowMs: number }) {
+  const ageMs = nowMs - d.createdAtMs;
+  const age = ageMs < 3_600_000 ? `${Math.max(1, Math.round(ageMs / 60_000))}m` : ageMs < 86_400_000 ? `${(ageMs / 3_600_000).toFixed(1)}h` : `${Math.round(ageMs / 86_400_000)}d`;
+  const kindColor =
+    d.kind === 'open' ? ZONE_COLORS.ok : d.kind === 'close' ? '#58a6ff' : d.kind === 'propose' ? '#d29922' : d.kind === 'error' ? ZONE_COLORS.danger : GH.textMuted;
+  const label = d.kind === 'propose' ? '💡 propose' : d.kind;
+  return (
+    <div className={css({ display: 'flex', gap: '7px', alignItems: 'baseline', fontFamily: 'mono', fontSize: '10px', lineHeight: '1.35' })}>
+      <span className={css({ color: 'cockpit.faint', flexShrink: 0, minWidth: '26px', textAlign: 'right' })}>{age}</span>
+      <span style={{ color: kindColor }} className={css({ flexShrink: 0, fontWeight: 'medium' })}>
+        {label}
+        {(d.kind === 'open' || d.kind === 'close') && (d.executed ? ' ✓' : ' ✗')}
+      </span>
+      {d.coin && <span className={css({ color: 'github.textBright', flexShrink: 0 })}>{d.coin}</span>}
+      <span className={css({ color: 'github.textMuted', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })} title={d.reasoning}>
+        {d.reasoning}
       </span>
     </div>
   );

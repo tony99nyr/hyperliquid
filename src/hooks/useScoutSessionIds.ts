@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * useScoutSessionIds — the autonomous scout's session ids (title='scout'),
+ * useScoutSessionIds — the autonomous scout's session ids (current + archived),
  * newest-first. Shared by the scout views so they agree on "which sessions are
  * the scout's": useScoutHypotheses filters the global hypotheses feed by the
  * membership `set`, and the ScoutPanel reads the `latestId` (the active scout
@@ -33,7 +33,9 @@ export function useScoutSessionIds(enabled = true): ScoutSessionIds {
         const { data } = await getBrowserClient()
           .from('sessions')
           .select('id')
-          .eq('title', 'scout')
+          // Mirrors the server resolver's title branch (scout + archived history) —
+          // the bare eq('title','scout') went blind when the session was archived.
+          .or('title.eq.scout,title.like.scout-archived%')
           .order('created_at', { ascending: false });
         if (!cancelled) setIds((data ?? []).map((r) => (r as { id: string }).id));
       } catch {
