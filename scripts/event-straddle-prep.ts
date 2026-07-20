@@ -78,6 +78,7 @@ async function main(): Promise<void> {
   const activeFromMs = printAtMs - 15 * 60 * 1000;
   const expiresAtMs = printAtMs + 24 * 60 * 60 * 1000;
 
+  const pxDp = ref >= 1_000 ? 0 : ref >= 10 ? 2 : 4;
   const legs = (['long', 'short'] as const).map((side) => {
     const dir: 1 | -1 = side === 'long' ? 1 : -1;
     const gate = nudgeOffRound(ref * (1 + dir * gatePct), dir);
@@ -86,13 +87,21 @@ async function main(): Promise<void> {
     const kind = side === 'long' ? 'price_above' : 'price_below';
     const lvl = (rMult: number) => nudgeOffRound(gate * (1 + dir * gatePct * rMult), dir);
     const stall = `momentum-stall-${side}`;
+    // Trail distance ≈ 0.8 × the 1R gate distance: wide enough to survive
+    // post-print chop, tight enough that the tail-carry (the source of the
+    // backtest's best FOMC results, +0.6..+3.4R) banks itself on reversal.
+    const trailDist = Number((gate * gatePct * 0.8).toFixed(pxDp));
     const rungs: NewRung[] = [
       { seq: 1, coin, side, action: 'open', triggerKind: kind, triggerPx: gate, riskUsd, stopFrac, leverage: 2 },
       { seq: 2, coin, side, action: 'stop_move', triggerKind: kind, triggerPx: lvl(0.7), triggerMeta: { moveTo: 'breakeven' } },
       { seq: 3, coin, side, action: 'reduce', triggerKind: kind, triggerPx: lvl(1.0), reduceFrac: 0.34 },
       { seq: 4, coin, side, action: 'reduce', triggerKind: kind, triggerPx: lvl(2.0), reduceFrac: 0.5 },
+      // TAIL-CARRY TRAIL (FOMC toolkit, Jul-19): from +1.2R the runner's stop
+      // follows price at trailDist — the +3R tails stop managing themselves at
+      // +2R banks otherwise. Only-tightens; per-candle claims; flat terminates.
+      { seq: 5, coin, side, action: 'stop_move', triggerKind: kind, triggerPx: lvl(1.2), triggerMeta: { moveTo: 'trail', trailDistancePx: trailDist } },
       {
-        seq: 5, coin, side, action: 'reduce', triggerKind: 'indicator', reduceFrac: 0.5,
+        seq: 6, coin, side, action: 'reduce', triggerKind: 'indicator', reduceFrac: 0.5,
         triggerMeta: { op: 'above', indicatorName: stall, indicatorValue: 2 },
       },
     ];
