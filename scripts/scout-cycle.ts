@@ -68,6 +68,27 @@ run(async () => {
     db,
   ).catch(() => ({ tape: [], leaders: [], afHypePerDay: null, percentiles: [] }));
 
+  // 3b-ii) REVERSION SCAN (pre-registered PAPER lane, Jul-20): the one candidate
+  // edge that survived a day of honest backtesting — fade a STATISTICALLY EXTREME
+  // price stretch in a RANGE regime. Deterministic per-coin signal over the scan
+  // universe; the scout paper-trades it (lane 'reversion', setup_type
+  // 'reversion-extreme') so its FORWARD record is the out-of-sample proof. Fail-soft.
+  const reversionHits: Array<{ coin: string; side: 'long' | 'short'; z: number; er: number; mark: number; stop: number; target: number; stopFrac: number }> = [];
+  try {
+    const { fetchCandles: fc } = await import('@/lib/hyperliquid/candle-service');
+    const { reversionSignal } = await import('@/lib/scout/reversion-signal-business-logic');
+    const scanCoins = inputs.marks.map((m) => m.coin).slice(0, 6);
+    for (const coin of scanCoins) {
+      try {
+        const res = await fc(coin, '15m', now - 30 * 3_600_000, now);
+        if (res.stale || res.candles.length < 120) continue;
+        const bars = res.candles.slice(0, -1).map((c) => ({ highPx: c.high, lowPx: c.low, closePx: c.close }));
+        const sig = reversionSignal(bars);
+        if (sig) reversionHits.push({ coin, side: sig.side, z: sig.zScore, er: sig.efficiency, mark: sig.markPx, stop: sig.stopPx, target: sig.targetPx, stopFrac: sig.stopFrac });
+      } catch { /* per-coin fail-soft */ }
+    }
+  } catch { /* scan unavailable → section just prints empty */ }
+
   // 3c) READ-ONLY live book (the STEWARD lane): the scout may SEE the live positions
   // + armed ladders to PROPOSE ladder management — it can never touch them (the
   // execution path asserts paper sessions; proposals go to Discord + the log only).
@@ -182,6 +203,9 @@ run(async () => {
       degradedReason: inputs.degradedReason,
       triggers: triggers.map((t) => ({ kind: t.kind, coin: t.coin, side: t.side ?? null, urgency: t.urgency, detail: t.detail, at: new Date(t.at).toISOString() })),
       rubric: inputs.rubric.map((r) => ({ coin: r.coin, side: r.side, opportunity: Math.round(r.opportunity), badge: r.badge })),
+      // Extreme-reversion FADE candidates (pre-registered paper lane 'reversion',
+      // setupType 'reversion-extreme'). Empty in a trending tape by design.
+      reversion: reversionHits,
       marks: inputs.marks,
       funding: fundingCtx,
       // Advisory context (see docs/SIGNAL_ROADMAP.md): tape flow is a POINT sample
@@ -222,6 +246,10 @@ run(async () => {
     .slice()
     .sort((a, b) => b.opportunity - a.opportunity)
     .forEach((r) => line(`${r.coin} ${r.side.padEnd(5)} opp=${Math.round(r.opportunity)} ${r.badge}`));
+
+  header('REVERSION SCAN (extreme-stretch FADE candidates — PAPER lane reversion-extreme)');
+  if (reversionHits.length === 0) line('(none — no coin is extremely stretched in a range regime; trending tape correctly yields nothing)');
+  for (const h of reversionHits) line(`${h.coin} FADE ${h.side.toUpperCase()} (z=${h.z.toFixed(1)}, ER=${h.er.toFixed(2)} range)  mark=${h.mark} stop=${h.stop.toFixed(4)} target=${h.target.toFixed(4)} stopFrac=${(h.stopFrac * 100).toFixed(1)}%  -> if taken: lane 'reversion', setupType 'reversion-extreme'`);
 
   header('MARKS');
   inputs.marks.forEach((m) => line(`${m.coin} = ${m.markPx}`));

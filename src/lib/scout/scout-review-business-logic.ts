@@ -176,6 +176,49 @@ export function buildScorecard(input: ScorecardInput, cfg: ScorecardConfig = DEF
 /** A NULL/empty lane folds into the legacy directional book. */
 export const DEFAULT_LANE = 'directional';
 
+
+/** One resolved-trade row for per-setup expectancy (finer than lane). */
+export interface SetupOutcomeRow {
+  setupType: string | null;
+  realizedR: number | null;
+  excluded: boolean; // janitorial rows are ignored (Jul-16 quarantine)
+}
+
+export interface SetupExpectancy {
+  setupType: string;
+  n: number; // resolved trades with a realized R
+  winRate: number;
+  expectancyR: number; // mean realized R — the number that graduates or kills a strategy
+  totalR: number;
+}
+
+/**
+ * Group resolved outcomes by setup_type → per-strategy expectancy, so a single
+ * lane can carry several strategies and each is measured on its own. This is the
+ * telemetry that answers "does THIS specific signal work?" (e.g. reversion-extreme
+ * vs momentum), mirroring the human lane's per-setup ladder-expectancy. PURE.
+ * Rows without a setup_type or a realized R (or excluded) are dropped — an
+ * unmeasurable trade never dilutes a strategy's verdict.
+ */
+export function setupTypeExpectancy(rows: ReadonlyArray<SetupOutcomeRow>): SetupExpectancy[] {
+  const by = new Map<string, number[]>();
+  for (const r of rows) {
+    if (r.excluded || !r.setupType || r.realizedR == null || !Number.isFinite(r.realizedR)) continue;
+    const arr = by.get(r.setupType) ?? [];
+    arr.push(r.realizedR);
+    by.set(r.setupType, arr);
+  }
+  const out: SetupExpectancy[] = [];
+  for (const [setupType, rs] of by) {
+    const wins = rs.filter((x) => x > 0).length;
+    const totalR = rs.reduce((a, b) => a + b, 0);
+    // rs.length ≥ 1 for any group present in the map (built by push).
+    out.push({ setupType, n: rs.length, winRate: wins / rs.length, expectancyR: totalR / rs.length, totalR });
+  }
+  // Most-traded first (biggest sample = most trustworthy verdict on top).
+  return out.sort((a, b) => b.n - a.n);
+}
+
 export interface LanePositionRow {
   lane: string | null;
   coin: string;

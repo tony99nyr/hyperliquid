@@ -83,6 +83,20 @@ The scout reads the LIVE book (snapshot `liveBook`, read-only) and may emit
 
 ## Learned rules (curated by scout-review — append below)
 
+### reversion-extreme (PRE-REGISTERED FORWARD TEST — Jul-20, not yet proven)
+A day of honest backtesting found MOMENTUM/BREAKOUT has negative expectancy on
+15m majors, but fading a STATISTICALLY EXTREME stretch in a RANGE regime edged
+positive. This lane forward-tests it. When the REVERSION SCAN section lists a
+candidate (|z| ≥ 2.5 stretch, efficiency ratio ≤ 0.35 = range), it is a valid
+paper entry to FADE it: open the given side, risk small (floor), stop at the
+listed level, thesis = "extreme <coin> stretch (z=X) in a range regime, fading
+to the mean". TAG IT: lane 'reversion', setupType 'reversion-extreme', regime
+'range'. Do NOT fade a stretch the scan did NOT list (a trend-regime stretch is
+skipped by design — fading a trend loses). One reversion position per coin.
+Empty scan in a trending tape = correct, take nothing. See
+PREREGISTRATION_reversion-extreme.md for the kill/graduate bar.
+
+
 <!-- scout-review appends/edits dated, evidence-backed rules here, e.g.:
 - 2026-07-01: negative-funding shorts into a flush lost 4/5 (avg -$X). Require
   confirmed 8h+1d bearish regime before shorting against funding. -->

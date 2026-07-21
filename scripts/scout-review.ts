@@ -39,6 +39,29 @@ run(async () => {
   line('');
   line('Next: the scout-review skill (Opus) reads this + the resolved hypotheses and curates docs/scout/playbook.md.');
 
+  // Per-SETUP-TYPE expectancy — "does THIS specific strategy work?" (finer than
+  // lane; the telemetry that lets a hand-off signal like reversion-extreme prove
+  // or kill itself on its own track record). Reads the structured outcome columns.
+  try {
+    const { getServiceRoleClient } = await import('@/lib/cockpit/supabase-server');
+    const { scoutSessionIds } = await import('@/lib/scout/scout-session-service');
+    const { setupTypeExpectancy } = await import('@/lib/scout/scout-review-business-logic');
+    const db = getServiceRoleClient();
+    const ids = await scoutSessionIds(db);
+    if (ids.length > 0) {
+      const { data: hyp } = await db
+        .from('hypotheses')
+        .select('setup_type, realized_r, excluded')
+        .in('session_id', ids)
+        .not('setup_type', 'is', null);
+      const rows = (hyp ?? []).map((h) => ({ setupType: (h as { setup_type: string | null }).setup_type, realizedR: (h as { realized_r: number | null }).realized_r, excluded: (h as { excluded: boolean }).excluded === true }));
+      const bySetup = setupTypeExpectancy(rows);
+      header('PER-SETUP EXPECTANCY (does each strategy work?)');
+      if (bySetup.length === 0) line('(no resolved trades tagged with a setup_type yet)');
+      else for (const s of bySetup) line(`${s.setupType.padEnd(22)} n=${String(s.n).padStart(3)}  win=${(s.winRate * 100).toFixed(0)}%  expectancy=${s.expectancyR >= 0 ? '+' : ''}${s.expectancyR.toFixed(2)}R  net=${s.totalR >= 0 ? '+' : ''}${s.totalR.toFixed(1)}R`);
+    }
+  } catch { /* advisory display only */ }
+
   // Steward counterfactual score — "would its advice have helped?" (Jul-17).
   try {
     const { getServiceRoleClient } = await import('@/lib/cockpit/supabase-server');

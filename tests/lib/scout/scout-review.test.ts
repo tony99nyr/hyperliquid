@@ -176,3 +176,33 @@ describe('buildLaneScorecards — per-lane grouping', () => {
     expect(cards[0].card.vsBarUsd).toBeCloseTo((200 / 90) * 30 - 100, 1);
   });
 });
+
+
+import { setupTypeExpectancy } from '@/lib/scout/scout-review-business-logic';
+describe('setupTypeExpectancy (per-strategy telemetry)', () => {
+  it('groups by setup_type and computes win rate + expectancy R', () => {
+    const out = setupTypeExpectancy([
+      { setupType: 'reversion-extreme', realizedR: 1.5, excluded: false },
+      { setupType: 'reversion-extreme', realizedR: -1, excluded: false },
+      { setupType: 'reversion-extreme', realizedR: 0.5, excluded: false },
+      { setupType: 'momentum', realizedR: -1, excluded: false },
+    ]);
+    const rev = out.find((x) => x.setupType === 'reversion-extreme')!;
+    expect(rev.n).toBe(3);
+    expect(rev.winRate).toBeCloseTo(2 / 3);
+    expect(rev.expectancyR).toBeCloseTo((1.5 - 1 + 0.5) / 3);
+    expect(out[0].setupType).toBe('reversion-extreme'); // most-traded first
+  });
+
+  it('drops excluded / untagged / R-less rows (unmeasurable never dilutes)', () => {
+    const out = setupTypeExpectancy([
+      { setupType: 'reversion-extreme', realizedR: 1, excluded: false },
+      { setupType: 'reversion-extreme', realizedR: 5, excluded: true }, // janitorial
+      { setupType: null, realizedR: 2, excluded: false }, // untagged
+      { setupType: 'reversion-extreme', realizedR: null, excluded: false }, // open/unresolved
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].n).toBe(1);
+    expect(out[0].expectancyR).toBe(1);
+  });
+});
