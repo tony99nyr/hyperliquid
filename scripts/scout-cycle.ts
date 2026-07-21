@@ -29,6 +29,7 @@ import { gatherScoutContext } from '@/lib/scout/scout-context-service';
 import { listLaddersWithRungs } from '@/lib/ladder/ladder-service';
 import { fetchClearinghouseState } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
+import { DEFAULT_REVERSION_CONFIG } from '@/lib/scout/reversion-signal-business-logic';
 
 interface VaultRow { vault_address: string; name: string; kind: string; nav_usd: number | null; apr_annual: number | null; max_drawdown_pct: number | null; age_days: number | null; leader_fraction: number | null }
 
@@ -68,23 +69,46 @@ run(async () => {
     db,
   ).catch(() => ({ tape: [], leaders: [], afHypePerDay: null, percentiles: [] }));
 
-  // 3b-ii) REVERSION SCAN (pre-registered PAPER lane, Jul-20): the one candidate
-  // edge that survived a day of honest backtesting — fade a STATISTICALLY EXTREME
-  // price stretch in a RANGE regime. Deterministic per-coin signal over the scan
-  // universe; the scout paper-trades it (lane 'reversion', setup_type
-  // 'reversion-extreme') so its FORWARD record is the out-of-sample proof. Fail-soft.
-  const reversionHits: Array<{ coin: string; side: 'long' | 'short'; z: number; er: number; mark: number; stop: number; target: number; stopFrac: number }> = [];
+  // 3b-ii) REGIME + REVERSION SCAN. The reversion lane (pre-registered Jul-20)
+  // fades a STATISTICALLY EXTREME 15m stretch — but ONLY in a non-trending regime
+  // (today's backtest: fading a confident trend loses). Phase 1 (Jul-21) gates it
+  // with the vendored iamrossi detector on 4h HL candles (the same robust brain
+  // the trend system uses, run
+  // coupling-free on our own data). Surfaced for the operator's insight AND used
+  // as the authoritative gate on the reversion lane below (never fade a confident
+  // trend). Fail-soft per coin.
+  const regimeByCoin: Record<string, { regime: 'bullish' | 'bearish' | 'neutral'; confidence: number; trend: number }> = {};
+  const reversionHits: Array<{ coin: string; side: 'long' | 'short'; z: number; er: number; regime: string; regimeConf: number; mark: number; stop: number; target: number; stopFrac: number }> = [];
   try {
     const { fetchCandles: fc } = await import('@/lib/hyperliquid/candle-service');
     const { reversionSignal } = await import('@/lib/scout/reversion-signal-business-logic');
+    const { detectMarketRegime } = await import('@/lib/strategy/analysis/market-regime-detector');
     const scanCoins = inputs.marks.map((m) => m.coin).slice(0, 6);
     for (const coin of scanCoins) {
       try {
+        // 4h regime (the vendored detector needs currentIndex ≥ 50, so ≥51 COMPLETED
+        // bars ⇒ ≥52 raw after dropping the in-progress bar; below that it returns
+        // neutral/0 which would silently un-gate the fade). Its own try so a 4h read
+        // blip degrades to efficiency-only reversion, not a dropped coin. NOTE: this
+        // runs the vendored SNAPSHOT of iamrossi's detector — faithful to that logic,
+        // frozen at vendor time (it can drift from iamrossi's live tuning; that's the
+        // correct coupling-free trade-off).
+        let regimeGate: { regime: 'bullish' | 'bearish' | 'neutral'; confidence: number } | undefined;
+        try {
+          const reg4h = await fc(coin, '4h', now - 45 * 24 * 3_600_000, now);
+          if (!reg4h.stale && reg4h.candles.length >= 52) {
+            const completed = reg4h.candles.slice(0, -1);
+            const sig = detectMarketRegime(completed, completed.length - 1);
+            regimeByCoin[coin] = { regime: sig.regime, confidence: sig.confidence, trend: sig.indicators.trend };
+            regimeGate = { regime: sig.regime, confidence: sig.confidence };
+          }
+        } catch { /* 4h read failed → efficiency-only reversion (never un-gates a trend) */ }
+        // 15m reversion, GATED by the 4h regime.
         const res = await fc(coin, '15m', now - 30 * 3_600_000, now);
         if (res.stale || res.candles.length < 120) continue;
         const bars = res.candles.slice(0, -1).map((c) => ({ highPx: c.high, lowPx: c.low, closePx: c.close }));
-        const sig = reversionSignal(bars);
-        if (sig) reversionHits.push({ coin, side: sig.side, z: sig.zScore, er: sig.efficiency, mark: sig.markPx, stop: sig.stopPx, target: sig.targetPx, stopFrac: sig.stopFrac });
+        const revSig = reversionSignal(bars, undefined, regimeGate);
+        if (revSig) reversionHits.push({ coin, side: revSig.side, z: revSig.zScore, er: revSig.efficiency, regime: revSig.regimeLabel, regimeConf: revSig.regimeConfidence, mark: revSig.markPx, stop: revSig.stopPx, target: revSig.targetPx, stopFrac: revSig.stopFrac });
       } catch { /* per-coin fail-soft */ }
     }
   } catch { /* scan unavailable → section just prints empty */ }
@@ -203,6 +227,9 @@ run(async () => {
       degradedReason: inputs.degradedReason,
       triggers: triggers.map((t) => ({ kind: t.kind, coin: t.coin, side: t.side ?? null, urgency: t.urgency, detail: t.detail, at: new Date(t.at).toISOString() })),
       rubric: inputs.rubric.map((r) => ({ coin: r.coin, side: r.side, opportunity: Math.round(r.opportunity), badge: r.badge })),
+      // Higher-TF (4h) regime per scan coin — the vendored iamrossi detector, run
+      // coupling-free on HL candles. Gates the reversion lane + a trend-follow input.
+      regime: regimeByCoin,
       // Extreme-reversion FADE candidates (pre-registered paper lane 'reversion',
       // setupType 'reversion-extreme'). Empty in a trending tape by design.
       reversion: reversionHits,
@@ -247,9 +274,13 @@ run(async () => {
     .sort((a, b) => b.opportunity - a.opportunity)
     .forEach((r) => line(`${r.coin} ${r.side.padEnd(5)} opp=${Math.round(r.opportunity)} ${r.badge}`));
 
-  header('REVERSION SCAN (extreme-stretch FADE candidates — PAPER lane reversion-extreme)');
+  header('REGIME (4h, vendored iamrossi detector — TREND vs range background)');
+  if (Object.keys(regimeByCoin).length === 0) line('(regime read unavailable this cycle)');
+  for (const [coin, r] of Object.entries(regimeByCoin)) line(`${coin}: ${r.regime.toUpperCase()} conf=${(r.confidence * 100).toFixed(0)}% trend=${r.trend.toFixed(2)}  ${r.regime !== 'neutral' && r.confidence >= DEFAULT_REVERSION_CONFIG.maxTrendConfidence ? '→ CONFIDENT TREND (reversion lane skips; trend-follow candidate)' : '→ range/neutral (reversion lane active)'}`);
+
+  header('REVERSION SCAN (extreme-stretch FADE candidates — PAPER lane reversion-extreme; 4h-regime-gated)');
   if (reversionHits.length === 0) line('(none — no coin is extremely stretched in a range regime; trending tape correctly yields nothing)');
-  for (const h of reversionHits) line(`${h.coin} FADE ${h.side.toUpperCase()} (z=${h.z.toFixed(1)}, ER=${h.er.toFixed(2)} range)  mark=${h.mark} stop=${h.stop.toFixed(4)} target=${h.target.toFixed(4)} stopFrac=${(h.stopFrac * 100).toFixed(1)}%  -> if taken: lane 'reversion', setupType 'reversion-extreme'`);
+  for (const h of reversionHits) line(`${h.coin} FADE ${h.side.toUpperCase()} (z=${h.z.toFixed(1)}, ER=${h.er.toFixed(2)}, 4h-regime=${h.regime}/${(h.regimeConf * 100).toFixed(0)}%)  mark=${h.mark} stop=${h.stop.toFixed(4)} target=${h.target.toFixed(4)} stopFrac=${(h.stopFrac * 100).toFixed(1)}%  -> if taken: lane 'reversion', setupType 'reversion-extreme'`);
 
   header('MARKS');
   inputs.marks.forEach((m) => line(`${m.coin} = ${m.markPx}`));

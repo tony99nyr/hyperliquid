@@ -66,4 +66,32 @@ describe('reversionSignal', () => {
     const flat = Array.from({ length: 70 }, () => ({ highPx: 100, lowPx: 100, closePx: 100 }));
     expect(reversionSignal(flat, cfg)).toBeNull();
   });
+
+  it('a confident higher-TF TREND rejects the fade even when local structure is rangey', () => {
+    const bars = series(60, 0.3, 0.06, cfg.moveBars); // fires without a regime
+    expect(reversionSignal(bars, cfg)).not.toBeNull();
+    // same bars, but the 4h background is a confident bull trend → do not fade
+    expect(reversionSignal(bars, cfg, { regime: 'bullish', confidence: 0.9 })).toBeNull();
+    expect(reversionSignal(bars, cfg, { regime: 'bearish', confidence: 0.7 })).toBeNull();
+  });
+
+  it('a NEUTRAL or LOW-confidence regime still allows the fade, and is echoed on the signal', () => {
+    const bars = series(60, 0.3, 0.06, cfg.moveBars);
+    const neutral = reversionSignal(bars, cfg, { regime: 'neutral', confidence: 0.9 });
+    expect(neutral).not.toBeNull();
+    expect(neutral!.regimeLabel).toBe('neutral');
+    const weakTrend = reversionSignal(bars, cfg, { regime: 'bullish', confidence: 0.3 });
+    expect(weakTrend).not.toBeNull(); // below maxTrendConfidence → not a gate
+    expect(weakTrend!.regimeConfidence).toBe(0.3);
+    // Boundary: confidence EXACTLY at maxTrendConfidence rejects (>=, not >).
+    expect(reversionSignal(bars, cfg, { regime: 'bullish', confidence: cfg.maxTrendConfidence })).toBeNull();
+  });
+
+  it('omitting the regime falls back to efficiency-only and marks regimeLabel unknown', () => {
+    const bars = series(60, 0.3, 0.06, cfg.moveBars);
+    const sig = reversionSignal(bars, cfg);
+    expect(sig!.regimeLabel).toBe('unknown');
+    expect(sig!.regimeConfidence).toBe(0);
+  });
+
 });

@@ -32,6 +32,7 @@ export interface ReversionConfig {
   minZ: number; // stretch threshold (e.g. 2.0)
   regimeBars: number; // bars for the efficiency-ratio regime read (>> moveBars, e.g. 96)
   maxEfficiency: number; // ER at/below this = range regime (e.g. 0.35)
+  maxTrendConfidence: number; // higher-TF regime gate: reject a directional trend at/above this confidence (e.g. 0.55)
   stopBufferFrac: number; // stop sits this far beyond the K-bar extreme (e.g. 0.004)
   reversionTargetFrac: number; // target = this fraction of the stretch retraced (e.g. 0.5)
 }
@@ -42,14 +43,29 @@ export const DEFAULT_REVERSION_CONFIG: ReversionConfig = {
   minZ: 2.5,
   regimeBars: 96,
   maxEfficiency: 0.35,
+  maxTrendConfidence: 0.55,
   stopBufferFrac: 0.004,
   reversionTargetFrac: 0.5,
 };
 
+/**
+ * The higher-TF background regime gate (Phase 1, Jul-21). Structurally satisfied
+ * by the vendored `MarketRegimeSignal` (iamrossi's detector) — typed locally so
+ * this pure scout module never imports the strategy subsystem. Fading a CONFIDENT
+ * directional trend loses (today's backtest); this is the authoritative regime
+ * filter, complementing the local efficiency-ratio range check.
+ */
+export interface RegimeGate {
+  regime: 'bullish' | 'bearish' | 'neutral';
+  confidence: number; // 0–1
+}
+
 export interface ReversionSignal {
   side: 'long' | 'short'; // the FADE direction (long = fade a down-stretch)
   zScore: number; // signed z of the K-bar move (negative for a down-stretch)
-  efficiency: number; // the regime ER (lower = more range-like)
+  efficiency: number; // the LOCAL 15m efficiency ratio (lower = more range-like)
+  regimeLabel: 'bullish' | 'bearish' | 'neutral' | 'unknown'; // higher-TF background regime
+  regimeConfidence: number; // 0–1 (0 when no regime was supplied)
   markPx: number;
   stopPx: number;
   targetPx: number;
@@ -67,11 +83,21 @@ function stdev(xs: number[]): number {
  * recent COMPLETED bar; caller drops the in-progress bar). Returns null when
  * either gate fails or data is insufficient — a thin/quiet tape never fires.
  */
-export function reversionSignal(bars: RevBar[], cfg: ReversionConfig = DEFAULT_REVERSION_CONFIG): ReversionSignal | null {
+export function reversionSignal(
+  bars: RevBar[],
+  cfg: ReversionConfig = DEFAULT_REVERSION_CONFIG,
+  /** Higher-TF background regime (the vendored detector, Phase 1). When supplied,
+   *  a CONFIDENT directional trend rejects the fade — the authoritative regime gate
+   *  complementing the local efficiency ratio. Omit to fall back to efficiency-only. */
+  regime?: RegimeGate,
+): ReversionSignal | null {
   // Bound EVERY window that indexes back (regimeBars can exceed volLookback+moveBars),
   // else a slice would clamp to 0 and silently compute over a truncated window.
   const need = Math.max(cfg.volLookback + cfg.moveBars, cfg.regimeBars) + 1;
   if (bars.length < need) return null;
+  // Higher-TF regime gate FIRST (cheap, authoritative): never fade a confident
+  // trend, whatever the local structure looks like.
+  if (regime && regime.regime !== 'neutral' && regime.confidence >= cfg.maxTrendConfidence) return null;
   const closes = bars.map((b) => b.closePx);
   const n = closes.length;
 
@@ -107,5 +133,15 @@ export function reversionSignal(bars: RevBar[], cfg: ReversionConfig = DEFAULT_R
   const targetPx = side === 'short' ? mark - cfg.reversionTargetFrac * (mark - moveStart) : mark + cfg.reversionTargetFrac * (moveStart - mark);
   const stopFrac = Math.abs(mark - stopPx) / mark;
 
-  return { side, zScore, efficiency, markPx: mark, stopPx, targetPx, stopFrac };
+  return {
+    side,
+    zScore,
+    efficiency,
+    regimeLabel: regime?.regime ?? 'unknown',
+    regimeConfidence: regime?.confidence ?? 0,
+    markPx: mark,
+    stopPx,
+    targetPx,
+    stopFrac,
+  };
 }
