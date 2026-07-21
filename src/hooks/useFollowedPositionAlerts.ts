@@ -13,6 +13,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isPageActive, onActivityResume } from './page-activity';
 import { getBrowserClient } from '@/lib/cockpit/supabase-browser';
 import { useLeaderActionsFeed } from './useLeaderActionsFeed';
 
@@ -45,8 +46,10 @@ export function useFollowedPositionAlerts(): UseFollowedAlertsState {
   useEffect(() => {
     startedRef.current = Date.now();
     void loadFollows();
-    const id = setInterval(() => void loadFollows(), FOLLOWS_POLL_MS);
-    return () => clearInterval(id);
+    // Idle-gate: an unattended tab stops re-polling the follows set (cost control).
+    const id = setInterval(() => { if (isPageActive()) void loadFollows(); }, FOLLOWS_POLL_MS);
+    const stopResume = onActivityResume(() => void loadFollows());
+    return () => { clearInterval(id); stopResume(); };
   }, [loadFollows]);
 
   // Process new qualifying actions in a useCallback so setState stays out of the

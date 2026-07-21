@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { isPageActive, onActivityResume } from './page-activity';
 import type { PerformanceSummary } from '@/lib/cockpit/performance-service';
 import type { LaneCard } from '@/types/scout';
 
@@ -38,7 +39,7 @@ export function useScoutPerformance(opts: { enabled?: boolean } = {}): ScoutPerf
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     async function poll(): Promise<void> {
-      if (typeof document !== 'undefined' && document.hidden) {
+      if (!isPageActive()) {
         timer = setTimeout(() => void poll(), POLL_MS);
         return;
       }
@@ -59,12 +60,11 @@ export function useScoutPerformance(opts: { enabled?: boolean } = {}): ScoutPerf
     }
 
     void poll();
-    const onVis = () => { if (!document.hidden) void poll(); };
-    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVis);
+    const stopResume = onActivityResume(() => void poll());
     return () => {
       active = false;
       if (timer) clearTimeout(timer);
-      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVis);
+      stopResume();
     };
   }, [enabled]);
 

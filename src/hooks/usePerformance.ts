@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { isPageActive, onActivityResume } from './page-activity';
 import type { PerformanceSummary } from '@/lib/cockpit/performance-service';
 
 export interface PerformanceState {
@@ -46,9 +47,10 @@ export function usePerformance(
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     async function poll(): Promise<void> {
-      // Pause while hidden — don't keep folding the account ledger for a backgrounded
-      // tab (Vercel CPU + egress). Resumes on visibilitychange.
-      if (typeof document !== 'undefined' && document.hidden) {
+      // Pause while hidden OR idle — don't fold the account ledger (the priciest
+      // server route) for an unattended tab, foregrounded or not (the overnight
+      // Vercel Fluid-CPU bill). Resumes instantly on user input.
+      if (!isPageActive()) {
         timer = setTimeout(() => void poll(), pollMs);
         return;
       }
@@ -72,12 +74,11 @@ export function usePerformance(
     }
 
     void poll();
-    const onVis = () => { if (!document.hidden) void poll(); };
-    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVis);
+    const stopResume = onActivityResume(() => void poll());
     return () => {
       active = false;
       if (timer) clearTimeout(timer);
-      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVis);
+      stopResume();
     };
   }, [sessionId, pollMs]);
 
