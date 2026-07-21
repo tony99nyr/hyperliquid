@@ -72,7 +72,17 @@ EOF
 # Strip markdown code fences (a fenced reply would fail parse every cycle) and take the
 # last non-empty line — anything malformed is rejected by parseScoutDecision (no trade).
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
-DECISION="$(printf '%s' "$PROMPT" | "$CLAUDE_BIN" -p --model sonnet | sed 's/^```.*$//' | grep -v '^[[:space:]]*$' | tail -1)"
+# Extract the JSON object robustly: strip code fences, then take the LAST line that
+# actually begins with '{' (the model intermittently appends a trailing prose line
+# after the JSON — a blind `tail -1` grabbed the prose and failed to parse, ~1/3 of
+# cycles). grep for the JSON line, not the last line.
+RAW="$(printf '%s' "$PROMPT" | "$CLAUDE_BIN" -p --model sonnet | sed 's/^```.*$//')"
+DECISION="$(printf '%s' "$RAW" | grep -E '^[[:space:]]*\{' | tail -1)"
+# Fallback: if no line starts with '{' (JSON split across lines), collapse to the
+# last {...} object on a single line so parseScoutDecision still gets one object.
+if [ -z "$DECISION" ]; then
+  DECISION="$(printf '%s' "$RAW" | tr -d '\n' | grep -oE '\{.*\}' | tail -1)"
+fi
 echo "[scout-headless] decision: $DECISION"
 pnpm --silent scout:trade -- --from-json "$DECISION"
 
