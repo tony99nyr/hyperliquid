@@ -62,6 +62,13 @@ const envSchema = z.object({
   // and auto-exit relies on the (always-computable) loss + health triggers.
   HL_ACCOUNT_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'expected a 0x-prefixed 20-byte address').optional(),
 
+  // --- Household exposure read (Phase 3) — iamrossi's on-chain Base Safe wallets,
+  // READ-ONLY public-chain state (no coupling). Unset ⇒ the read returns null and
+  // the cockpit/scout simply show no household context. Awareness + sizing only. ---
+  IAMROSSI_SAFE_ETH: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  IAMROSSI_SAFE_BTC: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  BASE_RPC_URL: z.string().url().optional(),
+
   // --- Layer-1 auto-exit (exit-only safety net; see docs/LIVE_AUTO_EXIT.md) ---
   // Master kill-switch. Default OFF: the risk-exit endpoint refuses to fire and
   // the detector no-ops unless this is explicitly 'true'. EXIT-ONLY when on.

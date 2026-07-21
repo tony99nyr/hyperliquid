@@ -113,6 +113,18 @@ run(async () => {
     }
   } catch { /* scan unavailable → section just prints empty */ }
 
+  // 3b-iii) HOUSEHOLD EXPOSURE (Phase 3, Jul-21) — iamrossi's on-chain Base Safe
+  // crypto exposure, READ-ONLY. The scout (and panels) now know what the OTHER
+  // household system holds, so a scout paper idea can be judged against household
+  // stacking. Public-chain read, no coupling; fail-soft (null when unconfigured).
+  let household: { ethUsd: number; btcUsd: number; netUsd: number; dominant: string } | null = null;
+  try {
+    const { readHouseholdExposure } = await import('@/lib/household/household-exposure-service');
+    const midByCoin = new Map(inputs.marks.map((m) => [m.coin, m.markPx]));
+    const ex = await readHouseholdExposure({ ethUsd: midByCoin.get('ETH') ?? 0, btcUsd: midByCoin.get('BTC') ?? 0 });
+    if (ex) household = { ethUsd: ex.ethExposureUsd, btcUsd: ex.btcExposureUsd, netUsd: ex.netCryptoBetaUsd, dominant: ex.dominant };
+  } catch { /* household read unavailable → section absent */ }
+
   // 3c) READ-ONLY live book (the STEWARD lane): the scout may SEE the live positions
   // + armed ladders to PROPOSE ladder management — it can never touch them (the
   // execution path asserts paper sessions; proposals go to Discord + the log only).
@@ -227,6 +239,8 @@ run(async () => {
       degradedReason: inputs.degradedReason,
       triggers: triggers.map((t) => ({ kind: t.kind, coin: t.coin, side: t.side ?? null, urgency: t.urgency, detail: t.detail, at: new Date(t.at).toISOString() })),
       rubric: inputs.rubric.map((r) => ({ coin: r.coin, side: r.side, opportunity: Math.round(r.opportunity), badge: r.badge })),
+      // iamrossi household on-chain exposure (read-only awareness; null unconfigured).
+      household,
       // Higher-TF (4h) regime per scan coin — the vendored iamrossi detector, run
       // coupling-free on HL candles. Gates the reversion lane + a trend-follow input.
       regime: regimeByCoin,
@@ -277,6 +291,11 @@ run(async () => {
   header('REGIME (4h, vendored iamrossi detector — TREND vs range background)');
   if (Object.keys(regimeByCoin).length === 0) line('(regime read unavailable this cycle)');
   for (const [coin, r] of Object.entries(regimeByCoin)) line(`${coin}: ${r.regime.toUpperCase()} conf=${(r.confidence * 100).toFixed(0)}% trend=${r.trend.toFixed(2)}  ${r.regime !== 'neutral' && r.confidence >= DEFAULT_REVERSION_CONFIG.maxTrendConfidence ? '→ CONFIDENT TREND (reversion lane skips; trend-follow candidate)' : '→ range/neutral (reversion lane active)'}`);
+
+  if (household) {
+    header('HOUSEHOLD EXPOSURE (iamrossi on-chain — cockpit trades STACK on this)');
+    line(`ETH long $${household.ethUsd.toFixed(0)} · BTC long $${household.btcUsd.toFixed(0)} · NET crypto beta $${household.netUsd.toFixed(0)} (dominant ${household.dominant}). A cockpit LONG here stacks; a SHORT partially hedges. Awareness only — never auto-hedge.`);
+  }
 
   header('REVERSION SCAN (extreme-stretch FADE candidates — PAPER lane reversion-extreme; 4h-regime-gated)');
   if (reversionHits.length === 0) line('(none — no coin is extremely stretched in a range regime; trending tape correctly yields nothing)');
