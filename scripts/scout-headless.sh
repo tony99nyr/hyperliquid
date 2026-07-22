@@ -78,11 +78,16 @@ CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 # cycles). grep for the JSON line, not the last line.
 RAW="$(printf '%s' "$PROMPT" | "$CLAUDE_BIN" -p --model sonnet | sed 's/^```.*$//')"
 DECISION="$(printf '%s' "$RAW" | grep -E '^[[:space:]]*\{' | tail -1)"
-# Fallback: if no line starts with '{' (JSON split across lines), collapse to the
-# last {...} object on a single line so parseScoutDecision still gets one object.
-if [ -z "$DECISION" ]; then
-  DECISION="$(printf '%s' "$RAW" | tr -d '\n' | grep -oE '\{.*\}' | tail -1)"
-fi
+# Fallback when the grabbed line is NOT a self-contained object: empty (JSON split
+# across lines) OR it doesn't end in '}' — which is exactly what a PRETTY-PRINTED reply
+# produces: the last line beginning with '{' is a lone opening brace that fails to parse
+# every cycle (review D-MED). Collapse newlines and take the last {...} object so
+# parseScoutDecision gets one object. Whitespace-strip before the end-check so a trailing
+# space on a complete object doesn't spuriously trip the fallback.
+case "$(printf '%s' "$DECISION" | tr -d '[:space:]')" in
+  *'}') : ;; # ends in '}' → looks like a complete object, keep it
+  *) DECISION="$(printf '%s' "$RAW" | tr -d '\n' | grep -oE '\{.*\}' | tail -1)" ;;
+esac
 echo "[scout-headless] decision: $DECISION"
 pnpm --silent scout:trade -- --from-json "$DECISION"
 

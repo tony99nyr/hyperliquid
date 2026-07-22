@@ -32,7 +32,7 @@ import { writeHypothesis, resolveHypothesis } from '@/lib/cockpit/hypothesis-ser
 import { isDiscordConfigured } from '@/lib/infrastructure/notify/discord-notify';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 import { ensureWatchDaemon } from '@/lib/cockpit/watch-spawn';
-import { setAdvisoryStop } from '@/lib/scout/scout-watch-service';
+import { setAdvisoryStop, writeScoutHeartbeat } from '@/lib/scout/scout-watch-service';
 import { sendDiscord } from '@/lib/infrastructure/notify/discord-notify';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import type { OrderSide } from '@/types/fill';
@@ -110,6 +110,16 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
     throw new Error('Proposal has warnings; fix the inputs and retry.');
   }
 
+  // OPEN BASELINE (migration 0041): the cumulative realized/fees on this (session,
+  // coin) row BEFORE this trip's open fill folds. The scout reuses one session and
+  // re-enters coins, so the row's accumulators span EVERY prior trip; the close
+  // resolves on (now − baseline) so a prior trip can't contaminate this one's P&L.
+  // Read it here, pre-fill, so this trip's entry fee is inside the delta. Best-effort:
+  // a null read leaves the baseline unset and the close falls back to single-leg.
+  const priorPos = await loadPosition(sessionId, coin).catch(() => null);
+  const realizedAtOpenUsd = Number.isFinite(Number(priorPos?.realizedPnlUsd)) ? Number(priorPos?.realizedPnlUsd) : 0;
+  const feesAtOpenUsd = Number.isFinite(Number(priorPos?.feesPaidUsd)) ? Number(priorPos?.feesPaidUsd) : 0;
+
   const fill = await executeIntent({
     ...proposal.intent,
     origin: 'scout',
@@ -131,25 +141,40 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   const ok = await setAdvisoryStop(sessionId, coin, advisoryStop).catch(() => false);
   if (!ok) line('WARN: advisory stop not persisted — near-stop trigger will be silent for this position.');
 
-  const hypothesis = await writeHypothesis({
-    sessionId,
-    statement: thesis,
-    lane,
-    coin, // (session, coin) lets a close resolve this hypothesis even if the id isn't threaded through
-    // Structured trial fields (Jul-16 review): risk at open makes realized R
-    // computable at close; setupType/regime make per-setup expectancy queryable.
-    riskUsd: Number.isFinite(riskUsd) ? riskUsd : undefined,
-    setupType: typeof args['setup-type'] === 'string' ? String(args['setup-type']) : undefined,
-    regime: typeof args['regime'] === 'string' ? String(args['regime']) : undefined,
-  });
+  // The fill is COMMITTED (line 113). writeHypothesis must NOT throw past this point
+  // — a DB blip / missing column would otherwise crash out and leave a paper
+  // position with no hypothesis (no outcome, unresolvable) yet the fill on the
+  // books (review H1). Best-effort + LOUD: the close path's (session, coin) lookup
+  // will find nothing, so warn so the tracking gap is visible, not silent.
+  let hypothesis: { id: string } | null = null;
+  try {
+    hypothesis = await writeHypothesis({
+      sessionId,
+      statement: thesis,
+      lane,
+      coin, // (session, coin) lets a close resolve this hypothesis even if the id isn't threaded through
+      // Structured trial fields (Jul-16 review): risk at open makes realized R
+      // computable at close; setupType/regime make per-setup expectancy queryable.
+      riskUsd: Number.isFinite(riskUsd) ? riskUsd : undefined,
+      setupType: typeof args['setup-type'] === 'string' ? String(args['setup-type']) : undefined,
+      regime: typeof args['regime'] === 'string' ? String(args['regime']) : undefined,
+      realizedAtOpenUsd,
+      feesAtOpenUsd,
+    });
+  } catch (err) {
+    line(`WARN: hypothesis NOT recorded (${err instanceof Error ? err.message : String(err)}) — position is open but its outcome won't be tracked. Investigate.`);
+  }
+  // Best-effort: a logging blip here must NOT throw past the committed fill and skip
+  // the watch-daemon spawn below (an unmonitored live paper position) or the caller's
+  // 'scout-cycle' heartbeat (a healthy trade looking dead — review D-MED).
   await writeAnalysisLog({
     sessionId,
     source: 'scout',
     message: `SCOUT opened ${side} ${fill.sz} ${coin} @ $${fill.px} (paper). Thesis: ${thesis}`,
-  });
+  }).catch(() => {});
   header('Paper position opened + hypothesis recorded');
   line(`session: ${sessionId}`);
-  line(`hypothesis id: ${hypothesis.id}`);
+  line(`hypothesis id: ${hypothesis?.id ?? '(not recorded — see WARN above)'}`);
 
   // Bring up the crash-safe watch daemon so the position is monitored even if the
   // scout session dies. Never fail the (committed) paper fill if it can't start.
@@ -223,16 +248,32 @@ async function runExit(args: Record<string, string | boolean>): Promise<void> {
   if (!hypothesisId && closedAll) {
     try {
       const db = getServiceRoleClient();
+      // Resolve the OLDEST open hypothesis for (session, coin) — FIFO. The scout
+      // convention is one-open-per-coin, but nothing enforces it; if a scale-in
+      // ever left two open, "newest" would resolve the wrong one (the class of the
+      // Jul-22 manual mix-up: a SOL winner and a HYPE loser both 'open'). FIFO pairs
+      // this close with the earliest unresolved thesis and warns on the ambiguity.
       const { data } = await db
         .from('hypotheses')
         .select('id')
         .eq('session_id', sessionId)
         .eq('coin', coin)
         .eq('status', 'open')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (data) hypothesisId = String((data as { id: string }).id);
+        .order('created_at', { ascending: true })
+        .limit(2);
+      const rows = (data as { id: string }[] | null) ?? [];
+      if (rows.length > 1) {
+        // Ambiguous: ≥2 open hypotheses for one (session, coin) — off the
+        // one-open-per-coin convention (usually a prior trip whose resolution failed
+        // and stayed open). Each carries its OWN open baseline; auto-pairing this close
+        // with either risks attributing this trip's P&L against the WRONG baseline →
+        // a wrong ledger number (the corruption this whole path prevents). Leave BOTH
+        // open and page for an explicit, id-scoped resolution — an orphan is
+        // recoverable, a wrong number is not.
+        line(`WARN: ${rows.length} open ${coin} hypotheses for this session — NOT auto-resolving (ambiguous baseline). Resolve by explicit hypothesisId; ledger left untouched.`);
+      } else if (rows[0]) {
+        hypothesisId = String(rows[0].id);
+      }
     } catch { /* best-effort — resolution just skipped if the lookup fails */ }
   }
 
@@ -246,20 +287,51 @@ async function runExit(args: Record<string, string | boolean>): Promise<void> {
   if (hypothesisId && closedAll) {
     // Resolve the thesis by OUTCOME so the scout's win/loss record is REAL — not a
     // flat "resolved" for every close (which pinned W/L at 0/0 and win-rate blank on
-    // the panel). Net realized P&L on the closed portion: dir*(exit−entry)*sz − fee.
+    // the panel).
+    //
+    // THIS trip's net = the DELTA of the folded positions accumulators vs the OPEN
+    // baseline (migration 0041). executeIntent folds every fill into
+    // positions.realized_pnl_usd (cumulative GROSS realized) + fees_paid_usd
+    // (cumulative). Those span EVERY trip on this reused (session, coin) row — reading
+    // the raw cumulative would bake a PRIOR trip's P&L into this outcome (review H1),
+    // while reading only the final fill drops this trip's banked partials + entry fee
+    // (review C1). The delta (now − at-open) is exactly this trip's realized and fees:
+    // partials in, prior trips out. Legacy rows carry no baseline → single-leg fallback
+    // (exact for their full closes; on a legacy PARTIAL-then-close it counts only the
+    // final leg — dropping the banked partial + entry fee — but no live open row
+    // predates the baseline, so that path is transitional only).
     const dir = position.side === 'long' ? 1 : -1;
-    const netPnl = dir * (fill.px - position.avgEntryPx) * fill.sz - fill.feeUsd;
+    const closed = await loadPosition(sessionId, coin).catch(() => null); // flat now; cumulative realized+fees across ALL trips
+    const realizedNow = Number(closed?.realizedPnlUsd);
+    const feesNow = Number(closed?.feesPaidUsd);
+
+    // Open baseline + risk in one read.
+    let realizedAtOpen: number | null = null;
+    let feesAtOpen: number | null = null;
+    let riskAtOpen = NaN;
+    try {
+      const db = getServiceRoleClient();
+      const { data: hrow } = await db
+        .from('hypotheses')
+        .select('risk_usd, realized_at_open_usd, fees_at_open_usd')
+        .eq('id', hypothesisId)
+        .maybeSingle();
+      const h = hrow as { risk_usd: number | null; realized_at_open_usd: number | null; fees_at_open_usd: number | null } | null;
+      riskAtOpen = Number(h?.risk_usd);
+      if (Number.isFinite(Number(h?.realized_at_open_usd))) realizedAtOpen = Number(h?.realized_at_open_usd);
+      if (Number.isFinite(Number(h?.fees_at_open_usd))) feesAtOpen = Number(h?.fees_at_open_usd);
+    } catch { /* best-effort */ }
+
+    const netPnl =
+      Number.isFinite(realizedNow) && Number.isFinite(feesNow) && realizedAtOpen !== null && feesAtOpen !== null
+        ? realizedNow - realizedAtOpen - (feesNow - feesAtOpen)
+        : dir * (fill.px - position.avgEntryPx) * fill.sz - fill.feeUsd; // legacy / vanished-row fallback
     const status = netPnl > 0 ? 'confirmed' : netPnl < 0 ? 'invalidated' : 'resolved';
     const pnlLabel = `${netPnl >= 0 ? '+' : '-'}$${Math.abs(netPnl).toFixed(2)}`;
     // Realized R = net P&L / risk taken at open (null when the open predates the
     // structured fields — R stays uncomputable for legacy rows, never guessed).
     let realizedR: number | undefined;
-    try {
-      const db = getServiceRoleClient();
-      const { data: hrow } = await db.from('hypotheses').select('risk_usd').eq('id', hypothesisId).maybeSingle();
-      const riskAtOpen = Number((hrow as { risk_usd: number | null } | null)?.risk_usd);
-      if (Number.isFinite(riskAtOpen) && riskAtOpen > 0) realizedR = netPnl / riskAtOpen;
-    } catch { /* best-effort */ }
+    if (Number.isFinite(riskAtOpen) && riskAtOpen > 0) realizedR = netPnl / riskAtOpen;
     await resolveHypothesis({
       hypothesisId,
       status,
@@ -269,11 +341,13 @@ async function runExit(args: Record<string, string | boolean>): Promise<void> {
     });
     line(`Resolved hypothesis ${hypothesisId} → ${status} (realized ${pnlLabel}).`);
   }
+  // Best-effort: the fill is committed and the hypothesis resolved; a logging blip must
+  // not throw past here and skip the caller's 'scout-cycle' heartbeat (review D-MED).
   await writeAnalysisLog({
     sessionId,
     source: 'scout',
     message: `SCOUT closed ${fill.sz} ${coin} @ $${fill.px} (paper).${note ? ` ${note}` : ''}`,
-  });
+  }).catch(() => {});
 }
 
 
@@ -329,8 +403,18 @@ run(async () => {
   // Headless contract (C2): --from-json '<decision>' carries the model's decision as
   // ONE strict JSON object (see parseScoutDecision — malformed NEVER trades). The
   // stand-down outcome is first-class: log it and exit clean.
-  if (typeof args['from-json'] === 'string') {
-    const parsed = parseScoutDecision(args['from-json']);
+  const fromJson = typeof args['from-json'] === 'string';
+  // A healthy headless cycle = a valid model decision that was actually HANDLED
+  // (stand-down / propose / trade). Writing the 'scout-cycle' consumer heartbeat here
+  // — after handling — rather than at snapshot-build time is what turns a
+  // mis-replying or erroring consumer into a STALE row instead of a fresh 'ok'
+  // (review D-HIGH). The parse-error path deliberately skips it so the row ages out
+  // and the watchdog pages.
+  const markCycleHealthy = (kind: string) =>
+    writeScoutHeartbeat('ok', `headless decision handled (${kind})`, 'scout-cycle').catch(() => {});
+
+  if (fromJson) {
+    const parsed = parseScoutDecision(args['from-json'] as string);
     // TRIAL LEDGER (Jul-16 review): persist EVERY decision — including stand-downs
     // and parse errors. Stand-downs are trials; an unlogged search makes the track
     // record uninterpretable (Bailey/López de Prado). Best-effort: ledger failure
@@ -345,6 +429,7 @@ run(async () => {
     if (parsed.kind === 'stand-down') {
       header('stand-down');
       line(parsed.note);
+      await markCycleHealthy('stand-down');
       return;
     }
     if (parsed.kind === 'propose') {
@@ -370,6 +455,7 @@ run(async () => {
       } catch { /* dedupe unavailable → page anyway (fail-open for an advisory) */ }
       if (isRepeat) {
         line('(repeat within 2h — logged, not paged)');
+        await markCycleHealthy('propose-repeat');
         return;
       }
       if (!isDiscordConfigured()) {
@@ -425,6 +511,7 @@ _(advisory only — nothing was executed; the counterfactual resolver will score
         const sid = (sess?.[0] as { id: string } | undefined)?.id;
         if (sid) await writeAnalysisLog({ sessionId: sid, source: 'scout', severity: 'info', message: `STEWARD PROPOSAL${parsed.coin ? ` [${parsed.coin}]` : ''}: ${parsed.title} — ${parsed.body.slice(0, 300)}` });
       } catch { /* best-effort */ }
+      await markCycleHealthy('propose');
       return;
     }
     args = parsed.args;
@@ -436,4 +523,6 @@ _(advisory only — nothing was executed; the counterfactual resolver will score
   } else {
     await runEntry(args);
   }
+  // Headless trade handled end-to-end (fill + bookkeeping) → mark the consumer alive.
+  if (fromJson) await markCycleHealthy(isExit ? 'close' : 'open');
 });

@@ -53,6 +53,10 @@ const CONSUMER_INTERVAL_MS = (() => {
 const CONSUMER_TIMEOUT_MS = 10 * 60_000;
 let consumerRunning = false;
 let lastConsumerAt = 0;
+// Handle to the in-flight consumer child (a detached process-group leader) so a
+// daemon shutdown can reap the whole tree — otherwise a hung claude CLI outlives the
+// daemon that spawned it and keeps billing with no timeout to bound it (review D-MED).
+let activeConsumerChild: ReturnType<typeof spawn> | null = null;
 
 function maybeSpawnConsumer(now: number): void {
   if (CONSUMER_INTERVAL_MS === 0) return; // explicitly disabled
@@ -66,23 +70,38 @@ function maybeSpawnConsumer(now: number): void {
   consumerRunning = true;
   lastConsumerAt = now;
   line(`[${new Date(now).toISOString()}] ▶ embedded consumer cycle (scout-headless.sh)`);
-  const child = spawn('sh', [script], { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
+  // detached:true makes `child` a PROCESS-GROUP LEADER so the timeout can reap the
+  // whole tree (sh → pnpm → claude CLI). A bare child.kill() reaps only `sh`, leaving
+  // a hung model call running in the background — still billing the subscription and
+  // able to fire a late scout:trade past the timeout the kill was meant to bound
+  // (review D-MED). We keep the handle (no unref) to go on collecting stdout.
+  const child = spawn('sh', [script], { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'], env: process.env, detached: true });
+  activeConsumerChild = child;
   let out = '';
   child.stdout.on('data', (d: Buffer) => { out += d.toString(); });
   child.stderr.on('data', (d: Buffer) => { out += d.toString(); });
   const killer = setTimeout(() => {
-    line('WARN embedded consumer timed out (10min) — killing');
-    child.kill('SIGKILL');
+    line('WARN embedded consumer timed out (10min) — killing the process group');
+    // Negative pid = the whole group; fall back to the lone child if the group kill
+    // fails (e.g. it already exited).
+    try {
+      if (child.pid) process.kill(-child.pid, 'SIGKILL');
+      else child.kill('SIGKILL');
+    } catch {
+      child.kill('SIGKILL');
+    }
   }, CONSUMER_TIMEOUT_MS);
   child.on('exit', (code) => {
     clearTimeout(killer);
     consumerRunning = false;
+    if (activeConsumerChild === child) activeConsumerChild = null;
     const tail = out.trim().split('\n').slice(-3).join(' | ');
     line(`[${new Date().toISOString()}] ◀ consumer exit=${code} :: ${tail.slice(0, 300)}`);
   });
   child.on('error', (err) => {
     clearTimeout(killer);
     consumerRunning = false;
+    if (activeConsumerChild === child) activeConsumerChild = null;
     line(`WARN embedded consumer spawn failed: ${err.message}`);
   });
 }
@@ -163,6 +182,13 @@ run(async () => {
     if (stopping) return;
     stopping = true;
     line(`\nReceived ${sig} — finishing the in-flight cycle, then exiting…`);
+    // Reap any in-flight consumer group so a hung claude CLI can't outlive the daemon
+    // (detached:true means it won't die with us otherwise — review D-MED).
+    const c = activeConsumerChild;
+    if (c?.pid) {
+      try { process.kill(-c.pid, 'SIGKILL'); }
+      catch { try { c.kill('SIGKILL'); } catch { /* already gone */ } }
+    }
   };
   process.on('SIGINT', () => requestStop('SIGINT'));
   process.on('SIGTERM', () => requestStop('SIGTERM'));

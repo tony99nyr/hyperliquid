@@ -23,7 +23,7 @@ import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import { fetchMetaAndAssetCtxs } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { gatherScoutInputs, writeScoutHeartbeat } from '@/lib/scout/scout-watch-service';
 import { recentTriggers, markTriggersConsumed, pruneConsumedTriggers, type SinkTrigger } from '@/lib/scout/scout-trigger-sink';
-import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
+import { checkCircuitBreaker, type CircuitBreakerStatus } from '@/lib/risk/circuit-breaker-service';
 import { scoutPlaybookPath, summarizeHypotheses, type HypothesisSummaryRow } from '@/lib/scout/scout-cycle-business-logic';
 import { gatherScoutContext } from '@/lib/scout/scout-context-service';
 import { listLaddersWithRungs } from '@/lib/ladder/ladder-service';
@@ -194,41 +194,72 @@ run(async () => {
     }
   } catch { /* fail-soft: steward context absent → the scout just doesn't propose */ }
 
-  // 4) Vaults (Lane A allocation candidates — newest snapshot per vault).
-  const { data: vaultRows } = await db
-    .from('vault_snapshots')
-    .select('vault_address, name, kind, nav_usd, apr_annual, max_drawdown_pct, age_days, leader_fraction, fetched_at')
-    .order('fetched_at', { ascending: false })
-    .limit(50);
-  const latestByVault = new Map<string, VaultRow>();
-  for (const v of (vaultRows ?? []) as VaultRow[]) if (!latestByVault.has(v.vault_address)) latestByVault.set(v.vault_address, v);
-  const vaults = [...latestByVault.values()];
+  // Sections 4–6 are each wrapped fail-soft (review D-MED): a blip in any one must
+  // DEGRADE the snapshot (that section empty/safe-default), never abort the whole
+  // cycle — an abort here silently skips the decision AND the heartbeat write, which
+  // is the exact "healthy-looking dead" failure the earlier sections already guard.
 
-  // 5) Circuit breaker (HALTED ⇒ no new entries; exits always allowed).
-  const breaker = await checkCircuitBreaker('scout', now);
+  // 4) Vaults (Lane A allocation candidates — newest snapshot per vault).
+  let vaults: VaultRow[] = [];
+  try {
+    const { data: vaultRows } = await db
+      .from('vault_snapshots')
+      .select('vault_address, name, kind, nav_usd, apr_annual, max_drawdown_pct, age_days, leader_fraction, fetched_at')
+      .order('fetched_at', { ascending: false })
+      .limit(50);
+    const latestByVault = new Map<string, VaultRow>();
+    for (const v of (vaultRows ?? []) as VaultRow[]) if (!latestByVault.has(v.vault_address)) latestByVault.set(v.vault_address, v);
+    vaults = [...latestByVault.values()];
+  } catch { /* vaults absent this cycle → no Lane-A candidates surfaced */ }
+
+  // 5) Circuit breaker (HALTED ⇒ no new entries; exits always allowed). On a check
+  // failure, FAIL SAFE to halted: an unknown risk state must block new paper entries
+  // (self-heals next cycle), never silently allow them.
+  let breaker: CircuitBreakerStatus;
+  try {
+    breaker = await checkCircuitBreaker('scout', now);
+  } catch (e) {
+    breaker = {
+      blockNewEntries: true, flattenRecommended: false, tripped: null,
+      dailyLossPct: 0, drawdownPct: 0,
+      reason: `breaker check failed — halting new entries (fail-safe): ${e instanceof Error ? e.message : String(e)}`,
+      equityUsd: 0, peakEquityUsd: 0, dayStartEquityUsd: 0,
+    };
+  }
 
   // 6) Track record (scout sessions only — self-assessment excludes manual trades).
   // Robust identity (Jul-16 review): the archived title made this return [] — every
   // cycle ran with NO self-memory. Resolve scout sessions properly.
-  const { scoutSessionIds } = await import('@/lib/scout/scout-session-service');
-  const scoutIds = await scoutSessionIds(db);
   let hypRows: HypothesisSummaryRow[] = [];
-  if (scoutIds.length > 0) {
-    const { data } = await db
-      .from('hypotheses')
-      .select('statement, status, resolution_note, created_at, resolved_at')
-      .eq('excluded', false) // janitorial rows poison self-memory (Jul-16 quarantine)
-      .in('session_id', scoutIds)
-      .order('created_at', { ascending: false })
-      .limit(30);
-    hypRows = (data ?? []) as HypothesisSummaryRow[];
-  }
+  try {
+    const { scoutSessionIds } = await import('@/lib/scout/scout-session-service');
+    const scoutIds = await scoutSessionIds(db);
+    if (scoutIds.length > 0) {
+      const { data } = await db
+        .from('hypotheses')
+        .select('statement, status, resolution_note, created_at, resolved_at')
+        .eq('excluded', false) // janitorial rows poison self-memory (Jul-16 quarantine)
+        .in('session_id', scoutIds)
+        .order('created_at', { ascending: false })
+        .limit(30);
+      hypRows = (data ?? []) as HypothesisSummaryRow[];
+    }
+  } catch { /* track record absent → the scout runs this cycle without self-memory */ }
   const summary = summarizeHypotheses(hypRows);
   const playbookPath = scoutPlaybookPath();
 
   // CONSUMER liveness — distinct from the producer's 'scout-watch' row. A dead consumer
   // is now a stale row in the cockpit, not silence.
-  await writeScoutHeartbeat(inputs.degraded ? 'degraded' : 'ok', `${triggers.length} trigger(s) consumed${inputs.degraded ? ` — ${inputs.degradedReason}` : ''}`, 'scout-cycle', now);
+  //
+  // Only the INTERACTIVE path writes it here: this run IS the whole cycle, so the
+  // heartbeat is authoritative. In HEADLESS (jsonMode) the model decision + scout:trade
+  // run AFTER this snapshot is printed — writing 'ok' now would show a fresh heartbeat
+  // even when the model mis-replies or scout:trade errors EVERY cycle (a healthy-looking
+  // dead consumer, review D-HIGH). scout:trade writes the 'scout-cycle' heartbeat once
+  // the decision is actually handled, so a broken consumer goes stale and the watchdog pages.
+  if (!jsonMode) {
+    await writeScoutHeartbeat(inputs.degraded ? 'degraded' : 'ok', `${triggers.length} trigger(s) consumed${inputs.degraded ? ` — ${inputs.degradedReason}` : ''}`, 'scout-cycle', now);
+  }
 
   if (jsonMode) {
     // The HEADLESS contract: one JSON object, stable field names. The decision model

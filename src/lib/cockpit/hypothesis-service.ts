@@ -46,6 +46,13 @@ export async function writeHypothesis(
     setupType?: string;
     regime?: string;
     coin?: string;
+    /** Cumulative positions.realized_pnl_usd / fees_paid_usd on this (session,coin)
+     *  row JUST BEFORE this trip's open fill folds (migration 0041). The close
+     *  resolves on the DELTA vs these, so a re-entered coin's prior-trip P&L can't
+     *  contaminate this trip's outcome. Snapshot BEFORE the open fill so this trip's
+     *  entry fee lands inside the delta. */
+    realizedAtOpenUsd?: number;
+    feesAtOpenUsd?: number;
   },
   client: SupabaseClient = getServiceRoleClient(),
 ): Promise<Hypothesis> {
@@ -54,6 +61,8 @@ export async function writeHypothesis(
     ...(input.riskUsd !== undefined && Number.isFinite(input.riskUsd) ? { risk_usd: input.riskUsd } : {}),
     ...(input.setupType ? { setup_type: input.setupType.slice(0, 40) } : {}),
     ...(input.regime ? { regime: input.regime.slice(0, 40) } : {}),
+    ...(input.realizedAtOpenUsd !== undefined && Number.isFinite(input.realizedAtOpenUsd) ? { realized_at_open_usd: input.realizedAtOpenUsd } : {}),
+    ...(input.feesAtOpenUsd !== undefined && Number.isFinite(input.feesAtOpenUsd) ? { fees_at_open_usd: input.feesAtOpenUsd } : {}),
   };
   const { data, error } = await client.from('hypotheses').insert(row).select().single();
   if (error) throw new Error(`writeHypothesis failed: ${error.message}`);
