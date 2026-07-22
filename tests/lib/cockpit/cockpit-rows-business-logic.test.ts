@@ -73,6 +73,12 @@ describe('insert-row builders (camelCase → snake_case)', () => {
     expect('lane' in buildHypothesisRow({ sessionId: 's1', statement: 'x', lane: '' })).toBe(false);
   });
 
+  it('buildHypothesisRow attaches coin uppercased only when non-empty (the by-coin resolution key)', () => {
+    expect(buildHypothesisRow({ sessionId: 's1', statement: 'x', coin: 'sol' }).coin).toBe('SOL');
+    expect('coin' in buildHypothesisRow({ sessionId: 's1', statement: 'x' })).toBe(false);
+    expect('coin' in buildHypothesisRow({ sessionId: 's1', statement: 'x', coin: '  ' })).toBe(false);
+  });
+
   it('buildHealthSnapshotRow maps probs + alerts', () => {
     expect(
       buildHealthSnapshotRow({

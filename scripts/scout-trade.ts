@@ -135,6 +135,7 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
     sessionId,
     statement: thesis,
     lane,
+    coin, // (session, coin) lets a close resolve this hypothesis even if the id isn't threaded through
     // Structured trial fields (Jul-16 review): risk at open makes realized R
     // computable at close; setupType/regime make per-setup expectancy queryable.
     riskUsd: Number.isFinite(riskUsd) ? riskUsd : undefined,
@@ -177,7 +178,7 @@ async function runExit(args: Record<string, string | boolean>): Promise<void> {
   const sessionId = requireString(args, 'session');
   await assertPaperSession(sessionId);
   const coin = requireString(args, 'coin').toUpperCase();
-  const hypothesisId = typeof args['hypothesis'] === 'string' ? args['hypothesis'] : null;
+  let hypothesisId = typeof args['hypothesis'] === 'string' ? args['hypothesis'] : null;
   const note = typeof args['note'] === 'string' ? args['note'] : null;
   const fraction = optionalNumber(args, 'fraction', 1);
 
@@ -214,6 +215,26 @@ async function runExit(args: Record<string, string | boolean>): Promise<void> {
   // near-stop trigger can't fire on a flat position. Partial closes keep it.
   const closedAll = fraction >= 1 || fill.sz >= position.sz - 1e-12;
   if (closedAll) await setAdvisoryStop(sessionId, coin, null).catch(() => false);
+
+  // Resolution robustness (Jul-22 fix): the model often closes WITHOUT echoing the
+  // hypothesisId, which orphaned the hypothesis (a HYPE reversion loss never
+  // resolved → missing from per-setup expectancy). On a full close, look up the
+  // OPEN hypothesis for (session, coin) so the outcome is always recorded.
+  if (!hypothesisId && closedAll) {
+    try {
+      const db = getServiceRoleClient();
+      const { data } = await db
+        .from('hypotheses')
+        .select('id')
+        .eq('session_id', sessionId)
+        .eq('coin', coin)
+        .eq('status', 'open')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (data) hypothesisId = String((data as { id: string }).id);
+    } catch { /* best-effort — resolution just skipped if the lookup fails */ }
+  }
 
   if (hypothesisId && !closedAll) {
     // Partial close: the hypothesis stays OPEN — resolving it here would record a

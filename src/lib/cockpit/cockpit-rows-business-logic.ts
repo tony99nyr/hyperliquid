@@ -88,6 +88,9 @@ export interface HypothesisInsertRow {
   /** Strategy lane (scout multi-lane) — so per-lane win/loss can be attributed.
    * Omitted when undefined (a hypothesis has no coin to map a lane from). */
   lane?: string;
+  /** The coin — lets a close resolve the open hypothesis for (session, coin)
+   *  deterministically even if the id wasn't threaded through. */
+  coin?: string;
 }
 
 export function buildHypothesisRow(input: {
@@ -95,6 +98,7 @@ export function buildHypothesisRow(input: {
   statement: string;
   status?: HypothesisStatus;
   lane?: string;
+  coin?: string;
 }): HypothesisInsertRow {
   const row: HypothesisInsertRow = {
     session_id: input.sessionId,
@@ -103,6 +107,9 @@ export function buildHypothesisRow(input: {
   };
   if (typeof input.lane === 'string' && input.lane.trim() !== '') {
     row.lane = input.lane.trim();
+  }
+  if (typeof input.coin === 'string' && input.coin.trim() !== '') {
+    row.coin = input.coin.trim().toUpperCase();
   }
   return row;
 }

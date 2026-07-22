@@ -45,6 +45,7 @@ export async function writeHypothesis(
     riskUsd?: number;
     setupType?: string;
     regime?: string;
+    coin?: string;
   },
   client: SupabaseClient = getServiceRoleClient(),
 ): Promise<Hypothesis> {
