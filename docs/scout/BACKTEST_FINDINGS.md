@@ -320,3 +320,16 @@ forward, multi-regime track record.
   underperforming ETH/SOL in real paper trading rather than fitting it on 2yr.
 - **One different signal (low priority):** Bollinger-band mean-reversion in low-vol
   regimes (distinct from regime-direction) — low expectations given friction.
+
+## UPDATE (2026-07-23) — funding-extreme REVERSION: KILLED (pre-registered)
+
+Tested funding as a **contrarian directional** signal (distinct from the carry
+harvest): fade a funding-rate extreme, collecting the carry while price reverts.
+BTC/ETH/SOL, 2024-06→2026-07, daily grid, 7d trailing funding z-score, non-overlapping.
+Pre-registered bar (pooled mean>0, t≥2, ≥2/3 assets +, n≥30 @ 2-day hold) **FAILED both
+thresholds**: pooled t = +0.22 (Z=1.5) / +0.68 (Z=2.0), well-powered (282–439 trades),
+positive mean is BTC-only, carry component negligible (+0.02–0.04%), no stable regime
+conditioning. **Not built.** Funding stays a rubric carry pillar + context, never a
+directional lane. Full write-up: `scripts/analysis/funding-reversion-study/FINDINGS.md`.
+The one candidate edge remains price **reversion-extreme** (forward-testing) — don't
+mine funding directionally (multiple-testing debt).
