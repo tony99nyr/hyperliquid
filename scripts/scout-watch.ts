@@ -32,7 +32,7 @@ import {
   saveScoutState,
   writeScoutHeartbeat,
 } from '@/lib/scout/scout-watch-service';
-import { type ScoutState } from '@/lib/scout/scout-trigger-business-logic';
+import { hasActTrigger, DEFAULT_SCOUT_TRIGGER_CONFIG, type ScoutState, type ScoutTriggerConfig } from '@/lib/scout/scout-trigger-business-logic';
 
 const DEFAULT_INTERVAL_SECONDS = 60;
 const MIN_INTERVAL_SECONDS = 15;
@@ -51,8 +51,35 @@ const CONSUMER_INTERVAL_MS = (() => {
   return Number.isFinite(m) && m >= 0 ? m * 60_000 : 30 * 60_000;
 })();
 const CONSUMER_TIMEOUT_MS = 10 * 60_000;
+// A pending act-class trigger (reversion-extreme, position risk) lets the consumer run
+// on this SHORTER cadence instead of waiting a full interval — a fresh fade decays fast.
+// Worst case: a sustained act stream holds the consumer at this floor (≈3× normal spend
+// at 10min vs 30min), bounded by the single-flight guard. Set SCOUT_ACT_INTERVAL_MIN to
+// 0 (or ≥ SCOUT_CONSUMER_INTERVAL_MIN) to DISABLE the floor and keep the normal cadence.
+const CONSUMER_ACT_INTERVAL_MS = (() => {
+  const raw = process.env.SCOUT_ACT_INTERVAL_MIN;
+  if (raw === undefined || raw.trim() === '') return 10 * 60_000; // unset → 10min floor
+  const m = Number(raw);
+  // 0 / negative / non-numeric = floor OFF → fall back to the normal cadence (NOT 0ms,
+  // which would fire every tick — the opposite of "disable", matching a foot-gun both
+  // reviews flagged). A positive value is the floor.
+  return Number.isFinite(m) && m > 0 ? m * 60_000 : CONSUMER_INTERVAL_MS;
+})();
+// Reversion sub-cadence scan interval (daemon-side, ms). SCOUT_REVERSION_SCAN_MIN=0
+// disables the scan entirely; unset → the config default (~5min). Passed to
+// runScoutWatchCycle so the operator can tune/kill it without a code edit.
+const REVERSION_SCAN_MS = (() => {
+  const raw = process.env.SCOUT_REVERSION_SCAN_MIN;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_SCOUT_TRIGGER_CONFIG.reversionScanIntervalMs;
+  const m = Number(raw);
+  return Number.isFinite(m) && m >= 0 ? m * 60_000 : DEFAULT_SCOUT_TRIGGER_CONFIG.reversionScanIntervalMs;
+})();
+const WATCH_CFG: ScoutTriggerConfig = { ...DEFAULT_SCOUT_TRIGGER_CONFIG, reversionScanIntervalMs: REVERSION_SCAN_MS };
 let consumerRunning = false;
 let lastConsumerAt = 0;
+// Epoch ms of the most recent act-class trigger. When it's newer than the last consumer
+// run, an act trigger is UNCONSUMED → the shorter act cadence applies.
+let lastActTriggerAt = 0;
 // Handle to the in-flight consumer child (a detached process-group leader) so a
 // daemon shutdown can reap the whole tree — otherwise a hung claude CLI outlives the
 // daemon that spawned it and keeps billing with no timeout to bound it (review D-MED).
@@ -60,7 +87,11 @@ let activeConsumerChild: ReturnType<typeof spawn> | null = null;
 
 function maybeSpawnConsumer(now: number): void {
   if (CONSUMER_INTERVAL_MS === 0) return; // explicitly disabled
-  if (consumerRunning || now - lastConsumerAt < CONSUMER_INTERVAL_MS) return;
+  // Shorten the wait when an act-class trigger fired since the last consumer run (never
+  // lengthen — min guards a mis-set act interval). Normal cadence otherwise.
+  const actPending = lastActTriggerAt > lastConsumerAt;
+  const interval = actPending ? Math.min(CONSUMER_INTERVAL_MS, CONSUMER_ACT_INTERVAL_MS) : CONSUMER_INTERVAL_MS;
+  if (consumerRunning || now - lastConsumerAt < interval) return;
   const script = path.join(process.cwd(), 'scripts', 'scout-headless.sh');
   if (!existsSync(script)) {
     line(`WARN embedded consumer: ${script} not found — skipping`);
@@ -132,7 +163,7 @@ async function preflight(): Promise<void> {
 async function oneCycle(state: ScoutState): Promise<ScoutState> {
   const ts = new Date().toISOString();
   try {
-    const { triggers, state: next, degraded, degradedReason, sink } = await runScoutWatchCycle(state);
+    const { triggers, state: next, degraded, degradedReason, sink, reversionCoverage } = await runScoutWatchCycle(state, WATCH_CFG);
     saveScoutState(next); // persist so a restart resumes from the latest baseline
     if (degraded) {
       line(`[${ts}] ⏸ STAND DOWN — feed degraded: ${degradedReason} (no triggers emitted)`);
@@ -140,6 +171,14 @@ async function oneCycle(state: ScoutState): Promise<ScoutState> {
       line(`[${ts}] no triggers`);
     } else {
       for (const t of triggers) line(`[${ts}] ⚡ ${t.urgency.toUpperCase()} ${t.kind} — ${t.detail}`);
+    }
+    // Mark an act-class trigger so the consumer can run on the shorter cadence (a fresh
+    // reversion fade / position risk shouldn't wait a full interval to be acted on).
+    if (!degraded && hasActTrigger(triggers)) lastActTriggerAt = Date.now();
+    // Reversion-scan coverage — surface dropped coins (stale/thin candles, fetch blips) so
+    // the forward-test isn't silently missing setups a "no triggers" line would hide.
+    if (reversionCoverage && reversionCoverage.skipped > 0) {
+      line(`[${ts}] reversion scan: ${reversionCoverage.scanned}/${reversionCoverage.requested} coins evaluated, ${reversionCoverage.skipped} skipped (stale/thin/blip)`);
     }
     // Sink adapter matters operationally: 'jsonl' = Supabase unreachable, these triggers
     // are INVISIBLE to a table-reading consumer on another box; 'none' = both sinks failed.

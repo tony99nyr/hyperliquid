@@ -50,7 +50,8 @@ export type ScoutTriggerKind =
   | 'price-drift' // |Δ mark| ≥ driftThresholdPct vs a rolling anchor (slow trend — either direction)
   | 'position-health-drop' // open position health fell sharply / below the floor
   | 'position-near-stop' // open position is within nearStopPct of its stop
-  | 'leader-action'; // a rated leader opened/flipped/added big (leader-follow lane wake)
+  | 'leader-action' // a rated leader opened/flipped/added big (leader-follow lane wake)
+  | 'reversion-extreme'; // a |z|≥minZ statistical stretch printed in a non-trending regime (the fade lane)
 
 /** "info" = a fresh opportunity to consider; "act" = open-position risk (escalate first). */
 export type ScoutUrgency = 'info' | 'act';
@@ -100,6 +101,11 @@ export interface ScoutState {
   driftAnchorAt: Record<string, number>;
   /** Cursor (epoch ms) — leader_actions at or before this were already emitted. */
   lastLeaderActionMs?: number;
+  /** key `${COIN}:${side}` → epoch ms a reversion-extreme was last EMITTED. A |z|≥minZ
+   *  stretch persists across bars; this de-dups to one wake per episode (cooldown). */
+  lastReversionEmit?: Record<string, number>;
+  /** Epoch ms the daemon last RAN the reversion candle-scan (sub-cadence gate). */
+  lastReversionScanAt?: number;
 }
 
 export interface ScoutTriggerConfig {
@@ -123,6 +129,13 @@ export interface ScoutTriggerConfig {
   leaderMinNotionalUsd: number;
   /** Max leader-action triggers per cycle (a whale rebalancing burst ≠ N wakes). */
   leaderMaxPerCycle: number;
+  /** How often (ms) the daemon runs the heavier reversion candle-scan. 15m candles
+   *  don't update faster than 15m, so this is a sub-cadence well below the 60s tick.
+   *  0 disables the scan entirely. */
+  reversionScanIntervalMs: number;
+  /** Don't re-emit a reversion-extreme for the same coin:side within this (ms). A
+   *  |z|≥minZ stretch persists across bars; one wake per episode, not one per scan. */
+  reversionCooldownMs: number;
 }
 
 export const DEFAULT_SCOUT_TRIGGER_CONFIG: ScoutTriggerConfig = {
@@ -136,10 +149,12 @@ export const DEFAULT_SCOUT_TRIGGER_CONFIG: ScoutTriggerConfig = {
   driftWindowMs: 4 * 60 * 60 * 1000, // re-anchor every ~4h if no drift trigger fired
   leaderMinNotionalUsd: 1_000_000, // rated-whale conviction floor (adds below $1M are churn)
   leaderMaxPerCycle: 5,
+  reversionScanIntervalMs: 5 * 60 * 1000, // scan every ~5min (15m candles change slower)
+  reversionCooldownMs: 2 * 60 * 60 * 1000, // one wake per coin:side per ~2h episode (≈ the fade hold)
 };
 
 export function emptyScoutState(): ScoutState {
-  return { lastOpportunity: {}, lastBadge: {}, lastMark: {}, lastHealth: {}, driftAnchorPx: {}, driftAnchorAt: {}, lastLeaderActionMs: 0 };
+  return { lastOpportunity: {}, lastBadge: {}, lastMark: {}, lastHealth: {}, driftAnchorPx: {}, driftAnchorAt: {}, lastLeaderActionMs: 0, lastReversionEmit: {}, lastReversionScanAt: 0 };
 }
 
 const sideKey = (coin: string, side: Side): string => `${coin.toUpperCase()}:${side}`;
@@ -175,6 +190,10 @@ export function detectScoutTriggers(
     driftAnchorPx: { ...(prev.driftAnchorPx ?? {}) },
     driftAnchorAt: { ...(prev.driftAnchorAt ?? {}) },
     lastLeaderActionMs: prev.lastLeaderActionMs ?? 0,
+    // Reversion scan state is owned by the sub-cadence scan (reversionTriggersFromHits),
+    // not this cheap detector — carry it through untouched.
+    lastReversionEmit: { ...(prev.lastReversionEmit ?? {}) },
+    lastReversionScanAt: prev.lastReversionScanAt ?? 0,
   };
 
   // --- Rubric: GO crossing + opportunity jumps (opportunity layer, "info"). ---
@@ -348,4 +367,56 @@ export function detectScoutTriggers(
 /** True when any trigger is risk-class ("act") — the daemon flags these for priority handling. */
 export function hasActTrigger(triggers: ScoutTrigger[]): boolean {
   return triggers.some((t) => t.urgency === 'act');
+}
+
+/** One reversion-extreme hit from the scan (subset the trigger builder needs; the full
+ *  shape with levels lives in reversion-scan-service). Type-only coupling — this module
+ *  stays pure and I/O-free. */
+export interface ReversionHitLite {
+  coin: string;
+  side: Side;
+  z: number;
+  er: number;
+  regime: string;
+  regimeConf: number;
+  mark: number;
+  stop: number;
+  target: number;
+}
+
+/**
+ * PURE: turn reversion-scan hits into `reversion-extreme` triggers, de-duped so a
+ * persistent stretch wakes the model ONCE per episode, not every scan. A |z|≥minZ
+ * dislocation stays elevated across several bars; without the cooldown the daemon
+ * would re-emit the same setup every scan interval and spam the feed. urgency 'act'
+ * because a fresh fade is time-sensitive (the edge decays as price reverts) — it also
+ * lets the daemon shorten the consumer cadence to participate before the setup is gone.
+ * Returns the next state (carry `lastReversionEmit` + `lastReversionScanAt`).
+ */
+export function reversionTriggersFromHits(
+  hits: ReversionHitLite[],
+  prev: ScoutState,
+  now: number,
+  cfg: ScoutTriggerConfig = DEFAULT_SCOUT_TRIGGER_CONFIG,
+): { triggers: ScoutTrigger[]; state: ScoutState } {
+  const lastEmit: Record<string, number> = { ...(prev.lastReversionEmit ?? {}) };
+  const triggers: ScoutTrigger[] = [];
+  for (const h of hits) {
+    const key = sideKey(h.coin, h.side);
+    const prevAt = lastEmit[key] ?? 0;
+    if (now - prevAt < cfg.reversionCooldownMs) continue; // still cooling down for this coin:side → no re-wake
+    lastEmit[key] = now;
+    triggers.push({
+      kind: 'reversion-extreme',
+      coin: coinKey(h.coin),
+      side: h.side,
+      urgency: 'act',
+      detail:
+        `${h.side.toUpperCase()} fade z=${h.z.toFixed(2)} ER=${h.er.toFixed(2)} ` +
+        `regime=${h.regime}/${Math.round(h.regimeConf * 100)}% mark=${h.mark} stop=${h.stop} tgt=${h.target} ` +
+        `(reversion-extreme lane — re-validate freshness before acting)`,
+      at: now,
+    });
+  }
+  return { triggers, state: { ...prev, lastReversionEmit: lastEmit, lastReversionScanAt: now } };
 }

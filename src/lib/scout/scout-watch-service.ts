@@ -21,7 +21,9 @@ import { listActiveSessions } from '@/lib/cockpit/session-service';
 import { loadOpenPositions } from '@/lib/cockpit/fill-persistence-service';
 import {
   detectScoutTriggers,
+  reversionTriggersFromHits,
   emptyScoutState,
+  DEFAULT_SCOUT_TRIGGER_CONFIG,
   type ScoutLeaderActionRead,
   type ScoutRubricRead,
   type ScoutMarketRead,
@@ -30,6 +32,7 @@ import {
   type ScoutTrigger,
   type ScoutTriggerConfig,
 } from './scout-trigger-business-logic';
+import { scanReversionExtremes } from './reversion-scan-service';
 
 // Trigger persistence lives behind the ScoutTriggerSink seam (scout-trigger-sink.ts):
 // supabase `scout_triggers` primary (any-box visibility + consumer cursor), JSONL fallback.
@@ -54,6 +57,10 @@ export function loadScoutState(path = scoutStateFilePath()): ScoutState {
       driftAnchorPx: s.driftAnchorPx ?? {},
       driftAnchorAt: s.driftAnchorAt ?? {},
       lastLeaderActionMs: s.lastLeaderActionMs ?? 0,
+      // Reversion sub-cadence state — persisted so a daemon restart doesn't re-emit a
+      // still-cooling stretch or immediately re-scan.
+      lastReversionEmit: s.lastReversionEmit ?? {},
+      lastReversionScanAt: s.lastReversionScanAt ?? 0,
     };
   } catch {
     return emptyScoutState();
@@ -321,11 +328,24 @@ export async function appendScoutTriggers(triggers: ScoutTrigger[]): Promise<'su
  * Run one trigger cycle: gather → detect → append. Returns the next state (carry
  * it into the next call) + the triggers fired. NEVER trades.
  */
+/** Hard wall-time cap on the reversion candle-scan so a slow/hostile HL can't stall the
+ *  60s trigger tick past this (up to 6 coins × 2 sequential fetches × the candle-service
+ *  8s timeout would otherwise be ~90s). On timeout the scan is treated as a failure. */
+const REVERSION_SCAN_TIMEOUT_MS = 20_000;
+
 export async function runScoutWatchCycle(
   prev: ScoutState,
   cfg?: ScoutTriggerConfig,
   now: number = Date.now(),
-): Promise<{ triggers: ScoutTrigger[]; state: ScoutState; degraded: boolean; degradedReason: string | null; sink: 'supabase' | 'jsonl' | 'none' }> {
+): Promise<{
+  triggers: ScoutTrigger[];
+  state: ScoutState;
+  degraded: boolean;
+  degradedReason: string | null;
+  sink: 'supabase' | 'jsonl' | 'none';
+  /** Coverage of the reversion scan this cycle (absent when the scan didn't run). */
+  reversionCoverage?: { requested: number; scanned: number; skipped: number };
+}> {
   const input = await gatherScoutInputs(now);
   // STAND DOWN on a degraded feed: don't emit (and thus don't wake the model to
   // trade) on stale rubric or empty marks. Still advance state so the next good
@@ -340,9 +360,42 @@ export async function runScoutWatchCycle(
     return { triggers: [], state, degraded: true, degradedReason: input.degradedReason, sink: 'none' };
   }
   const { triggers, state } = detectScoutTriggers(input, prev, cfg);
+
+  // Reversion-extreme scan on a SUB-CADENCE. The 60s detector above is cheap table/mark
+  // reads; this fetches candles (15m + 4h) per coin, so it runs at most every
+  // reversionScanIntervalMs and is FULLY fail-soft — a candle blip must never break the
+  // trigger tick. Emitting these as triggers (vs only inside the model's cycle) captures
+  // a stretch AT PRINT TIME and feeds the reversion-extreme forward-test telemetry.
+  const cfgEff = cfg ?? DEFAULT_SCOUT_TRIGGER_CONFIG;
+  let allTriggers = triggers;
+  let nextState = state;
+  let reversionCoverage: { requested: number; scanned: number; skipped: number } | undefined;
+  const scanDue = cfgEff.reversionScanIntervalMs > 0 && now - (state.lastReversionScanAt ?? 0) >= cfgEff.reversionScanIntervalMs;
+  if (scanDue) {
+    try {
+      const coins = input.marks.map((m) => m.coin).slice(0, 6);
+      // Wall-time bound (REVERSION_SCAN_TIMEOUT_MS): a timeout resolves to a zero-scan
+      // result so a slow HL can't stall the tick — treated exactly like a scan failure.
+      const scan = await Promise.race([
+        scanReversionExtremes(coins, now),
+        new Promise<Awaited<ReturnType<typeof scanReversionExtremes>>>((resolve) =>
+          setTimeout(() => resolve({ hits: [], regimeByCoin: {}, coverage: { requested: coins.length, scanned: 0, skipped: coins.length } }), REVERSION_SCAN_TIMEOUT_MS),
+        ),
+      ]);
+      const { triggers: revTriggers, state: revState } = reversionTriggersFromHits(scan.hits, state, now, cfgEff);
+      allTriggers = revTriggers.length > 0 ? [...triggers, ...revTriggers] : triggers;
+      nextState = revState;
+      reversionCoverage = scan.coverage;
+    } catch {
+      // Advance the scan clock even on failure so a persistent fetch error can't hot-loop
+      // the candle pull every 60s tick — the next window retries.
+      nextState = { ...state, lastReversionScanAt: now };
+    }
+  }
+
   // The adapter that took the write matters operationally: 'jsonl' means Supabase was
   // unreachable and these triggers are INVISIBLE to a table-reading consumer on another
   // box; 'none' means both sinks failed. The daemon surfaces this in its heartbeat.
-  const sink = await appendScoutTriggers(triggers);
-  return { triggers, state, degraded: false, degradedReason: null, sink };
+  const sink = await appendScoutTriggers(allTriggers);
+  return { triggers: allTriggers, state: nextState, degraded: false, degradedReason: null, sink, reversionCoverage };
 }

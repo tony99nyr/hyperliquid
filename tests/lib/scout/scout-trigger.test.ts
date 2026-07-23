@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   detectScoutTriggers,
+  reversionTriggersFromHits,
   emptyScoutState,
   hasActTrigger,
   DEFAULT_SCOUT_TRIGGER_CONFIG,
   type ScoutState,
   type DetectScoutTriggersInput,
+  type ReversionHitLite,
 } from '@/lib/scout/scout-trigger-business-logic';
 
 const NOW = 1_700_000_000_000;
@@ -271,5 +273,54 @@ describe('detectScoutTriggers — leader-action (leader-follow lane)', () => {
     const leader = triggers.filter((t) => t.kind === 'leader-action');
     expect(leader).toHaveLength(1);
     expect(leader[0].detail).toContain('FLIP');
+  });
+});
+
+describe('reversionTriggersFromHits', () => {
+  const hit = (over: Partial<ReversionHitLite> = {}): ReversionHitLite => ({
+    coin: 'SOL', side: 'short', z: 3.1, er: 0.2, regime: 'neutral', regimeConf: 0.3,
+    mark: 150, stop: 153, target: 148, ...over,
+  });
+  const COOLDOWN = DEFAULT_SCOUT_TRIGGER_CONFIG.reversionCooldownMs;
+
+  it('emits an act-class reversion-extreme trigger for a fresh hit + advances the scan clock', () => {
+    const { triggers, state } = reversionTriggersFromHits([hit()], emptyScoutState(), NOW);
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0].kind).toBe('reversion-extreme');
+    expect(triggers[0].urgency).toBe('act');
+    expect(triggers[0].coin).toBe('SOL');
+    expect(triggers[0].side).toBe('short');
+    expect(hasActTrigger(triggers)).toBe(true);
+    expect(state.lastReversionScanAt).toBe(NOW);
+    expect(state.lastReversionEmit!['SOL:short']).toBe(NOW);
+  });
+
+  it('de-dups the same coin:side within the cooldown (one wake per episode)', () => {
+    const first = reversionTriggersFromHits([hit()], emptyScoutState(), NOW);
+    const again = reversionTriggersFromHits([hit()], first.state, NOW + COOLDOWN - 1);
+    expect(again.triggers).toHaveLength(0); // still cooling down
+    expect(again.state.lastReversionScanAt).toBe(NOW + COOLDOWN - 1); // clock still advances
+  });
+
+  it('re-emits once the cooldown elapses', () => {
+    const first = reversionTriggersFromHits([hit()], emptyScoutState(), NOW);
+    const later = reversionTriggersFromHits([hit()], first.state, NOW + COOLDOWN + 1);
+    expect(later.triggers).toHaveLength(1);
+  });
+
+  it('treats each coin:side independently (opposite side / other coin not deduped)', () => {
+    const first = reversionTriggersFromHits([hit({ coin: 'SOL', side: 'short' })], emptyScoutState(), NOW);
+    const { triggers } = reversionTriggersFromHits(
+      [hit({ coin: 'SOL', side: 'long' }), hit({ coin: 'ETH', side: 'short' })],
+      first.state,
+      NOW + 1000,
+    );
+    expect(triggers.map((t) => `${t.coin}:${t.side}`).sort()).toEqual(['ETH:short', 'SOL:long']);
+  });
+
+  it('empty hits still advances the scan clock (so the sub-cadence gate resets)', () => {
+    const { triggers, state } = reversionTriggersFromHits([], emptyScoutState(), NOW);
+    expect(triggers).toHaveLength(0);
+    expect(state.lastReversionScanAt).toBe(NOW);
   });
 });

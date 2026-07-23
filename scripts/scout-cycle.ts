@@ -30,6 +30,7 @@ import { listLaddersWithRungs } from '@/lib/ladder/ladder-service';
 import { fetchClearinghouseState } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
 import { DEFAULT_REVERSION_CONFIG } from '@/lib/scout/reversion-signal-business-logic';
+import { type ReversionHit, type RegimeRead } from '@/lib/scout/reversion-scan-service';
 
 interface VaultRow { vault_address: string; name: string; kind: string; nav_usd: number | null; apr_annual: number | null; max_drawdown_pct: number | null; age_days: number | null; leader_fraction: number | null }
 
@@ -77,40 +78,17 @@ run(async () => {
   // coupling-free on our own data). Surfaced for the operator's insight AND used
   // as the authoritative gate on the reversion lane below (never fade a confident
   // trend). Fail-soft per coin.
-  const regimeByCoin: Record<string, { regime: 'bullish' | 'bearish' | 'neutral'; confidence: number; trend: number }> = {};
-  const reversionHits: Array<{ coin: string; side: 'long' | 'short'; z: number; er: number; regime: string; regimeConf: number; mark: number; stop: number; target: number; stopFrac: number }> = [];
+  // The reversion scan (4h regime read → 15m fade signal per coin) is shared with the
+  // trigger daemon via reversion-scan-service, so the snapshot the model sees and the
+  // deterministic reversion-extreme trigger run IDENTICAL logic. Fail-soft.
+  let regimeByCoin: Record<string, RegimeRead> = {};
+  let reversionHits: ReversionHit[] = [];
   try {
-    const { fetchCandles: fc } = await import('@/lib/hyperliquid/candle-service');
-    const { reversionSignal } = await import('@/lib/scout/reversion-signal-business-logic');
-    const { detectMarketRegime } = await import('@/lib/strategy/analysis/market-regime-detector');
+    const { scanReversionExtremes } = await import('@/lib/scout/reversion-scan-service');
     const scanCoins = inputs.marks.map((m) => m.coin).slice(0, 6);
-    for (const coin of scanCoins) {
-      try {
-        // 4h regime (the vendored detector needs currentIndex ≥ 50, so ≥51 COMPLETED
-        // bars ⇒ ≥52 raw after dropping the in-progress bar; below that it returns
-        // neutral/0 which would silently un-gate the fade). Its own try so a 4h read
-        // blip degrades to efficiency-only reversion, not a dropped coin. NOTE: this
-        // runs the vendored SNAPSHOT of iamrossi's detector — faithful to that logic,
-        // frozen at vendor time (it can drift from iamrossi's live tuning; that's the
-        // correct coupling-free trade-off).
-        let regimeGate: { regime: 'bullish' | 'bearish' | 'neutral'; confidence: number } | undefined;
-        try {
-          const reg4h = await fc(coin, '4h', now - 45 * 24 * 3_600_000, now);
-          if (!reg4h.stale && reg4h.candles.length >= 52) {
-            const completed = reg4h.candles.slice(0, -1);
-            const sig = detectMarketRegime(completed, completed.length - 1);
-            regimeByCoin[coin] = { regime: sig.regime, confidence: sig.confidence, trend: sig.indicators.trend };
-            regimeGate = { regime: sig.regime, confidence: sig.confidence };
-          }
-        } catch { /* 4h read failed → efficiency-only reversion (never un-gates a trend) */ }
-        // 15m reversion, GATED by the 4h regime.
-        const res = await fc(coin, '15m', now - 30 * 3_600_000, now);
-        if (res.stale || res.candles.length < 120) continue;
-        const bars = res.candles.slice(0, -1).map((c) => ({ highPx: c.high, lowPx: c.low, closePx: c.close }));
-        const revSig = reversionSignal(bars, undefined, regimeGate);
-        if (revSig) reversionHits.push({ coin, side: revSig.side, z: revSig.zScore, er: revSig.efficiency, regime: revSig.regimeLabel, regimeConf: revSig.regimeConfidence, mark: revSig.markPx, stop: revSig.stopPx, target: revSig.targetPx, stopFrac: revSig.stopFrac });
-      } catch { /* per-coin fail-soft */ }
-    }
+    const scan = await scanReversionExtremes(scanCoins, now);
+    regimeByCoin = scan.regimeByCoin;
+    reversionHits = scan.hits;
   } catch { /* scan unavailable → section just prints empty */ }
 
   // 3b-iii) HOUSEHOLD EXPOSURE (Phase 3, Jul-21) — iamrossi's on-chain Base Safe
