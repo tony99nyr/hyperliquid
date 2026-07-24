@@ -61,10 +61,10 @@ describe('parseScoutDecision — the headless contract is strict (malformed NEVE
     const r = parseScoutDecision('{"action":"stand-down","note":"chop"}');
     expect(r.kind).toBe('stand-down');
   });
-  it('valid close requires sessionId and maps exit args', () => {
+  it('valid close maps exit args (sessionId optional — resolved by coin downstream)', () => {
     const r = parseScoutDecision(JSON.stringify({ action: 'close', coin: 'ETH', sessionId: 's1', fraction: 0.5 }));
     expect(r.kind).toBe('close');
-    if (r.kind === 'close') { expect(r.args['exit']).toBe(true); expect(r.args['fraction']).toBe('0.5'); }
+    if (r.kind === 'close') { expect(r.args['exit']).toBe(true); expect(r.args['fraction']).toBe('0.5'); expect(r.args['session']).toBe('s1'); }
   });
   it('rejects: bad JSON, unknown action, missing thesis, bad stopFrac, bad side', () => {
     expect(parseScoutDecision('not json').kind).toBe('error');
@@ -72,6 +72,7 @@ describe('parseScoutDecision — the headless contract is strict (malformed NEVE
     expect(parseScoutDecision('{"action":"open","coin":"ETH","side":"buy","riskUsd":50,"stopFrac":0.03}').kind).toBe('error');
     expect(parseScoutDecision('{"action":"open","coin":"ETH","side":"buy","riskUsd":50,"stopFrac":1.5,"thesis":"t"}').kind).toBe('error');
     expect(parseScoutDecision('{"action":"open","coin":"ETH","side":"long","riskUsd":50,"stopFrac":0.03,"thesis":"t"}').kind).toBe('error');
-    expect(parseScoutDecision('{"action":"close","coin":"ETH"}').kind).toBe('error');
+    expect(parseScoutDecision('{"action":"close","coin":"ETH"}').kind).toBe('close'); // coin alone is valid now (session resolved downstream)
+    expect(parseScoutDecision('{"action":"close","sessionId":"s1"}').kind).toBe('error'); // but coin is still required
   });
 });

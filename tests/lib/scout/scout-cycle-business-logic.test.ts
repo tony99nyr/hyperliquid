@@ -29,3 +29,27 @@ describe('parseScoutDecision — propose (steward lane, never executes)', () => 
     expect(parseScoutDecision(JSON.stringify({ action: 'propose', title: 'x' })).kind).toBe('error');
   });
 });
+
+describe('parseScoutDecision — close (session resolved by coin when omitted)', () => {
+  it('accepts a close WITHOUT sessionId (headless model has coin, not session)', () => {
+    const r = parseScoutDecision(JSON.stringify({ action: 'close', coin: 'SOL', note: 'target hit' }));
+    expect(r.kind).toBe('close');
+    if (r.kind !== 'close') return;
+    expect(r.args.exit).toBe(true);
+    expect(r.args.coin).toBe('SOL');
+    expect('session' in r.args).toBe(false); // resolved downstream by (coin, active paper session)
+    expect(r.args.note).toBe('target hit');
+  });
+
+  it('passes an explicit sessionId through when supplied', () => {
+    const r = parseScoutDecision(JSON.stringify({ action: 'close', coin: 'SOL', sessionId: 'abc', fraction: 0.5 }));
+    expect(r.kind).toBe('close');
+    if (r.kind !== 'close') return;
+    expect(r.args.session).toBe('abc');
+    expect(r.args.fraction).toBe('0.5');
+  });
+
+  it('still requires a coin', () => {
+    expect(parseScoutDecision(JSON.stringify({ action: 'close', sessionId: 'abc' })).kind).toBe('error');
+  });
+});

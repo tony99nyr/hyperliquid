@@ -131,8 +131,12 @@ export function parseScoutDecision(raw: string): { kind: 'open' | 'close'; args:
   }
   if (d.action === 'close') {
     if (!d.coin || typeof d.coin !== 'string') return { kind: 'error', error: 'close: coin required' };
-    if (!d.sessionId || typeof d.sessionId !== 'string') return { kind: 'error', error: 'close: sessionId required' };
-    const args: Record<string, string | boolean> = { exit: true, coin: d.coin, session: d.sessionId };
+    // sessionId is OPTIONAL: the headless snapshot doesn't always surface it, so a
+    // compliant "close SOL" was being rejected before it could execute. When omitted,
+    // scout:trade resolves the (single) active PAPER session holding an open position
+    // for the coin — mirrors the (session, coin) hypothesis resolution.
+    const args: Record<string, string | boolean> = { exit: true, coin: d.coin };
+    if (typeof d.sessionId === 'string' && d.sessionId.trim()) args['session'] = d.sessionId;
     if (typeof d.hypothesisId === 'string') args['hypothesis'] = d.hypothesisId;
     if (typeof d.note === 'string') args['note'] = d.note;
     if (typeof d.fraction === 'number' && d.fraction > 0 && d.fraction <= 1) args['fraction'] = String(d.fraction);

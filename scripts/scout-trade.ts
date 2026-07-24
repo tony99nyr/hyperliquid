@@ -220,10 +220,40 @@ async function assertPaperSession(sessionId: string): Promise<void> {
   if (target.mode !== 'paper') throw new Error(`scout: session ${sessionId} is mode='${target.mode}' — the scout may only touch PAPER sessions`);
 }
 
+/**
+ * Resolve the session to close when the model omits --session: the (single) ACTIVE
+ * PAPER session holding an open position for `coin`. Only paper sessions are searched
+ * (the lane boundary — a live position is never touchable here). Refuses on zero
+ * (nothing to close) or more-than-one (ambiguous — the caller must disambiguate with
+ * --session), so it can never close the wrong book.
+ */
+async function resolveScoutPaperSessionForCoin(coin: string): Promise<string> {
+  const paper = (await listActiveSessions()).filter((s) => s.mode === 'paper');
+  const holding: string[] = [];
+  for (const s of paper) {
+    const pos = await loadPosition(s.id, coin).catch(() => null);
+    if (pos && pos.side !== 'flat' && pos.sz > 0) holding.push(s.id);
+  }
+  if (holding.length === 0) throw new Error(`scout close: no ACTIVE paper session holds an open ${coin} position`);
+  if (holding.length > 1) throw new Error(`scout close: ${holding.length} paper sessions hold ${coin} — pass --session to disambiguate`);
+  return holding[0];
+}
+
 async function runExit(args: Record<string, string | boolean>): Promise<void> {
-  const sessionId = requireString(args, 'session');
-  await assertPaperSession(sessionId);
   const coin = requireString(args, 'coin').toUpperCase();
+  // Session: use the explicit --session when given, else resolve the (single) active
+  // PAPER session holding an open position for this coin. The headless model has the
+  // coin from the snapshot but not always the session id — without this a compliant
+  // close ("close SOL") errored with 'sessionId required' and never executed, so the
+  // reversion target exit could never fire (found live Jul 23).
+  let sessionId: string;
+  if (typeof args['session'] === 'string' && args['session'].trim()) {
+    sessionId = args['session'].trim();
+    await assertPaperSession(sessionId);
+  } else {
+    sessionId = await resolveScoutPaperSessionForCoin(coin);
+    line(`(no --session — resolved paper session ${sessionId} holding an open ${coin} position)`);
+  }
   let hypothesisId = typeof args['hypothesis'] === 'string' ? args['hypothesis'] : null;
   const note = typeof args['note'] === 'string' ? args['note'] : null;
   const fraction = optionalNumber(args, 'fraction', 1);

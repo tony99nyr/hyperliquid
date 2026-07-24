@@ -62,9 +62,13 @@ wake:
    hypothesis track record, and the playbook pointer. NEVER trades.
 2. **Read the playbook** (`docs/scout/playbook.md`) — apply its rules.
 3. **Manage open positions first (risk before opportunity).** For each open paper
-   position, judge hold vs exit (health, thesis intact, near stop/target). If an
-   exit is warranted:
-   `pnpm scout:trade --exit --session <id> --coin <COIN> --hypothesis <id> [--fraction 0.5] --note "<why>"`
+   position, judge hold vs exit (health, thesis intact, near stop/target). A
+   position showing `atTarget: true` (or a `position-at-target` trigger) is a
+   MANDATORY close per the reversion exit rule — take it. If an exit is warranted:
+   `pnpm scout:trade --exit --coin <COIN> [--session <id>] [--hypothesis <id>] [--fraction 0.5] --note "<why>"`
+   `--session` is OPTIONAL — omitted, it resolves the paper session holding that coin
+   (the headless JSON `{"action":"close","coin":"SOL",...}` needs no sessionId). Pass
+   the position's `sessionId` from the snapshot when you have it.
 4. **Then consider new opportunities.** If a rubric/price trigger points at a
    setup that clears the bar, size it by risk and open it:
    `pnpm scout:trade --coin <COIN> --side buy|sell --risk <usd> --stop-frac <frac> --entry <px> --thesis "<why>" [--session <id>]`

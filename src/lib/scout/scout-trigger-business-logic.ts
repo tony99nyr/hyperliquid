@@ -34,6 +34,8 @@ export interface ScoutMarketRead {
 /** An open PAPER position the scout is managing (mapped from positions by the daemon). */
 export interface ScoutPositionRead {
   coin: string;
+  /** Owning paper session — surfaced so the headless model can close by (session,coin). */
+  sessionId?: string;
   side: Side;
   /** Health engine score 0–100, or null when unavailable. */
   healthScore: number | null;

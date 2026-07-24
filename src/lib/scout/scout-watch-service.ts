@@ -327,6 +327,7 @@ export async function gatherScoutInputs(now: number): Promise<ScoutInputs> {
       const healthScore = await readLatestHealth(client, s.id, p.coin).catch(() => null);
       positions.push({
         coin,
+        sessionId: s.id, // so the headless model can close by (session, coin)
         side: p.side,
         healthScore,
         unrealizedPnlUsd: 0, // not needed for triggers; the cycle computes it fresh
