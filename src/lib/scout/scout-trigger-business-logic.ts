@@ -40,6 +40,8 @@ export interface ScoutPositionRead {
   unrealizedPnlUsd: number;
   /** Protective stop price, when known (from the safe-exit plan). */
   stopPx?: number | null;
+  /** Take-profit target, when known (scout reversion lane — positions.target_px). */
+  targetPx?: number | null;
   markPx: number;
 }
 
@@ -50,6 +52,7 @@ export type ScoutTriggerKind =
   | 'price-drift' // |Δ mark| ≥ driftThresholdPct vs a rolling anchor (slow trend — either direction)
   | 'position-health-drop' // open position health fell sharply / below the floor
   | 'position-near-stop' // open position is within nearStopPct of its stop
+  | 'position-at-target' // open position reached its take-profit target (mechanical reversion exit)
   | 'leader-action' // a rated leader opened/flipped/added big (leader-follow lane wake)
   | 'reversion-extreme'; // a |z|≥minZ statistical stretch printed in a non-trending regime (the fade lane)
 
@@ -312,6 +315,25 @@ export function detectScoutTriggers(
           side: p.side,
           urgency: 'act',
           detail: `${coinKey(p.coin)} ${p.side} within ${(distFrac * 100).toFixed(2)}% of stop (${p.stopPx})`,
+          at: now,
+        });
+      }
+    }
+
+    // Take-profit target reached — the MECHANICAL reversion exit (target is always on
+    // the profit side, so a favorable cross = target hit; no band). Fires every tick
+    // while past target (like near-stop) so the model can't sit on a winner past its
+    // registered target — an 'act' wake to close now. target_px is set only for lanes
+    // that pass --target (reversion), so this never fires on an untargeted position.
+    if (p.targetPx != null && p.targetPx > 0 && p.markPx > 0) {
+      const hit = p.side === 'long' ? p.markPx >= p.targetPx : p.markPx <= p.targetPx;
+      if (hit) {
+        triggers.push({
+          kind: 'position-at-target',
+          coin: coinKey(p.coin),
+          side: p.side,
+          urgency: 'act',
+          detail: `${coinKey(p.coin)} ${p.side} reached target ${p.targetPx} (mark ${p.markPx}) — CLOSE per the registered reversion exit (mechanical, no discretion)`,
           at: now,
         });
       }

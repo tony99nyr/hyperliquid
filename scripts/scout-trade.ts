@@ -32,7 +32,7 @@ import { writeHypothesis, resolveHypothesis } from '@/lib/cockpit/hypothesis-ser
 import { isDiscordConfigured } from '@/lib/infrastructure/notify/discord-notify';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 import { ensureWatchDaemon } from '@/lib/cockpit/watch-spawn';
-import { setAdvisoryStop, writeScoutHeartbeat } from '@/lib/scout/scout-watch-service';
+import { setAdvisoryStop, setAdvisoryTarget, writeScoutHeartbeat } from '@/lib/scout/scout-watch-service';
 import { sendDiscord } from '@/lib/infrastructure/notify/discord-notify';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import type { OrderSide } from '@/types/fill';
@@ -141,6 +141,27 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   const ok = await setAdvisoryStop(sessionId, coin, advisoryStop).catch(() => false);
   if (!ok) line('WARN: advisory stop not persisted — near-stop trigger will be silent for this position.');
 
+  // Advisory TARGET (migration 0042) — the reversion lane's MECHANICAL take-profit.
+  // Persist --target so position-at-target fires + the cycle snapshot shows atTarget,
+  // so the model closes at the registered target instead of holding a winner past it.
+  // UNCONDITIONAL like the stop: a re-entry overwrites (or clears) any stale target.
+  const targetArg = typeof args['target'] === 'string' ? Number(args['target']) : NaN;
+  let advisoryTarget = Number.isFinite(targetArg) && targetArg > 0 ? targetArg : null;
+  // Profit-side sanity vs the ACTUAL fill: a short's target must be BELOW entry, a
+  // long's ABOVE. A wrong-side target would trip position-at-target immediately at a
+  // loss (review) — drop it with a WARN rather than persist a bad level. Also the
+  // audit echo below prints the level so a --target that isn't the scan's computed
+  // 50%-retrace (a smuggled free parameter) is visible in the log.
+  if (advisoryTarget != null) {
+    const profitSide = side === 'buy' ? advisoryTarget > fill.px : advisoryTarget < fill.px; // buy=long (target above), sell=short (below)
+    if (!profitSide) {
+      line(`WARN: --target ${advisoryTarget} is not on the profit side of entry ${fill.px} (${side}) — ignoring.`);
+      advisoryTarget = null;
+    }
+  }
+  await setAdvisoryTarget(sessionId, coin, advisoryTarget).catch(() => false);
+  if (advisoryTarget) line(`Target persisted: ${advisoryTarget} (reversion take-profit; entry ${fill.px}).`);
+
   // The fill is COMMITTED (line 113). writeHypothesis must NOT throw past this point
   // — a DB blip / missing column would otherwise crash out and leave a paper
   // position with no hypothesis (no outcome, unresolvable) yet the fill on the
@@ -236,10 +257,13 @@ async function runExit(args: Record<string, string | boolean>): Promise<void> {
   // (review F5). Best-effort.
   await markPendingDecisionExecuted(sessionId).catch(() => {});
 
-  // Full close ⇒ the advisory stop no longer describes anything — clear it so the
-  // near-stop trigger can't fire on a flat position. Partial closes keep it.
+  // Full close ⇒ the advisory stop + target no longer describe anything — clear both
+  // so neither near-stop nor at-target fires on a flat position. Partial closes keep them.
   const closedAll = fraction >= 1 || fill.sz >= position.sz - 1e-12;
-  if (closedAll) await setAdvisoryStop(sessionId, coin, null).catch(() => false);
+  if (closedAll) {
+    await setAdvisoryStop(sessionId, coin, null).catch(() => false);
+    await setAdvisoryTarget(sessionId, coin, null).catch(() => false);
+  }
 
   // Resolution robustness (Jul-22 fix): the model often closes WITHOUT echoing the
   // hypothesisId, which orphaned the hypothesis (a HYPE reversion loss never

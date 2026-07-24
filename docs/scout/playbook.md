@@ -96,6 +96,29 @@ skipped by design — fading a trend loses). One reversion position per coin.
 Empty scan in a trending tape = correct, take nothing. See
 PREREGISTRATION_reversion-extreme.md for the kill/graduate bar.
 
+**EXIT — pre-registered 2026-07-23 (NON-DISCRETIONARY rule; model-executed).** The
+registered reversion exit is a FIXED TARGET take-profit at the scan's `target` (the
+50%-retrace of the stretch), NOT a trail and NOT "hold for more". Pass `--target
+<targetPx>` (the scan's exact `target`, no other level) on the open so it persists
+(positions.target_px, migration 0042). When the snapshot's position shows
+`atTarget: true` (mark reached/crossed the target) OR a `position-at-target` trigger
+fires, you MUST close the FULL position that cycle — `scout:trade --exit`. This is
+not a judgment call. NOTE the honest limit: nothing auto-fires the close — it is a
+deterministic SIGNAL (the atTarget flag + act trigger) plus this hard rule, but the
+close still executes through YOUR `scout:trade --exit` call, so compliance is on the
+model. (A scout-side auto-close mirroring risk-exit is the future hardening if
+compliance slips.) Rationale: taking the registered target is the strategy being
+measured; holding a winner past target turns the forward test into "fade and hold
+until something breaks", making planned-R vs realized-R meaningless. The stop stays
+the pre-registered invalidation level — no break-even move, no trail (those are
+SEPARATE strategies to pre-register + A/B only IF the lane graduates).
+Why the rule exists: the first SOL reversion short (07-22) blew ~4× past its target
+and sat open ~24h because no target-close rule existed — a +4R paper windfall, but
+zero clean measurement of the registered exit. That hypothesis has been marked
+`excluded=true` (transitional — the rule wasn't live at its target-hit), so its
+fat-tail R never enters the sample in EITHER direction; every close after 07-23
+follows this rule and counts.
+
 
 <!-- scout-review appends/edits dated, evidence-backed rules here, e.g.:
 - 2026-07-01: negative-funding shorts into a flush lost 4/5 (avg -$X). Require

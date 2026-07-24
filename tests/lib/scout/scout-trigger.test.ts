@@ -125,6 +125,42 @@ describe('detectScoutTriggers — open positions (risk / act)', () => {
     expect(r.triggers.map((t) => t.kind)).toEqual(['position-health-drop']);
   });
 
+  it('fires position-at-target when a SHORT mark falls to/through its target (mechanical reversion exit)', () => {
+    const prev: ScoutState = { ...emptyScoutState(), lastHealth: { 'SOL:short': 60 } };
+    // short target below entry; mark at/under target = take-profit hit.
+    const hit = detectScoutTriggers(
+      input({ positions: [{ coin: 'SOL', side: 'short', healthScore: 60, unrealizedPnlUsd: 100, targetPx: 77.86, markPx: 75.98 }] }),
+      prev,
+    );
+    const at = hit.triggers.filter((t) => t.kind === 'position-at-target');
+    expect(at).toHaveLength(1);
+    expect(at[0].urgency).toBe('act');
+    expect(at[0].side).toBe('short');
+
+    // mark still above the short's target → not yet hit.
+    const notYet = detectScoutTriggers(
+      input({ positions: [{ coin: 'SOL', side: 'short', healthScore: 60, unrealizedPnlUsd: 5, targetPx: 77.86, markPx: 78.2 }] }),
+      prev,
+    );
+    expect(notYet.triggers.map((t) => t.kind)).not.toContain('position-at-target');
+  });
+
+  it('fires position-at-target when a LONG mark rises to/through its target; never fires without a target', () => {
+    const prev: ScoutState = { ...emptyScoutState(), lastHealth: { 'ETH:long': 60 } };
+    const hit = detectScoutTriggers(
+      input({ positions: [{ coin: 'ETH', side: 'long', healthScore: 60, unrealizedPnlUsd: 20, targetPx: 1900, markPx: 1905 }] }),
+      prev,
+    );
+    expect(hit.triggers.map((t) => t.kind)).toContain('position-at-target');
+
+    // no target set → the trigger can never fire (untargeted lanes unaffected).
+    const noTarget = detectScoutTriggers(
+      input({ positions: [{ coin: 'ETH', side: 'long', healthScore: 60, unrealizedPnlUsd: 20, markPx: 1905 }] }),
+      prev,
+    );
+    expect(noTarget.triggers.map((t) => t.kind)).not.toContain('position-at-target');
+  });
+
   it('fires position-near-stop only when the mark is adverse + within the band', () => {
     // long with stop at 1700, mark 1702 → within 0.4% AND on the losing side.
     const near = detectScoutTriggers(

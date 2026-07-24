@@ -171,6 +171,26 @@ async function readAdvisoryStops(client: SupabaseClient, sessionId: string): Pro
 }
 
 /**
+ * Advisory TARGET prices per coin (positions.target_px, migration 0042) — mirrors
+ * readAdvisoryStops. Feeds the position-at-target trigger + the cycle snapshot.
+ * Best-effort: a read failure just leaves the target absent, never kills the cycle.
+ */
+async function readAdvisoryTargets(client: SupabaseClient, sessionId: string): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const { data, error } = await client
+    .from('positions')
+    .select('coin, target_px')
+    .eq('session_id', sessionId)
+    .not('target_px', 'is', null);
+  if (error || !data) return out;
+  for (const r of data as Array<{ coin: string; target_px: unknown }>) {
+    const px = Number(r.target_px);
+    if (Number.isFinite(px) && px > 0) out.set(r.coin.trim().toUpperCase(), px);
+  }
+  return out;
+}
+
+/**
  * Persist / clear the advisory stop for a (session, coin) position. Called by the
  * scout paper path only (entry sets, full close clears). Best-effort by design —
  * the fill is already committed; a failed stop write must not fail the trade.
@@ -185,6 +205,26 @@ export async function setAdvisoryStop(
   const { error } = await client
     .from('positions')
     .update({ stop_px: value })
+    .eq('session_id', sessionId)
+    .eq('coin', coin.trim().toUpperCase());
+  return !error;
+}
+
+/**
+ * Persist / clear the advisory TARGET for a (session, coin) position — mirrors
+ * setAdvisoryStop. Called by the scout paper path (reversion entry sets it from the
+ * scan's target; full close clears it). Best-effort — the fill is already committed.
+ */
+export async function setAdvisoryTarget(
+  sessionId: string,
+  coin: string,
+  targetPx: number | null,
+  client: SupabaseClient = getServiceRoleClient(),
+): Promise<boolean> {
+  const value = targetPx != null && Number.isFinite(targetPx) && targetPx > 0 ? targetPx : null;
+  const { error } = await client
+    .from('positions')
+    .update({ target_px: value })
     .eq('session_id', sessionId)
     .eq('coin', coin.trim().toUpperCase());
   return !error;
@@ -275,9 +315,10 @@ export async function gatherScoutInputs(now: number): Promise<ScoutInputs> {
   const paperSessions = sessions.filter((sess) => sess.mode === 'paper');
   const positions: ScoutPositionRead[] = [];
   for (const s of paperSessions) {
-    const [open, stops] = await Promise.all([
+    const [open, stops, targets] = await Promise.all([
       loadOpenPositions(s.id).catch(() => []),
       readAdvisoryStops(client, s.id).catch(() => new Map<string, number>()),
+      readAdvisoryTargets(client, s.id).catch(() => new Map<string, number>()),
     ]);
     for (const p of open) {
       if (p.side === 'flat') continue;
@@ -290,6 +331,7 @@ export async function gatherScoutInputs(now: number): Promise<ScoutInputs> {
         healthScore,
         unrealizedPnlUsd: 0, // not needed for triggers; the cycle computes it fresh
         stopPx: stops.get(coin) ?? null,
+        targetPx: targets.get(coin) ?? null,
         markPx,
       });
     }

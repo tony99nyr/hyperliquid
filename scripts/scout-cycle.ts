@@ -269,7 +269,18 @@ run(async () => {
       // ({action:'propose', title, body, coin?}) — you can NEVER trade/touch these.
       liveBook,
       vaults,
-      positions: inputs.positions,
+      // atTarget: mark reached/crossed the take-profit target — a hard, non-discretionary
+      // signal to CLOSE per the registered reversion exit (playbook). Computed here so the
+      // model can't miss it (the raw thesis prose isn't re-read each cycle).
+      positions: inputs.positions.map((p) => ({
+        ...p,
+        atTarget:
+          p.targetPx != null && p.targetPx > 0 && p.markPx > 0
+            ? p.side === 'long'
+              ? p.markPx >= p.targetPx
+              : p.markPx <= p.targetPx
+            : false,
+      })),
       circuitBreaker: { halted: breaker.blockNewEntries, reason: breaker.reason, equityUsd: breaker.equityUsd, peakEquityUsd: breaker.peakEquityUsd, dayStartEquityUsd: breaker.dayStartEquityUsd, flattenRecommended: breaker.flattenRecommended },
       trackRecord: { open: summary.open, confirmed: summary.confirmed, invalidated: summary.invalidated, resolved: summary.resolved, lastResolved: summary.lastResolved },
       playbookPath: existsSync(playbookPath) ? playbookPath : null,
