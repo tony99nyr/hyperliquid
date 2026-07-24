@@ -93,10 +93,13 @@ conviction; you supply structure):
   auto-cancels (structure goes stale in days).
 - **Size** — graded ([[graded-entry-preference]]): a starter + scale-in, ~1% campaign risk.
 
-Then **panel-gate it** ([[adversarial-panel-for-ladders]]) and **default to `mode: paper`**
-to prove the mechanism before risking live. `reversion-fade` is the one PROVEN shape;
-every other shape is discretionary scaffolding for YOUR thesis — real, but unproven, so
-size and gate accordingly.
+Then **panel-gate it** ([[adversarial-panel-for-ladders]]). **Ladders are ALWAYS
+`mode: 'live'`, sized LOW — NEVER `mode: 'paper'`** ([[no-paper-ladders]]): a paper ladder
+can't fire (no paper watcher — the live production cron mode-mismatch-skips it) and the
+paper/live split confuses the models. The risk discipline does the protecting, not paper
+mode — low $ worst case, review-ladder STRONG, stop + expiry baked in. `reversion-fade` is
+the one PROVEN shape; every other shape is discretionary scaffolding for YOUR thesis —
+real, but unproven, so size and gate accordingly.
 
 **Discipline on the armed set (this is where it goes wrong):**
 - **Arm FEW.** A lattice of speculative "if it hits X" triggers is multiple-testing in an
