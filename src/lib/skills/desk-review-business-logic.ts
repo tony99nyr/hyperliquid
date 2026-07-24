@@ -85,3 +85,60 @@ export function trendLine(s: TrendSplit): string {
   const rel = s.aligned ? 'aligned' : s.counterTrendPullback ? 'counter-trend' : 'mixed';
   return `LT ${s.longTerm} · ST ${s.shortTerm} (${rel})`;
 }
+
+/**
+ * The conditional-entry SHAPE that fits a coin's structure — the "IF it hits X THEN
+ * enter" pattern to arm proactively, instead of reactively chasing or watching a move
+ * go by. This does NOT say "trade" — it names the resting-order shape a thesis would
+ * take, so desk-review can point at where a conditional ladder belongs. The operator +
+ * panel supply the conviction and the exact levels.
+ */
+export type ConditionalShape =
+  | 'reversion-fade' // a statistical extreme → fade to mean (the one FORWARD-TESTING edge)
+  | 'breakdown-short' // rubric leans short → arm a short that fires on the confirmed level break
+  | 'reclaim-long' // rubric leans long → arm a long that fires on the confirmed reclaim
+  | 'bounce-short' // structural DOWNtrend → arm a short into a bounce (don't chase the grind)
+  | 'dip-long' // structural UPtrend → arm a long into a dip
+  | 'none';
+
+export interface ConditionalSetupInput {
+  trend: TrendSplit | null;
+  rubricBest: { side: 'long' | 'short'; opportunity: number; badge: string } | null;
+  reversion: { side: 'long' | 'short'; z: number } | null;
+}
+
+export interface ConditionalSetup {
+  shape: ConditionalShape;
+  /** Whether this shape is a backtested edge (reversion) or a discretionary scaffold. */
+  proven: boolean;
+  rationale: string;
+}
+
+/**
+ * Pick the conditional-entry shape. Priority: the proven reversion edge first, then a
+ * rubric-directional break (arm AHEAD of the WATCH→GO confirmation — the proactive
+ * play), then a trend-continuation entry-on-a-counter-move. PURE. Advisory only — every
+ * shape but reversion is DISCRETIONARY scaffolding (the operator's thesis), not a signal.
+ */
+export function conditionalSetup(inp: ConditionalSetupInput): ConditionalSetup {
+  if (inp.reversion) {
+    return {
+      shape: 'reversion-fade',
+      proven: true,
+      rationale: `|z|=${Math.abs(inp.reversion.z).toFixed(1)} extreme → fade ${inp.reversion.side} to the mean (the forward-testing lane)`,
+    };
+  }
+  const rb = inp.rubricBest;
+  if (rb && (rb.badge === 'GO' || rb.badge === 'WATCH')) {
+    const ahead = rb.badge === 'WATCH' ? 'arm AHEAD of confirmation — fires when WATCH→GO (the level breaks)' : 'edge cleared — arm the confirmation-triggered entry';
+    return rb.side === 'short'
+      ? { shape: 'breakdown-short', proven: false, rationale: `rubric short ${Math.round(rb.opportunity)} (${rb.badge}) → ${ahead}` }
+      : { shape: 'reclaim-long', proven: false, rationale: `rubric long ${Math.round(rb.opportunity)} (${rb.badge}) → ${ahead}` };
+  }
+  if (inp.trend && inp.trend.longTerm !== 'neutral') {
+    return inp.trend.longTerm === 'bear'
+      ? { shape: 'bounce-short', proven: false, rationale: 'structural downtrend → arm a short into a bounce (better R:R than chasing the grind); momentum-confirm the roll-over' }
+      : { shape: 'dip-long', proven: false, rationale: 'structural uptrend → arm a long into a dip; momentum-confirm the turn' };
+  }
+  return { shape: 'none', proven: false, rationale: 'no structural bias + no rubric edge — nothing to pre-position' };
+}

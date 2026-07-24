@@ -38,7 +38,7 @@ import {
 import { scanReversionExtremes } from '@/lib/scout/reversion-scan-service';
 import { readHouseholdExposure } from '@/lib/household/household-exposure-service';
 import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
-import { splitTrend, opportunityFlag, trendLine, type OpportunityFlag } from '@/lib/skills/desk-review-business-logic';
+import { splitTrend, opportunityFlag, trendLine, conditionalSetup, type OpportunityFlag, type ConditionalSetup } from '@/lib/skills/desk-review-business-logic';
 import { validateEnv } from '@/lib/env/env';
 
 const LOOKBACK_MS: Record<MarketTimeframe, number> = {
@@ -231,16 +231,37 @@ run(async () => {
     const trendStr = t ? trendLine(t) : 'no data';
     const rubricStr = rb ? `${rb.side} ${Math.round(rb.opportunity)} ${rb.badge}` : '—';
     const revStr = rev ? `${rev.side} z=${rev.z.toFixed(1)}` : '—';
+    const setup = conditionalSetup({
+      trend: t ?? null,
+      rubricBest: rb ? { side: rb.side, opportunity: rb.opportunity, badge: rb.badge } : null,
+      reversion: rev ? { side: rev.side, z: rev.z } : null,
+    });
     line(
       `${coin.padEnd(6)} ${String(Number.isFinite(mark) ? mark : '?').padEnd(11)} ${String(chg != null ? pct(chg) : '?').padEnd(8)} ${trendStr.padEnd(34)} ${flag.padEnd(9)} ${rubricStr.padEnd(16)} ${revStr.padEnd(11)} ${fundingApr != null ? pct(fundingApr) + ' APR' : '?'}`,
     );
-    rows.push({ coin, mark, chg24hPct: chg, trend: t ?? null, opportunity: flag, rubricBest: rb, reversion: rev, fundingApr, openInterest: ctx?.openInterest ?? null });
+    rows.push({ coin, mark, chg24hPct: chg, trend: t ?? null, opportunity: flag, rubricBest: rb, reversion: rev, fundingApr, openInterest: ctx?.openInterest ?? null, conditionalSetup: setup });
   }
   line('');
   line('opp: GO = rubric edge cleared the bar · REVERSION = a backtested fade candidate · WATCH = rubric building · NONE = stand down');
   const rubricAgeMin = rubricMs > 0 ? Math.round((now - rubricMs) / 60000) : null;
   line(`rubric freshness: ${rubricAgeMin == null ? 'NO recent scan (run pnpm rubric)' : rubricAgeMin + 'm old'}${rubricAgeMin != null && rubricAgeMin > 20 ? ' ⚠ STALE' : ''}`);
   if (reversion.coverage.skipped > 0) line(`reversion scan: ${reversion.coverage.scanned}/${reversion.coverage.requested} coins evaluated, ${reversion.coverage.skipped} skipped`);
+
+  // ===================== PRINT: CONDITIONAL-ENTRY IDEAS =====================
+  // The proactive layer: where a resting "IF it hits X THEN enter" ladder FITS the
+  // structure, so we pre-position for a good scenario instead of chasing or watching a
+  // move go by. NOT trade calls — the SKILL + panel supply conviction + exact levels.
+  header('CONDITIONAL-ENTRY IDEAS — where to pre-position a resting ladder');
+  const ideas = rows
+    .map((r) => ({ coin: r.coin as string, s: r.conditionalSetup as ConditionalSetup }))
+    .filter((x) => x.s.shape !== 'none');
+  if (ideas.length === 0) line('None — no coin has a structural bias or rubric edge worth pre-positioning. Stand down.');
+  for (const { coin, s } of ideas) {
+    line(`  ${coin.padEnd(6)} ${s.shape.padEnd(16)} ${s.proven ? '[PROVEN edge]  ' : '[discretionary] '} ${s.rationale}`);
+  }
+  line('');
+  line('Each is a SHAPE, not a trade: arm few, panel-gate them, momentum-confirm the entry,');
+  line('bake the stop + expiry in, and cap correlated conditional exposure. See the SKILL.');
 
   // ===================== PRINT: SIGNALS =====================
   header('SIGNALS');

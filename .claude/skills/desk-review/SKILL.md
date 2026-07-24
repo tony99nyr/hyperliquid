@@ -71,6 +71,41 @@ go / no-go and what's owed before arming.
   signal — funding-extreme reversion was tested and KILLED (`docs/scout/BACKTEST_FINDINGS.md`).
   Don't propose fading funding directionally.
 
+### 3b. Proactive conditional entries — the "make opportunity" layer
+
+The script's **CONDITIONAL-ENTRY IDEAS** section names, per coin, the resting-ladder
+SHAPE that fits its structure — `reversion-fade` / `breakdown-short` / `reclaim-long` /
+`bounce-short` / `dip-long`. This is the antidote to "we confirm late, so we chase or
+watch it go by": instead of reacting, arm an **IF it hits X THEN enter** conditional
+ladder that only fires when your pre-judged good scenario prints (a bounce to short into,
+a confirmed level break, a dip to buy). We already have the engine — conditional `open`
+rungs with `momentumConfirm`, stops, targets, expiry — and it's fired real entries.
+
+For each idea worth acting on, propose the CONCRETE ladder (the operator + panel supply
+conviction; you supply structure):
+
+- **The level** — the specific trigger price off current structure (resistance for a
+  bounce-short, the broken base for a breakdown, support for a dip-long). Read it from
+  `analyze-market-timeframes` if you need the swing levels.
+- **The confirmation** — `momentumConfirm` on the entry rung so it fires on the roll-over,
+  not a naked price tag into a knife.
+- **Invalidation + expiry** — stop rung baked in, and an `expiresAt` so a stale watch
+  auto-cancels (structure goes stale in days).
+- **Size** — graded ([[graded-entry-preference]]): a starter + scale-in, ~1% campaign risk.
+
+Then **panel-gate it** ([[adversarial-panel-for-ladders]]) and **default to `mode: paper`**
+to prove the mechanism before risking live. `reversion-fade` is the one PROVEN shape;
+every other shape is discretionary scaffolding for YOUR thesis — real, but unproven, so
+size and gate accordingly.
+
+**Discipline on the armed set (this is where it goes wrong):**
+- **Arm FEW.** A lattice of speculative "if it hits X" triggers is multiple-testing in an
+  execution costume — most fire on noise and bleed. A handful of well-reasoned, tight ones.
+- **Cap correlated exposure.** Ten short-the-bounce ladders all fire in one crypto dump =
+  one concentrated bet you didn't choose. Count conditional exposure like live exposure.
+- **Rotate + expire.** Keep the armed set small and current; desk-review lists it so you
+  prune drift. Per-event one-offs that archive ≠ a standing practice.
+
 ### 4. Synthesize — the desk read
 
 Deliver a tight read, not a data dump:
