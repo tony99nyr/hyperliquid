@@ -1,0 +1,87 @@
+/**
+ * desk-review — PURE helpers. The desk-review skill gathers the whole book + market
+ * read (I/O, in scripts/desk-review.ts) and this classifies each coin into a
+ * short-term vs long-term trend read + an opportunity flag. Kept pure so the
+ * classification is deterministic + fixture-tested; the SKILL does the human synthesis.
+ */
+
+import type { TimeframeRead, MarketTimeframe } from './analyze-market-business-logic';
+
+export type TrendDir = 'bull' | 'bear' | 'neutral';
+
+/** Confidence-weighted directional sign over a set of TF reads (−1..+1). */
+function dirScore(reads: TimeframeRead[]): number {
+  let num = 0;
+  let den = 0;
+  for (const r of reads) {
+    if (!r.hasData) continue;
+    const sign = r.regime === 'bullish' ? 1 : r.regime === 'bearish' ? -1 : 0;
+    num += sign * r.confidence;
+    den += 1;
+  }
+  return den === 0 ? 0 : num / den;
+}
+
+function label(score: number): TrendDir {
+  if (score > 0.12) return 'bull';
+  if (score < -0.12) return 'bear';
+  return 'neutral';
+}
+
+export interface TrendSplit {
+  /** 1d + 8h — the structural / longer-horizon trend. */
+  longTerm: TrendDir;
+  /** 1h + 15m — the near-term / timing trend. */
+  shortTerm: TrendDir;
+  /** Both non-neutral and pointing the SAME way. */
+  aligned: boolean;
+  /** Short-term turning against a still-intact long-term trend (a pullback/bounce). */
+  counterTrendPullback: boolean;
+  longScore: number;
+  shortScore: number;
+}
+
+const LONG_TFS: MarketTimeframe[] = ['1d', '8h'];
+const SHORT_TFS: MarketTimeframe[] = ['1h', '15m'];
+
+/** Split a multi-TF read into long- vs short-term trend + their relationship. PURE. */
+export function splitTrend(reads: TimeframeRead[]): TrendSplit {
+  const byTf = new Map(reads.map((r) => [r.timeframe, r]));
+  const pick = (tfs: MarketTimeframe[]) => tfs.map((t) => byTf.get(t)).filter((r): r is TimeframeRead => !!r);
+  const longScore = dirScore(pick(LONG_TFS));
+  const shortScore = dirScore(pick(SHORT_TFS));
+  const longTerm = label(longScore);
+  const shortTerm = label(shortScore);
+  const aligned = longTerm !== 'neutral' && longTerm === shortTerm;
+  // A pullback/bounce: LT has a direction, ST leans the OPPOSITE way.
+  const counterTrendPullback =
+    longTerm !== 'neutral' && shortTerm !== 'neutral' && longTerm !== shortTerm;
+  return { longTerm, shortTerm, aligned, counterTrendPullback, longScore, shortScore };
+}
+
+export type OpportunityFlag = 'GO' | 'WATCH' | 'REVERSION' | 'NONE';
+
+export interface OpportunityInput {
+  /** Best rubric read for the coin (highest opportunity across sides), or null. */
+  rubricBest: { side: 'long' | 'short'; opportunity: number; badge: string } | null;
+  /** A live reversion-extreme fade candidate for the coin, or null. */
+  reversion: { side: 'long' | 'short'; z: number } | null;
+}
+
+/**
+ * Collapse the deterministic signals into ONE flag. Rubric GO wins; a reversion
+ * candidate is its own flag (a distinct, backtested edge); a WATCH-badge rubric is a
+ * watch; everything else is NONE. Advisory — the SKILL + operator decide to act. PURE.
+ */
+export function opportunityFlag(inp: OpportunityInput): OpportunityFlag {
+  if (inp.rubricBest?.badge === 'GO') return 'GO';
+  if (inp.reversion) return 'REVERSION';
+  if (inp.rubricBest?.badge === 'WATCH') return 'WATCH';
+  return 'NONE';
+}
+
+/** One-line trend descriptor, e.g. "LT bear · ST bull (bounce)". PURE. */
+export function trendLine(s: TrendSplit): string {
+  const rel = s.aligned ? 'aligned' : s.counterTrendPullback ? 'counter-trend' : 'mixed';
+  return `LT ${s.longTerm} · ST ${s.shortTerm} (${rel})`;
+}
