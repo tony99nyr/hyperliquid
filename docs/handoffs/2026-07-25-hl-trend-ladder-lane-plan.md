@@ -1,6 +1,11 @@
 # Plan: the HL trend-ladder lane (response to the 2026-07-25 iamrossi handoff)
 
-**Status:** PROPOSED — nothing built, nothing armed. Companion to
+**Status:** BUILT 2026-07-25 (same day) — Tony chose **Option B** (the swap leakage changed
+the coupling calculus: "the systems kind of need each other"), **start small** (probe ~$10
+campaign risk, no funding move yet), **telemetry-first** (the lane must earn a SIZE-UP in
+the expectancy ledger's `trend-follow-8h-long` bucket). Cockpit commit `1b608a4`; stance
+route restored in iamrossi (landed via their `71a2e47b`); `STANCE_READ_TOKEN` provisioned
+both sides. Nothing armed — drafts always wait for the human. Companion to
 [2026-07-25-eth-exposure-from-iamrossi.md](./2026-07-25-eth-exposure-from-iamrossi.md).
 
 **Goal.** When the iamrossi 8h trend system is **bullish and confident** on ETH, add
