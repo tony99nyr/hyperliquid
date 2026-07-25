@@ -28,6 +28,13 @@ export function isReversionAlertEnabled(): boolean {
   return validateEnv().REVERSION_ALERT_ENABLED;
 }
 
+/** When ON, the ladder-watch cron auto-DRAFTS a low-qty LIVE trend-follow ladder +
+ *  pings Discord when the iamrossi 8h system turns bullish+confident on a coin it is
+ *  holding (the retired-leverage-lane replacement). DRAFT only — never arms. Default OFF. */
+export function isTrendAlertEnabled(): boolean {
+  return validateEnv().TREND_ALERT_ENABLED;
+}
+
 /** The bearer the NAS watcher uses to call /ladder/fire-rung. Dedicated token (the
  *  watcher never holds ADMIN_SECRET); falls back to Vercel's native CRON_SECRET. */
 export function getLadderCronSecret(): string | undefined {

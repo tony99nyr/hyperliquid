@@ -13,7 +13,7 @@ run(async () => {
   const mids = await fetchAllMids().catch(() => ({} as Record<string, string>));
   const ex = await readHouseholdExposure({ ethUsd: Number(mids.ETH), btcUsd: Number(mids.BTC) });
   if (!ex) { line('unconfigured or unreadable (set IAMROSSI_SAFE_ETH / IAMROSSI_SAFE_BTC).'); return; }
-  line(`ETH long delta:  $${ex.ethExposureUsd.toFixed(0)}  (weETH collateral)`);
+  line(`ETH long delta:  $${ex.ethExposureUsd.toFixed(0)}  (native ETH + weETH)`);
   line(`BTC long delta:  $${ex.btcExposureUsd.toFixed(0)}`);
   line(`stables:         $${ex.stablesUsd.toFixed(0)}`);
   line(`NET crypto beta: $${ex.netCryptoBetaUsd.toFixed(0)}  (dominant: ${ex.dominant})`);

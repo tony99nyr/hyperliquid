@@ -69,6 +69,13 @@ const envSchema = z.object({
   IAMROSSI_SAFE_BTC: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
   BASE_RPC_URL: z.string().url().optional(),
 
+  // --- Cross-system stance bridge (restored 2026-07-25; the iamrossi 8h trend system's
+  // read-only GET /api/trading/stance). Unset ⇒ fetchTrendStance() returns null and the
+  // trend-alert lane + flip guard simply no-op. READ-ONLY consumer, contractually
+  // fail-open: an iamrossi outage must never break anything here. ---
+  IAMROSSI_STANCE_URL: z.string().url().optional(),
+  IAMROSSI_STANCE_TOKEN: z.string().min(16).optional(),
+
   // --- Layer-1 auto-exit (exit-only safety net; see docs/LIVE_AUTO_EXIT.md) ---
   // Master kill-switch. Default OFF: the risk-exit endpoint refuses to fire and
   // the detector no-ops unless this is explicitly 'true'. EXIT-ONLY when on.
@@ -103,6 +110,14 @@ const envSchema = z.object({
   // ladder + pings Discord on a fresh reversion-extreme candidate (the one proven-ish
   // edge). DRAFT only — it NEVER arms (the human gate holds); default OFF.
   REVERSION_ALERT_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  // Trend-alert: when 'true', the ladder-watch cron auto-DRAFTS a low-qty LIVE trend
+  // ladder + pings Discord when the iamrossi 8h system turns bullish+confident on a
+  // coin it's holding (the replacement for its retired Base leverage lane). DRAFT only
+  // — it NEVER arms (the human gate holds); default OFF. Needs IAMROSSI_STANCE_URL/TOKEN.
+  TREND_ALERT_ENABLED: z
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
@@ -151,6 +166,9 @@ export function validateEnv(source: NodeJS.ProcessEnv = process.env): CockpitEnv
     LADDER_LIVE_ENABLED: source.LADDER_LIVE_ENABLED,
     LADDER_AUTOFIRE_ENABLED: source.LADDER_AUTOFIRE_ENABLED,
     REVERSION_ALERT_ENABLED: source.REVERSION_ALERT_ENABLED,
+    TREND_ALERT_ENABLED: source.TREND_ALERT_ENABLED,
+    IAMROSSI_STANCE_URL: source.IAMROSSI_STANCE_URL,
+    IAMROSSI_STANCE_TOKEN: source.IAMROSSI_STANCE_TOKEN,
     LADDER_CRON_SECRET: source.LADDER_CRON_SECRET,
     LADDER_WATCH_HEALTHCHECK_URL: source.LADDER_WATCH_HEALTHCHECK_URL,
   });

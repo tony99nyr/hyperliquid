@@ -16,7 +16,7 @@
  */
 
 import 'server-only';
-import { createPublicClient, http, getAddress, erc20Abi, formatUnits } from 'viem';
+import { createPublicClient, http, getAddress, erc20Abi, formatUnits, formatEther } from 'viem';
 import { base } from 'viem/chains';
 import { computeHouseholdExposure, type HouseholdExposure } from './household-exposure-business-logic';
 
@@ -71,19 +71,29 @@ export async function readHouseholdExposure(marks: { ethUsd: number; btcUsd: num
       return Number(formatUnits(raw, decimals));
     };
     // weETH & USDC live in the ETH Safe; cbBTC in the BTC Safe (per iamrossi's split).
-    // ASSUMPTION: collateral sits IN-WALLET (balanceOf). If iamrossi ever SUPPLIES
-    // weETH into Morpho Blue (internal accounting), balanceOf returns only idle
-    // weETH and this UNDERSTATES the ETH delta — a silent low read, never a wrong
-    // direction. Reading supplied-collateral needs the position-manager decode
-    // (the coupling we avoid). Verified in-wallet at build time ($14,097 ETH).
+    // Since the leverage-lane retirement (2026-07-25) the ETH Safe holds its long as
+    // NATIVE ETH, so getBalance is the primary ETH read; weETH stays counted for any
+    // residue. ASSUMPTION: assets sit IN-WALLET. Anything supplied into a protocol
+    // (Morpho collateral, Moonwell USDC) is invisible here — a silent LOW read,
+    // never a wrong direction. Verified on-chain 2026-07-25: 8.04 native ETH in the
+    // ETH Safe, zero weETH/USDC/cbBTC across both Safes.
+    const nativeBal = async (holder: `0x${string}` | null): Promise<number> => {
+      if (!holder) return 0;
+      return Number(formatEther(await client.getBalance({ address: holder })));
+    };
     const sameSafe = safeEth && safeBtc && safeEth === safeBtc;
-    const [weEth, usdcEth, wBtc, usdcBtc] = await Promise.all([
+    const [weEth, usdcEth, wBtc, usdcBtc, nativeEthSafe, nativeBtcSafe] = await Promise.all([
       bal(weeth, safeEth, 18),
       bal(usdc, safeEth, 6),
       bal(wbtc, safeBtc, 8),
       sameSafe ? Promise.resolve(0) : bal(usdc, safeBtc, 6), // don't double-count one wallet's USDC
+      nativeBal(safeEth),
+      sameSafe ? Promise.resolve(0) : nativeBal(safeBtc), // gas dust, same household delta
     ]);
-    const exposure = computeHouseholdExposure({ weEth, wBtc, usdc: usdcEth + usdcBtc }, marks);
+    const exposure = computeHouseholdExposure(
+      { weEth, nativeEth: nativeEthSafe + nativeBtcSafe, wBtc, usdc: usdcEth + usdcBtc },
+      marks,
+    );
     return { ...exposure, readAt: Date.now(), source: 'onchain-base' };
   } catch {
     return null; // RPC / decode failure → awareness simply absent this cycle

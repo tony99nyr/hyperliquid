@@ -14,8 +14,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyCronBearer } from '@/lib/infrastructure/auth/auth';
-import { getLadderCronSecret, isReversionAlertEnabled } from '@/lib/ladder/ladder-flags';
+import { getLadderCronSecret, isReversionAlertEnabled, isTrendAlertEnabled } from '@/lib/ladder/ladder-flags';
 import { runReversionAlertCycle } from '@/lib/ladder/reversion-alert-service';
+import { runTrendAlertCycle } from '@/lib/ladder/trend-alert-service';
+import { runTrendFlipGuard } from '@/lib/ladder/trend-flip-guard-service';
 import { runLadderWatchTick } from '@/lib/ladder/ladder-watch-service';
 import { runLeaderGuard } from '@/lib/ladder/ladder-leader-guard-service';
 import { runExpiryAlerts } from '@/lib/ladder/ladder-expiry-alert-service';
@@ -56,8 +58,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const reversionAlert = isReversionAlertEnabled()
       ? await runReversionAlertCycle(undefined, Date.now()).catch((e) => ({ error: extractErrorMessage(e) }))
       : { skipped: 'disabled' };
+    //  - trend lane (the iamrossi retired-leverage-lane replacement, both halves fail-soft):
+    //    trend alert: 8h stance bullish+confident+holding → auto-DRAFT a low-qty LIVE
+    //    pyramiding ladder + 📈 Discord. DRAFT only — NEVER arms. Flag-gated (default OFF).
+    //    trend flip guard: DISARM-ONLY — kills armed trend ladders when the 8h stance
+    //    leaves bullish (runs whenever the stance bridge is configured, even if drafting is off).
+    const trendAlert = isTrendAlertEnabled()
+      ? await runTrendAlertCycle(undefined, Date.now()).catch((e) => ({ error: extractErrorMessage(e) }))
+      : { skipped: 'disabled' };
+    const trendFlipGuard = await runTrendFlipGuard(Date.now()).catch((e) => ({ checked: -1, disarmed: [], stanceUnreadable: false, error: extractErrorMessage(e) }));
     await pingHealthcheck(hcUrl, 'success');
-    return NextResponse.json({ ok: true, ...summary, leaderGuard, expiryAlerts, priceAlerts, scoutHeartbeats, stewardProposals, reversionAlert });
+    return NextResponse.json({ ok: true, ...summary, leaderGuard, expiryAlerts, priceAlerts, scoutHeartbeats, stewardProposals, reversionAlert, trendAlert, trendFlipGuard });
   } catch (e) {
     await pingHealthcheck(hcUrl, 'fail');
     return NextResponse.json({ ok: false, error: extractErrorMessage(e) }, { status: 500 });

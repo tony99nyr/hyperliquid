@@ -47,6 +47,16 @@ describe('deriveSetupType', () => {
     const l = ladder([rung({ side: 'short', triggerKind: 'price_below' })]);
     expect(deriveSetupType(l)).toBe('breakdown-short-single');
   });
+  it('tags the trend-follow auto-draft lane by title, not rung shape', () => {
+    const l = ladder([rung({ action: 'open' }), rung({ seq: 2, action: 'add' })]);
+    l.title = 'ETH trend-follow long — 8h bullish 81% (auto-draft · review+arm)';
+    expect(deriveSetupType(l)).toBe('trend-follow-8h-long');
+  });
+  it('tags the reversion-fade auto-draft lane by title', () => {
+    const l = ladder([rung({ side: 'short', triggerKind: 'price_below' })]);
+    l.title = 'BTC reversion-fade short — z=2.3 (auto-draft · review+arm)';
+    expect(deriveSetupType(l)).toBe('reversion-fade-short');
+  });
 });
 
 describe('resolveLadderOutcome', () => {

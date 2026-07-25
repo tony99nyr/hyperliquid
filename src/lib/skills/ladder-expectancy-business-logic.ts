@@ -40,11 +40,18 @@ export interface LadderOutcomeRow {
 /** |realizedR| at or under this is a scratch (noise), not a win/loss. */
 export const SCRATCH_R = 0.05;
 
-/** Derive a stable setup tag from the rung shape — the grouping key for expectancy. */
-export function deriveSetupType(ladder: Pick<LadderWithRungs, 'rungs'>): string {
+/** Derive a stable setup tag from the ladder — the grouping key for expectancy.
+ *  The two AUTO-DRAFT lanes are tagged by their stable title prefixes so their
+ *  expectancy is sliced per-lane (a trend-follow pyramid must never be pooled with
+ *  discretionary breakout-long-pyramid ladders — the whole point of the lane is a
+ *  clean KILL/SIZE-UP verdict); everything else falls back to the rung-shape tag. */
+export function deriveSetupType(ladder: Pick<LadderWithRungs, 'rungs' | 'title'>): string {
   const opens = ladder.rungs.filter((r) => r.action === 'open');
   const hasAdd = ladder.rungs.some((r) => r.action === 'add');
   const side = opens[0]?.side ?? ladder.rungs[0]?.side ?? 'long';
+  const title = ladder.title.toLowerCase();
+  if (title.includes(' trend-follow')) return `trend-follow-8h-${side}`;
+  if (title.includes(' reversion-fade')) return `reversion-fade-${side}`;
   const kind = opens[0]?.triggerKind ?? 'price_above';
   const dir = side === 'long'
     ? (kind === 'price_above' ? 'breakout' : 'dip')
