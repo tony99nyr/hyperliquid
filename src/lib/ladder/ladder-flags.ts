@@ -22,6 +22,12 @@ export function isLadderAutofireEnabled(): boolean {
   return validateEnv().LADDER_AUTOFIRE_ENABLED;
 }
 
+/** When ON, the ladder-watch cron auto-DRAFTS a low-qty LIVE reversion-fade ladder +
+ *  pings Discord on a fresh reversion candidate. DRAFT only — never arms. Default OFF. */
+export function isReversionAlertEnabled(): boolean {
+  return validateEnv().REVERSION_ALERT_ENABLED;
+}
+
 /** The bearer the NAS watcher uses to call /ladder/fire-rung. Dedicated token (the
  *  watcher never holds ADMIN_SECRET); falls back to Vercel's native CRON_SECRET. */
 export function getLadderCronSecret(): string | undefined {

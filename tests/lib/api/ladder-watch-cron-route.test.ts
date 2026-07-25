@@ -11,7 +11,10 @@ const getLadderCronSecret = vi.fn();
 const runLadderWatchTick = vi.fn();
 
 vi.mock('@/lib/infrastructure/auth/auth', () => ({ verifyCronBearer: (...a: unknown[]) => verifyCronBearer(...a) }));
-vi.mock('@/lib/ladder/ladder-flags', () => ({ getLadderCronSecret: (...a: unknown[]) => getLadderCronSecret(...a) }));
+vi.mock('@/lib/ladder/ladder-flags', () => ({
+  getLadderCronSecret: (...a: unknown[]) => getLadderCronSecret(...a),
+  isReversionAlertEnabled: () => false, // sub-task stays skipped in this auth test
+}));
 vi.mock('@/lib/ladder/ladder-watch-service', () => ({ runLadderWatchTick: (...a: unknown[]) => runLadderWatchTick(...a) }));
 
 import { GET } from '@/app/api/cron/ladder-watch/route';

@@ -99,6 +99,13 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+  // Reversion-alert: when 'true', the ladder-watch cron auto-DRAFTS a low-qty LIVE
+  // ladder + pings Discord on a fresh reversion-extreme candidate (the one proven-ish
+  // edge). DRAFT only — it NEVER arms (the human gate holds); default OFF.
+  REVERSION_ALERT_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
   // Dedicated bearer token for the NAS watcher to call /api/cockpit/ladder/fire-rung
   // (P1d). Separate from ADMIN_SECRET so the watcher never holds the admin credential.
   LADDER_CRON_SECRET: z.string().min(1).optional(),
@@ -143,6 +150,7 @@ export function validateEnv(source: NodeJS.ProcessEnv = process.env): CockpitEnv
     CRON_SECRET: source.CRON_SECRET,
     LADDER_LIVE_ENABLED: source.LADDER_LIVE_ENABLED,
     LADDER_AUTOFIRE_ENABLED: source.LADDER_AUTOFIRE_ENABLED,
+    REVERSION_ALERT_ENABLED: source.REVERSION_ALERT_ENABLED,
     LADDER_CRON_SECRET: source.LADDER_CRON_SECRET,
     LADDER_WATCH_HEALTHCHECK_URL: source.LADDER_WATCH_HEALTHCHECK_URL,
   });

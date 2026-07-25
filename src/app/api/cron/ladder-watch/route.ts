@@ -14,7 +14,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyCronBearer } from '@/lib/infrastructure/auth/auth';
-import { getLadderCronSecret } from '@/lib/ladder/ladder-flags';
+import { getLadderCronSecret, isReversionAlertEnabled } from '@/lib/ladder/ladder-flags';
+import { runReversionAlertCycle } from '@/lib/ladder/reversion-alert-service';
 import { runLadderWatchTick } from '@/lib/ladder/ladder-watch-service';
 import { runLeaderGuard } from '@/lib/ladder/ladder-leader-guard-service';
 import { runExpiryAlerts } from '@/lib/ladder/ladder-expiry-alert-service';
@@ -49,8 +50,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const scoutHeartbeats = await checkScoutHeartbeats().catch(() => ({ checked: -1, paged: 0 }));
     //  - steward counterfactuals: scores due proposals ("would it have helped?") — 📊 pages.
     const stewardProposals = await resolveStewardProposals().catch(() => ({ checked: -1, resolved: 0 }));
+    //  - reversion alert: on a fresh reversion-extreme candidate, auto-DRAFT a low-qty
+    //    LIVE fade ladder + 🔁 Discord the operator to review+arm. DRAFT only — NEVER arms
+    //    (the human gate holds). Flag-gated (default OFF), fail-soft.
+    const reversionAlert = isReversionAlertEnabled()
+      ? await runReversionAlertCycle(undefined, Date.now()).catch((e) => ({ error: extractErrorMessage(e) }))
+      : { skipped: 'disabled' };
     await pingHealthcheck(hcUrl, 'success');
-    return NextResponse.json({ ok: true, ...summary, leaderGuard, expiryAlerts, priceAlerts, scoutHeartbeats, stewardProposals });
+    return NextResponse.json({ ok: true, ...summary, leaderGuard, expiryAlerts, priceAlerts, scoutHeartbeats, stewardProposals, reversionAlert });
   } catch (e) {
     await pingHealthcheck(hcUrl, 'fail');
     return NextResponse.json({ ok: false, error: extractErrorMessage(e) }, { status: 500 });
