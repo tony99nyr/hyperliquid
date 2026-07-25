@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildTrendLadderPlan, trendAlertMessage, TREND_TITLE_PREFIX, type TrendAlertContext } from '@/lib/ladder/trend-alert-business-logic';
+import { buildTrendLadderPlan, trendAlertMessage, isTrendLadderTitle, TREND_TITLE_PREFIX, type TrendAlertContext } from '@/lib/ladder/trend-alert-business-logic';
 
 const NOW = 1_700_000_000_000;
 
@@ -46,6 +46,50 @@ describe('buildTrendLadderPlan', () => {
     expect(p.maxTotalLossUsd!).toBeGreaterThanOrEqual(slipped); // never quote the clean stop as worst case
   });
 
+  it('ADD TRIGGERS CLEAR THE ENGINE COVERAGE GATE: core profit at each add trigger ≥ the add\'s SLIPPED worst case', () => {
+    // The fire path refuses an add unless rungWorstCaseLoss (stop slips 10% OF PRICE,
+    // i.e. riskUsd·(0.9+0.1/stopFrac)) ≤ current unrealized profit. A trigger below
+    // that bound permanently skips the one-shot rung — the silent pyramid-gutting bug.
+    // NOTE the core FILLS at the 15m close ABOVE its trigger, which RAISES the entry
+    // and SHRINKS profit at the add level — so coverage is asserted at an overshot
+    // entry (+0.75%), not at the optimistic trigger price.
+    const OVERSHOOT = 1.0075;
+    for (const atrFrac of [0.025, 0.04, 0.075, 0.2]) {
+      const p = buildTrendLadderPlan({ ...ctx, atrFrac }, { now: NOW });
+      const open = p.rungs.find((r) => r.action === 'open')!;
+      const [add1, add2] = p.rungs.filter((r) => r.action === 'add');
+      const f = open.stopFrac!;
+      const coreEntry = open.triggerPx! * OVERSHOOT;
+      const coreNotional = open.riskUsd! / f;
+      const profitAt = (px: number) => ((px - coreEntry) / coreEntry) * coreNotional;
+      const slipped = (riskUsd: number) => riskUsd * (0.9 + 0.1 / f);
+      expect(profitAt(add1!.triggerPx!)).toBeGreaterThanOrEqual(slipped(add1!.riskUsd!));
+      // add2 must be covered by the CORE ALONE (add1 may have been one-shot skipped)
+      expect(profitAt(add2!.triggerPx!)).toBeGreaterThanOrEqual(slipped(add2!.riskUsd!));
+    }
+  });
+
+  it('the drafted TITLE, the guard matcher, and the ledger tag agree BY CONSTRUCTION', () => {
+    // The flip guard's disarm authority and the dedupe both key off the drafted title
+    // shape — pin them against the ACTUAL builder output so a future title edit
+    // cannot silently kill the guard match or the dedupe.
+    const p = buildTrendLadderPlan(ctx, { now: NOW });
+    expect(isTrendLadderTitle(p.title, 'ETH')).toBe(true);
+    expect(isTrendLadderTitle(p.title)).toBe(true);
+    expect(p.title.startsWith(`ETH ${TREND_TITLE_PREFIX}`)).toBe(true); // the dedupe ilike pattern
+  });
+
+  it('rungs stay strictly ordered: core < add1 (=BE) < add2 < reduce1 (=trail) < reduce2', () => {
+    const p = buildTrendLadderPlan(ctx, { now: NOW });
+    const px = (seq: number) => p.rungs.find((r) => r.seq === seq)!.triggerPx!;
+    expect(px(1)).toBeLessThan(px(2));
+    expect(px(2)).toBe(px(3)); // breakeven ratchets at the first add level
+    expect(px(2)).toBeLessThan(px(4));
+    expect(px(4)).toBeLessThan(px(5));
+    expect(px(5)).toBe(px(6)); // trail takes over where the first bank happens
+    expect(px(5)).toBeLessThan(px(7));
+  });
+
   it('exit management rides the trend: breakeven at the first add level, trail + scale-outs above', () => {
     const p = buildTrendLadderPlan(ctx, { now: NOW });
     const be = p.rungs.find((r) => r.action === 'stop_move' && r.triggerMeta?.moveTo === 'breakeven')!;
@@ -56,6 +100,21 @@ describe('buildTrendLadderPlan', () => {
     const reduces = p.rungs.filter((r) => r.action === 'reduce');
     expect(reduces.length).toBe(2);
     expect(reduces.every((r) => (r.reduceFrac ?? 0) > 0 && (r.reduceFrac ?? 0) < 1)).toBe(true); // path-robust fractions
+  });
+});
+
+describe('isTrendLadderTitle (the flip guard\'s disarm-authority matcher)', () => {
+  it('matches the drafted title shape, anchored', () => {
+    expect(isTrendLadderTitle('ETH trend-follow long — 8h bullish 81% (auto-draft · review+arm)', 'ETH')).toBe(true);
+    expect(isTrendLadderTitle('ETH trend-follow long — 8h bullish 81% (auto-draft · review+arm)')).toBe(true);
+  });
+  it('NEVER matches operator titles that merely mention the lane (wrong-ladder disarm)', () => {
+    expect(isTrendLadderTitle('ETH short vs trend-follow lane', 'ETH')).toBe(false);
+    expect(isTrendLadderTitle('ETH trend-following pyramid', 'ETH')).toBe(false);
+    expect(isTrendLadderTitle('my trend-follow idea')).toBe(false);
+  });
+  it('pins the coin when given', () => {
+    expect(isTrendLadderTitle('ETH trend-follow long — …', 'BTC')).toBe(false);
   });
 });
 

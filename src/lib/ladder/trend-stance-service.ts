@@ -37,12 +37,18 @@ export const TREND_BULLISH_CONF_MIN = 0.7;
 
 const FETCH_TIMEOUT_MS = 5_000;
 const CACHE_TTL_MS = 2 * 60_000;
+/** A snapshot older than one 8h signal beat + grace is a FROZEN endpoint, not a
+ *  stance — treat as unreadable (draft nothing; the flip guard can't verify). */
+const MAX_STANCE_AGE_MS = 9 * 60 * 60 * 1000;
 
 let cache: { snapshot: TrendStanceSnapshot; atMs: number } | null = null;
 
 export function isTrendStanceConfigured(): boolean {
   const env = validateEnv();
-  return Boolean(env.IAMROSSI_STANCE_URL && env.IAMROSSI_STANCE_TOKEN);
+  // Token length is enforced HERE (route contract: min 16), not in the zod schema —
+  // a too-short optional var must degrade to "unconfigured", never throw inside
+  // validateEnv() and take unrelated routes (incl. the fire path) down with it.
+  return Boolean(env.IAMROSSI_STANCE_URL && (env.IAMROSSI_STANCE_TOKEN?.length ?? 0) >= 16);
 }
 
 /** Test hook — clears the in-module cache. */
@@ -64,7 +70,9 @@ function sanitizeStance(raw: any): TrendStance | null {
     asset,
     enabled: raw.enabled === true,
     position: raw.position === 'holding' ? 'holding' : 'cash',
-    regime: String(raw.regime ?? 'unknown').slice(0, 24),
+    // Charset-whitelisted: regime reaches Discord messages + the analysis log, and
+    // a compromised feed must not smuggle markdown/newlines through it.
+    regime: String(raw.regime ?? 'unknown').toLowerCase().replace(/[^a-z_-]/g, '').slice(0, 24) || 'unknown',
     regimeConfidence: clamp01(raw.regimeConfidence),
   };
 }
@@ -77,26 +85,32 @@ function sanitizeStance(raw: any): TrendStance | null {
  */
 export async function fetchTrendStance(now: number = Date.now()): Promise<TrendStanceSnapshot | null> {
   const env = validateEnv();
-  if (!env.IAMROSSI_STANCE_URL || !env.IAMROSSI_STANCE_TOKEN) return null;
+  const baseUrl = env.IAMROSSI_STANCE_URL;
+  const token = env.IAMROSSI_STANCE_TOKEN;
+  if (!baseUrl || !token || token.length < 16) return null; // same bar as isTrendStanceConfigured
   if (cache && now - cache.atMs < CACHE_TTL_MS) return cache.snapshot;
 
   try {
-    const url = `${env.IAMROSSI_STANCE_URL.replace(/\/$/, '')}/api/trading/stance`;
+    const url = `${baseUrl.replace(/\/$/, '')}/api/trading/stance`;
     const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${env.IAMROSSI_STANCE_TOKEN}` },
+      headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       cache: 'no-store',
     });
     if (!res.ok) return null;
     const body = (await res.json()) as { ok?: boolean; generatedAt?: number; stances?: unknown[] };
     if (body.ok !== true || !Array.isArray(body.stances)) return null;
+    // Staleness gate — honest about its reach: generatedAt is stamped at RESPONSE
+    // time by the producer (which recomputes regime per request), so this catches a
+    // frozen proxy/cache/replayed payload, NOT a paused producer whose upstream
+    // candle store went stale (that needs a per-computation timestamp — deferred).
+    // A missing/garbage generatedAt is treated as unreadable (fail-closed).
+    const generatedAtMs = Number(body.generatedAt);
+    if (!Number.isFinite(generatedAtMs)) return null;
+    if (now - generatedAtMs > MAX_STANCE_AGE_MS) return null;
     const stances = body.stances.map(sanitizeStance).filter((s): s is TrendStance => s !== null);
     if (stances.length === 0) return null;
-    const snapshot: TrendStanceSnapshot = {
-      generatedAtMs: Number.isFinite(Number(body.generatedAt)) ? Number(body.generatedAt) : now,
-      fetchedAtMs: now,
-      stances,
-    };
+    const snapshot: TrendStanceSnapshot = { generatedAtMs, fetchedAtMs: now, stances };
     cache = { snapshot, atMs: now };
     return snapshot;
   } catch {

@@ -17,6 +17,17 @@ import type { CreateLadderInput } from './ladder-service';
 /** Title prefix — the dedupe key AND the ledger's setup-type tag. Keep stable. */
 export const TREND_TITLE_PREFIX = 'trend-follow';
 
+/**
+ * ANCHORED match for auto-drafted trend titles (`ETH trend-follow long — …`).
+ * The flip guard auto-DISARMS on this — a loose substring would let an operator's
+ * hand-written title ("ETH short vs trend-following flows") get disarmed by the
+ * guard. Anchor to the exact drafted shape; pass `coin` to also pin the symbol.
+ */
+export function isTrendLadderTitle(title: string, coin?: string): boolean {
+  if (coin) return title.startsWith(`${coin.toUpperCase()} ${TREND_TITLE_PREFIX} `);
+  return new RegExp(`^[A-Z0-9]+ ${TREND_TITLE_PREFIX} `).test(title);
+}
+
 /** Everything the plan needs, gathered by the service. */
 export interface TrendAlertContext {
   coin: string;
@@ -58,10 +69,25 @@ export function buildTrendLadderPlan(ctx: TrendAlertContext, opts: TrendPlanOpts
   const mark = ctx.mark;
   const coin = ctx.coin.toUpperCase();
 
-  // Decreasing-size split (core > add1 > add2), Σ = the campaign budget.
-  const coreRisk = round(campaignRiskUsd * 0.5);
-  const add1Risk = round(campaignRiskUsd * 0.3);
-  const add2Risk = round(campaignRiskUsd * 0.2);
+  // Decreasing-size split (core > add1 > add2), Σ = the campaign budget. The core
+  // carries most of it so the adds' coverage triggers (below) stay reachable.
+  const coreRisk = round(campaignRiskUsd * 0.6);
+  const add1Risk = round(campaignRiskUsd * 0.25);
+  const add2Risk = round(campaignRiskUsd * 0.15);
+
+  // ADD TRIGGERS ARE DERIVED FROM THE ENGINE'S COVERAGE GATE, not picked round.
+  // The fire path refuses an add unless the add's SLIPPED worst case
+  // (riskUsd·(0.9 + 0.1/stopFrac), rungWorstCaseLoss) is covered by current
+  // unrealized profit (≈ coreNotional × favorable move). Solving for the move:
+  //   p ≥ (addRisk/coreRisk) · (0.9·stopFrac + 0.1)
+  // plus margin for the core's +0.3% entry offset and close-overshoot. A trigger
+  // below this bound consumes the ONE-SHOT rung as a permanent skip — the silent
+  // pyramid-gutting failure this formula exists to prevent.
+  const coverMargin = 0.015;
+  const add1TriggerFrac = (add1Risk / coreRisk) * (0.9 * stopFrac + 0.1) + coverMargin;
+  const add2TriggerFrac = add1TriggerFrac + 0.6 * stopFrac; // above add1, coverage then trivial
+  const reduce1Frac = add2TriggerFrac + 0.5 * stopFrac; // bank into real extension only
+  const reduce2Frac = add2TriggerFrac + 1.5 * stopFrac;
 
   // Slipped no-netting worst case: each stop can slip 10% OF PRICE, so the loss
   // multiplier is (1 + 0.10/stopFrac). Cap must clear it or the arm is refused.
@@ -91,20 +117,20 @@ export function buildTrendLadderPlan(ctx: TrendAlertContext, opts: TrendPlanOpts
         riskUsd: coreRisk, stopFrac, leverage, triggerMeta: { momentumConfirm: true, momentumSustain: 2, momentumMaxFlips: 0 },
       },
       {
-        seq: 2, coin, side: 'long', action: 'add', triggerKind: 'price_above', triggerPx: round(mark * 1.025),
+        seq: 2, coin, side: 'long', action: 'add', triggerKind: 'price_above', triggerPx: round(mark * (1 + add1TriggerFrac)),
         riskUsd: add1Risk, stopFrac, leverage,
       },
-      { seq: 3, coin, side: 'long', action: 'stop_move', triggerKind: 'price_above', triggerPx: round(mark * 1.025), triggerMeta: { moveTo: 'breakeven' } },
+      { seq: 3, coin, side: 'long', action: 'stop_move', triggerKind: 'price_above', triggerPx: round(mark * (1 + add1TriggerFrac)), triggerMeta: { moveTo: 'breakeven' } },
       {
-        seq: 4, coin, side: 'long', action: 'add', triggerKind: 'price_above', triggerPx: round(mark * 1.05),
+        seq: 4, coin, side: 'long', action: 'add', triggerKind: 'price_above', triggerPx: round(mark * (1 + add2TriggerFrac)),
         riskUsd: add2Risk, stopFrac, leverage,
       },
-      { seq: 5, coin, side: 'long', action: 'reduce', triggerKind: 'price_above', triggerPx: round(mark * 1.06), reduceFrac: 0.4 },
+      { seq: 5, coin, side: 'long', action: 'reduce', triggerKind: 'price_above', triggerPx: round(mark * (1 + reduce1Frac)), reduceFrac: 0.4 },
       {
-        seq: 6, coin, side: 'long', action: 'stop_move', triggerKind: 'price_above', triggerPx: round(mark * 1.06),
+        seq: 6, coin, side: 'long', action: 'stop_move', triggerKind: 'price_above', triggerPx: round(mark * (1 + reduce1Frac)),
         triggerMeta: { moveTo: 'trail', trailDistancePx: round(Math.max(mark * 1.5 * (Number.isFinite(ctx.atrFrac) && ctx.atrFrac > 0 ? ctx.atrFrac : 0.04), 1e-6)) },
       },
-      { seq: 7, coin, side: 'long', action: 'reduce', triggerKind: 'price_above', triggerPx: round(mark * 1.1), reduceFrac: 0.4 },
+      { seq: 7, coin, side: 'long', action: 'reduce', triggerKind: 'price_above', triggerPx: round(mark * (1 + reduce2Frac)), reduceFrac: 0.4 },
     ],
   };
 }

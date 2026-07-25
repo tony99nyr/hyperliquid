@@ -73,8 +73,11 @@ const envSchema = z.object({
   // read-only GET /api/trading/stance). Unset ⇒ fetchTrendStance() returns null and the
   // trend-alert lane + flip guard simply no-op. READ-ONLY consumer, contractually
   // fail-open: an iamrossi outage must never break anything here. ---
+  // Deliberately loose (.min would make validateEnv THROW app-wide on a typo'd
+  // optional var, taking the ladder watcher down with it): the ≥16-char contract
+  // is enforced in trend-stance-service, where too-short degrades to "unconfigured".
   IAMROSSI_STANCE_URL: z.string().url().optional(),
-  IAMROSSI_STANCE_TOKEN: z.string().min(16).optional(),
+  IAMROSSI_STANCE_TOKEN: z.string().optional(),
 
   // --- Layer-1 auto-exit (exit-only safety net; see docs/LIVE_AUTO_EXIT.md) ---
   // Master kill-switch. Default OFF: the risk-exit endpoint refuses to fire and

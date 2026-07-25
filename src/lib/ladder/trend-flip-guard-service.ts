@@ -15,7 +15,7 @@
 import 'server-only';
 import { listLaddersWithRungs, disarmLadder } from './ladder-service';
 import { fetchTrendStance, stanceFor, isTrendStanceConfigured, TREND_BULLISH_CONF_MIN, type TrendStance } from './trend-stance-service';
-import { TREND_TITLE_PREFIX } from './trend-alert-business-logic';
+import { isTrendLadderTitle } from './trend-alert-business-logic';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 import { getActiveSession } from '@/lib/cockpit/session-service';
 import { sendDiscord } from '@/lib/infrastructure/notify/discord-notify';
@@ -27,8 +27,6 @@ export interface TrendFlipGuardSummary {
   stanceUnreadable: boolean;
 }
 
-const isTrendLadder = (title: string): boolean =>
-  title.toLowerCase().includes(` ${TREND_TITLE_PREFIX}`.toLowerCase());
 
 /**
  * A flip = the system is readable and has left the bullish-and-holding state that
@@ -45,7 +43,11 @@ export async function runTrendFlipGuard(now = Date.now()): Promise<TrendFlipGuar
   const summary: TrendFlipGuardSummary = { checked: 0, disarmed: [], stanceUnreadable: false };
   if (!isTrendStanceConfigured()) return summary;
 
-  const armed = (await listLaddersWithRungs('armed')).filter((l) => isTrendLadder(l.title));
+  // ANCHORED per-ladder match (title starts `<COIN> trend-follow `) — the guard holds
+  // disarm authority, so a loose substring must never rope in an operator ladder.
+  const armed = (await listLaddersWithRungs('armed')).filter((l) =>
+    isTrendLadderTitle(l.title, l.rungs[0]?.coin ?? undefined),
+  );
   summary.checked = armed.length;
   if (armed.length === 0) return summary;
 

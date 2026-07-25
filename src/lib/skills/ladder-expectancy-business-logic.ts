@@ -49,9 +49,11 @@ export function deriveSetupType(ladder: Pick<LadderWithRungs, 'rungs' | 'title'>
   const opens = ladder.rungs.filter((r) => r.action === 'open');
   const hasAdd = ladder.rungs.some((r) => r.action === 'add');
   const side = opens[0]?.side ?? ladder.rungs[0]?.side ?? 'long';
-  const title = ladder.title.toLowerCase();
-  if (title.includes(' trend-follow')) return `trend-follow-8h-${side}`;
-  if (title.includes(' reversion-fade')) return `reversion-fade-${side}`;
+  // ANCHORED to the auto-draft title shapes ("ETH trend-follow long — …",
+  // "BTC reversion-fade short — …") — a substring would mislabel operator ladders
+  // that merely mention a lane.
+  if (/^[A-Z0-9]+ trend-follow /.test(ladder.title)) return `trend-follow-8h-${side}`;
+  if (/^[A-Z0-9]+ reversion-fade /.test(ladder.title)) return `reversion-fade-${side}`;
   const kind = opens[0]?.triggerKind ?? 'price_above';
   const dir = side === 'long'
     ? (kind === 'price_above' ? 'breakout' : 'dip')

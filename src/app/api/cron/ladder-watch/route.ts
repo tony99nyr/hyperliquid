@@ -39,6 +39,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const hcUrl = validateEnv().LADDER_WATCH_HEALTHCHECK_URL;
   await pingHealthcheck(hcUrl, 'start');
   try {
+    //  - trend flip guard FIRST (DISARM-ONLY, fail-soft): if the 8h stance already
+    //    left bullish, pending trend rungs must be disarmed BEFORE this tick's fire
+    //    pass loads the armed list — otherwise a rung can fire on the very tick the
+    //    thesis died. Runs whenever the stance bridge is configured (even with
+    //    drafting off); never fires or closes anything.
+    const trendFlipGuard = await runTrendFlipGuard(Date.now()).catch((e) => ({ checked: -1, disarmed: [], stanceUnreadable: false, error: extractErrorMessage(e) }));
     const summary = await runLadderWatchTick({ now: Date.now() });
     // Post-tick guards, all FAIL-SOFT (they must never break or fail the watcher tick):
     //  - leader guard: DISARM-ONLY — kills copy-thesis ladders whose leader exited/flipped.
@@ -58,15 +64,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const reversionAlert = isReversionAlertEnabled()
       ? await runReversionAlertCycle(undefined, Date.now()).catch((e) => ({ error: extractErrorMessage(e) }))
       : { skipped: 'disabled' };
-    //  - trend lane (the iamrossi retired-leverage-lane replacement, both halves fail-soft):
-    //    trend alert: 8h stance bullish+confident+holding → auto-DRAFT a low-qty LIVE
-    //    pyramiding ladder + 📈 Discord. DRAFT only — NEVER arms. Flag-gated (default OFF).
-    //    trend flip guard: DISARM-ONLY — kills armed trend ladders when the 8h stance
-    //    leaves bullish (runs whenever the stance bridge is configured, even if drafting is off).
+    //  - trend alert (the iamrossi retired-leverage-lane replacement, fail-soft):
+    //    8h stance bullish+confident+holding → auto-DRAFT a low-qty LIVE pyramiding
+    //    ladder + 📈 Discord. DRAFT only — NEVER arms. Flag-gated (default OFF).
+    //    (Its DISARM-side twin, the trend flip guard, runs BEFORE the tick above.)
     const trendAlert = isTrendAlertEnabled()
       ? await runTrendAlertCycle(undefined, Date.now()).catch((e) => ({ error: extractErrorMessage(e) }))
       : { skipped: 'disabled' };
-    const trendFlipGuard = await runTrendFlipGuard(Date.now()).catch((e) => ({ checked: -1, disarmed: [], stanceUnreadable: false, error: extractErrorMessage(e) }));
     await pingHealthcheck(hcUrl, 'success');
     return NextResponse.json({ ok: true, ...summary, leaderGuard, expiryAlerts, priceAlerts, scoutHeartbeats, stewardProposals, reversionAlert, trendAlert, trendFlipGuard });
   } catch (e) {

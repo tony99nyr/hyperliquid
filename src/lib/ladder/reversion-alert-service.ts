@@ -28,16 +28,20 @@ export interface ReversionAlertResult {
   cappedOut: number;
 }
 
-/** A recent live reversion-fade draft/armed ladder already exists for this coin? */
+/** A recent live reversion-fade draft/armed ladder already exists for this coin?
+ *  Deliberately IGNORES archived_at: archiving a draft is the operator's "not this
+ *  one" — it must start the cooldown, not trigger an instant re-draft next tick. */
 async function alreadyDrafted(coin: string, sinceMs: number): Promise<boolean> {
   const db = getServiceRoleClient();
-  const { data } = await db
+  const { data, error } = await db
     .from('ladders')
     .select('id')
     .ilike('title', `${coin} reversion-fade%`)
-    .is('archived_at', null)
     .gte('created_at', new Date(sinceMs).toISOString())
     .limit(1);
+  // FAIL CLOSED: a dedupe read error must throw into the per-coin catch (skip, no
+  // draft) — treating it as "not drafted" would spray a draft + ping every tick.
+  if (error) throw new Error(`reversion dedupe read failed: ${error.message}`);
   return (data?.length ?? 0) > 0;
 }
 

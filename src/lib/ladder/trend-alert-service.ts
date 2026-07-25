@@ -37,18 +37,41 @@ export interface TrendAlertResult {
   skipped: Array<{ coin: string; reason: string }>;
 }
 
-/** An active (draft/armed) or recent trend-follow ladder already covers this coin? */
-async function alreadyDrafted(coin: string, sinceMs: number): Promise<boolean> {
+/**
+ * An active or recent trend-follow ladder already covers this coin? Two legs, both
+ * load-bearing:
+ *  (a) LIVE coverage — a draft/armed trend ladder that has NOT passed its expiry.
+ *      Drafts never transition to 'expired' (only armed ones do), so without the
+ *      expires_at bound one ignored draft would suppress the lane FOREVER.
+ *  (b) RECENCY — anything created inside the cooldown window REGARDLESS of status
+ *      or archived_at. Archiving a draft is the operator's "not this one" gesture;
+ *      it must start the cooldown, not trigger an instant re-draft + re-ping.
+ */
+async function alreadyDrafted(coin: string, now: number, sinceMs: number): Promise<boolean> {
   const db = getServiceRoleClient();
-  const { data, error } = await db
-    .from('ladders')
-    .select('id,status,created_at')
-    .ilike('title', `${coin} ${TREND_TITLE_PREFIX}%`)
-    .is('archived_at', null)
-    .or(`status.in.(draft,armed),created_at.gte.${new Date(sinceMs).toISOString()}`)
-    .limit(1);
-  if (error) throw new Error(`trend-alert dedupe read failed: ${error.message}`);
-  return (data?.length ?? 0) > 0;
+  const titlePattern = `${coin} ${TREND_TITLE_PREFIX}%`;
+  const [active, recent] = await Promise.all([
+    db
+      .from('ladders')
+      .select('id')
+      .ilike('title', titlePattern)
+      // 'done' counts as live coverage too: a fully-fired ladder leaves an OPEN
+      // position under management — re-drafting a second pyramid on the same coin
+      // mid-campaign invites stacking. Its expiry bound still frees the lane later.
+      .in('status', ['draft', 'armed', 'done'])
+      .is('archived_at', null)
+      .gte('expires_at', new Date(now).toISOString())
+      .limit(1),
+    db
+      .from('ladders')
+      .select('id')
+      .ilike('title', titlePattern)
+      .gte('created_at', new Date(sinceMs).toISOString())
+      .limit(1),
+  ]);
+  if (active.error) throw new Error(`trend-alert dedupe (active) failed: ${active.error.message}`);
+  if (recent.error) throw new Error(`trend-alert dedupe (recent) failed: ${recent.error.message}`);
+  return (active.data?.length ?? 0) > 0 || (recent.data?.length ?? 0) > 0;
 }
 
 /**
@@ -79,7 +102,7 @@ export async function runTrendAlertCycle(
         result.skipped.push({ coin, reason: `stance:${stance ? `${stance.regime}/${Math.round(stance.regimeConfidence * 100)}%/${stance.position}` : 'absent'}` });
         continue;
       }
-      if (await alreadyDrafted(coin, now - DEDUP_WINDOW_MS)) {
+      if (await alreadyDrafted(coin, now, now - DEDUP_WINDOW_MS)) {
         result.skipped.push({ coin, reason: 'dedup' });
         continue;
       }
