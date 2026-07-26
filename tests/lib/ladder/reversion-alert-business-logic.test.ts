@@ -39,11 +39,18 @@ describe('buildReversionLadderPlan', () => {
     expect(tp.triggerPx).toBe(2080);
   });
 
-  it('caps risk low + sizes the loss/notional caps off riskUsd (worst case room)', () => {
-    const p = buildReversionLadderPlan(shortHit, { now: NOW, riskUsd: 2.5 });
-    expect(p.maxTotalLossUsd).toBe(13); // ceil(2.5*5), floored at 6
-    expect(p.maxTotalNotionalUsd).toBeGreaterThan(0);
+  it('sizes the loss/notional caps off the BOUNDED notional so the arm gate never false-blocks', () => {
+    const p = buildReversionLadderPlan(shortHit, { now: NOW, riskUsd: 2.5 }); // stopFrac 0.04 → notional 62.5
+    expect(p.maxTotalLossUsd).toBe(15); // max(15, ceil(62.5*0.2)=13)
+    expect(p.maxTotalNotionalUsd).toBe(120);
     expect(p.mode).toBe('live');
+  });
+
+  it('a TIGHT stop reduces riskUsd to cap the notional (the ETH-fade bug: 0.5% stop must not balloon)', () => {
+    const tight = buildReversionLadderPlan({ ...shortHit, stopFrac: 0.006 }, { now: NOW, riskUsd: 2.5 });
+    const open = tight.rungs.find((r) => r.action === 'open')!;
+    expect(open.riskUsd).toBeCloseTo(0.6, 6); // min(2.5, 100*0.006) — notional stays ≤ $100
+    expect(open.riskUsd! / open.stopFrac!).toBeCloseTo(100, 3); // notional ≈ $100, not $500
   });
 
   it('clamps a garbage stopFrac into a sane band (never 0 / never huge)', () => {

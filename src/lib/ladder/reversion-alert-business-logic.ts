@@ -40,10 +40,17 @@ const clampFrac = (f: number): number => (Number.isFinite(f) && f > 0.005 ? Math
  * the mean (target); then breakeven + trail on the runner. PURE.
  */
 export function buildReversionLadderPlan(hit: ReversionAlertHit, opts: ReversionPlanOpts): CreateLadderInput {
-  const riskUsd = opts.riskUsd ?? 2.5;
   const leverage = opts.leverage ?? 3;
   const expiryHours = opts.expiryHours ?? 12;
   const stopFrac = clampFrac(hit.stopFrac);
+  // BOUND THE NOTIONAL, not just the risk. A reversion stop can be very TIGHT (small
+  // stopFrac — an ETH fade came in at 0.5%); a fixed riskUsd then balloons the notional
+  // (riskUsd/stopFrac) and the slip-aware worst case blows past the loss cap so the ladder
+  // can NEVER arm ($495 notional / $52 worst on that ETH one). Cap the notional so the
+  // position stays genuinely tiny + ARMABLE regardless of how tight the signal's stop is:
+  // riskUsd = min(desired, NOTIONAL_CAP × stopFrac) ⇒ notional ≤ NOTIONAL_CAP.
+  const NOTIONAL_CAP_USD = 100;
+  const riskUsd = Math.min(opts.riskUsd ?? 2.5, NOTIONAL_CAP_USD * stopFrac);
   const mark = hit.mark;
   const target = hit.target;
   const isShort = hit.side === 'short';
@@ -68,8 +75,11 @@ export function buildReversionLadderPlan(hit: ReversionAlertHit, opts: Reversion
       `Short shelf-life (${expiryHours}h expiry) — reversion is fast.`,
     author: 'operator',
     mode: 'live',
-    maxTotalLossUsd: Math.max(6, Math.ceil(riskUsd * 5)),
-    maxTotalNotionalUsd: Math.ceil((riskUsd / stopFrac) * 1.3),
+    // The slip-aware worst case scales with NOTIONAL (a tight stop + 10% slip model makes
+    // the tail ~15% of notional), NOT with the tiny intended riskUsd — so size the cap off
+    // the bounded notional or the arm gate false-blocks (min 15 covers the ≤$100 notional).
+    maxTotalLossUsd: Math.max(15, Math.ceil((riskUsd / stopFrac) * 0.2)),
+    maxTotalNotionalUsd: NOTIONAL_CAP_USD + 20,
     expiresAtMs: opts.now + expiryHours * 60 * 60 * 1000,
     rungs: [
       {
