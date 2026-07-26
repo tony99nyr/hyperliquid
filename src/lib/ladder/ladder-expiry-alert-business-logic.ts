@@ -9,8 +9,11 @@
 
 import type { LadderWithRungs } from './ladder-types';
 
-/** Alert when an armed ladder is within this of its expiry. */
+/** Alert when an armed ladder is within this of its expiry — but never more than a
+ *  FRACTION of its own total window (armed→expiry), so a deliberately short-dated ladder
+ *  (a 12h reversion fade) warns in its LAST QUARTER, not the moment it's armed. */
 export const EXPIRY_ALERT_WINDOW_MS = 12 * 3_600_000;
+export const EXPIRY_ALERT_WINDOW_FRAC = 0.25;
 
 export interface ExpiryAlertVerdict {
   shouldAlert: boolean;
@@ -18,7 +21,7 @@ export interface ExpiryAlertVerdict {
 }
 
 export function expiryAlertVerdict(
-  ladder: Pick<LadderWithRungs, 'id' | 'title' | 'status' | 'expiresAt' | 'rungs'> & { expiryAlertAt?: string | null },
+  ladder: Pick<LadderWithRungs, 'id' | 'title' | 'status' | 'expiresAt' | 'rungs'> & { armedAt?: string | null; expiryAlertAt?: string | null },
   now: number,
   windowMs: number = EXPIRY_ALERT_WINDOW_MS,
 ): ExpiryAlertVerdict {
@@ -26,7 +29,13 @@ export function expiryAlertVerdict(
   if (ladder.expiryAlertAt) return { shouldAlert: false, message: null }; // already paged
   const expMs = ladder.expiresAt ? Date.parse(ladder.expiresAt) : NaN;
   if (!Number.isFinite(expMs)) return { shouldAlert: false, message: null };
-  if (expMs <= now || expMs - now > windowMs) return { shouldAlert: false, message: null };
+  // Effective window = min(fixed 12h, 25% of the ladder's own armed→expiry span). A 4-day
+  // event straddle still warns ~12h out; a 12h reversion fade warns in its last ~3h — not
+  // instantly on arm (the bug: a fixed 12h trips any ≤12h-window ladder at arm time).
+  const armedMs = ladder.armedAt ? Date.parse(ladder.armedAt) : NaN;
+  const totalWindow = Number.isFinite(armedMs) ? expMs - armedMs : Number.POSITIVE_INFINITY;
+  const effWindow = Math.min(windowMs, EXPIRY_ALERT_WINDOW_FRAC * totalWindow);
+  if (expMs <= now || expMs - now > effWindow) return { shouldAlert: false, message: null };
 
   const pending = ladder.rungs.filter((r) => r.status === 'pending');
   if (pending.length === 0) return { shouldAlert: false, message: null }; // fully terminal — nothing at stake

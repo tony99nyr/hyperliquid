@@ -49,4 +49,28 @@ describe('expiryAlertVerdict', () => {
     expect(v.shouldAlert).toBe(true);
     expect(v.message).toMatch(/scale-outs stop at expiry/);
   });
+
+  it('a freshly-armed 12h reversion fade does NOT alert at arm time (window-relative, the bug fix)', () => {
+    const v = expiryAlertVerdict(subject({
+      armedAt: new Date(NOW - 12 * 60_000).toISOString(),        // armed 12 min ago
+      expiresAt: new Date(NOW + (12 * 3_600_000 - 12 * 60_000)).toISOString(), // ~11.8h left of a 12h window
+    }), NOW);
+    expect(v.shouldAlert).toBe(false); // 11.8h left > 25% of a 12h window (3h) → no page
+  });
+
+  it('the SAME 12h ladder DOES alert in its last quarter (~2h left)', () => {
+    const v = expiryAlertVerdict(subject({
+      armedAt: new Date(NOW - 10 * 3_600_000).toISOString(),     // 12h window, armed 10h ago
+      expiresAt: new Date(NOW + 2 * 3_600_000).toISOString(),    // 2h left < 3h (25% of 12h)
+    }), NOW);
+    expect(v.shouldAlert).toBe(true);
+  });
+
+  it('a long (4-day) ladder still warns ~12h out (unchanged for long windows)', () => {
+    const v = expiryAlertVerdict(subject({
+      armedAt: new Date(NOW - 84 * 3_600_000).toISOString(),     // 96h window, 84h in
+      expiresAt: new Date(NOW + 12 * 3_600_000).toISOString(),   // 12h left < min(12h, 24h)
+    }), NOW);
+    expect(v.shouldAlert).toBe(true);
+  });
 });
