@@ -48,9 +48,15 @@ and the coin's trend row (is the trend still with the position?). If anything lo
 needs action, say so plainly — but do NOT act; point the operator to `assess-trade-health`
 (deep multi-TF health) or `advise-exit` (which surfaces a reduce-only order for their yes).
 
-For each **armed ladder**: is it still coherent with the current tape (trend row, leader
-flow, funding)? Flag expiry, OCO, and anything that drifted. For a real grade, defer to
-`review-ladder` (the 0/10 RISK + UPSIDE scorecard) — name it, don't reproduce it.
+For each **armed ladder**: judge it with a **clear, unsentimental, objective** eye — never
+"we already have it, so keep it." Apply the test: **is the ladder's thesis still VALID, and
+does the current tape still support it?** If the premise decayed (the trend that justified a
+fade is gone, the flow that justified a long reversed, the rubric no longer scores it) —
+**DISARM it.** desk-review IS permitted to disarm (see the discipline note; disarm is
+risk-REDUCING — it cancels resting orders, moves no money, opens nothing). Flag expiry, OCO,
+drift. For a graded scorecard defer to `review-ladder` — name it, don't reproduce it. When
+there's no market edge anywhere and a ladder's thesis has decayed, the objective position is
+FLAT; hold a resting bet only while its premise is still true.
 
 For each **draft ladder / preview**: is it safe to arm / approve given the current read?
 Again `review-ladder` / `review-previews` do the graded version; here just flag obvious
@@ -122,8 +128,13 @@ Deliver a tight read, not a data dump:
 
 ## Discipline (the desk rules — apply every time)
 
-- **Advisory only. Never trade, arm, or write.** Every entry/exit/arm is a separate step the
-  operator confirms.
+- **Objective + unsentimental, always.** Look with a clear, unopinionated eye for where the
+  real advantages are and for the objective HEALTH of every position + ladder. Never hold
+  something because we have it; the market doesn't care what we're already in.
+- **Never OPEN, arm, or fire — but desk-review MAY DISARM.** Opening/arming/executing new risk
+  stays a separate operator-confirmed step. Disarming is the one write allowed here because it
+  only REDUCES risk (cancels resting orders, moves no money) — so when a ladder's thesis has
+  objectively decayed, disarm it in the review rather than just recommending it.
 - **Stand-down is a valid, common answer.** "No edge, stand down" beats a forced setup.
   Detection surface is not the bottleneck — proven edge is.
 - **Adversarial panel before ANY new entry** ([[adversarial-panel-for-ladders]]): before

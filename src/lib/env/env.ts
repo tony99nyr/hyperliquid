@@ -116,6 +116,9 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+  // Public base URL of the deployed cockpit — used to build clickable Discord deep-links
+  // (e.g. the reversion-alert 👉 ladders-page link). Defaults to the production alias.
+  COCKPIT_BASE_URL: z.string().url().default('https://hyperliquid-rouge.vercel.app'),
   // Trend-alert: when 'true', the ladder-watch cron auto-DRAFTS a low-qty LIVE trend
   // ladder + pings Discord when the iamrossi 8h system turns bullish+confident on a
   // coin it's holding (the replacement for its retired Base leverage lane). DRAFT only
@@ -169,6 +172,7 @@ export function validateEnv(source: NodeJS.ProcessEnv = process.env): CockpitEnv
     LADDER_LIVE_ENABLED: source.LADDER_LIVE_ENABLED,
     LADDER_AUTOFIRE_ENABLED: source.LADDER_AUTOFIRE_ENABLED,
     REVERSION_ALERT_ENABLED: source.REVERSION_ALERT_ENABLED,
+    COCKPIT_BASE_URL: source.COCKPIT_BASE_URL,
     TREND_ALERT_ENABLED: source.TREND_ALERT_ENABLED,
     IAMROSSI_STANCE_URL: source.IAMROSSI_STANCE_URL,
     IAMROSSI_STANCE_TOKEN: source.IAMROSSI_STANCE_TOKEN,

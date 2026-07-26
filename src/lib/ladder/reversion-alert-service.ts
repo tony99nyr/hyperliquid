@@ -15,6 +15,7 @@ import { scanReversionExtremes } from '@/lib/scout/reversion-scan-service';
 import { createLadder } from './ladder-service';
 import { buildReversionLadderPlan, reversionAlertMessage, type ReversionAlertHit } from './reversion-alert-business-logic';
 import { sendDiscord, isDiscordConfigured } from '@/lib/infrastructure/notify/discord-notify';
+import { validateEnv } from '@/lib/env/env';
 
 const DEFAULT_COINS = ['BTC', 'ETH', 'SOL', 'HYPE'];
 const DEDUP_WINDOW_MS = 6 * 60 * 60 * 1000; // one draft per coin per 6h episode
@@ -80,7 +81,7 @@ export async function runReversionAlertCycle(
       const ladderId = await createLadder(buildReversionLadderPlan(alertHit, { now }));
       drafted.push({ coin, side: hit.side, ladderId });
       if (isDiscordConfigured()) {
-        await sendDiscord(reversionAlertMessage(alertHit, ladderId), 'HL Reversion Scout').catch(() => {});
+        await sendDiscord(reversionAlertMessage(alertHit, ladderId, validateEnv().COCKPIT_BASE_URL), 'HL Reversion Scout').catch(() => {});
       }
     } catch {
       /* per-coin fail-soft — a draft/alert failure never blocks the rest of the cycle */

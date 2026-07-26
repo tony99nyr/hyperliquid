@@ -62,10 +62,16 @@ describe('buildReversionLadderPlan', () => {
     expect(p.rungs[3].triggerMeta?.moveTo).toBe('trail');
   });
 
-  it('reversionAlertMessage names the coin, side, mean, stop + the arm gate', () => {
-    const m = reversionAlertMessage(shortHit, 'abcdef12-3456');
+  it('reversionAlertMessage names the coin, side, mean, stop + the arm gate + a clickable ladders link', () => {
+    const m = reversionAlertMessage(shortHit, 'abcdef12-3456', 'https://example.vercel.app');
     expect(m).toContain('SOL SHORT');
     expect(m).toContain('abcdef12');
     expect(m).toContain('review + arm');
+    expect(m).toContain('https://example.vercel.app/cockpit?tab=ladders');
+  });
+
+  it('omits the link when no base URL is supplied (and strips a trailing slash when it is)', () => {
+    expect(reversionAlertMessage(shortHit, 'abcdef12-3456')).not.toContain('/cockpit?tab=ladders');
+    expect(reversionAlertMessage(shortHit, 'x', 'https://h.app/')).toContain('https://h.app/cockpit?tab=ladders');
   });
 });

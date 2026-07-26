@@ -84,12 +84,15 @@ export function buildReversionLadderPlan(hit: ReversionAlertHit, opts: Reversion
 }
 
 /** The Discord nudge for a fresh reversion draft. PURE (caller sends it). */
-export function reversionAlertMessage(hit: ReversionAlertHit, ladderId: string): string {
+export function reversionAlertMessage(hit: ReversionAlertHit, ladderId: string, cockpitBaseUrl?: string): string {
+  // Clickable deep-link straight to the ladders tab so the operator can review + arm in one
+  // tap. baseUrl has no trailing slash (env is validated); omitted only if unconfigured.
+  const link = cockpitBaseUrl ? `\n👉 ${cockpitBaseUrl.replace(/\/$/, '')}/cockpit?tab=ladders` : '';
   return (
     `🔁 **Reversion fade candidate — ${hit.coin} ${hit.side.toUpperCase()}** (|z|=${Math.abs(hit.z).toFixed(1)}, ` +
     `regime ${hit.regime}/${Math.round(hit.regimeConf * 100)}%)\n` +
     `Auto-drafted a LIVE low-qty ladder \`${ladderId.slice(0, 8)}\` — fade to the mean ${hit.target.toFixed(4)}, ` +
     `stop ${hit.stop.toFixed(4)}. Reversion is the forward-testing edge (unproven) — **review + arm in the cockpit** ` +
-    `if you like it (12h expiry; nothing fires until you arm).`
+    `if you like it (12h expiry; nothing fires until you arm).${link}`
   );
 }
