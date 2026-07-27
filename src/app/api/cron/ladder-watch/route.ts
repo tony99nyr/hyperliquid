@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyCronBearer } from '@/lib/infrastructure/auth/auth';
 import { getLadderCronSecret, isReversionAlertEnabled, isTrendAlertEnabled } from '@/lib/ladder/ladder-flags';
 import { runReversionAlertCycle } from '@/lib/ladder/reversion-alert-service';
+import { runEventPrepAlert } from '@/lib/ladder/event-prep-alert-service';
 import { runTrendAlertCycle } from '@/lib/ladder/trend-alert-service';
 import { runTrendFlipGuard } from '@/lib/ladder/trend-flip-guard-service';
 import { runLadderWatchTick } from '@/lib/ladder/ladder-watch-service';
@@ -71,8 +72,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const trendAlert = isTrendAlertEnabled()
       ? await runTrendAlertCycle(undefined, Date.now()).catch((e) => ({ error: extractErrorMessage(e) }))
       : { skipped: 'disabled' };
+    //  - event-prep alert: 🚨 pings the operator ONCE when a calendar macro event (FOMC,
+    //    CPI…) enters its prep window, with the straddle:prep command. Advisory, deduped,
+    //    fail-soft — never trades/arms/drafts.
+    const eventPrepAlert = await runEventPrepAlert(Date.now()).catch((e) => ({ pinged: null, error: extractErrorMessage(e) }));
     await pingHealthcheck(hcUrl, 'success');
-    return NextResponse.json({ ok: true, ...summary, leaderGuard, expiryAlerts, priceAlerts, scoutHeartbeats, stewardProposals, reversionAlert, trendAlert, trendFlipGuard });
+    return NextResponse.json({ ok: true, ...summary, leaderGuard, expiryAlerts, priceAlerts, scoutHeartbeats, stewardProposals, reversionAlert, trendAlert, trendFlipGuard, eventPrepAlert });
   } catch (e) {
     await pingHealthcheck(hcUrl, 'fail');
     return NextResponse.json({ ok: false, error: extractErrorMessage(e) }, { status: 500 });

@@ -39,6 +39,7 @@ import { scanReversionExtremes } from '@/lib/scout/reversion-scan-service';
 import { readHouseholdExposure } from '@/lib/household/household-exposure-service';
 import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
 import { splitTrend, opportunityFlag, trendLine, conditionalSetup, type OpportunityFlag, type ConditionalSetup } from '@/lib/skills/desk-review-business-logic';
+import { upcomingEvents, eventDeskLine } from '@/lib/skills/event-calendar-business-logic';
 import { validateEnv } from '@/lib/env/env';
 
 const LOOKBACK_MS: Record<MarketTimeframe, number> = {
@@ -133,6 +134,18 @@ run(async () => {
   const now = Date.now();
 
   header('desk-review — full book + market read (ADVISORY, read-only)');
+
+  // ===================== EVENTS FIRST (the tape-dominating context) =====================
+  // A scheduled macro event within ~10d overrides the normal read: don't hold naked
+  // directional risk into a binary, and the straddle is the play. Lead with it.
+  const events = upcomingEvents(now, 10);
+  header('EVENTS');
+  if (events.length === 0) line('No scheduled macro events in the next 10 days.');
+  for (const e of events) {
+    line(eventDeskLine(e));
+    if (e.note) line(`   ${e.note}`);
+    if (e.prepDue) line(`   🚨 RUN NOW: pnpm straddle:prep --coin ${e.straddleCoin ?? 'BTC'} --event ${e.name} --print ${new Date(e.atMs).toISOString()}`);
+  }
 
   // ===== gather THE BOOK + market context in parallel =====
   const addr = getHlAccountAddress();
