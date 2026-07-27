@@ -16,6 +16,8 @@ import { createLadder } from './ladder-service';
 import { buildReversionLadderPlan, reversionAlertMessage, type ReversionAlertHit } from './reversion-alert-business-logic';
 import { sendDiscord, isDiscordConfigured } from '@/lib/infrastructure/notify/discord-notify';
 import { validateEnv } from '@/lib/env/env';
+import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
+import { fetchClearinghouseState } from '@/lib/hyperliquid/hyperliquid-info-service';
 
 const DEFAULT_COINS = ['BTC', 'ETH', 'SOL', 'HYPE'];
 const DEDUP_WINDOW_MS = 6 * 60 * 60 * 1000; // one draft per coin per 6h episode
@@ -26,7 +28,24 @@ export interface ReversionAlertResult {
   candidates: number;
   drafted: Array<{ coin: string; side: string; ladderId: string }>;
   skippedDedup: string[];
+  /** Coins skipped because a live position is already open on them — an auto-fade must not
+   *  stack onto / net against a position the operator is already running. */
+  skippedPositioned: string[];
   cappedOut: number;
+}
+
+/** Coins with a live open position right now. FAIL-OPEN: a read blip returns empty (a draft
+ *  is only a draft — the operator reviews it — so a position-read failure must not silence
+ *  the whole lane). Skipped entirely when there are no hits (avoids a needless HL call). */
+async function openPositionCoins(): Promise<Set<string>> {
+  try {
+    const address = getHlAccountAddress();
+    if (!address) return new Set();
+    const state = await fetchClearinghouseState(address, { uncached: true });
+    return new Set(state.positions.map((p) => p.coin.toUpperCase()));
+  } catch {
+    return new Set();
+  }
 }
 
 /** A recent live reversion-fade draft/armed ladder already exists for this coin?
@@ -61,7 +80,12 @@ export async function runReversionAlertCycle(
 
   const drafted: ReversionAlertResult['drafted'] = [];
   const skippedDedup: string[] = [];
+  const skippedPositioned: string[] = [];
   let cappedOut = 0;
+
+  // Book-awareness: never auto-draft a fade on a coin the operator is already positioned in
+  // (it would net against / stack onto a live position with its own plan). One read per cycle.
+  const positioned = hits.length > 0 ? await openPositionCoins() : new Set<string>();
 
   for (const hit of hits) {
     if (drafted.length >= MAX_DRAFTS_PER_CYCLE) {
@@ -69,6 +93,10 @@ export async function runReversionAlertCycle(
       continue;
     }
     const coin = hit.coin.toUpperCase();
+    if (positioned.has(coin)) {
+      skippedPositioned.push(coin);
+      continue;
+    }
     try {
       if (await alreadyDrafted(coin, now - DEDUP_WINDOW_MS)) {
         skippedDedup.push(coin);
@@ -88,5 +116,5 @@ export async function runReversionAlertCycle(
     }
   }
 
-  return { scanned: coverage.scanned, candidates: hits.length, drafted, skippedDedup, cappedOut };
+  return { scanned: coverage.scanned, candidates: hits.length, drafted, skippedDedup, skippedPositioned, cappedOut };
 }
