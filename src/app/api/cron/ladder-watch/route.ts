@@ -47,6 +47,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     //    drafting off); never fires or closes anything.
     const trendFlipGuard = await runTrendFlipGuard(Date.now()).catch((e) => ({ checked: -1, disarmed: [], stanceUnreadable: false, error: extractErrorMessage(e) }));
     const summary = await runLadderWatchTick({ now: Date.now() });
+    // Fire pass is DONE — close the dead-man's-switch NOW, before the advisory lanes below.
+    // They do candle I/O (the reversion scan fetches up to 8 coins); letting them run first
+    // would defer the 'success' ping and could trip the external check on a perfectly healthy
+    // fire tick. Wrapped: a healthcheck-endpoint blip must never flip a good tick to 'fail'.
+    await pingHealthcheck(hcUrl, 'success').catch(() => {});
     // Post-tick guards, all FAIL-SOFT (they must never break or fail the watcher tick):
     //  - leader guard: DISARM-ONLY — kills copy-thesis ladders whose leader exited/flipped.
     //  - expiry alert: ADVISORY — one page when an armed ladder nears expiry unfired.
@@ -76,7 +81,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     //    CPI…) enters its prep window, with the straddle:prep command. Advisory, deduped,
     //    fail-soft — never trades/arms/drafts.
     const eventPrepAlert = await runEventPrepAlert(Date.now()).catch((e) => ({ pinged: null, error: extractErrorMessage(e) }));
-    await pingHealthcheck(hcUrl, 'success');
     return NextResponse.json({ ok: true, ...summary, leaderGuard, expiryAlerts, priceAlerts, scoutHeartbeats, stewardProposals, reversionAlert, trendAlert, trendFlipGuard, eventPrepAlert });
   } catch (e) {
     await pingHealthcheck(hcUrl, 'fail');

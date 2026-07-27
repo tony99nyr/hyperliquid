@@ -34,7 +34,12 @@ export function expiryAlertVerdict(
   // instantly on arm (the bug: a fixed 12h trips any ≤12h-window ladder at arm time).
   const armedMs = ladder.armedAt ? Date.parse(ladder.armedAt) : NaN;
   const totalWindow = Number.isFinite(armedMs) ? expMs - armedMs : Number.POSITIVE_INFINITY;
-  const effWindow = Math.min(windowMs, EXPIRY_ALERT_WINDOW_FRAC * totalWindow);
+  // Floor at 30m (≥ the ~5m cron cadence): a deliberately SHORT-armed ladder has a tiny
+  // FRAC×window (minutes) that can fall entirely between ticks — then the page the module
+  // exists for is silently skipped and the ladder dies unpaged. A too-early page on a very
+  // short ladder is the acceptable side of that trade (advisory + deduped, fires once).
+  const MIN_EFF_WINDOW_MS = 30 * 60_000;
+  const effWindow = Math.max(MIN_EFF_WINDOW_MS, Math.min(windowMs, EXPIRY_ALERT_WINDOW_FRAC * totalWindow));
   if (expMs <= now || expMs - now > effWindow) return { shouldAlert: false, message: null };
 
   const pending = ladder.rungs.filter((r) => r.status === 'pending');

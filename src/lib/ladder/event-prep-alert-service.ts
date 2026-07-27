@@ -40,6 +40,25 @@ export async function runEventPrepAlert(now: number = Date.now()): Promise<Event
 
   const minsOut = Math.max(0, Math.round(e.msOut / 60_000));
   const coin = e.straddleCoin ?? 'BTC';
+
+  // Resolve the dedup home (most-recent session) and WRITE THE STAMP BEFORE pinging.
+  // The stamp is the whole dedup — the read above keys off it — so if we can't persist it,
+  // we must NOT ping (a ping with no stamp re-fires every ~5m tick for the entire prep
+  // window). Fail-closed: no session or a failed write → skip this tick, retry next.
+  const { data: sess } = await db.from('sessions').select('id').order('created_at', { ascending: false }).limit(1);
+  const sid = (sess?.[0] as { id: string } | undefined)?.id;
+  if (!sid) return { pinged: null, skipped: 'no-session-to-dedup-against' };
+  try {
+    await writeAnalysisLog({
+      sessionId: sid,
+      source: 'event-prep-alert',
+      severity: 'warn',
+      message: `Event prep window: ${e.name} in ~${minsOut}m — pinged to prep + arm the ${coin} straddle.`,
+    });
+  } catch {
+    return { pinged: null, skipped: 'dedup-write-failed' };
+  }
+
   const base = validateEnv().COCKPIT_BASE_URL.replace(/\/$/, '');
   const msg =
     `🚨 **${e.name} in ~${minsOut} min — PREP + ARM THE STRADDLE NOW**\n` +
@@ -47,18 +66,5 @@ export async function runEventPrepAlert(now: number = Date.now()): Promise<Event
     `Drafts the two OCO legs off the LIVE pre-print reference — then arm in the cockpit ` +
     `👉 ${base}/cockpit?tab=ladders  (don't hold naked directional risk through the print).`;
   if (isDiscordConfigured()) await sendDiscord(msg, 'HL Event Desk').catch(() => {});
-
-  // Write the dedup stamp to the most-recent session (guaranteed to exist given trade
-  // history) so the dedup holds even when no session is "active".
-  const { data: sess } = await db.from('sessions').select('id').order('created_at', { ascending: false }).limit(1);
-  const sid = (sess?.[0] as { id: string } | undefined)?.id;
-  if (sid) {
-    await writeAnalysisLog({
-      sessionId: sid,
-      source: 'event-prep-alert',
-      severity: 'warn',
-      message: `Event prep window: ${e.name} in ~${minsOut}m — pinged to prep + arm the ${coin} straddle.`,
-    }).catch(() => {});
-  }
   return { pinged: e.name };
 }
