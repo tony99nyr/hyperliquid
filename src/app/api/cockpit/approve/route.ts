@@ -24,6 +24,7 @@ import {
   getPendingAction,
 } from '@/lib/cockpit/pending-actions-service';
 import { serverValidateLeverage } from '@/lib/trading/leverage-business-logic';
+import { getTradingMode } from '@/lib/env/mode';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,19 +59,31 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'id required' }, { status: 400 });
   }
 
+  // Fetch + validate the pending action ONCE, up front. Defense-in-depth mode re-check
+  // (mirrors preview/decide): never approve an action AUTHORED in a different mode than
+  // the live system — if TRADING_MODE flipped paper⇄live between create and approve, refuse
+  // rather than let a paper-authored action be approved for live execution (or vice-versa).
+  const action = await getPendingAction(id);
+  if (!action || action.status !== 'pending') {
+    return NextResponse.json(
+      { ok: false, error: 'Action is not pending (already decided or not found)' },
+      { status: 409 },
+    );
+  }
+  const mode = getTradingMode();
+  if (action.mode !== mode) {
+    return NextResponse.json(
+      { ok: false, error: `Action was created in ${action.mode} mode but the system is now ${mode} — discard and recreate it.` },
+      { status: 409 },
+    );
+  }
+
   // When the popup sent a leverage, SERVER-VALIDATE it against the proposal's
   // coin max (DON'T trust the client) and approve+stamp it atomically. When no
   // leverage was sent (or the action isn't an opening entry), fall through to the
   // plain decide — the proposal's own leverage is kept. NO-AUTO-FIRE is unchanged:
   // both paths only flip the row to 'approved'; nothing here fires a trade.
   if (rawLeverage !== undefined && rawLeverage !== null) {
-    const action = await getPendingAction(id);
-    if (!action || action.status !== 'pending') {
-      return NextResponse.json(
-        { ok: false, error: 'Action is not pending (already decided or not found)' },
-        { status: 409 },
-      );
-    }
     const coinMax = action.proposal.display.coinMaxLeverage ?? 1;
     const fallback = action.proposal.intent.leverage ?? 1;
     const validated = serverValidateLeverage(rawLeverage, coinMax, fallback);

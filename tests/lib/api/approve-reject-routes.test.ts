@@ -10,7 +10,9 @@ const verifyAdminAuth = vi.fn();
 const decidePendingAction = vi.fn();
 const approveWithLeverage = vi.fn();
 const getPendingAction = vi.fn();
+const getTradingMode = vi.fn();
 
+vi.mock('@/lib/env/mode', () => ({ getTradingMode: () => getTradingMode() }));
 vi.mock('@/lib/infrastructure/auth/auth', () => ({
   verifyAdminAuth: (...a: unknown[]) => verifyAdminAuth(...a),
   getClientIdentifier: (req: { headers: { get: (k: string) => string | null } }) =>
@@ -38,6 +40,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   _resetRateLimits();
   verifyAdminAuth.mockResolvedValue(true);
+  getTradingMode.mockReturnValue('live');
+  // Default: a pending action authored in the SAME mode as the system (the mode re-check passes).
+  getPendingAction.mockResolvedValue({ id: 'a1', status: 'pending', mode: 'live', proposal: { intent: {}, display: {} } });
 });
 
 describe('POST /api/cockpit/approve', () => {
@@ -88,6 +93,7 @@ describe('POST /api/cockpit/approve — leverage (Item 3, server-validated)', ()
     return {
       id: 'a1',
       status: 'pending',
+      mode: 'live', // matches the default getTradingMode() in beforeEach
       proposal: {
         intent: { coin: 'ETH', side: 'buy', sz: 1, reduceOnly: false, leverage: 5 },
         display: { coin: 'ETH', side: 'buy', sz: 1, coinMaxLeverage: 20, leverage: 5 },
@@ -95,6 +101,14 @@ describe('POST /api/cockpit/approve — leverage (Item 3, server-validated)', ()
       ...over,
     };
   }
+
+  it('409s when the action was authored in a DIFFERENT mode than the system (lane re-check)', async () => {
+    getPendingAction.mockResolvedValue(pendingAction({ mode: 'paper' })); // system is 'live'
+    const res = await approve(req({ id: 'a1', leverage: 8 }));
+    expect(res.status).toBe(409);
+    expect(approveWithLeverage).not.toHaveBeenCalled();
+    expect(decidePendingAction).not.toHaveBeenCalled();
+  });
 
   it('SERVER-VALIDATES the chosen leverage to the coin max (clamps a too-high client value)', async () => {
     getPendingAction.mockResolvedValue(pendingAction());

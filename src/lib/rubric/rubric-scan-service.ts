@@ -8,6 +8,7 @@
 
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import { listActiveSessions } from '@/lib/cockpit/session-service';
+import { getTradingMode } from '@/lib/env/mode';
 import { loadOpenPositions } from '@/lib/cockpit/fill-persistence-service';
 import { assessHealth } from '@/lib/health/health-engine';
 import { loadRubricConfig, resolveCoinConfig } from './rubric-config';
@@ -45,9 +46,14 @@ const ASSISTANCE_FUND_ADDRESS = '0xfefefefefefefefefefefefefefefefefefefefe';
 
 const SNAPSHOT_RETENTION_MS = 180 * 24 * 60 * 60 * 1000; // 180d — this series is the desk's free OI/funding/flow history; keep it long
 
-/** Open (non-flat) legs across all active sessions, for the portfolio cap. */
+/** Open (non-flat) legs across active sessions OF THIS DEPLOYMENT'S MODE, for the
+ *  portfolio cap. Mode-scoped on purpose: the OpportunityBoard is the live surface, and a
+ *  PAPER scout position must NEVER count against the operator's live portfolio-beta cap
+ *  (nor vice-versa) — that would let paper exposure veto real live opportunities. Same
+ *  mode-blind-listActiveSessions class as the auto-exit cross-lane incident. */
 async function gatherOpenLegs(): Promise<Array<OpenLeg & { sessionId: string }>> {
-  const sessions = await listActiveSessions();
+  const mode = getTradingMode();
+  const sessions = (await listActiveSessions()).filter((s) => s.mode === mode);
   const legs: Array<OpenLeg & { sessionId: string }> = [];
   for (const s of sessions) {
     let positions;

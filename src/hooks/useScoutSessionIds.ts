@@ -35,6 +35,9 @@ export function useScoutSessionIds(enabled = true): ScoutSessionIds {
           .select('id')
           // Mirrors the server resolver's title branch (scout + archived history) —
           // the bare eq('title','scout') went blind when the session was archived.
+          // mode='paper' is REQUIRED: without it a live session ever titled 'scout*'
+          // would surface as scout (paper) rows in the anon Scout panel (lane conflation).
+          .eq('mode', 'paper')
           .or('title.eq.scout,title.like.scout-archived%')
           .order('created_at', { ascending: false });
         if (!cancelled) setIds((data ?? []).map((r) => (r as { id: string }).id));

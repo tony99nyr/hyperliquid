@@ -6,6 +6,7 @@
  */
 
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
+import { scoutSessionIds } from '@/lib/scout/scout-session-service';
 import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
 import { fetchSpotUsdcBalance, fetchClearinghouseState } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { fetchAllMids } from '@/lib/hyperliquid/hyperliquid-info-service';
@@ -46,8 +47,10 @@ interface PositionRow {
 /** Paper equity = starting + realized (net of fees) + unrealized (open marked to mid). */
 async function computeScoutEquity(): Promise<number> {
   const client = getServiceRoleClient();
-  const { data: sessions } = await client.from('sessions').select('id').eq('title', 'scout');
-  const ids = (sessions ?? []).map((s) => (s as { id: string }).id);
+  // Canonical resolver (mode='paper' + archived + hypothesis-owner sessions). The bare
+  // eq('title','scout') under-counted — it missed archived + lane-tagged paper sessions,
+  // so paper equity read near the $1000 anchor forever and the scout breaker under-triggered.
+  const ids = await scoutSessionIds(client);
   let equity = startingEquityUsd();
   if (ids.length === 0) return equity;
 
