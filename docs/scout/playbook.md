@@ -124,4 +124,20 @@ follows this rule and counts.
 - 2026-07-01: negative-funding shorts into a flush lost 4/5 (avg -$X). Require
   confirmed 8h+1d bearish regime before shorting against funding. -->
 
-_(none yet — the track record is empty)_
+### 2026-07-28 review — reversion-extreme is FAILING (n=12, −0.55R); account KILL
+Scorecard: account NET **−$32.58** over 19 trades / 35d (13% win) → deterministic **KILL**.
+The one active edge, reversion-extreme: **−0.55R expectancy over 12 closed (2 wins), net
+−$5.7** — below breakeven, far below the +0.15R graduation bar.
+- **Failure mode (evidence):** fades of dislocations that **keep trending** drive the losses —
+  BTC z=3.94 (−1.07R), SOL/BTC down-fades z=−3.16/−3.04/−2.58 that extended (−0.5..−0.6R each),
+  BTC z=2.74 tagged regime=bullish/50% (−1.76R). The ER≤0.35 + 4h-regime range gate is admitting
+  **fast directional legs**, not just range dislocations. The 2 wins were tiny (+0.38R, +0.03R)
+  while losers ran full stops — the asymmetry of a negative edge.
+- **Discipline (do NOT p-hack):** the pre-registered decision point is **n=15 (≈3 trades away)**
+  or 21 days — NOT yet reached, so the frozen rule stays frozen: no loosening, no tightening, no
+  new gate mid-test (that resets the clock). Let it reach n=15 → KILL (near-certain) or the rare
+  reprieve. Any redesign (e.g. a fresh-move / short-TF-trend-alignment filter) is a **NEW
+  pre-registration**, not an edit to this one.
+- **Separation:** the operator-facing Discord-alert / ladder-draft lane is NOT this frozen
+  paper ledger — its filtering (e.g. don't draft a fade against an aligned short-TF trend) may
+  be tightened freely without touching the forward test.
