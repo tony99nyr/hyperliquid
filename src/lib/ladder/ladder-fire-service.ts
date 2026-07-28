@@ -315,7 +315,10 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
   if (rung.action === 'add') {
     const pos = await loadPosition(sessionId, coin);
     let hlPos: HlPosition | null = null;
-    if (getTradingMode() === 'live') {
+    // Read the live clearinghouse ONLY for a genuine live fire (!forcePaper = live ladder on
+    // a live deployment). A paper ladder must never source its add-coverage profit from the
+    // LIVE account's same-coin position — it uses its own paper position (lane consistency).
+    if (!forcePaper) {
       const address = getHlAccountAddress();
       if (address) hlPos = (await fetchClearinghouseState(address, { uncached: true })).positions.find((p) => p.coin.toUpperCase() === coin) ?? null;
     }

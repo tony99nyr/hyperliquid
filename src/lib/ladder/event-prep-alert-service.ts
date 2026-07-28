@@ -14,6 +14,7 @@ import { prepDueEvent } from '@/lib/skills/event-calendar-business-logic';
 import { sendDiscord, isDiscordConfigured } from '@/lib/infrastructure/notify/discord-notify';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 import { validateEnv } from '@/lib/env/env';
+import { getTradingMode } from '@/lib/env/mode';
 
 export interface EventPrepAlertResult {
   pinged: string | null;
@@ -45,7 +46,14 @@ export async function runEventPrepAlert(now: number = Date.now()): Promise<Event
   // The stamp is the whole dedup — the read above keys off it — so if we can't persist it,
   // we must NOT ping (a ping with no stamp re-fires every ~5m tick for the entire prep
   // window). Fail-closed: no session or a failed write → skip this tick, retry next.
-  const { data: sess } = await db.from('sessions').select('id').order('created_at', { ascending: false }).limit(1);
+  // Mode-scoped: the dedup stamp belongs on THIS deployment's own lane — a live event-prep
+  // row must not land on a paper (scout) session (a mode-blind "newest session" could).
+  const { data: sess } = await db
+    .from('sessions')
+    .select('id')
+    .eq('mode', getTradingMode())
+    .order('created_at', { ascending: false })
+    .limit(1);
   const sid = (sess?.[0] as { id: string } | undefined)?.id;
   if (!sid) return { pinged: null, skipped: 'no-session-to-dedup-against' };
   try {

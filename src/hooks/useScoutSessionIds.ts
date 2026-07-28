@@ -30,17 +30,42 @@ export function useScoutSessionIds(enabled = true): ScoutSessionIds {
     let cancelled = false;
     const fetchIds = async (): Promise<void> => {
       try {
-        const { data } = await getBrowserClient()
+        const client = getBrowserClient();
+        // Branch 1 — TITLE (newest-first, drives latestId = the active scout session).
+        // mode='paper' is REQUIRED: without it a live session ever titled 'scout*' would
+        // surface as scout (paper) rows in the anon Scout panel (lane conflation).
+        const { data: titled } = await client
           .from('sessions')
           .select('id')
-          // Mirrors the server resolver's title branch (scout + archived history) —
-          // the bare eq('title','scout') went blind when the session was archived.
-          // mode='paper' is REQUIRED: without it a live session ever titled 'scout*'
-          // would surface as scout (paper) rows in the anon Scout panel (lane conflation).
           .eq('mode', 'paper')
           .or('title.eq.scout,title.like.scout-archived%')
           .order('created_at', { ascending: false });
-        if (!cancelled) setIds((data ?? []).map((r) => (r as { id: string }).id));
+        const ordered = (titled ?? []).map((r) => (r as { id: string }).id);
+        const seen = new Set(ordered);
+
+        // Branch 2 — HYPOTHESES-OWNER (membership completeness; mirrors the server
+        // `scoutSessionIds` resolver): paper sessions that own a lane-tagged hypothesis but
+        // aren't titled scout*. Appended AFTER the title branch so latestId is unchanged.
+        const { data: hyp } = await client
+          .from('hypotheses')
+          .select('session_id')
+          .not('lane', 'is', null)
+          .order('created_at', { ascending: false })
+          .limit(1000);
+        const hypIds = Array.from(new Set((hyp ?? []).map((h) => (h as { session_id: string }).session_id))).filter(
+          (id) => id && !seen.has(id),
+        );
+        if (hypIds.length > 0) {
+          const { data: owners } = await client.from('sessions').select('id').eq('mode', 'paper').in('id', hypIds);
+          for (const s of owners ?? []) {
+            const id = (s as { id: string }).id;
+            if (!seen.has(id)) {
+              ordered.push(id);
+              seen.add(id);
+            }
+          }
+        }
+        if (!cancelled) setIds(ordered);
       } catch {
         if (!cancelled) setIds([]);
       }
