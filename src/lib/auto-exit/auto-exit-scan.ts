@@ -16,11 +16,18 @@ export interface ScanCandidate {
   coin: string;
 }
 
-/** Every open (non-flat) position across active sessions, as exit candidates. */
+/** Every open (non-flat) position across active LIVE sessions, as exit candidates.
+ *
+ * LIVE-ONLY by construction (both consumers — the auto-exit fire path AND the liq
+ * alert — act on the REAL account): a PAPER (scout) session's position must NEVER
+ * enter this list, or the auto-exit closes the live account's same-coin position off
+ * a paper signal (the 2026-07-28 cross-lane incident: a paper SOL long's health→0
+ * flattened the live SOL short). The scout manages its own paper exits. */
 export async function listExitCandidates(): Promise<ScanCandidate[]> {
   const sessions = await listActiveSessions();
   const candidates: ScanCandidate[] = [];
   for (const session of sessions) {
+    if (session.mode !== 'live') continue; // paper positions are out of scope for the live auto-exit
     let positions;
     try {
       positions = await loadOpenPositions(session.id);

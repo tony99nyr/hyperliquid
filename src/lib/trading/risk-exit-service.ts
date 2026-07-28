@@ -18,6 +18,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { loadPosition } from '@/lib/cockpit/fill-persistence-service';
+import { getSession } from '@/lib/cockpit/session-service';
 import { executeIntent } from '@/lib/trading/fill-source';
 import { buildMarketReduceOnlyClose } from '@/lib/trading/safe-exit-business-logic';
 import { assessHealth } from '@/lib/health/health-engine';
@@ -63,6 +64,17 @@ export async function performRiskExit(args: {
   const { sessionId, now } = args;
   const coin = args.coin.toUpperCase();
   const config = loadAutoExitConfig();
+
+  // 0) LANE BOUNDARY (defense-in-depth with the LIVE-only scan): the Layer-1 auto-exit
+  //    reads the live clearinghouse and fires a live reduce-only close — so it must ONLY
+  //    ever run for a LIVE session. A PAPER (scout) session's position must never reach
+  //    here; otherwise, in a live deployment, a paper position's trigger closes the live
+  //    account's same-coin position (the 2026-07-28 cross-lane incident). The scout owns
+  //    its own paper exits. Refuse a missing / non-live session with no I/O beyond this read.
+  const session = await getSession(sessionId);
+  if (!session || session.mode !== 'live') {
+    return { fired: false, reason: null, skipped: 'not-live-session' };
+  }
 
   // 1) Live position — nothing to do if flat.
   const position = await loadPosition(sessionId, coin);

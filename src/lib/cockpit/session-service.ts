@@ -73,6 +73,26 @@ export async function getActiveSession(
 }
 
 /**
+ * Fetch a single session by id (any status/mode), or null. Used where a caller has
+ * only a sessionId and must know the session's MODE before acting — e.g. the auto-exit
+ * must confirm a candidate belongs to a LIVE session before it can fire a live close.
+ */
+export async function getSession(
+  sessionId: string,
+  clientFactory: () => SupabaseClient = getServiceRoleClient,
+): Promise<Session | null> {
+  let client: SupabaseClient;
+  try {
+    client = clientFactory();
+  } catch {
+    return null; // Supabase not configured yet — fail soft.
+  }
+  const { data, error } = await client.from('sessions').select('*').eq('id', sessionId).maybeSingle();
+  if (error || !data) return null;
+  return toSession(data as SessionRow);
+}
+
+/**
  * List ALL active sessions (most-recent first). Used by the non-agent watch
  * daemon, which monitors every active sitting (not just the single newest one
  * the cockpit live-tracks). Fail-soft: returns [] when Supabase is unconfigured

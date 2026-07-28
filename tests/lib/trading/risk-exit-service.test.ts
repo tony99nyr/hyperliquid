@@ -14,7 +14,9 @@ const acquireExitLock = vi.fn();
 const releaseExitLock = vi.fn();
 const loadAutoExitConfig = vi.fn();
 const getHlAccountAddress = vi.fn();
+const getSession = vi.fn();
 
+vi.mock('@/lib/cockpit/session-service', () => ({ getSession: (...a: unknown[]) => getSession(...a) }));
 vi.mock('@/lib/cockpit/fill-persistence-service', () => ({ loadPosition: (...a: unknown[]) => loadPosition(...a) }));
 vi.mock('@/lib/trading/fill-source', () => ({ executeIntent: (...a: unknown[]) => executeIntent(...a) }));
 vi.mock('@/lib/health/health-engine', () => ({ assessHealth: (...a: unknown[]) => assessHealth(...a) }));
@@ -57,6 +59,7 @@ function fullFill(over: Partial<CanonicalFill> = {}): CanonicalFill {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  getSession.mockResolvedValue({ id: 's1', mode: 'live' }); // the auto-exit only runs for LIVE sessions
   getTradingMode.mockReturnValue('paper'); // no clearinghouse path
   getHlAccountAddress.mockReturnValue(undefined);
   loadAutoExitConfig.mockReturnValue(CONFIG);
@@ -68,6 +71,25 @@ beforeEach(() => {
 });
 
 describe('performRiskExit', () => {
+  it('REFUSES a paper (scout) session — never touches the clearinghouse or fires (lane boundary)', async () => {
+    getSession.mockResolvedValue({ id: 'scout1', mode: 'paper' });
+    loadPosition.mockResolvedValue(LONG); // even with a losing position present
+    const r = await performRiskExit({ sessionId: 'scout1', coin: 'SOL', now: 1 });
+    expect(r.fired).toBe(false);
+    expect(r.skipped).toBe('not-live-session');
+    expect(loadPosition).not.toHaveBeenCalled(); // guard is before ANY position/mark/venue read
+    expect(fetchClearinghouseState).not.toHaveBeenCalled();
+    expect(executeIntent).not.toHaveBeenCalled();
+  });
+
+  it('REFUSES when the session is missing/deleted (fail-closed)', async () => {
+    getSession.mockResolvedValue(null);
+    const r = await performRiskExit({ sessionId: 'gone', coin: 'ETH', now: 1 });
+    expect(r.fired).toBe(false);
+    expect(r.skipped).toBe('not-live-session');
+    expect(executeIntent).not.toHaveBeenCalled();
+  });
+
   it('fires a reduce-only close when a trigger is met (max-loss-usd: -$50)', async () => {
     loadPosition.mockResolvedValue(LONG); // mark 950 → uPnL -50 ≤ -40
     executeIntent.mockResolvedValue(fullFill());
