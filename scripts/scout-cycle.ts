@@ -302,15 +302,28 @@ run(async () => {
     line(`Reason: ${inputs.degradedReason}. Do NOT open a trade on this snapshot.`);
     line('Manage existing positions conservatively (favor safety); wait for a fresh feed before any entry.');
   }
-  header('RUBRIC (newest per coin×side)');
+  header('RUBRIC (newest per coin×side — GO crossing = the rubric-crossing paper lane)');
   inputs.rubric
     .slice()
     .sort((a, b) => b.opportunity - a.opportunity)
-    .forEach((r) => line(`${r.coin} ${r.side.padEnd(5)} opp=${Math.round(r.opportunity)} ${r.badge}`));
+    .forEach((r) =>
+      line(
+        `${r.coin} ${r.side.padEnd(5)} opp=${Math.round(r.opportunity)} ${r.badge}` +
+          (r.badge === 'GO'
+            ? `  -> if no open position on it: ${r.side === 'short' ? "SHORT lane 'breakdown-short'" : "LONG lane 'reclaim-long'"}, setupType 'rubric-crossing', stop 2.5%; exit when it drops out of GO`
+            : ''),
+      ),
+    );
 
-  header('REGIME (4h, vendored iamrossi detector — TREND vs range background)');
+  header('REGIME (4h, vendored iamrossi detector — TREND vs range; CONFIDENT TREND = the trend-follow paper lane)');
   if (Object.keys(regimeByCoin).length === 0) line('(regime read unavailable this cycle)');
-  for (const [coin, r] of Object.entries(regimeByCoin)) line(`${coin}: ${r.regime.toUpperCase()} conf=${(r.confidence * 100).toFixed(0)}% trend=${r.trend.toFixed(2)}  ${r.regime !== 'neutral' && r.confidence >= DEFAULT_REVERSION_CONFIG.maxTrendConfidence ? '→ CONFIDENT TREND (reversion lane skips; trend-follow candidate)' : '→ range/neutral (reversion lane active)'}`);
+  for (const [coin, r] of Object.entries(regimeByCoin)) {
+    const confidentTrend = r.regime !== 'neutral' && r.confidence >= DEFAULT_REVERSION_CONFIG.maxTrendConfidence;
+    const tag = confidentTrend
+      ? `→ CONFIDENT TREND — trend-follow candidate: if none open, enter ${r.regime === 'bullish' ? 'LONG' : 'SHORT'} lane 'trend-follow' setupType 'trend-follow' stop 4%; exit when no longer a confident trend (reversion lane skips)`
+      : '→ range/neutral (reversion lane active; no trend-follow)';
+    line(`${coin}: ${r.regime.toUpperCase()} conf=${(r.confidence * 100).toFixed(0)}% trend=${r.trend.toFixed(2)}  ${tag}`);
+  }
 
   if (household) {
     header('HOUSEHOLD EXPOSURE (iamrossi on-chain — cockpit trades STACK on this)');

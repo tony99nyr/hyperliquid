@@ -81,6 +81,33 @@ The scout reads the LIVE book (snapshot `liveBook`, read-only) and may emit
 - Never propose loosening a stop, adding to a loser, or removing protection.
 - Rate-limit yourself: repeat a proposal only if the evidence STRENGTHENED.
 
+## Lane: trend-follow (pre-registered 2026-07-28 — paper; verifies the trend-alert edge)
+
+The paper twin of the trend-alert. When the REGIME section flags a coin as a
+CONFIDENT TREND (regime bullish/bearish, conf ≥ 55%):
+- ENTER WITH the trend (bullish → long, bearish → short), ONE position per coin,
+  only if you hold none on it. Risk floor, `--stop-frac 0.04`,
+  `--lane trend-follow --setup-type trend-follow`. Thesis = "confident 4h <regime>
+  trend, riding it".
+- EXIT (MECHANICAL — not a judgment call): CLOSE the FULL position the cycle the
+  coin's 4h regime is NO LONGER a confident trend in your direction (→ neutral or
+  flips), OR the 4% stop. No target, no trail. See PREREGISTRATION_trend-follow.md.
+- Empty when the tape is ranging (the reversion lane's mirror) — that's correct.
+
+## Lane: rubric-crossing (pre-registered 2026-07-28 — paper; RETIRES 'directional')
+
+Mechanizes the desk-review breakdown-short / reclaim-long shapes. When the RUBRIC
+section shows a side at GO:
+- SHORT-GO → short, `--lane breakdown-short`; LONG-GO → long, `--lane reclaim-long`.
+  `--setup-type rubric-crossing`, ONE position per coin×side, only if none open on
+  it. Risk floor, `--stop-frac 0.025`. Thesis = "rubric <coin> <side> crossed GO
+  (opp=X)".
+- EXIT (MECHANICAL): CLOSE when that side drops OUT of GO (→ WATCH/NO-EDGE) OR the
+  2.5% stop. See PREREGISTRATION_rubric-crossing.md.
+- **`directional` is RETIRED** (0/6, unfalsifiable): take NO untagged directional
+  bet. A rubric-driven entry is ONLY one of these two tagged crossings; otherwise
+  STAND DOWN.
+
 ## Learned rules (curated by scout-review — append below)
 
 ### reversion-extreme (PRE-REGISTERED FORWARD TEST — Jul-20, not yet proven)
