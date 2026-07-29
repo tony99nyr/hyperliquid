@@ -46,14 +46,14 @@ export async function runEventPrepAlert(now: number = Date.now()): Promise<Event
   // The stamp is the whole dedup — the read above keys off it — so if we can't persist it,
   // we must NOT ping (a ping with no stamp re-fires every ~5m tick for the entire prep
   // window). Fail-closed: no session or a failed write → skip this tick, retry next.
-  // Mode-scoped: the dedup stamp belongs on THIS deployment's own lane — a live event-prep
-  // row must not land on a paper (scout) session (a mode-blind "newest session" could).
-  const { data: sess } = await db
-    .from('sessions')
-    .select('id')
-    .eq('mode', getTradingMode())
-    .order('created_at', { ascending: false })
-    .limit(1);
+  // The stamp is only an FK home for the dedup row — the dedup READ above is GLOBAL (keyed
+  // on source+message+time), so which session owns the stamp is cosmetic. PREFER a same-mode
+  // session (keep a live event-prep row off a paper lane), but FALL BACK to any session so the
+  // ping is NEVER suppressed just because no same-mode session exists (fresh-deploy edge).
+  let sess = (await db.from('sessions').select('id').eq('mode', getTradingMode()).order('created_at', { ascending: false }).limit(1)).data;
+  if (!sess?.length) {
+    sess = (await db.from('sessions').select('id').order('created_at', { ascending: false }).limit(1)).data;
+  }
   const sid = (sess?.[0] as { id: string } | undefined)?.id;
   if (!sid) return { pinged: null, skipped: 'no-session-to-dedup-against' };
   try {
