@@ -168,3 +168,21 @@ The one active edge, reversion-extreme: **−0.55R expectancy over 12 closed (2 
 - **Separation:** the operator-facing Discord-alert / ladder-draft lane is NOT this frozen
   paper ledger — its filtering (e.g. don't draft a fade against an aligned short-TF trend) may
   be tightened freely without touching the forward test.
+
+### 2026-07-31 review — worse (NET −$105); trend-follow bleeding; the "both lanes lose" tell
+Account NET **−$105.38** over 23 trades / 39d (10% win) → **KILL**, and the paper breaker is in a
+**drawdown HALT** (−18% from peak). Down ~$73 in 3 days — the driver is the NEW **trend-follow**
+lane: **−$69.30 over 4 trades, 0% win, −0.37R.** It entered 4 confident-4h trends and all
+**reversed and stopped out** (~full 4% stop each) — trend-following whipsawed by a choppy tape.
+- **THE TELL (the real finding):** the FADE lane (reversion, −0.55R) and the FOLLOW lane
+  (trend-follow, −0.37R) are losing **simultaneously**. That's the paradox that resolves to one
+  answer: at the scout's **15m-entry / 4h-regime timescale**, BTC/majors are **choppy noise** —
+  neither clean persistence (trend) nor clean mean-reversion (fade) survives the ~9bps round-trip.
+  Strong evidence there is **no mechanical edge at this timescale/instrument** for this account —
+  which is exactly what the falsification engine exists to surface.
+- **Discipline:** both reversion (n=12) and trend-follow (n=4) are BELOW their n=15 pre-registered
+  kill points — let them run to n=15 (the paper bleed IS the honest cost of the test; don't kill
+  early or p-hack). Near-certain KILL for both at n=15. `directional` (0/6, no frozen rule) should
+  be **retired** now. Only the passive benchmarks (carry +$3, vault +$0.3) are non-negative.
+- **Implication:** if both graduate to KILL, the honest next step is NOT another 15m mechanical
+  lane — it's a different timescale (HTF/daily) or a structural/behavioral edge, pre-registered fresh.
