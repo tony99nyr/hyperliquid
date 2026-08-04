@@ -10,7 +10,11 @@
  * Contractually FAIL-OPEN toward iamrossi and FAIL-CLOSED toward drafting:
  * unreadable/unconfigured ⇒ null ⇒ no drafts happen (and the flip guard treats
  * null as "cannot verify", never as a flip). Short in-module cache — the stance
- * only changes on the 8h cron beat, so a 2-min TTL is generous.
+ * only changes on the 8h cron beat (or when that system trades), and the 2-min
+ * TTL is kept deliberately TIGHT for the flip guard's disarm latency, not for
+ * cost: since 2026-08 the producer serves a Redis-cached payload (its
+ * stance-cache.ts, busted post-trade and on the cron beat), so each fetch here
+ * is cheap for it — do not widen this TTL to "save" the producer.
  */
 
 import 'server-only';
@@ -100,10 +104,14 @@ export async function fetchTrendStance(now: number = Date.now()): Promise<TrendS
     if (!res.ok) return null;
     const body = (await res.json()) as { ok?: boolean; generatedAt?: number; stances?: unknown[] };
     if (body.ok !== true || !Array.isArray(body.stances)) return null;
-    // Staleness gate — honest about its reach: generatedAt is stamped at RESPONSE
-    // time by the producer (which recomputes regime per request), so this catches a
-    // frozen proxy/cache/replayed payload, NOT a paused producer whose upstream
-    // candle store went stale (that needs a per-computation timestamp — deferred).
+    // Staleness gate — since 2026-08 the producer stamps generatedAt at
+    // COMPUTATION time (its Redis payload cache writes it once and serves it
+    // for up to 15 min, busted post-trade and on the 8h beat), so this now
+    // measures real snapshot age instead of response time. In practice the
+    // producer's setEx TTL bounds age at ~15 min, so this 9h gate only fires
+    // on a frozen proxy/replayed payload. It still can't see a paused producer
+    // whose upstream candle store went stale — the recompute would stamp fresh
+    // over stale candles (a candle-age field is the remaining gap).
     // A missing/garbage generatedAt is treated as unreadable (fail-closed).
     const generatedAtMs = Number(body.generatedAt);
     if (!Number.isFinite(generatedAtMs)) return null;
