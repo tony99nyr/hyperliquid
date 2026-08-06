@@ -186,3 +186,27 @@ lane: **−$69.30 over 4 trades, 0% win, −0.37R.** It entered 4 confident-4h t
   be **retired** now. Only the passive benchmarks (carry +$3, vault +$0.3) are non-negative.
 - **Implication:** if both graduate to KILL, the honest next step is NOT another 15m mechanical
   lane — it's a different timescale (HTF/daily) or a structural/behavioral edge, pre-registered fresh.
+
+### 2026-08-06 review — reversion KILL bar FIRED (clean); scout dormant 6 days; HTF pre-registered
+Account NET **−$113.52** over 23 trades / **44.2 days** (10% win) → **KILL**; monthly run-rate
+−$77/mo. Zero new trades since the 07-31 review (still 23 total / reversion 12 / trend-follow 4) —
+the neutral chop of early August surfaced no candidates (and the operator-facing reversion
+alert lane was muted 08-01, [[reversion-alert-muted]]). Verify the scout daemon is alive, not
+just quiet ([[scout-repair-jul-2026]] — the consumer has died silently before).
+- **reversion-extreme → KILL (pre-registered, NOT early).** The frozen bar is "net < 0 past **21
+  days** with ≥3 closed." We are at **44 days, n=12, −0.55R, net −$14** → the TIME criterion has
+  fired cleanly. This is the pre-registered decision point arriving, not a p-hack. **Retire the
+  lane.** Any redesign (fresh-move filter, short-TF-alignment gate) is a NEW pre-registration.
+- **directional → RETIRE.** 0/6, no frozen rule — flagged for retirement 07-31, do it now.
+- **trend-follow → HOLD THE FROZEN BAR (do not KILL early).** n=4, ~9 days since it registered —
+  BELOW both its criteria (n≥15 OR 21 days). It is the worst bleeder (−$72.59, 0/4, −0.37R) and
+  near-certain to KILL at its ≈Aug-18 time bar, but killing at n=4 is exactly the loss-driven
+  premature judgment the pre-reg guards against (trend-follow is DESIGNED low-win + lumpy). Let
+  the frozen bar arrive; it is dormant meanwhile, so this costs nothing.
+- **leader-follow / vault:HLP / carry → CONTINUE** as controls only (n=1 and two passive
+  benchmarks; not edges under test).
+- **THE PIVOT (the actual forward work):** the only test worth BUILDING now is the pre-registered
+  **`htf-trend`** daily Donchian-breakout lane (c710516, [[PREREGISTRATION_htf-trend]]) — a
+  different timescale + mechanism, the honest response to the confirmed "no mechanical edge at
+  15m/4h" finding. It needs its signal-surfacing built into the scout cycle before it trades;
+  that build — not another 15m lane — is where effort goes next.
