@@ -62,10 +62,12 @@ Judged by `scout:review` (`setupTypeExpectancy` + the per-lane card):
 - **Compliance-on-the-model exit** (same as reversion/trend-follow): the 10-day-reversal exit is
   a deterministic SIGNAL, but the close still executes through the model's `scout:trade --exit` —
   a scout-side auto-close is the future hardening if compliance slips.
-- **Implementation is a separate build:** this doc freezes the RULE. Surfacing the daily Donchian
-  channels (20-day high/low, 10-day exit bands, ATR20) + the breakout/exit signals in the scout
-  cycle is the next step, mirroring the reversion scan. NO trade counts until that's live and the
-  scout is trading this lane per this frozen rule.
+- **Implementation — BUILT 2026-08-06.** The pure signal (`htf-trend-signal-business-logic.ts`,
+  fixture-tested) + the daily scan (`htf-trend-scan-service.ts`) + the `HTF-TREND SCAN` cycle
+  section are live: the scout now sees the 20-day/10-day channels + ATR20 + breakout/exit levels
+  each cycle. The forward test begins once the scout daemon is revived and trades this lane per
+  this frozen rule; NO trade counts before then. (Exit is `htfTrendExitHit` — the 10-day-channel
+  close-through — surfaced for the model; nothing auto-fires it, per the honest limit above.)
 
 ## Why this, and why it's a fair test
 

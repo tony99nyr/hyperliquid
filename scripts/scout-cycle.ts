@@ -31,6 +31,7 @@ import { fetchClearinghouseState } from '@/lib/hyperliquid/hyperliquid-info-serv
 import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
 import { DEFAULT_REVERSION_CONFIG } from '@/lib/scout/reversion-signal-business-logic';
 import { type ReversionHit, type RegimeRead } from '@/lib/scout/reversion-scan-service';
+import { type HtfTrendCoinRead } from '@/lib/scout/htf-trend-scan-service';
 
 interface VaultRow { vault_address: string; name: string; kind: string; nav_usd: number | null; apr_annual: number | null; max_drawdown_pct: number | null; age_days: number | null; leader_fraction: number | null }
 
@@ -81,14 +82,26 @@ run(async () => {
   // The reversion scan (4h regime read → 15m fade signal per coin) is shared with the
   // trigger daemon via reversion-scan-service, so the snapshot the model sees and the
   // deterministic reversion-extreme trigger run IDENTICAL logic. Fail-soft.
+  const scanCoins = inputs.marks.map((m) => m.coin).slice(0, 6);
   let regimeByCoin: Record<string, RegimeRead> = {};
   let reversionHits: ReversionHit[] = [];
   try {
     const { scanReversionExtremes } = await import('@/lib/scout/reversion-scan-service');
-    const scanCoins = inputs.marks.map((m) => m.coin).slice(0, 6);
     const scan = await scanReversionExtremes(scanCoins, now);
     regimeByCoin = scan.regimeByCoin;
     reversionHits = scan.hits;
+  } catch { /* scan unavailable → section just prints empty */ }
+
+  // 3b-ii-b) HTF-TREND SCAN (pre-registered 2026-08-01) — daily Donchian 20-day breakout,
+  // the DIFFERENT-timescale test after fade+follow both died at 15m/4h. Surfaces one read
+  // per coin: the 20d/10d channels (always — so an OPEN htf-trend position's 10-day
+  // close-through EXIT is checkable here) + a breakout when the completed daily close broke
+  // the 20-day channel. Fail-soft. See docs/scout/PREREGISTRATION_htf-trend.md.
+  let htfReads: HtfTrendCoinRead[] = [];
+  try {
+    const { scanHtfTrend } = await import('@/lib/scout/htf-trend-scan-service');
+    const scan = await scanHtfTrend(scanCoins, now);
+    htfReads = scan.reads;
   } catch { /* scan unavailable → section just prints empty */ }
 
   // 3b-iii) HOUSEHOLD EXPOSURE (Phase 3, Jul-21) — iamrossi's on-chain Base Safe
@@ -333,6 +346,19 @@ run(async () => {
   header('REVERSION SCAN (extreme-stretch FADE candidates — PAPER lane reversion-extreme; 4h-regime-gated)');
   if (reversionHits.length === 0) line('(none — no coin is extremely stretched in a range regime; trending tape correctly yields nothing)');
   for (const h of reversionHits) line(`${h.coin} FADE ${h.side.toUpperCase()} (z=${h.z.toFixed(1)}, ER=${h.er.toFixed(2)}, 4h-regime=${h.regime}/${(h.regimeConf * 100).toFixed(0)}%)  mark=${h.mark} stop=${h.stop.toFixed(4)} target=${h.target.toFixed(4)} stopFrac=${(h.stopFrac * 100).toFixed(1)}%  -> if taken: lane 'reversion', setupType 'reversion-extreme'`);
+
+  header("HTF-TREND SCAN (DAILY Donchian 20d breakout — PAPER lane htf-trend, setupType 'donchian-20-10'; pre-registered 2026-08-01)");
+  if (htfReads.length === 0) line('(daily scan unavailable this cycle)');
+  for (const r of htfReads) {
+    const px = (x: number) => (r.latestClose >= 1000 ? x.toFixed(0) : r.latestClose >= 10 ? x.toFixed(2) : x.toFixed(4));
+    const base =
+      `${r.coin} close=${px(r.latestClose)}  20d[H ${px(r.don20High)} L ${px(r.don20Low)}]  10d[H ${px(r.don10High)} L ${px(r.don10Low)}]  ATR20=${px(r.atr)}` +
+      `  [OPEN LONG exits if a daily close < ${px(r.don10Low)}; OPEN SHORT exits if a daily close > ${px(r.don10High)}]`;
+    const bo = r.breakout
+      ? `  → BREAKOUT ${r.breakout.side.toUpperCase()} entry=${px(r.breakout.entryPx)} stop=${px(r.breakout.stopPx)} (stopFrac ${(r.breakout.stopFrac * 100).toFixed(1)}%): if NONE open on ${r.coin}, ENTER lane 'htf-trend' setupType 'donchian-20-10' regime 'trend' — NO fixed target (let it run); exit ONLY on the 10-day-channel close-through above or the stop`
+      : '';
+    line(base + bo);
+  }
 
   header('MARKS');
   inputs.marks.forEach((m) => line(`${m.coin} = ${m.markPx}`));
