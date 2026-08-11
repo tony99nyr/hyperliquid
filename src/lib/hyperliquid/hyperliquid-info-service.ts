@@ -27,6 +27,13 @@ export function hlInfoUrlFor(network: 'mainnet' | 'testnet'): string {
   return network === 'testnet' ? HL_INFO_URL_TESTNET : HL_INFO_URL;
 }
 const REQUEST_TIMEOUT_MS = 8000;
+// HL's info endpoint enforces a per-IP weight budget; a fan-out (desk-review, the
+// scout cycle) or the always-on daemons sharing an IP can transiently exhaust it →
+// HTTP 429. These control the backoff+retry that rides through those short windows so
+// a single 429 no longer greys out an entire market read. Retryable = 429 / 5xx /
+// network-abort; a non-429 4xx is a real client error and fails fast (no retry).
+const MAX_INFO_RETRIES = 3; // up to 4 total attempts
+const RETRY_BASE_MS = 300; // exponential: ~300 / 600 / 1200 ms (+ jitter)
 const POSITION_CACHE_TTL_MS = 15_000;
 const FILLS_CACHE_TTL_MS = 60_000;
 
@@ -144,23 +151,41 @@ const fillsCache = new Map<string, CacheEntry<HlFillsResult>>();
 // --- Low-level POST with timeout ---
 
 async function hlInfoPost<T>(body: Record<string, unknown>, infoUrl: string = HL_INFO_URL): Promise<T> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    const res = await fetch(infoUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-      cache: 'no-store',
-    });
-    if (!res.ok) {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= MAX_INFO_RETRIES; attempt++) {
+    if (attempt > 0) {
+      // Exponential backoff + jitter before a retry — lets the per-IP weight budget
+      // refill and staggers a concurrent fan-out so the retries don't re-collide.
+      const backoff = RETRY_BASE_MS * 2 ** (attempt - 1) + Math.floor(Math.random() * 100);
+      await new Promise((r) => setTimeout(r, backoff));
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(infoUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+        cache: 'no-store',
+      });
+    } catch (e) {
+      // Network error / abort (timeout) — transient; record and retry.
+      lastErr = e;
+      clearTimeout(timer);
+      continue;
+    }
+    clearTimeout(timer);
+    if (res.ok) return (await res.json()) as T;
+    // Non-429 client errors (4xx) are real failures the caller made — fail fast, no retry.
+    if (res.status !== 429 && res.status < 500) {
       throw new Error(`Hyperliquid info API returned ${res.status}`);
     }
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(timer);
+    // 429 (rate limit) or 5xx (server) — transient; record and let the loop back off + retry.
+    lastErr = new Error(`Hyperliquid info API returned ${res.status}`);
   }
+  throw lastErr instanceof Error ? lastErr : new Error(`Hyperliquid info API failed: ${String(lastErr)}`);
 }
 
 // --- Parsing helpers (HL returns numbers as strings) ---

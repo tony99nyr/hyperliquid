@@ -34,7 +34,13 @@ import {
 } from '@/lib/scout/scout-watch-service';
 import { hasActTrigger, DEFAULT_SCOUT_TRIGGER_CONFIG, type ScoutState, type ScoutTriggerConfig } from '@/lib/scout/scout-trigger-business-logic';
 
-const DEFAULT_INTERVAL_SECONDS = 60;
+// 120s baseline (was 60s): the 60s cadence was sized for the fast 15m reversion lane,
+// now RETIRED. Every remaining lane is daily/slow (htf-trend = daily Donchian; rubric-
+// crossing rides the rubric cron; leader-follow the leader feed), so a 2× slower poll
+// costs no meaningful trigger latency and halves this always-on daemon's share of HL's
+// per-IP weight budget — the baseline pressure behind the 429s the transport now retries
+// through. Override with --interval to go faster. See [[reversion-alert-muted]].
+const DEFAULT_INTERVAL_SECONDS = 120;
 const MIN_INTERVAL_SECONDS = 15;
 
 /**
