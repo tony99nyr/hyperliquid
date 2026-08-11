@@ -17,6 +17,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { isPageActive } from './page-activity';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { getBrowserClient } from '@/lib/cockpit/supabase-browser';
 import { accumulateById, type RealtimeRow } from './realtime-row-mappers';
@@ -164,8 +165,11 @@ export function useRealtimeTable<T extends { id: string }>(
             void loadSnapshot();
           }
         });
-      // Safety-net refetch runs only while subscribed (i.e. visible).
-      interval = setInterval(() => void loadSnapshot(), REALTIME_REFETCH_MS);
+      // Safety-net refetch runs only while subscribed (i.e. visible) AND the page
+      // is actively used — matching the sibling useRealtimeChannel. Without the
+      // idle gate, a visible-but-unattended tab (a wall monitor) polled the fat
+      // unscoped tables (rubric/leader feeds) forever (egress fix, Aug 2026).
+      interval = setInterval(() => { if (isPageActive()) void loadSnapshot(); }, REALTIME_REFETCH_MS);
     };
 
     const unsubscribe = () => {

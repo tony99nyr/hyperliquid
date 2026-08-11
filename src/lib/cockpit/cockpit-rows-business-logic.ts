@@ -219,7 +219,8 @@ export interface FillSelectRow {
   partial: boolean;
   source: TradingMode;
   hl_order_id: string | null;
-  hl_raw: Record<string, unknown> | null;
+  /** Optional: read paths that never consume the raw blob (performance) omit it. */
+  hl_raw?: Record<string, unknown> | null;
   filled_at: string | number;
 }
 
@@ -249,7 +250,7 @@ export function fillFromRow(row: FillSelectRow): CanonicalFill {
     partial: row.partial,
     source: row.source,
     hlOrderId: row.hl_order_id,
-    hlRaw: row.hl_raw,
+    hlRaw: row.hl_raw ?? null,
     filledAt: typeof row.filled_at === 'number' ? row.filled_at : new Date(row.filled_at).getTime(),
   };
 }

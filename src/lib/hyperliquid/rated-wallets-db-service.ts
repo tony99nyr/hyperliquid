@@ -90,8 +90,22 @@ export async function upsertRatedWalletsToDb(
     throw new Error(`upsertRatedWalletsToDb prune failed (new gen IS live): ${delErr.message}`);
   }
 
+  // New generation is live — drop the read cache so this process serves it fresh.
+  ratedWalletsCache = null;
+
   return { generation, count: wallets.length };
 }
+
+/**
+ * Module-level TTL cache for the default read path (egress fix, Aug 2026): the
+ * force-dynamic cockpit page paged ~1 MB of rated_wallets out of Supabase on
+ * EVERY load, but the dataset only changes on the weekly re-rank. A warm
+ * serverless instance (Fluid Compute reuses instances) serves repeat loads from
+ * memory for the TTL. Only successful (non-null) reads are cached, and only for
+ * the default client — injected factories (tests) always hit the source.
+ */
+const RATED_WALLETS_CACHE_TTL_MS = 15 * 60_000;
+let ratedWalletsCache: { at: number; dataset: RatedWalletsDataset } | null = null;
 
 /**
  * Read the active generation's rankings as a `RatedWalletsDataset`. Returns null
@@ -101,6 +115,11 @@ export async function upsertRatedWalletsToDb(
 export async function loadRatedWalletsFromDb(
   clientFactory: () => SupabaseClient = getServiceRoleClient,
 ): Promise<RatedWalletsDataset | null> {
+  const cacheable = clientFactory === getServiceRoleClient;
+  if (cacheable && ratedWalletsCache && Date.now() - ratedWalletsCache.at < RATED_WALLETS_CACHE_TTL_MS) {
+    return ratedWalletsCache.dataset;
+  }
+
   let client: SupabaseClient;
   try {
     client = clientFactory();
@@ -136,7 +155,9 @@ export async function loadRatedWalletsFromDb(
     }
 
     if (wallets.length === 0) return null; // empty generation — fall back to JSON
-    return datasetFromMeta(metaRow, wallets);
+    const dataset = datasetFromMeta(metaRow, wallets);
+    if (cacheable) ratedWalletsCache = { at: Date.now(), dataset };
+    return dataset;
   } catch {
     // Fail-soft: any read error → null so the caller uses the committed JSON.
     return null;

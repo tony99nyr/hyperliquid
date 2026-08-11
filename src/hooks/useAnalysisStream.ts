@@ -22,6 +22,9 @@ export function useAnalysisStream(sessionId: string | null): AnalysisStreamState
     sessionId,
     map: mapAnalysisLogRow,
     compare: byCreatedAtDesc,
+    // The only mounted consumer (RealtimeStatus) reads status booleans, not the
+    // entries — keep the snapshot small (egress fix, Aug 2026).
+    limit: 25,
   });
   return { entries: rows, loaded, subscribed, error };
 }

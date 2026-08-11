@@ -31,6 +31,9 @@ export function useHealthSnapshots(sessionId: string | null): HealthSnapshotsSta
     sessionId,
     map: mapHealthSnapshotRow,
     compare: byCreatedAtDesc,
+    // The panel reads latest-per-coin only — the default 200-row snapshot (with
+    // the alerts jsonb) was ~95% discarded bytes every 60s (egress fix, Aug 2026).
+    limit: 30,
   });
   // rows are newest-first → the first seen per coin is its latest.
   const latestByCoin: Record<string, HealthSnapshot> = {};

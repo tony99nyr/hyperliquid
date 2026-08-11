@@ -29,12 +29,17 @@ export interface PositionPnlState {
 export function usePositionPnl(sessionId: string | null): PositionPnlState {
   // Positions are keyed (session, coin); they update in place. Sort by coin via
   // updatedAt desc so the freshest write surfaces first.
+  // Tight limits (egress fix, Aug 2026): positions is one row per (session, coin)
+  // updated in place, and pnl is reduced to latest-per-coin below — the default
+  // 200-row snapshot was ~95% discarded bytes, refetched every 60s by several
+  // independently-mounted panels.
   const positions = useRealtimeChannel<PositionRow>({
     table: 'positions',
     sessionId,
     map: mapPositionRow,
     compare: (a, b) => b.updatedAt - a.updatedAt,
     orderColumn: 'updated_at',
+    limit: 50,
   });
 
   const pnl = useRealtimeChannel<PnlSnapshot>({
@@ -42,6 +47,7 @@ export function usePositionPnl(sessionId: string | null): PositionPnlState {
     sessionId,
     map: mapPnlRow,
     compare: byCreatedAtDesc,
+    limit: 30,
   });
 
   // Reduce pnl snapshots to the newest per coin (rows already newest-first).

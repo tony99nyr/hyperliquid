@@ -37,7 +37,11 @@ export function useTraderEvaluations(): UseTraderEvaluationsState {
       const { data, error } = await getBrowserClient()
         .from('trader_evaluations')
         .select('leader_address, verdict, metrics, generated_at')
-        .order('generated_at', { ascending: false }); // newest first → first seen per address wins
+        .order('generated_at', { ascending: false }) // newest first → first seen per address wins
+        // Bound the read: the table is append-only (one row per vet), so an
+        // unlimited select grows forever (egress fix, Aug 2026). 400 newest rows
+        // comfortably cover the rated-wallet universe's latest-per-address.
+        .limit(400);
       if (!error && data) {
         const map = new Map<string, TraderEvalLite>();
         for (const r of data as Array<{ leader_address: string; verdict: string; metrics: Record<string, unknown> | null }>) {

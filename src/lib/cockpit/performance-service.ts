@@ -73,8 +73,11 @@ export interface PerformanceSummary {
   generatedAt: number;
 }
 
+// hl_raw (the exchange's raw fill jsonb) is deliberately EXCLUDED: the
+// performance path only folds economics (buildLedger never reads hlRaw), and the
+// blob was ~13% of an up-to-5000-row read polled every 30s (egress fix, Aug 2026).
 const FILL_COLUMNS =
-  'client_intent_id, session_id, coin, side, px, sz, notional_usd, fee_usd, reduce_only, partial, source, hl_order_id, hl_raw, filled_at';
+  'client_intent_id, session_id, coin, side, px, sz, notional_usd, fee_usd, reduce_only, partial, source, hl_order_id, filled_at';
 
 /**
  * The REAL starting-balance anchor for the equity CURVE, or null when unknown.

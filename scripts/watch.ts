@@ -37,6 +37,7 @@ import { runWatchCycle, type AlertStateStore } from '@/lib/watch/watch-service';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import { fetchCandles } from '@/lib/hyperliquid/candle-service';
 import { WATCH_LOCK_PATH, defaultPidIsWatchDaemon } from '@/lib/cockpit/watch-spawn';
+import { pruneCockpitHistory } from '@/lib/cockpit/history-prune-service';
 
 /** Default poll interval (seconds) — ~20s balances freshness vs. HL rate limits. */
 const DEFAULT_INTERVAL_SECONDS = 20;
@@ -279,10 +280,25 @@ run(async () => {
   let lastSuccessfulTickAt = Date.now();
   let consecutiveFailedCycles = 0;
   const intervalMs = interval * 1000;
+  // History retention: prune the append-only pnl/health/rubric tables about once
+  // a day (never every cycle). Best-effort — a prune failure never stops the loop.
+  const PRUNE_EVERY_MS = 24 * 60 * 60 * 1000;
+  let lastPruneAt = 0;
 
   while (!stopping) {
     const cycleStart = Date.now();
     const outcome = await runOneCycle(alertState, () => stopping);
+
+    if (Date.now() - lastPruneAt >= PRUNE_EVERY_MS) {
+      lastPruneAt = Date.now();
+      try {
+        await pruneCockpitHistory();
+        line(`[${new Date().toISOString()}] pruned cockpit history (retention sweep).`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        line(`[${new Date().toISOString()}] WARN history prune failed (continuing): ${msg}`);
+      }
+    }
 
     if (outcome.ok) {
       lastSuccessfulTickAt = Date.now();
