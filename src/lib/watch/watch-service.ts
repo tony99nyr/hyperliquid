@@ -23,7 +23,7 @@
 
 import { listActiveSessions } from '@/lib/cockpit/session-service';
 import {
-  loadOpenPositionsWithOpenedAt,
+  loadOpenPositionsWithOpenedAtForSessions,
   writePnlSnapshot,
 } from '@/lib/cockpit/fill-persistence-service';
 import { writeHealthSnapshot } from '@/lib/cockpit/health-snapshot-service';
@@ -254,15 +254,22 @@ export async function runWatchCycle(
   // ticks OK.
   let cycleHlFailures = 0;
 
+  // ONE batched positions query for the whole cycle (egress fix, Aug 2026): the
+  // previous per-session load was one PostgREST round-trip per active session per
+  // tick — the dominant term in the Supabase fair-use overage. A load failure here
+  // fails the WHOLE cycle's discovery (there is only one query now), recorded as a
+  // single wildcard failure.
+  let positionsBySession: Map<string, Array<{ position: Position; openedAtMs: number | null }>>;
+  try {
+    positionsBySession = await loadOpenPositionsWithOpenedAtForSessions(sessions.map((s) => s.id));
+  } catch (err) {
+    failures.push({ sessionId: '*', coin: '*', error: extractErrorMessage(err) });
+    return { activeSessions: sessions.length, monitored, failures };
+  }
+
   let first = true;
   for (const session of sessions) {
-    let positions: Array<{ position: Position; openedAtMs: number | null }>;
-    try {
-      positions = await loadOpenPositionsWithOpenedAt(session.id);
-    } catch (err) {
-      failures.push({ sessionId: session.id, coin: '*', error: extractErrorMessage(err) });
-      continue;
-    }
+    const positions = positionsBySession.get(session.id) ?? [];
     for (const { position, openedAtMs } of positions) {
       seenKeys.add(alertKey(session.id, position.coin));
       // Gentle per-position spacing so HL isn't hit at full rate (the harder

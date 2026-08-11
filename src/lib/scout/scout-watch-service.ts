@@ -18,7 +18,6 @@ import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import { appendTriggers } from './scout-trigger-sink';
 import { fetchAllMids } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { listActiveSessions } from '@/lib/cockpit/session-service';
-import { loadOpenPositions } from '@/lib/cockpit/fill-persistence-service';
 import {
   detectScoutTriggers,
   reversionTriggersFromHits,
@@ -150,42 +149,62 @@ async function readLatestRubric(
   return { reads: pickNewestRubricReads(rows), newestMs: Number.isFinite(newestMs) ? newestMs : 0 };
 }
 
-/**
- * Advisory stop prices per coin for a session's open positions (positions.stop_px,
- * written by the scout paper path at entry — see migration 0033). Best-effort:
- * a read failure just leaves the near-stop trigger silent, never kills the cycle.
- */
-async function readAdvisoryStops(client: SupabaseClient, sessionId: string): Promise<Map<string, number>> {
-  const out = new Map<string, number>();
-  const { data, error } = await client
-    .from('positions')
-    .select('coin, stop_px')
-    .eq('session_id', sessionId)
-    .not('stop_px', 'is', null);
-  if (error || !data) return out;
-  for (const r of data as Array<{ coin: string; stop_px: unknown }>) {
-    const px = Number(r.stop_px);
-    if (Number.isFinite(px) && px > 0) out.set(r.coin.trim().toUpperCase(), px);
-  }
-  return out;
+/** One open paper position row from the batched cross-session read. */
+interface OpenPaperPositionRow {
+  sessionId: string;
+  coin: string;
+  side: 'long' | 'short';
+  avgEntryPx: number;
+  stopPx: number | null;
+  targetPx: number | null;
+}
+
+/** Coerce a stop/target column value to a positive finite price, else null. */
+function toAdvisoryPx(value: unknown): number | null {
+  const px = Number(value);
+  return Number.isFinite(px) && px > 0 ? px : null;
 }
 
 /**
- * Advisory TARGET prices per coin (positions.target_px, migration 0042) — mirrors
- * readAdvisoryStops. Feeds the position-at-target trigger + the cycle snapshot.
- * Best-effort: a read failure just leaves the target absent, never kills the cycle.
+ * Batched read of every OPEN position (with its advisory stop_px/target_px)
+ * across many paper sessions in ONE query. Replaces the per-session
+ * loadOpenPositions + readAdvisoryStops + readAdvisoryTargets triple in the
+ * 60s trigger tick (egress fix, Aug 2026). `sz > 0` filters server-side so
+ * flat rows never leave the database. Throws on a hard read error — the caller
+ * treats that as "no positions this tick" (best-effort, never kills the cycle).
  */
-async function readAdvisoryTargets(client: SupabaseClient, sessionId: string): Promise<Map<string, number>> {
-  const out = new Map<string, number>();
+async function readOpenPaperPositions(
+  client: SupabaseClient,
+  sessionIds: string[],
+): Promise<OpenPaperPositionRow[]> {
+  if (sessionIds.length === 0) return [];
   const { data, error } = await client
     .from('positions')
-    .select('coin, target_px')
-    .eq('session_id', sessionId)
-    .not('target_px', 'is', null);
-  if (error || !data) return out;
-  for (const r of data as Array<{ coin: string; target_px: unknown }>) {
-    const px = Number(r.target_px);
-    if (Number.isFinite(px) && px > 0) out.set(r.coin.trim().toUpperCase(), px);
+    .select('session_id, coin, side, sz, avg_entry_px, stop_px, target_px')
+    .in('session_id', sessionIds)
+    .gt('sz', 0);
+  if (error) throw new Error(`scout-watch: open-positions read failed: ${error.message}`);
+  const out: OpenPaperPositionRow[] = [];
+  for (const r of (data ?? []) as Array<{
+    session_id: string;
+    coin: string;
+    side: string;
+    sz: unknown;
+    avg_entry_px: unknown;
+    stop_px: unknown;
+    target_px: unknown;
+  }>) {
+    if (r.side !== 'long' && r.side !== 'short') continue;
+    const sz = Number(r.sz);
+    if (!Number.isFinite(sz) || sz <= 0) continue;
+    out.push({
+      sessionId: r.session_id,
+      coin: r.coin,
+      side: r.side,
+      avgEntryPx: Number(r.avg_entry_px) || 0,
+      stopPx: toAdvisoryPx(r.stop_px),
+      targetPx: toAdvisoryPx(r.target_px),
+    });
   }
   return out;
 }
@@ -314,28 +333,29 @@ export async function gatherScoutInputs(now: number): Promise<ScoutInputs> {
   // close flattened the live ledger row. The scout must only ever SEE its own lane.
   const paperSessions = sessions.filter((sess) => sess.mode === 'paper');
   const positions: ScoutPositionRead[] = [];
-  for (const s of paperSessions) {
-    const [open, stops, targets] = await Promise.all([
-      loadOpenPositions(s.id).catch(() => []),
-      readAdvisoryStops(client, s.id).catch(() => new Map<string, number>()),
-      readAdvisoryTargets(client, s.id).catch(() => new Map<string, number>()),
-    ]);
-    for (const p of open) {
-      if (p.side === 'flat') continue;
-      const coin = p.coin.toUpperCase();
-      const markPx = markByCoin.get(coin) ?? p.avgEntryPx;
-      const healthScore = await readLatestHealth(client, s.id, p.coin).catch(() => null);
-      positions.push({
-        coin,
-        sessionId: s.id, // so the headless model can close by (session, coin)
-        side: p.side,
-        healthScore,
-        unrealizedPnlUsd: 0, // not needed for triggers; the cycle computes it fresh
-        stopPx: stops.get(coin) ?? null,
-        targetPx: targets.get(coin) ?? null,
-        markPx,
-      });
-    }
+  // ONE batched query for open positions + advisory stop/target across ALL paper
+  // sessions (egress fix, Aug 2026): the previous per-session triple
+  // (loadOpenPositions + readAdvisoryStops + readAdvisoryTargets) was 3 PostgREST
+  // round-trips per active paper session per 60s tick — with dozens of stale
+  // sessions, a major term in the Supabase fair-use overage. Best-effort: a read
+  // failure yields no positions this tick, never kills the cycle.
+  const open = await readOpenPaperPositions(client, paperSessions.map((s) => s.id)).catch(
+    () => [] as OpenPaperPositionRow[],
+  );
+  for (const p of open) {
+    const coin = p.coin.toUpperCase();
+    const markPx = markByCoin.get(coin) ?? p.avgEntryPx;
+    const healthScore = await readLatestHealth(client, p.sessionId, p.coin).catch(() => null);
+    positions.push({
+      coin,
+      sessionId: p.sessionId, // so the headless model can close by (session, coin)
+      side: p.side,
+      healthScore,
+      unrealizedPnlUsd: 0, // not needed for triggers; the cycle computes it fresh
+      stopPx: p.stopPx,
+      targetPx: p.targetPx,
+      markPx,
+    });
   }
 
   // Freshness gate: don't act on a stale rubric (scan down) or empty marks (HL

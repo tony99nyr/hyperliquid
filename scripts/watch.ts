@@ -31,17 +31,94 @@
  * are append-only history; positions are recomputed from the immutable ledger).
  */
 
+import { readFileSync, writeFileSync, unlinkSync, existsSync } from 'node:fs';
 import { parseArgs, optionalNumber, header, line, run } from './_skill-runtime';
 import { runWatchCycle, type AlertStateStore } from '@/lib/watch/watch-service';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import { fetchCandles } from '@/lib/hyperliquid/candle-service';
+import { WATCH_LOCK_PATH, defaultPidIsWatchDaemon } from '@/lib/cockpit/watch-spawn';
 
 /** Default poll interval (seconds) — ~20s balances freshness vs. HL rate limits. */
 const DEFAULT_INTERVAL_SECONDS = 20;
 /** Floor so a fat-fingered --interval 0 cannot hammer the HL/Supabase endpoints. */
 const MIN_INTERVAL_SECONDS = 2;
+/**
+ * Poll cadence while there are NO open positions anywhere (ms). An idle daemon
+ * only needs to discover a new position promptly-ish, not mark-to-market — the
+ * 20s cadence with zero positions was pure Supabase egress (Aug 2026 fair-use
+ * overage). A new fill is picked up within ~2 minutes, and ensureWatchDaemon /
+ * open-position paths surface immediately anyway.
+ */
+const IDLE_INTERVAL_MS = 120_000;
 /** Consecutive total-failure cycles before a LOUD escalation log (FIX 4). */
 const ESCALATE_AFTER_FAILED_CYCLES = 3;
+
+/**
+ * SINGLE-INSTANCE GUARD (egress fix, Aug 2026): five hand-started daemons were
+ * once found running side by side — the ensureWatchDaemon lockfile only guards
+ * the auto-spawn path, so `pnpm watch` by hand could stack duplicates without
+ * bound, multiplying every Supabase poll. The daemon now claims the SAME
+ * lockfile itself at startup and refuses to start when a confirmed-live watch
+ * daemon (that is not our own ancestor — the spawner records the pnpm wrapper
+ * pid) already holds it. Stale/dead/unconfirmable locks are replaced — err
+ * toward monitoring, exactly like watch-spawn.
+ */
+function acquireDaemonLockOrExplain(): { ok: boolean; holderPid?: number } {
+  const ancestors = ownAncestorPids();
+  if (existsSync(WATCH_LOCK_PATH)) {
+    let lockPid: number | null = null;
+    try {
+      const parsed = Number(readFileSync(WATCH_LOCK_PATH, 'utf8').trim());
+      lockPid = Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+    } catch {
+      lockPid = null;
+    }
+    if (lockPid !== null && !ancestors.has(lockPid) && defaultPidIsWatchDaemon(lockPid)) {
+      return { ok: false, holderPid: lockPid };
+    }
+  }
+  try {
+    writeFileSync(WATCH_LOCK_PATH, String(process.pid), 'utf8');
+  } catch {
+    // Best-effort: an unwritable lock dir must not stop monitoring.
+  }
+  return { ok: true };
+}
+
+/**
+ * Our own pid plus its ancestor chain (via /proc). When ensureWatchDaemon spawns
+ * us it records the detached `pnpm watch` wrapper pid in the lock — which is our
+ * ancestor, not a rival daemon — so the guard must never treat an ancestor as
+ * "someone else". Walks at most 15 levels; stops silently where /proc is absent.
+ */
+function ownAncestorPids(): Set<number> {
+  const out = new Set<number>([process.pid]);
+  let pid = process.pid;
+  for (let i = 0; i < 15; i++) {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const afterComm = stat.slice(stat.lastIndexOf(')') + 2);
+      const ppid = Number(afterComm.split(' ')[1]);
+      if (!Number.isInteger(ppid) || ppid <= 1) break;
+      out.add(ppid);
+      pid = ppid;
+    } catch {
+      break;
+    }
+  }
+  return out;
+}
+
+/** Drop the lock on clean shutdown IF we still own it (pid match). Best-effort. */
+function releaseDaemonLock(): void {
+  try {
+    if (readFileSync(WATCH_LOCK_PATH, 'utf8').trim() === String(process.pid)) {
+      unlinkSync(WATCH_LOCK_PATH);
+    }
+  } catch {
+    // Already gone or unreadable — fine.
+  }
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -174,8 +251,19 @@ run(async () => {
     return;
   }
 
+  // Refuse to stack a duplicate daemon (single-instance guard — see above).
+  const lock = acquireDaemonLockOrExplain();
+  if (!lock.ok) {
+    line(
+      `Another watch daemon is already running (pid ${lock.holderPid}) — refusing to ` +
+        `start a duplicate. Stop it first (kill ${lock.holderPid}) to hand over.`,
+    );
+    return;
+  }
+
   header(`watch daemon — loop every ${interval}s (Ctrl-C to stop)`);
   line('WATCH-ONLY: this never places a trade. Polling for open positions…');
+  line(`Idle throttle: with 0 open positions the poll slows to every ${IDLE_INTERVAL_MS / 1000}s.`);
 
   let stopping = false;
   const requestStop = (sig: string) => {
@@ -232,12 +320,18 @@ run(async () => {
     }
 
     if (stopping) break;
-    // Sleep in short slices so SIGINT is honored promptly mid-wait.
-    const wakeAt = cycleStart + intervalMs;
+    // Sleep in short slices so SIGINT is honored promptly mid-wait. With zero
+    // open positions the cadence stretches to IDLE_INTERVAL_MS (egress fix) —
+    // a HEALTHY idle cycle only; failures keep the fast cadence so recovery from
+    // an outage isn't slowed down.
+    const cadenceMs =
+      outcome.ok && outcome.monitored === 0 ? Math.max(intervalMs, IDLE_INTERVAL_MS) : intervalMs;
+    const wakeAt = cycleStart + cadenceMs;
     while (!stopping && Date.now() < wakeAt) {
       await sleep(Math.min(250, wakeAt - Date.now()));
     }
   }
 
+  releaseDaemonLock();
   line('watch daemon stopped cleanly.');
 });

@@ -24,8 +24,8 @@ import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
 import { buildOpenProposal } from '@/lib/skills/open-position-business-logic';
 import { buildMarketReduceOnlyClose } from '@/lib/trading/safe-exit-business-logic';
 import { executeIntent } from '@/lib/trading/fill-source';
-import { openSession, listActiveSessions } from '@/lib/cockpit/session-service';
-import { loadPosition } from '@/lib/cockpit/fill-persistence-service';
+import { openSession, closeSession, listActiveSessions } from '@/lib/cockpit/session-service';
+import { loadPosition, loadOpenPositions } from '@/lib/cockpit/fill-persistence-service';
 import { fetchAllMids } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { validateEnv } from '@/lib/env/env';
 import { writeHypothesis, resolveHypothesis } from '@/lib/cockpit/hypothesis-service';
@@ -395,6 +395,23 @@ async function runExit(args: Record<string, string | boolean>): Promise<void> {
     });
     line(`Resolved hypothesis ${hypothesisId} → ${status} (realized ${pnlLabel}).`);
   }
+  // SESSION HYGIENE (egress fix, Aug 2026): each scout entry opens a dedicated
+  // paper session that was never closed — 64 flat "active" sessions piled up, and
+  // every daemon poll paid for all of them (a major term in the Supabase fair-use
+  // overage). When this close leaves the session fully flat, close the session.
+  // Best-effort: a failure just leaves one stale session for the next cleanup.
+  if (closedAll) {
+    try {
+      const remaining = await loadOpenPositions(sessionId);
+      if (remaining.length === 0) {
+        await closeSession(sessionId);
+        line(`Scout session ${sessionId.slice(0, 8)} is flat — closed.`);
+      }
+    } catch {
+      /* best-effort hygiene */
+    }
+  }
+
   // Best-effort: the fill is committed and the hypothesis resolved; a logging blip must
   // not throw past here and skip the caller's 'scout-cycle' heartbeat (review D-MED).
   await writeAnalysisLog({

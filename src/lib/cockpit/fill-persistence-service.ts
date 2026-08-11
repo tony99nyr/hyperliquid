@@ -167,6 +167,38 @@ export async function loadOpenPositionsWithOpenedAt(
 }
 
 /**
+ * Batched loadOpenPositionsWithOpenedAt across MANY sessions in ONE query —
+ * the watch daemon's per-cycle discovery. The per-session variant issued one
+ * PostgREST round-trip per active session per tick, which at 66 stale sessions
+ * × a 20s interval was ~1.4M requests/day of pure egress (the Aug 2026 Supabase
+ * fair-use overage). One `.in()` query returns the same rows for the whole set.
+ * `sz > 0` is filtered server-side so flat rows never leave the database.
+ */
+export async function loadOpenPositionsWithOpenedAtForSessions(
+  sessionIds: string[],
+  client: SupabaseClient = getServiceRoleClient(),
+): Promise<Map<string, Array<{ position: Position; openedAtMs: number | null }>>> {
+  const out = new Map<string, Array<{ position: Position; openedAtMs: number | null }>>();
+  if (sessionIds.length === 0) return out;
+  const { data, error } = await client
+    .from('positions')
+    .select('session_id, coin, side, sz, avg_entry_px, realized_pnl_usd, fees_paid_usd, opened_at')
+    .in('session_id', sessionIds)
+    .gt('sz', 0);
+  if (error) throw new Error(`loadOpenPositionsWithOpenedAtForSessions failed: ${error.message}`);
+  type Row = Parameters<typeof positionFromRow>[0] & { session_id: string; opened_at?: string | null };
+  for (const row of (data ?? []) as Row[]) {
+    const position = positionFromRow(row);
+    if (position.side === 'flat' || position.sz <= 0) continue;
+    const entry = { position, openedAtMs: row.opened_at ? Date.parse(row.opened_at) : null };
+    const list = out.get(row.session_id);
+    if (list) list.push(entry);
+    else out.set(row.session_id, [entry]);
+  }
+  return out;
+}
+
+/**
  * Append a pnl snapshot row carrying a MARK price + unrealized P&L. Used by the
  * non-agent watch daemon: a fill writes a pnl row with mark=null (unrealized not
  * yet known), but the watch loop marks the open position to market each tick and
