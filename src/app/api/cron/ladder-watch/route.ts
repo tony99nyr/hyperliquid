@@ -30,6 +30,12 @@ import { validateEnv } from '@/lib/env/env';
 import { pingHealthcheck } from '@/lib/infrastructure/monitoring/healthcheck';
 
 export const dynamic = 'force-dynamic';
+// Pinned EXPLICITLY (review 08-13): the tick runs serial fail-soft lanes whose HL reads
+// now retry on 429 (worst case ~17s per uncached fire-path call, more for default
+// readers) — the budget must be a stated invariant, not the platform default du jour.
+// A platform kill mid-fire is the nightmare (post-claim = burned one-shot claim;
+// post-fill pre-bracket = filled-but-unstopped), so keep this generous.
+export const maxDuration = 300;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!verifyCronBearer(request, getLadderCronSecret())) {

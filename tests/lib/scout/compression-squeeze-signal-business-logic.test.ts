@@ -24,6 +24,19 @@ function volatileThenCoil(volatileLen: number, coilLen: number): SqueezeBar[] {
   return out;
 }
 
+/** Like volatileThenCoil but the volatile era's amplitude RAMPS 1→8, spreading the BBW
+ *  history across a continuum (needed by the grace-window fixtures: with a bimodal
+ *  history, even large expansion bars stay "bottom 20%" and the grace path never runs). */
+function gradedThenCoil(volatileLen: number, coilLen: number): SqueezeBar[] {
+  const out: SqueezeBar[] = [];
+  for (let i = 0; i < volatileLen; i++) {
+    const amp = 1 + (7 * i) / volatileLen;
+    out.push(bar(100 + (i % 2 === 0 ? amp : -amp), 4));
+  }
+  for (let i = 0; i < coilLen; i++) out.push(bar(100 + (i % 2 === 0 ? 0.5 : -0.5), 1));
+  return out;
+}
+
 describe('compressionRead — the frozen squeeze-breakout rule', () => {
   it('returns null when the series is too thin for the BBW percentile history', () => {
     expect(compressionRead(volatileThenCoil(30, 30))).toBeNull(); // < bbPeriod+bbwLookback
@@ -70,6 +83,38 @@ describe('compressionRead — the frozen squeeze-breakout rule', () => {
     const bars = volatileThenCoil(125, 0);
     bars.push(bar(115, 4)); // above every prior high, but BBW never squeezed
     const read = compressionRead(bars);
+    expect(read!.breakout).toBeNull();
+  });
+
+  it('fires within the POST-squeeze grace window (BBW expanded out of the squeeze before the break)', () => {
+    // GRADED volatile era (amplitude ramps 1→8, spreading the BBW distribution) → coil
+    // → two MONSTER expansion bars (±10, pushing BBW above the 20th pctile so the
+    // recent bars are NOT in-squeeze themselves) → the break above the monsters' high.
+    // Exercises the grace branch, which the original fixtures never reached (their
+    // break bars were still squeezed). Percentiles verified empirically: break p≈0.53,
+    // back-1 p≈0.24 (not squeezed), back-2 p≈0.07 (squeezed) → barsSinceSqueeze=2.
+    const bars = gradedThenCoil(100, 25);
+    bars.push(bar(110, 10), bar(90, 10)); // monster expansion: BBW pops out of the squeeze
+    bars.push(bar(117, 2)); // the break: above every prior high (incl. the monsters' 115)
+    const read = compressionRead(bars);
+    expect(read).not.toBeNull();
+    expect(read!.inSqueeze).toBe(false); // the break bar itself is no longer squeezed
+    expect(read!.barsSinceSqueeze).not.toBeNull(); // …but a squeeze sits within the grace window
+    expect(read!.barsSinceSqueeze!).toBeGreaterThan(0);
+    expect(read!.barsSinceSqueeze!).toBeLessThanOrEqual(DEFAULT_COMPRESSION_CONFIG.postSqueezeGraceBars);
+    expect(read!.breakout?.side).toBe('long');
+    expect(read!.breakout!.stopFrac).toBeCloseTo(DEFAULT_COMPRESSION_CONFIG.maxStopFrac, 10); // raw range-edge ≈27% → capped
+  });
+
+  it('does NOT fire when the squeeze is beyond the grace window', () => {
+    // Coil, then MANY monster bars (> grace) before the break — the coil is stale;
+    // every bar inside the grace window reads p≈0.45-0.65 (not squeezed).
+    const bars = gradedThenCoil(100, 25);
+    for (let i = 0; i < 6; i++) bars.push(bar(100 + (i % 2 === 0 ? 10 : -10), 10));
+    bars.push(bar(118, 2));
+    const read = compressionRead(bars);
+    expect(read!.inSqueeze).toBe(false);
+    expect(read!.barsSinceSqueeze).toBeNull(); // nothing squeezed within grace
     expect(read!.breakout).toBeNull();
   });
 

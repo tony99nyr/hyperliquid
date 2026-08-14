@@ -152,7 +152,8 @@ describe('cache collapse across the HL read services (real transport memo + mock
 
   it('regime set: PARTIAL success (some intervals good) → cached — FIX 2', async () => {
     // 1d/8h ok, 1h/15m fail. The set has usable candles → it IS cacheable.
-    // REGIME_TIMEFRAMES order is 1d, 8h, 1h, 15m.
+    // REGIME_TIMEFRAMES order is 1d, 8h, 1h, 15m. Since the 08-13 transport retry,
+    // a 5xx gets ONE in-place retry — so each failing TF must serve bad TWICE.
     const ok = { ok: true, status: 200, json: async () => [candleRow(100)] } as Response;
     const bad = { ok: false, status: 500, json: async () => ({}) } as Response;
     const f = vi
@@ -160,7 +161,9 @@ describe('cache collapse across the HL read services (real transport memo + mock
       .mockResolvedValueOnce(ok) // 1d
       .mockResolvedValueOnce(ok) // 8h
       .mockResolvedValueOnce(bad) // 1h
+      .mockResolvedValueOnce(bad) // 1h retry
       .mockResolvedValueOnce(bad) // 15m
+      .mockResolvedValueOnce(bad) // 15m retry
       .mockResolvedValue(ok); // any later (should not happen if cached)
     vi.stubGlobal('fetch', f);
 

@@ -71,8 +71,13 @@ wake:
    the position's `sessionId` from the snapshot when you have it.
 4. **Then consider new opportunities.** If a rubric/price trigger points at a
    setup that clears the bar, size it by risk and open it:
-   `pnpm scout:trade --coin <COIN> --side buy|sell --risk <usd> --stop-frac <frac> --entry <px> --thesis "<why>" [--session <id>]`
+   `pnpm scout:trade --coin <COIN> --side buy|sell --risk <usd> --stop-frac <frac> --entry <px> --thesis "<why>" --lane <lane> [--session <id>]`
    Reuse the existing scout `--session` so positions stay in one paper book.
+   **`--lane` is REQUIRED** — use the lane named by the cycle directive you are
+   acting on. KILLED lanes (`directional`, `reversion`, `trend-follow`, and any
+   `<killed>-*` variant like `reversion-extreme`) are REFUSED at execution
+   (`assertLaneAlive`) — their kill bars fired; do not try to trade them. Exits
+   are never lane-gated (a killed lane can always flatten).
 5. **Escalate when unsure.** For an ambiguous BUT promising, high-stakes call,
    spawn an Opus subagent (Agent tool, `model: 'opus'`) with the snapshot and ask
    for a go/no-go + levels. Use this sparingly — it spends the rationed Opus

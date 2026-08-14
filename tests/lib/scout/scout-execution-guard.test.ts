@@ -32,6 +32,13 @@ describe('assertLaneAlive — deterministic kill-bar enforcement (08-13 review)'
     expect(() => assertLaneAlive('REVERSION')).toThrow(ScoutKilledLaneError);
   });
 
+  it('kills variant/alias tags of a killed lane (prefix rule — no resurrection by rename)', () => {
+    expect(() => assertLaneAlive('reversion-extreme')).toThrow(ScoutKilledLaneError); // the daemon trigger's own wording
+    expect(() => assertLaneAlive('trend-follow-v2')).toThrow(ScoutKilledLaneError);
+    // But a genuinely NEW lane whose name merely contains a killed word survives:
+    expect(() => assertLaneAlive('htf-trend')).not.toThrow();
+  });
+
   it('permits the live lanes', () => {
     for (const lane of ['htf-trend', 'rubric-crossing', 'leader-follow', 'vault', 'carry']) {
       expect(() => assertLaneAlive(lane)).not.toThrow();

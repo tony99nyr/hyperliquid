@@ -11,8 +11,9 @@ export interface HeartbeatRow {
   staleAlertedAtMs: number | null;
 }
 
-/** Staleness thresholds per source. The producer loops every 60s; the consumer
- *  cron runs every 30min — thresholds sit well past normal jitter. */
+/** Staleness thresholds per source. The producer loops every 120s (eased from 60s
+ *  on 08-11 — the fast 15m lanes are retired); the consumer cron runs every 30min —
+ *  thresholds sit well past normal jitter either way. */
 export const STALE_AFTER_MS: Record<string, number> = {
   'scout-watch': 30 * 60 * 1000,
   'scout-cycle': 90 * 60 * 1000,

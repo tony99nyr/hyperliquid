@@ -154,7 +154,12 @@ export const DEFAULT_SCOUT_TRIGGER_CONFIG: ScoutTriggerConfig = {
   driftWindowMs: 4 * 60 * 60 * 1000, // re-anchor every ~4h if no drift trigger fired
   leaderMinNotionalUsd: 1_000_000, // rated-whale conviction floor (adds below $1M are churn)
   leaderMaxPerCycle: 5,
-  reversionScanIntervalMs: 5 * 60 * 1000, // scan every ~5min (15m candles change slower)
+  // DISABLED (08-13 review): the reversion-extreme lane is KILLED (21-day bar fired,
+  // n=12, −0.55R) — but the daemon kept emitting 'act' triggers whose note invited the
+  // fade under the alias 'reversion-extreme' lane (the same stale-directive class that
+  // churned trend-follow 42 trades past its bar). 0 turns the scan + its triggers +
+  // their candle load off; re-enable ONLY with a freshly pre-registered fade lane.
+  reversionScanIntervalMs: 0,
   reversionCooldownMs: 2 * 60 * 60 * 1000, // one wake per coin:side per ~2h episode (≈ the fade hold)
 };
 

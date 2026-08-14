@@ -9,8 +9,10 @@
  * (the popup) — NEVER this script.
  *
  * Entry:  pnpm scout:trade --coin ETH --side sell --risk 200 --stop-frac 0.02 \
- *           --thesis "…" [--entry 1720] [--limit 1719] [--leverage 3] [--session <id>] \
- *           [--lane vault|carry|directional]   (default 'directional')
+ *           --thesis "…" --lane <lane> [--entry 1720] [--limit 1719] [--leverage 3] [--session <id>]
+ *         --lane is REQUIRED (killed lanes are refused by assertLaneAlive; the old
+ *         default 'directional' is killed). Live: htf-trend | compression-straddle |
+ *         breakdown-short | reclaim-long | leader-follow | vault | carry.
  * Exit:   pnpm scout:trade --exit --session <id> --coin ETH [--hypothesis <id>] \
  *           [--fraction 0.5] [--note "target hit"]
  */
@@ -72,8 +74,16 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   const limitPx = typeof args['limit'] === 'string' ? Number(args['limit']) : undefined;
   const leverage = typeof args['leverage'] === 'string' ? Number(args['leverage']) : undefined;
   // Strategy lane (scout multi-lane): tags the positions row so the per-lane
-  // scorecard groups one paper book. Default 'directional' (the legacy lane).
-  const lane = typeof args['lane'] === 'string' && args['lane'].trim() !== '' ? args['lane'].trim() : 'directional';
+  // scorecard groups one paper book. REQUIRED since 08-13: the legacy default
+  // ('directional') is a KILLED lane, so a lane-less open could only ever be refused
+  // with a confusing error — demand the tag explicitly instead.
+  const lane = typeof args['lane'] === 'string' ? args['lane'].trim() : '';
+  if (lane === '') {
+    throw new Error(
+      "--lane is required for an open (the legacy default 'directional' is KILLED). " +
+        "Live lanes: 'htf-trend', 'compression-straddle', 'breakdown-short', 'reclaim-long', 'leader-follow', 'vault', 'carry'.",
+    );
+  }
   // DETERMINISTIC kill-bar enforcement (08-13 review): a killed lane can NEVER open —
   // prose/context-only sections were not enough (42 trades churned past a fired bar).
   // Exits stay allowed (the --exit path below never calls this).

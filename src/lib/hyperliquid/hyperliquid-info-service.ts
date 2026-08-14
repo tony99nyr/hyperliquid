@@ -27,13 +27,24 @@ export function hlInfoUrlFor(network: 'mainnet' | 'testnet'): string {
   return network === 'testnet' ? HL_INFO_URL_TESTNET : HL_INFO_URL;
 }
 const REQUEST_TIMEOUT_MS = 8000;
-// HL's info endpoint enforces a per-IP weight budget; a fan-out (desk-review, the
-// scout cycle) or the always-on daemons sharing an IP can transiently exhaust it →
-// HTTP 429. These control the backoff+retry that rides through those short windows so
-// a single 429 no longer greys out an entire market read. Retryable = 429 / 5xx /
-// network-abort; a non-429 4xx is a real client error and fails fast (no retry).
-const MAX_INFO_RETRIES = 3; // up to 4 total attempts
-const RETRY_BASE_MS = 300; // exponential: ~300 / 600 / 1200 ms (+ jitter)
+// HL's info endpoint enforces a per-IP weight budget; a fan-out or the always-on
+// daemons can transiently exhaust it → 429. Retryable = 429 / 5xx / network-abort /
+// 200-with-garbage-body; a non-429 4xx fails fast. Retry-After overrides the backoff.
+const MAX_INFO_RETRIES = 3; // up to 4 total attempts (default readers)
+// `uncached` (fire path / risk crons): ONE retry — fresh-or-fail-fast, bounded budget.
+const UNCACHED_ATTEMPTS = 2;
+const RETRY_BASE_MS = 300; // exponential step: ~300 / 600 / 1200 ms (full jitter added)
+const RETRY_AFTER_CAP_MS = 5_000; // honor Retry-After up to this; longer → give up to the caller
+
+/** Parse a `Retry-After` header (seconds or HTTP-date) into ms from now, or null. */
+function parseRetryAfterMs(header: string | null): number | null {
+  if (!header) return null;
+  const secs = Number(header);
+  if (Number.isFinite(secs) && secs >= 0) return Math.min(secs * 1000, RETRY_AFTER_CAP_MS);
+  const when = Date.parse(header);
+  if (Number.isFinite(when)) return Math.min(Math.max(when - Date.now(), 0), RETRY_AFTER_CAP_MS);
+  return null;
+}
 const POSITION_CACHE_TTL_MS = 15_000;
 const FILLS_CACHE_TTL_MS = 60_000;
 
@@ -150,15 +161,21 @@ const fillsCache = new Map<string, CacheEntry<HlFillsResult>>();
 
 // --- Low-level POST with timeout ---
 
-async function hlInfoPost<T>(body: Record<string, unknown>, infoUrl: string = HL_INFO_URL): Promise<T> {
+async function hlInfoPost<T>(
+  body: Record<string, unknown>,
+  infoUrl: string = HL_INFO_URL,
+  attempts: number = 1 + MAX_INFO_RETRIES,
+): Promise<T> {
   let lastErr: unknown;
-  for (let attempt = 0; attempt <= MAX_INFO_RETRIES; attempt++) {
+  let retryAfterMs: number | null = null;
+  for (let attempt = 0; attempt < attempts; attempt++) {
     if (attempt > 0) {
-      // Exponential backoff + jitter before a retry — lets the per-IP weight budget
-      // refill and staggers a concurrent fan-out so the retries don't re-collide.
-      const backoff = RETRY_BASE_MS * 2 ** (attempt - 1) + Math.floor(Math.random() * 100);
-      await new Promise((r) => setTimeout(r, backoff));
+      // Full-jitter exponential backoff (concurrent fan-out retries decorrelate),
+      // overridden upward by the server's own Retry-After when one was sent.
+      const step = RETRY_BASE_MS * 2 ** (attempt - 1);
+      await new Promise((r) => setTimeout(r, Math.max(step + Math.floor(Math.random() * step), retryAfterMs ?? 0)));
     }
+    retryAfterMs = null;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     let res: Response;
@@ -177,14 +194,25 @@ async function hlInfoPost<T>(body: Record<string, unknown>, infoUrl: string = HL
       continue;
     }
     clearTimeout(timer);
-    if (res.ok) return (await res.json()) as T;
+    if (res.ok) {
+      try {
+        const parsed = (await res.json()) as T;
+        if (attempt > 0) console.warn(`[hl-info] '${String(body.type)}' recovered on retry ${attempt}`);
+        return parsed;
+      } catch (e) {
+        lastErr = e; // 200 with a garbage/truncated body — a known HL hiccup; retry
+        continue;
+      }
+    }
     // Non-429 client errors (4xx) are real failures the caller made — fail fast, no retry.
     if (res.status !== 429 && res.status < 500) {
       throw new Error(`Hyperliquid info API returned ${res.status}`);
     }
     // 429 (rate limit) or 5xx (server) — transient; record and let the loop back off + retry.
+    if (res.status === 429) retryAfterMs = parseRetryAfterMs(res.headers.get('retry-after'));
     lastErr = new Error(`Hyperliquid info API returned ${res.status}`);
   }
+  console.warn(`[hl-info] '${String(body.type)}' failed after ${attempts} attempts: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`); // exhausted — never fail silent (the 08-09 outage was 2 days of silent empties)
   throw lastErr instanceof Error ? lastErr : new Error(`Hyperliquid info API failed: ${String(lastErr)}`);
 }
 
@@ -298,10 +326,8 @@ export async function fetchClearinghouseState(rawAddress: string, opts?: { uncac
     // leader/own position polls on a warm instance collapse to ~1
     // upstream HL fetch per address per window. Per-instance Map + fail-soft wrap.
     const raw = await cachedHlRead('clearinghouse', [address], async () => {
-      const body = await hlInfoPost<RawClearinghouseState>({
-        type: 'clearinghouseState',
-        user: address,
-      });
+      // Fresh-read callers (fire path / risk crons) get bounded attempts — fresh-or-fail-fast.
+      const body = await hlInfoPost<RawClearinghouseState>({ type: 'clearinghouseState', user: address }, undefined, opts?.uncached ? UNCACHED_ATTEMPTS : undefined);
       // Soft-fail guard: HL can return `{}` / a garbage body with HTTP 200 on a
       // hiccup. A REAL account ALWAYS carries a `marginSummary` (with at least an
       // `accountValue`), even when totally flat (no positions, zero value). So we
@@ -667,7 +693,8 @@ export async function fetchAllMids(network: 'mainnet' | 'testnet' = 'mainnet', o
   // Performance-view mark-to-market on a warm instance rides one HL fetch per
   // ~30s window. Throws on failure so callers can fail-soft (posture unchanged).
   const load = async () => {
-    const raw = await hlInfoPost<Record<string, string>>({ type: 'allMids' }, hlInfoUrlFor(network));
+    // Fresh-read callers (fire path pre-claim mark) get bounded attempts — fresh-or-fail-fast.
+    const raw = await hlInfoPost<Record<string, string>>({ type: 'allMids' }, hlInfoUrlFor(network), opts?.uncached ? UNCACHED_ATTEMPTS : undefined);
     const mids: Record<string, number> = {};
     for (const [coin, px] of Object.entries(raw ?? {})) {
       const n = num(px);

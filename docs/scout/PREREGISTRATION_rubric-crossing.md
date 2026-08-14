@@ -55,6 +55,12 @@ the per-lane `breakdown-short` / `reclaim-long` cards):
   after the live-decay haircut. A conversation, never an auto-promotion.
 - Multiplicity note: breakdown-short and reclaim-long are TWO looks at one signal —
   demand the stronger bar (t≈3 spirit) before reading a one-sided edge as real.
+- **Bar-counting clarification (2026-08-13, PRE-DATA, n≈0):** the KILL/GRADUATE trade
+  counts are judged on the **COMBINED family n** (`setupType='rubric-crossing'`, which
+  aggregates both lanes), not per-lane card n — otherwise the split tags let the family
+  churn ~2× the registered bar before either card trips (the exact between-review
+  enforcement gap of the 08-13 trend-follow incident). The per-side KILL option above
+  still exists, but the family bar fires on family n.
 
 ## The honest limit
 

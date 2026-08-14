@@ -52,7 +52,14 @@ export class ScoutKilledLaneError extends Error {
   }
 }
 
-/** Throw if `lane` is killed. Call before any scout-initiated OPEN (never on exits). */
+/** Throw if `lane` is killed. Call before any scout-initiated OPEN (never on exits).
+ *  Matches a killed name exactly OR as a `<killed>-` prefix, so variant tags cannot
+ *  resurrect a killed strategy under an alias — e.g. the daemon's old trigger wording
+ *  said "reversion-extreme lane", and `--lane reversion-extreme` must die with
+ *  `reversion` (a genuine successor gets a genuinely NEW name, like htf-trend). */
 export function assertLaneAlive(lane: string): void {
-  if (KILLED_LANES.has(lane.trim().toLowerCase())) throw new ScoutKilledLaneError(lane);
+  const norm = lane.trim().toLowerCase();
+  for (const killed of KILLED_LANES) {
+    if (norm === killed || norm.startsWith(`${killed}-`)) throw new ScoutKilledLaneError(lane);
+  }
 }

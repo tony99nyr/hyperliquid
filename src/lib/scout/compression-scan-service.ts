@@ -34,7 +34,8 @@ export interface CompressionScanResult {
 const HOUR_MS = 3_600_000;
 /** ~35 days of 4h bars (~210) covers bbPeriod(20)+bbwLookback(100)+grace with headroom. */
 const LOOKBACK_HOURS = 35 * 24;
-/** Minimum completed 4h bars for a trustworthy percentile: bbPeriod + bbwLookback. */
+/** Minimum completed 4h bars for a trustworthy percentile: bbPeriod + bbwLookback + 1
+ *  (the current bar on top of the seeded percentile history). */
 const MIN_4H_BARS = 121;
 
 export async function scanCompressionSqueezes(

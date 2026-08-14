@@ -139,7 +139,10 @@ export function compressionRead(
       const idx = n - 1 - back;
       const v = bbwAt(closes, idx, cfg);
       if (v == null) break;
-      const hist = history.slice(0, history.length - back + 1);
+      // Compare against history STRICTLY BEFORE that bar (self-exclusive, like the
+      // current-bar percentile above): history's last element is the bar at n−2, so
+      // the bar `back` bars ago (idx = n−1−back) drops the trailing `back` values.
+      const hist = history.slice(0, history.length - back);
       if (hist.length === 0) break;
       const p = hist.filter((x) => x <= v).length / hist.length;
       if (p <= cfg.squeezePctile) {

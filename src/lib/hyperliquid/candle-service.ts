@@ -93,29 +93,75 @@ function evictCandleCache(now: number): void {
   }
 }
 
+/** A 429 whose Retry-After (or absence → assume a short blip) is at/below this gets
+ *  ONE in-place retry before the process-global backoff engages. The 08-11 incident
+ *  showed HL's common 429 windows are sub-second: the info-service transport's plain
+ *  retries rode straight through them, while this transport's first-429-→-global-10s
+ *  backoff greyed the ENTIRE candle fan-out (trends, reversion scan, ladder eval) —
+ *  the half of the outage the first fix missed. A long explicit Retry-After still
+ *  goes straight to the global backoff (that layer is correct for real throttles). */
+const SHORT_429_RETRY_MS = 2_500;
+
 async function hlInfoPost<T>(body: Record<string, unknown>): Promise<T> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    const res = await fetch(HL_INFO_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-      cache: 'no-store',
-    });
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(HL_INFO_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+        cache: 'no-store',
+      });
+    } catch (e) {
+      // Network error / abort (timeout) — transient; one retry after a short pause.
+      clearTimeout(timer);
+      lastErr = e;
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 300 + Math.floor(Math.random() * 300)));
+        continue;
+      }
+      break;
+    }
+    clearTimeout(timer);
     if (res.status === 429) {
-      const wait = parseRetryAfterMs(res.headers.get('retry-after'));
+      const header = res.headers.get('retry-after');
+      const wait = parseRetryAfterMs(header);
+      const shortBlip = header === null || wait <= SHORT_429_RETRY_MS;
+      if (attempt === 0 && shortBlip) {
+        // Ride through the short window instead of greying the whole fan-out.
+        const pause = header === null ? 600 + Math.floor(Math.random() * 600) : wait;
+        lastErr = new RateLimitedError(wait);
+        await new Promise((r) => setTimeout(r, pause));
+        continue;
+      }
+      // Sustained/explicit throttle → the global backoff (serve-stale) takes over.
       backoffUntil = Date.now() + wait;
+      console.warn(`[hl-candles] 429 — global backoff ${Math.ceil(wait / 1000)}s (retry ${attempt > 0 ? 'exhausted' : 'skipped: long Retry-After'})`);
       throw new RateLimitedError(wait);
     }
     if (!res.ok) {
-      throw new Error(`Hyperliquid info API returned ${res.status}`);
+      // 5xx: transient — one retry. Non-429 4xx: a real client error — fail fast.
+      lastErr = new Error(`Hyperliquid info API returned ${res.status}`);
+      if (res.status >= 500 && attempt === 0) {
+        await new Promise((r) => setTimeout(r, 300 + Math.floor(Math.random() * 300)));
+        continue;
+      }
+      throw lastErr;
     }
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(timer);
+    try {
+      return (await res.json()) as T;
+    } catch (e) {
+      // 200 with a garbage/truncated body — transient; one retry.
+      lastErr = e;
+      if (attempt === 0) continue;
+      break;
+    }
   }
+  throw lastErr instanceof Error ? lastErr : new Error(`Hyperliquid candle fetch failed: ${String(lastErr)}`);
 }
 
 /**
