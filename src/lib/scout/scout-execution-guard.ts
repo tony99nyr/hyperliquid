@@ -29,3 +29,30 @@ export class ScoutLiveExecutionError extends Error {
 export function assertScoutPaperMode(mode: TradingMode): void {
   if (mode !== 'paper') throw new ScoutLiveExecutionError();
 }
+
+/**
+ * KILLED lanes — pre-registered forward tests whose kill bar has FIRED (see
+ * docs/scout/playbook.md reviews + docs/scout/PREREGISTRATION_*.md). Deterministic
+ * enforcement at the execution point: prose in the playbook and context-only cycle
+ * sections proved insufficient — after the 08-07 daemon revival a stale cycle
+ * directive churned 42 trend-follow trades PAST its fired n=15 bar (08-13 review).
+ * A lane on this list can NEVER open a new paper position; EXITS are always allowed
+ * (a killed lane must still be able to flatten). Un-killing a lane is a deliberate
+ * code change with a fresh pre-registration, never a runtime flag.
+ */
+export const KILLED_LANES: ReadonlySet<string> = new Set(['directional', 'reversion', 'trend-follow']);
+
+export class ScoutKilledLaneError extends Error {
+  constructor(lane: string) {
+    super(
+      `Scout lane '${lane}' is KILLED — its pre-registered kill bar fired (see docs/scout/playbook.md). ` +
+        'Refusing to OPEN. Exits of existing positions remain allowed. A revival requires a NEW pre-registration.',
+    );
+    this.name = 'ScoutKilledLaneError';
+  }
+}
+
+/** Throw if `lane` is killed. Call before any scout-initiated OPEN (never on exits). */
+export function assertLaneAlive(lane: string): void {
+  if (KILLED_LANES.has(lane.trim().toLowerCase())) throw new ScoutKilledLaneError(lane);
+}

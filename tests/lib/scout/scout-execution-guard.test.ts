@@ -1,5 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { assertScoutPaperMode, ScoutLiveExecutionError } from '@/lib/scout/scout-execution-guard';
+import {
+  assertScoutPaperMode,
+  ScoutLiveExecutionError,
+  assertLaneAlive,
+  ScoutKilledLaneError,
+  KILLED_LANES,
+} from '@/lib/scout/scout-execution-guard';
 import { executeIntent } from '@/lib/trading/fill-source';
 import type { TradeIntent } from '@/types/fill';
 
@@ -10,6 +16,26 @@ describe('assertScoutPaperMode — no-auto-fire-for-real-money guarantee', () =>
 
   it('REFUSES live mode (scout never auto-fires real funds)', () => {
     expect(() => assertScoutPaperMode('live')).toThrow(ScoutLiveExecutionError);
+  });
+});
+
+describe('assertLaneAlive — deterministic kill-bar enforcement (08-13 review)', () => {
+  it('refuses every killed lane (directional, reversion, trend-follow)', () => {
+    for (const lane of ['directional', 'reversion', 'trend-follow']) {
+      expect(KILLED_LANES.has(lane)).toBe(true);
+      expect(() => assertLaneAlive(lane)).toThrow(ScoutKilledLaneError);
+    }
+  });
+
+  it('is case/whitespace-insensitive (a sloppy tag cannot dodge the kill)', () => {
+    expect(() => assertLaneAlive(' Trend-Follow ')).toThrow(ScoutKilledLaneError);
+    expect(() => assertLaneAlive('REVERSION')).toThrow(ScoutKilledLaneError);
+  });
+
+  it('permits the live lanes', () => {
+    for (const lane of ['htf-trend', 'rubric-crossing', 'leader-follow', 'vault', 'carry']) {
+      expect(() => assertLaneAlive(lane)).not.toThrow();
+    }
   });
 });
 

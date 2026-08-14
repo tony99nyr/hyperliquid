@@ -18,7 +18,7 @@
 import { randomUUID } from 'node:crypto';
 import { parseArgs, requireString, optionalNumber, header, line, run } from './_skill-runtime';
 import { getTradingMode } from '@/lib/env/mode';
-import { assertScoutPaperMode } from '@/lib/scout/scout-execution-guard';
+import { assertScoutPaperMode, assertLaneAlive } from '@/lib/scout/scout-execution-guard';
 import { parseScoutDecision } from '@/lib/scout/scout-cycle-business-logic';
 import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
 import { buildOpenProposal } from '@/lib/skills/open-position-business-logic';
@@ -74,6 +74,10 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   // Strategy lane (scout multi-lane): tags the positions row so the per-lane
   // scorecard groups one paper book. Default 'directional' (the legacy lane).
   const lane = typeof args['lane'] === 'string' && args['lane'].trim() !== '' ? args['lane'].trim() : 'directional';
+  // DETERMINISTIC kill-bar enforcement (08-13 review): a killed lane can NEVER open —
+  // prose/context-only sections were not enough (42 trades churned past a fired bar).
+  // Exits stay allowed (the --exit path below never calls this).
+  assertLaneAlive(lane);
 
   // Reuse the scout session or open one (dedicated, paper).
   let sessionId: string;

@@ -1,11 +1,18 @@
 # Pre-registration — `compression-straddle` scout lane (volatility-squeeze breakout)
 
-**Registered 2026-08-13, BEFORE any lane trade. QUEUED, not yet active** — this freezes the
-rule now; it runs as the *next* scout test AFTER `htf-trend` gets its shot (one experiment at
-a time, so each result is readable). It is the disciplined form of the operator's "set up a
-straddle to catch the next move" idea: a straddle only has edge when something makes a large
-move *likely* — a scheduled event (the existing event-straddle handles that) or **volatility
-compression**. This lane tests the compression premise.
+**Registered 2026-08-13, BEFORE any lane trade.** It is the disciplined form of the operator's
+"set up a straddle to catch the next move" idea: a straddle only has edge when something makes
+a large move *likely* — a scheduled event (the existing event-straddle handles that) or
+**volatility compression**. This lane tests the compression premise.
+
+> **AMENDMENT (2026-08-13, same day, PRE-DATA, operator-authorized):** originally queued
+> behind `htf-trend`; **activated in parallel instead** — htf-trend is dormant-slow by design
+> (a few daily signals/month), the lanes are isolated by tags with independent bars, and the
+> scout is otherwise idle. Sequencing only; the RULE below is unchanged. Implementation note:
+> "the opposite edge of the pre-breakout squeeze range" is realized as the prior-20-bar
+> low/high (which IS the squeeze range while compressed), capped 4%. BUILT same day:
+> `compression-squeeze-signal-business-logic.ts` (pure, fixture-tested) +
+> `compression-scan-service.ts` + the `COMPRESSION-SQUEEZE SCAN` cycle section.
 
 ## Hypothesis
 

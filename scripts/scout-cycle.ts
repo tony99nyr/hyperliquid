@@ -32,6 +32,7 @@ import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
 import { DEFAULT_REVERSION_CONFIG } from '@/lib/scout/reversion-signal-business-logic';
 import { type ReversionHit, type RegimeRead } from '@/lib/scout/reversion-scan-service';
 import { type HtfTrendCoinRead } from '@/lib/scout/htf-trend-scan-service';
+import { type CompressionCoinRead } from '@/lib/scout/compression-scan-service';
 
 interface VaultRow { vault_address: string; name: string; kind: string; nav_usd: number | null; apr_annual: number | null; max_drawdown_pct: number | null; age_days: number | null; leader_fraction: number | null }
 
@@ -102,6 +103,17 @@ run(async () => {
     const { scanHtfTrend } = await import('@/lib/scout/htf-trend-scan-service');
     const scan = await scanHtfTrend(scanCoins, now);
     htfReads = scan.reads;
+  } catch { /* scan unavailable → section just prints empty */ }
+
+  // 3b-ii-c) COMPRESSION-SQUEEZE SCAN (pre-registered 2026-08-13, ACTIVATED same day
+  // pre-data with operator authorization) — 4h BBW-percentile squeeze → 20-bar breakout.
+  // The claim under test: 4h breakouts, dead UNCONDITIONALLY (trend-follow KILLED),
+  // pay when conditioned on a genuine volatility squeeze. Fail-soft.
+  let squeezeReads: CompressionCoinRead[] = [];
+  try {
+    const { scanCompressionSqueezes } = await import('@/lib/scout/compression-scan-service');
+    const scan = await scanCompressionSqueezes(scanCoins, now);
+    squeezeReads = scan.reads;
   } catch { /* scan unavailable → section just prints empty */ }
 
   // 3b-iii) HOUSEHOLD EXPOSURE (Phase 3, Jul-21) — iamrossi's on-chain Base Safe
@@ -362,6 +374,24 @@ run(async () => {
       `  [OPEN LONG exits if a daily close < ${px(r.don10Low)}; OPEN SHORT exits if a daily close > ${px(r.don10High)}]`;
     const bo = r.breakout
       ? `  → BREAKOUT ${r.breakout.side.toUpperCase()} entry=${px(r.breakout.entryPx)} stop=${px(r.breakout.stopPx)} (stopFrac ${(r.breakout.stopFrac * 100).toFixed(1)}%): if NONE open on ${r.coin}, ENTER lane 'htf-trend' setupType 'donchian-20-10' regime 'trend' — NO fixed target (let it run); exit ONLY on the 10-day-channel close-through above or the stop`
+      : '';
+    line(base + bo);
+  }
+
+  header("COMPRESSION-SQUEEZE SCAN (4h BBW squeeze → breakout — PAPER lane compression-straddle, setupType 'squeeze-breakout'; pre-registered 2026-08-13)");
+  if (squeezeReads.length === 0) line('(4h squeeze scan unavailable this cycle)');
+  for (const r of squeezeReads) {
+    const px = (x: number) => (r.latestClose >= 1000 ? x.toFixed(0) : r.latestClose >= 10 ? x.toFixed(2) : x.toFixed(4));
+    const state = r.inSqueeze
+      ? `SQUEEZE (BBW pctile ${(r.bbwPctile * 100).toFixed(0)}%)`
+      : r.barsSinceSqueeze != null
+        ? `post-squeeze +${r.barsSinceSqueeze} bars`
+        : `no squeeze (BBW pctile ${(r.bbwPctile * 100).toFixed(0)}%)`;
+    const base =
+      `${r.coin} close=${px(r.latestClose)}  ${state}  20bar[H ${px(r.don20High)} L ${px(r.don20Low)}]  BBmid=${px(r.bbMid)}` +
+      `  [OPEN LONG exits if a 4h close < ${px(r.bbMid)}; OPEN SHORT exits if a 4h close > ${px(r.bbMid)}]`;
+    const bo = r.breakout
+      ? `  → SQUEEZE BREAKOUT ${r.breakout.side.toUpperCase()} entry=${px(r.breakout.entryPx)} stop=${px(r.breakout.stopPx)} (stopFrac ${(r.breakout.stopFrac * 100).toFixed(1)}%): if NONE open on ${r.coin} AND this squeeze episode hasn't already been traded (ONE entry per episode — a stopped break is NEVER re-entered the other way), ENTER lane 'compression-straddle' setupType 'squeeze-breakout' regime 'expansion' — NO fixed target; exit ONLY on the 4h close back through BBmid or the stop`
       : '';
     line(base + bo);
   }
