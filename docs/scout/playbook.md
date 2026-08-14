@@ -210,3 +210,26 @@ just quiet ([[scout-repair-jul-2026]] — the consumer has died silently before)
   different timescale + mechanism, the honest response to the confirmed "no mechanical edge at
   15m/4h" finding. It needs its signal-surfacing built into the scout cycle before it trades;
   that build — not another 15m lane — is where effort goes next.
+
+### 2026-08-13 review — trend-follow churned 42 trades PAST its fired kill bar (process failure)
+Account NET **−$174.98** over 68 trades / 52.3 days (8% win) → **KILL**; run-rate −$100/mo.
+- **What happened:** when the daemon was revived (08-07), the cycle's REGIME section still
+  carried an ACTIVE "enter trend-follow" directive — so the scout churned **42 more trend-follow
+  trades in ~6 days** (mostly HYPE 4h flip-flops, −$38 incremental; lane totals n=46, 4% win,
+  −$141.39, −0.10R), sailing far past the n=15 kill bar with no review in between. The bar had
+  effectively FIRED at n=15; everything after was untracked bleed. **trend-follow is now KILLED**
+  (this was already near-certain on 08-06; it is now decisive and overdue).
+- **The process rules this adds (both applied in scripts/scout-cycle.ts, 08-13):**
+  1. **A killed/held lane's entry directive must be REMOVED from the cycle the moment its status
+     changes** — the model trades what the snapshot invites; playbook prose alone does not stop
+     it. REGIME + REVERSION sections are now CONTEXT-ONLY (no entry language).
+  2. **Kill bars need enforcement between reviews:** a lane at/past its pre-registered n with
+     negative expectancy must stop being tradeable without waiting for the next human review.
+     (Deterministic bar-check in the cycle = future hardening if this recurs.)
+- **Open position:** one BTC short (lane trend-follow) opened 08-13 — the cycle now instructs
+  closing any open killed-lane position; verify it's flat by next review.
+- **htf-trend: 0 trades** — correct, not broken: no major has closed a daily bar through its
+  20-day channel in this chop. The lane is live and waiting; its clock starts on the first breakout.
+- **Active roster after this review:** htf-trend (the ONE live experiment) + rubric-crossing
+  (n≈0, within bar) + passive controls (vault, carry). Killed: directional, reversion,
+  trend-follow. Queued: [[PREREGISTRATION_compression-straddle]] (after htf-trend resolves).

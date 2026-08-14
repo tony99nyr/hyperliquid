@@ -328,24 +328,30 @@ run(async () => {
       ),
     );
 
-  header('REGIME (4h, vendored iamrossi detector — TREND vs range; CONFIDENT TREND = the trend-follow paper lane)');
+  // CONTEXT ONLY since 08-13: the trend-follow lane is KILLED (n=46, 4% win, −$141 —
+  // the pre-registered bar fired at n=15 and the entry directive that used to live here
+  // kept inviting entries far past it). The regime read stays (it gates reversion + is
+  // honest context) but NO entry directive may appear here — the only mechanical trend
+  // lane is the DAILY htf-trend scan below. reversion-extreme is likewise killed.
+  header('REGIME (4h, vendored iamrossi detector — CONTEXT ONLY; trend-follow + reversion lanes are KILLED — do NOT enter from this section)');
   if (Object.keys(regimeByCoin).length === 0) line('(regime read unavailable this cycle)');
   for (const [coin, r] of Object.entries(regimeByCoin)) {
     const confidentTrend = r.regime !== 'neutral' && r.confidence >= DEFAULT_REVERSION_CONFIG.maxTrendConfidence;
-    const tag = confidentTrend
-      ? `→ CONFIDENT TREND — trend-follow candidate: if none open, enter ${r.regime === 'bullish' ? 'LONG' : 'SHORT'} lane 'trend-follow' setupType 'trend-follow' stop 4%; exit when no longer a confident trend (reversion lane skips)`
-      : '→ range/neutral (reversion lane active; no trend-follow)';
-    line(`${coin}: ${r.regime.toUpperCase()} conf=${(r.confidence * 100).toFixed(0)}% trend=${r.trend.toFixed(2)}  ${tag}`);
+    line(`${coin}: ${r.regime.toUpperCase()} conf=${(r.confidence * 100).toFixed(0)}% trend=${r.trend.toFixed(2)}  ${confidentTrend ? '(confident trend — context only)' : '(range/neutral)'}`);
   }
+  line("If any OPEN position is tagged lane 'trend-follow' or 'reversion': CLOSE it this cycle (scout:trade --exit) — killed lanes hold nothing.");
 
   if (household) {
     header('HOUSEHOLD EXPOSURE (iamrossi on-chain — cockpit trades STACK on this)');
     line(`ETH long $${household.ethUsd.toFixed(0)} · BTC long $${household.btcUsd.toFixed(0)} · NET crypto beta $${household.netUsd.toFixed(0)} (dominant ${household.dominant}). A cockpit LONG here stacks; a SHORT partially hedges. Awareness only — never auto-hedge.`);
   }
 
-  header('REVERSION SCAN (extreme-stretch FADE candidates — PAPER lane reversion-extreme; 4h-regime-gated)');
-  if (reversionHits.length === 0) line('(none — no coin is extremely stretched in a range regime; trending tape correctly yields nothing)');
-  for (const h of reversionHits) line(`${h.coin} FADE ${h.side.toUpperCase()} (z=${h.z.toFixed(1)}, ER=${h.er.toFixed(2)}, 4h-regime=${h.regime}/${(h.regimeConf * 100).toFixed(0)}%)  mark=${h.mark} stop=${h.stop.toFixed(4)} target=${h.target.toFixed(4)} stopFrac=${(h.stopFrac * 100).toFixed(1)}%  -> if taken: lane 'reversion', setupType 'reversion-extreme'`);
+  // KILLED LANE (08-06): reversion-extreme hit its pre-registered 21-day bar (n=12,
+  // −0.55R). The scan stays visible as CONTEXT (dislocations matter to judgment) but
+  // carries NO entry directive — do not open lane 'reversion' trades.
+  header('REVERSION SCAN (CONTEXT ONLY — the reversion-extreme lane is KILLED; never enter from this section)');
+  if (reversionHits.length === 0) line('(none — no coin is extremely stretched in a range regime)');
+  for (const h of reversionHits) line(`${h.coin} stretched ${h.side === 'long' ? 'DOWN' : 'UP'} (z=${h.z.toFixed(1)}, ER=${h.er.toFixed(2)}, 4h-regime=${h.regime}/${(h.regimeConf * 100).toFixed(0)}%)  mark=${h.mark}  — context only, lane killed`);
 
   header("HTF-TREND SCAN (DAILY Donchian 20d breakout — PAPER lane htf-trend, setupType 'donchian-20-10'; pre-registered 2026-08-01)");
   if (htfReads.length === 0) line('(daily scan unavailable this cycle)');
