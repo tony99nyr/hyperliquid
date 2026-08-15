@@ -42,6 +42,35 @@ export function assertScoutPaperMode(mode: TradingMode): void {
  */
 export const KILLED_LANES: ReadonlySet<string> = new Set(['directional', 'reversion', 'trend-follow']);
 
+/**
+ * REGISTERED lanes — the ONLY lanes a scout open may carry (allowlist; 08-15). The
+ * blocklist above catches killed experiments; this catches the OTHER failure class the
+ * 08-15 review surfaced: an unregistered lane (no frozen rule, no kill bar) quietly
+ * starting to trade — leader-follow ran 3 churn trades as an unregistered "control".
+ * A lane gets ON this list by having a pre-registration doc (docs/scout/PREREGISTRATION_*)
+ * or being a passive benchmark; anything else is refused at the execution point.
+ */
+export const REGISTERED_LANES: ReadonlySet<string> = new Set([
+  'htf-trend', // PREREGISTRATION_htf-trend.md
+  'compression-straddle', // PREREGISTRATION_compression-straddle.md
+  'breakdown-short', // PREREGISTRATION_rubric-crossing.md (short side)
+  'reclaim-long', // PREREGISTRATION_rubric-crossing.md (long side)
+  'leader-follow', // PREREGISTRATION_leader-follow.md
+  'vault', // passive benchmark (HLP buy-hold)
+  'carry', // passive benchmark (Δ-neutral funding)
+]);
+
+export class ScoutUnregisteredLaneError extends Error {
+  constructor(lane: string) {
+    super(
+      `Scout lane '${lane}' is not REGISTERED — every tradeable lane needs a frozen pre-registration ` +
+        '(docs/scout/PREREGISTRATION_*.md) + a kill bar BEFORE its first trade. Add it to REGISTERED_LANES ' +
+        'with its pre-reg, or use a registered lane.',
+    );
+    this.name = 'ScoutUnregisteredLaneError';
+  }
+}
+
 export class ScoutKilledLaneError extends Error {
   constructor(lane: string) {
     super(
@@ -62,4 +91,8 @@ export function assertLaneAlive(lane: string): void {
   for (const killed of KILLED_LANES) {
     if (norm === killed || norm.startsWith(`${killed}-`)) throw new ScoutKilledLaneError(lane);
   }
+  // Allowlist second (the killed check first gives the clearer message for known-dead
+  // lanes): anything not explicitly registered is refused — no unregistered lane can
+  // quietly start trading again.
+  if (!REGISTERED_LANES.has(norm)) throw new ScoutUnregisteredLaneError(lane);
 }

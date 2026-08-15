@@ -24,9 +24,25 @@ export interface EconEvent {
 
 export const ECONOMIC_EVENTS: EconEvent[] = [
   {
+    name: 'Jackson Hole — Warsh keynote',
+    atIso: '2026-08-28T14:00:00Z',
+    note:
+      "Kevin Warsh's FIRST keynote as Fed chair (symposium Aug 27-29, theme: financial innovation/payments). " +
+      'A new chair debuting policy tone = outsized headline risk vs a routine JH speech. Keynote ~10:00 ET.',
+    straddleCoin: 'BTC',
+    prepLeadMinutes: 30,
+  },
+  {
+    name: 'CPI (Aug data)',
+    atIso: '2026-09-11T12:30:00Z',
+    note: 'BLS CPI 08:30 ET. Inflation print into the Sep FOMC — binary macro.',
+    straddleCoin: 'BTC',
+    prepLeadMinutes: 30,
+  },
+  {
     name: 'FOMC',
-    atIso: '2026-07-29T18:00:00Z',
-    note: 'Rate decision 18:00 UTC + press conference 18:30. Binary macro — straddle it.',
+    atIso: '2026-09-16T18:00:00Z',
+    note: 'Rate decision 18:00 UTC + press conference 18:30. First decision of the Warsh Fed — binary macro, straddle it.',
     straddleCoin: 'BTC',
     prepLeadMinutes: 30,
   },

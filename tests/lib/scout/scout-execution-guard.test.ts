@@ -4,6 +4,7 @@ import {
   ScoutLiveExecutionError,
   assertLaneAlive,
   ScoutKilledLaneError,
+  ScoutUnregisteredLaneError,
   KILLED_LANES,
 } from '@/lib/scout/scout-execution-guard';
 import { executeIntent } from '@/lib/trading/fill-source';
@@ -39,9 +40,15 @@ describe('assertLaneAlive — deterministic kill-bar enforcement (08-13 review)'
     expect(() => assertLaneAlive('htf-trend')).not.toThrow();
   });
 
-  it('permits the live lanes', () => {
-    for (const lane of ['htf-trend', 'rubric-crossing', 'leader-follow', 'vault', 'carry']) {
+  it('permits every REGISTERED lane', () => {
+    for (const lane of ['htf-trend', 'compression-straddle', 'breakdown-short', 'reclaim-long', 'leader-follow', 'vault', 'carry']) {
       expect(() => assertLaneAlive(lane)).not.toThrow();
+    }
+  });
+
+  it('REFUSES unregistered lanes (allowlist — no lane trades without a pre-registration)', () => {
+    for (const lane of ['rubric-crossing', 'my-new-idea', 'reversion2', 'scalp', '']) {
+      expect(() => assertLaneAlive(lane)).toThrow(ScoutUnregisteredLaneError);
     }
   });
 });
