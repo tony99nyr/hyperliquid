@@ -94,7 +94,7 @@ export function trendLine(s: TrendSplit): string {
  * panel supply the conviction and the exact levels.
  */
 export type ConditionalShape =
-  | 'reversion-fade' // a statistical extreme → fade to mean (the one FORWARD-TESTING edge)
+  | 'reversion-fade' // a statistical extreme → fade to mean (forward test KILLED 08-06 at −0.55R — surfaced as CONTEXT, never "proven")
   | 'breakdown-short' // rubric leans short → arm a short that fires on the confirmed level break
   | 'reclaim-long' // rubric leans long → arm a long that fires on the confirmed reclaim
   | 'bounce-short' // structural DOWNtrend → arm a short into a bounce (don't chase the grind)
@@ -115,17 +115,22 @@ export interface ConditionalSetup {
 }
 
 /**
- * Pick the conditional-entry shape. Priority: the proven reversion edge first, then a
- * rubric-directional break (arm AHEAD of the WATCH→GO confirmation — the proactive
- * play), then a trend-continuation entry-on-a-counter-move. PURE. Advisory only — every
- * shape but reversion is DISCRETIONARY scaffolding (the operator's thesis), not a signal.
+ * Pick the conditional-entry shape. Priority: a live dislocation (reversion CONTEXT)
+ * first, then a rubric-directional break (arm AHEAD of the WATCH→GO confirmation — the
+ * proactive play), then a trend-continuation entry-on-a-counter-move. PURE. Advisory
+ * only — EVERY shape is discretionary scaffolding, not a signal: the reversion-fade
+ * forward test was KILLED on 2026-08-06 (n=12, −0.55R — dislocations kept trending),
+ * so it must never again be labeled "proven"; the losses clustered in exactly the
+ * fade-against-an-aligned-trend setups this section used to invite.
  */
 export function conditionalSetup(inp: ConditionalSetupInput): ConditionalSetup {
   if (inp.reversion) {
     return {
       shape: 'reversion-fade',
-      proven: true,
-      rationale: `|z|=${Math.abs(inp.reversion.z).toFixed(1)} extreme → fade ${inp.reversion.side} to the mean (the forward-testing lane)`,
+      proven: false,
+      rationale:
+        `|z|=${Math.abs(inp.reversion.z).toFixed(1)} extreme (CONTEXT ONLY — the fade lane was KILLED at −0.55R: ` +
+        `dislocations kept trending; do not knife-catch without independent confirmation)`,
     };
   }
   const rb = inp.rubricBest;

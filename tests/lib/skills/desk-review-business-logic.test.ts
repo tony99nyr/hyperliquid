@@ -69,10 +69,11 @@ describe('conditionalSetup', () => {
   const bullTrend = splitTrend([r('1d', 'bullish', 0.8), r('8h', 'bullish', 0.7), r('1h', 'bullish', 0.6), r('15m', 'bullish', 0.5)]);
   const neutralTrend = splitTrend([r('1d', 'neutral', 0.2), r('8h', 'neutral', 0.1), r('1h', 'neutral', 0.1), r('15m', 'neutral', 0.1)]);
 
-  it('reversion candidate wins — the one proven edge', () => {
+  it('reversion candidate wins priority but is CONTEXT-ONLY — the fade lane was KILLED (08-06, −0.55R)', () => {
     const s = conditionalSetup({ trend: bearTrend, rubricBest: { side: 'short', opportunity: 68, badge: 'WATCH' }, reversion: { side: 'long', z: -2.9 } });
     expect(s.shape).toBe('reversion-fade');
-    expect(s.proven).toBe(true);
+    expect(s.proven).toBe(false); // NEVER again labeled proven — pinned so a re-flip needs a fresh graduation
+    expect(s.rationale).toMatch(/KILLED/);
   });
 
   it('rubric WATCH short → breakdown-short, armed AHEAD of confirmation (discretionary)', () => {
