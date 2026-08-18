@@ -58,36 +58,45 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // would defer the 'success' ping and could trip the external check on a perfectly healthy
     // fire tick. Wrapped: a healthcheck-endpoint blip must never flip a good tick to 'fail'.
     await pingHealthcheck(hcUrl, 'success').catch(() => {});
-    // Post-tick guards, all FAIL-SOFT (they must never break or fail the watcher tick):
+    // SIDE-LANE THROTTLE (08-18, Vercel Active-CPU budget): the FIRE pass above runs
+    // every external-cron tick (~2min) — its latency is sacred. The advisory side lanes
+    // below don't need that cadence; they run only on ticks landing in the first 2
+    // minutes of each 10-minute wall-clock window (stateless — serverless has no
+    // counter), ≈1 in 5 ticks. Latency impact: leader/flip disarms ≤10min (risk-
+    // REDUCING, on $-capped ladders), event-prep still gets ≥2 checks inside its 30-min
+    // lead, heartbeat thresholds are 30/90min. The trend FLIP guard above is NOT
+    // throttled (it must precede every fire pass).
+    const fullTick = new Date().getUTCMinutes() % 10 < 2;
+    const throttled = { skipped: 'throttled' } as const;
     //  - leader guard: DISARM-ONLY — kills copy-thesis ladders whose leader exited/flipped.
     //  - expiry alert: ADVISORY — one page when an armed ladder nears expiry unfired.
-    const leaderGuard = await runLeaderGuard(Date.now()).catch((e) => ({ checked: -1, disarmed: [], error: extractErrorMessage(e) }));
-    const expiryAlerts = await runExpiryAlerts(Date.now()).catch((e) => ({ checked: -1, alerted: [], error: extractErrorMessage(e) }));
+    const leaderGuard = fullTick
+      ? await runLeaderGuard(Date.now()).catch((e) => ({ checked: -1, disarmed: [], error: extractErrorMessage(e) }))
+      : throttled;
+    const expiryAlerts = fullTick
+      ? await runExpiryAlerts(Date.now()).catch((e) => ({ checked: -1, alerted: [], error: extractErrorMessage(e) }))
+      : throttled;
     //  - price alerts: ADVISORY one-shot operator pings; independent of armed ladders.
-    const priceAlerts = await checkPriceAlerts().catch(() => ({ checked: -1, fired: 0 }));
-    //  - scout watchdog: pages when the scout producer/consumer heartbeat goes stale
-    //    (a dead scout box can't report itself; production must). Fail-soft.
-    const scoutHeartbeats = await checkScoutHeartbeats().catch(() => ({ checked: -1, paged: 0 }));
+    const priceAlerts = fullTick ? await checkPriceAlerts().catch(() => ({ checked: -1, fired: 0 })) : throttled;
+    //  - scout watchdog: pages when the scout producer/consumer heartbeat goes stale.
+    const scoutHeartbeats = fullTick ? await checkScoutHeartbeats().catch(() => ({ checked: -1, paged: 0 })) : throttled;
     //  - steward counterfactuals: scores due proposals ("would it have helped?") — 📊 pages.
-    const stewardProposals = await resolveStewardProposals().catch(() => ({ checked: -1, resolved: 0 }));
-    //  - reversion alert: on a fresh reversion-extreme candidate, auto-DRAFT a low-qty
-    //    LIVE fade ladder + 🔁 Discord the operator to review+arm. DRAFT only — NEVER arms
-    //    (the human gate holds). Flag-gated (default OFF), fail-soft.
-    const reversionAlert = isReversionAlertEnabled()
+    const stewardProposals = fullTick ? await resolveStewardProposals().catch(() => ({ checked: -1, resolved: 0 })) : throttled;
+    //  - reversion alert: flag-gated (default OFF), fail-soft. DRAFT only — never arms.
+    const reversionAlert = fullTick && isReversionAlertEnabled()
       ? await runReversionAlertCycle(undefined, Date.now()).catch((e) => ({ error: extractErrorMessage(e) }))
-      : { skipped: 'disabled' };
-    //  - trend alert (the iamrossi retired-leverage-lane replacement, fail-soft):
-    //    8h stance bullish+confident+holding → auto-DRAFT a low-qty LIVE pyramiding
-    //    ladder + 📈 Discord. DRAFT only — NEVER arms. Flag-gated (default OFF).
-    //    (Its DISARM-side twin, the trend flip guard, runs BEFORE the tick above.)
-    const trendAlert = isTrendAlertEnabled()
+      : { skipped: fullTick ? 'disabled' : 'throttled' };
+    //  - trend alert: flag-gated (default OFF), fail-soft. DRAFT only — never arms.
+    //    (Its DISARM-side twin, the trend flip guard, runs UNthrottled before the tick.)
+    const trendAlert = fullTick && isTrendAlertEnabled()
       ? await runTrendAlertCycle(undefined, Date.now()).catch((e) => ({ error: extractErrorMessage(e) }))
-      : { skipped: 'disabled' };
-    //  - event-prep alert: 🚨 pings the operator ONCE when a calendar macro event (FOMC,
-    //    CPI…) enters its prep window, with the straddle:prep command. Advisory, deduped,
-    //    fail-soft — never trades/arms/drafts.
-    const eventPrepAlert = await runEventPrepAlert(Date.now()).catch((e) => ({ pinged: null, error: extractErrorMessage(e) }));
-    return NextResponse.json({ ok: true, ...summary, leaderGuard, expiryAlerts, priceAlerts, scoutHeartbeats, stewardProposals, reversionAlert, trendAlert, trendFlipGuard, eventPrepAlert });
+      : { skipped: fullTick ? 'disabled' : 'throttled' };
+    //  - event-prep alert: 🚨 one deduped ping when a calendar macro event enters its
+    //    prep window. 10-min granularity still lands ≥2 checks inside the 30-min lead.
+    const eventPrepAlert = fullTick
+      ? await runEventPrepAlert(Date.now()).catch((e) => ({ pinged: null, error: extractErrorMessage(e) }))
+      : throttled;
+    return NextResponse.json({ ok: true, ...summary, fullTick, leaderGuard, expiryAlerts, priceAlerts, scoutHeartbeats, stewardProposals, reversionAlert, trendAlert, trendFlipGuard, eventPrepAlert });
   } catch (e) {
     await pingHealthcheck(hcUrl, 'fail');
     return NextResponse.json({ ok: false, error: extractErrorMessage(e) }, { status: 500 });
