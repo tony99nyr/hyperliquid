@@ -467,6 +467,15 @@ run(async () => {
     summary.lastResolved.forEach((h) => line(`  [${h.status}] ${h.statement}${h.resolutionNote ? ` — ${h.resolutionNote}` : ''}`));
   }
 
+  // The model trades what the snapshot shows it (every churn incident traces to this) —
+  // so the FROZEN per-lane rules ride in the snapshot itself, every cycle.
+  header('LANE RULES (FROZEN pre-registrations — violating these corrupts the forward test; exits are MECHANICAL, never discretionary)');
+  line("htf-trend: enter ONLY on the HTF-TREND SCAN breakout directive (completed DAILY close through the 20d channel); exit ONLY on the 10d-channel daily close-through or the stop. NO fixed target, NO early exits.");
+  line("compression-straddle: enter ONLY on the SQUEEZE BREAKOUT directive; ONE entry per squeeze episode per coin (a stopped break is NEVER re-entered); exit ONLY on the 4h close back through BBmid or the stop.");
+  line("leader-follow: enter ONLY on a rated-leader OPEN/ADD/FLIP ≥$1M on a major; ONE entry per coin per 24h (a cluster of adds is ONE signal — mechanically enforced); stop 3%; exit ONLY on the leader exiting/flipping, the stop, or 72h. A 30-minute discretionary exit is a RULE VIOLATION (see 08-17: three same-night BTC follows, all violations, −$4.4).");
+  line("breakdown-short / reclaim-long: enter ONLY on a rubric GO directive; stop 2.5%; exit when the side drops out of GO.");
+  line('vault / carry: passive benchmarks — no active management.');
+
   header('PLAYBOOK');
   line(existsSync(playbookPath) ? `Read + apply: ${playbookPath}` : `(missing — create ${playbookPath})`);
 

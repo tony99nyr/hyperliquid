@@ -88,6 +88,32 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   // prose/context-only sections were not enough (42 trades churned past a fired bar).
   // Exits stay allowed (the --exit path below never calls this).
   assertLaneAlive(lane);
+  // DETERMINISTIC entry cooldown (08-17): the leader-follow pre-reg's "ONE entry per
+  // coin per 24h" was violated the first night it existed (3 BTC follows in 4h) —
+  // prose doesn't hold; enforce it here. Any positions-row activity on this coin+lane
+  // inside the window blocks a NEW open (conservative: a close also restarts the
+  // clock, which is exactly the anti-churn intent). Fail-CLOSED on a read error —
+  // paper-only, so a blocked legal entry is the cheap failure mode.
+  const LANE_ENTRY_COOLDOWN_HOURS: Record<string, number> = { 'leader-follow': 24 };
+  const cooldownH = LANE_ENTRY_COOLDOWN_HOURS[lane.toLowerCase()];
+  if (cooldownH) {
+    const db = getServiceRoleClient();
+    const since = new Date(Date.now() - cooldownH * 3_600_000).toISOString();
+    const { data: recent, error: cdErr } = await db
+      .from('positions')
+      .select('updated_at')
+      .eq('coin', coin)
+      .eq('lane', lane)
+      .gte('updated_at', since)
+      .limit(1);
+    if (cdErr) throw new Error(`lane-cooldown check failed (${cdErr.message}) — refusing open (fail-closed)`);
+    if ((recent?.length ?? 0) > 0) {
+      throw new Error(
+        `lane '${lane}' cooldown: a ${coin} entry/exit already happened in the last ${cooldownH}h — ` +
+          'ONE entry per coin per window (frozen pre-registration). A cluster of leader adds is ONE signal; stand down.',
+      );
+    }
+  }
 
   // Reuse the scout session or open one (dedicated, paper).
   let sessionId: string;
