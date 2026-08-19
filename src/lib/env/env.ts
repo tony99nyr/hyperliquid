@@ -24,6 +24,22 @@
 
 import { z } from 'zod';
 
+/**
+ * A 'true'/'false' feature flag that tolerates the empty string. The Vercel CLI's
+ * stdin-piped `env add` has TWICE stored `""` instead of the intended value (08-01
+ * REVERSION_ALERT_ENABLED, 08-19 RUNAWAY_ALERT_ENABLED) — and a bare enum REJECTS ''
+ * (only `undefined` triggers .default), which makes validateEnv() throw APP-WIDE and
+ * takes the watcher down with it. Treat ''/null as unset → the safe default 'false'.
+ */
+const boolFlag = () =>
+  z.preprocess(
+    (v) => (v === '' || v == null ? undefined : v),
+    z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((v) => v === 'true'),
+  );
+
 const envSchema = z.object({
   TRADING_MODE: z.enum(['paper', 'live']).default('paper'),
 
@@ -82,10 +98,7 @@ const envSchema = z.object({
   // --- Layer-1 auto-exit (exit-only safety net; see docs/LIVE_AUTO_EXIT.md) ---
   // Master kill-switch. Default OFF: the risk-exit endpoint refuses to fire and
   // the detector no-ops unless this is explicitly 'true'. EXIT-ONLY when on.
-  AUTO_EXIT_ENABLED: z
-    .enum(['true', 'false'])
-    .default('false')
-    .transform((v) => v === 'true'),
+  AUTO_EXIT_ENABLED: boolFlag(),
   // Dedicated bearer token for the detector/cron to call /api/cockpit/risk-exit.
   // Separate from ADMIN_SECRET so the NAS/cron never holds the admin credential.
   AUTO_EXIT_CRON_SECRET: z.string().min(1).optional(),
@@ -95,27 +108,18 @@ const envSchema = z.object({
   // authorization) only when this is 'true'. PAPER ladders work regardless. Default
   // OFF. NOTE: arming ≠ executing — this does NOT let the watcher fire autonomously;
   // that is the SEPARATE LADDER_AUTOFIRE_ENABLED switch below.
-  LADDER_LIVE_ENABLED: z
-    .enum(['true', 'false'])
-    .default('false')
-    .transform((v) => v === 'true'),
+  LADDER_LIVE_ENABLED: boolFlag(),
   // The "automatic execute" kill-switch — INDEPENDENT of TRADING_MODE and
   // LADDER_LIVE_ENABLED. Only when this is 'true' may the NAS watcher / fire-rung route
   // (P1d) AUTONOMOUSLY execute a pre-armed rung while the operator is AFK. Default OFF,
   // and deliberately kept OFF even when the cockpit is fully live for MANUAL execution:
   // going live ≠ enabling AFK auto-fire. The fire route checks this as its single
   // enforcement point (invariant §4b.7 kill-switch) before any autonomous fill.
-  LADDER_AUTOFIRE_ENABLED: z
-    .enum(['true', 'false'])
-    .default('false')
-    .transform((v) => v === 'true'),
+  LADDER_AUTOFIRE_ENABLED: boolFlag(),
   // Reversion-alert: when 'true', the ladder-watch cron auto-DRAFTS a low-qty LIVE
   // ladder + pings Discord on a fresh reversion-extreme candidate (the one proven-ish
   // edge). DRAFT only — it NEVER arms (the human gate holds); default OFF.
-  REVERSION_ALERT_ENABLED: z
-    .enum(['true', 'false'])
-    .default('false')
-    .transform((v) => v === 'true'),
+  REVERSION_ALERT_ENABLED: boolFlag(),
   // Public base URL of the deployed cockpit — used to build clickable Discord deep-links
   // (e.g. the reversion-alert 👉 ladders-page link). Defaults to the production alias.
   COCKPIT_BASE_URL: z.string().url().default('https://hyperliquid-rouge.vercel.app'),
@@ -123,10 +127,11 @@ const envSchema = z.object({
   // ladder + pings Discord when the iamrossi 8h system turns bullish+confident on a
   // coin it's holding (the replacement for its retired Base leverage lane). DRAFT only
   // — it NEVER arms (the human gate holds); default OFF. Needs IAMROSSI_STANCE_URL/TOKEN.
-  TREND_ALERT_ENABLED: z
-    .enum(['true', 'false'])
-    .default('false')
-    .transform((v) => v === 'true'),
+  TREND_ALERT_ENABLED: boolFlag(),
+  // Runaway-alert (doctrine 08-19: "strong movements ARE a catalyst"): when 'true',
+  // the ladder-watch cron auto-DRAFTS a low-qty LIVE continuation ladder + pings
+  // Discord on an outsized 24h move (≥5%). DRAFT only — NEVER arms; default OFF.
+  RUNAWAY_ALERT_ENABLED: boolFlag(),
   // Dedicated bearer token for the NAS watcher to call /api/cockpit/ladder/fire-rung
   // (P1d). Separate from ADMIN_SECRET so the watcher never holds the admin credential.
   LADDER_CRON_SECRET: z.string().min(1).optional(),
@@ -174,6 +179,7 @@ export function validateEnv(source: NodeJS.ProcessEnv = process.env): CockpitEnv
     REVERSION_ALERT_ENABLED: source.REVERSION_ALERT_ENABLED,
     COCKPIT_BASE_URL: source.COCKPIT_BASE_URL,
     TREND_ALERT_ENABLED: source.TREND_ALERT_ENABLED,
+    RUNAWAY_ALERT_ENABLED: source.RUNAWAY_ALERT_ENABLED,
     IAMROSSI_STANCE_URL: source.IAMROSSI_STANCE_URL,
     IAMROSSI_STANCE_TOKEN: source.IAMROSSI_STANCE_TOKEN,
     LADDER_CRON_SECRET: source.LADDER_CRON_SECRET,

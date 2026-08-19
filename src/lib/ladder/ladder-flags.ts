@@ -35,6 +35,13 @@ export function isTrendAlertEnabled(): boolean {
   return validateEnv().TREND_ALERT_ENABLED;
 }
 
+/** When ON, the ladder-watch cron auto-DRAFTS a low-qty LIVE continuation ladder +
+ *  pings Discord on an outsized 24h move ("strong movements ARE a catalyst" — the
+ *  runaway doctrine, 08-19). DRAFT only — never arms. Default OFF. */
+export function isRunawayAlertEnabled(): boolean {
+  return validateEnv().RUNAWAY_ALERT_ENABLED;
+}
+
 /** The bearer the NAS watcher uses to call /ladder/fire-rung. Dedicated token (the
  *  watcher never holds ADMIN_SECRET); falls back to Vercel's native CRON_SECRET. */
 export function getLadderCronSecret(): string | undefined {
