@@ -45,9 +45,15 @@ async function openPositionCoins(): Promise<Set<string>> {
   }
 }
 
-/** A recent runaway draft already exists for this coin? Ignores archived_at on purpose —
- *  archiving is the operator's "not this one" and must start the cooldown. FAIL-CLOSED:
- *  a dedupe read error throws into the per-coin catch (skip, no spray). */
+/** Does this coin already have a VEHICLE? Two checks (first firing's lesson, 08-20: the
+ *  drafter re-created a panel-VETOED HYPE geometry because it only looked for its own
+ *  titles while a panel-approved HYPE draft sat right there):
+ *   1. a recent runaway draft (title match, archived included — archiving is the
+ *      operator's "not this one" and must start the cooldown);
+ *   2. ANY current draft/armed live ladder whose rungs touch the coin — the operator
+ *      (or the panel) already has a vehicle; a second mechanical one is clutter at best
+ *      and a vetoed-shape resurrection at worst.
+ *  FAIL-CLOSED: a read error throws into the per-coin catch (skip, no spray). */
 async function alreadyDrafted(coin: string, sinceMs: number): Promise<boolean> {
   const db = getServiceRoleClient();
   const { data, error } = await db
@@ -57,7 +63,16 @@ async function alreadyDrafted(coin: string, sinceMs: number): Promise<boolean> {
     .gte('created_at', new Date(sinceMs).toISOString())
     .limit(1);
   if (error) throw new Error(`runaway dedupe read failed: ${error.message}`);
-  return (data?.length ?? 0) > 0;
+  if ((data?.length ?? 0) > 0) return true;
+  const { data: rungRows, error: rungErr } = await db
+    .from('ladder_rungs')
+    .select('ladder_id, ladders!inner(status, archived_at)')
+    .eq('coin', coin)
+    .in('ladders.status', ['draft', 'armed'])
+    .is('ladders.archived_at', null)
+    .limit(1);
+  if (rungErr) throw new Error(`runaway vehicle-check read failed: ${rungErr.message}`);
+  return (rungRows?.length ?? 0) > 0;
 }
 
 /** Run one runaway-alert cycle. READ-heavy + DRAFT writes only; never arms or fires. */
