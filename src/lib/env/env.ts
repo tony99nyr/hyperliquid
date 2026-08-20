@@ -31,13 +31,17 @@ import { z } from 'zod';
  * (only `undefined` triggers .default), which makes validateEnv() throw APP-WIDE and
  * takes the watcher down with it. Treat ''/null as unset → the safe default 'false'.
  */
-const boolFlag = () =>
+const warnedEmptyFlags = new Set<string>();
+const boolFlag = (name: string) =>
   z.preprocess(
     (v) => {
       // Present-but-empty = the CLI bug ate an intended value. Reading it as OFF is the
-      // safe default, but say so — an operator who set 'true' and got '' would otherwise
-      // silently believe the feature is on (review 08-20 M2).
-      if (v === '') console.warn('[env] a boolean flag is set to an EMPTY string (the vercel-CLI stdin bug?) — treating as false');
+      // safe default, but say so — NAMED and once per process (validateEnv re-parses on
+      // every call; an anonymous per-request warn would spam and still be unactionable).
+      if (v === '' && !warnedEmptyFlags.has(name)) {
+        warnedEmptyFlags.add(name);
+        console.warn(`[env] ${name} is set to an EMPTY string (the vercel-CLI stdin bug?) — treating as false`);
+      }
       return v === '' || v == null ? undefined : v;
     },
     z
@@ -104,7 +108,7 @@ const envSchema = z.object({
   // --- Layer-1 auto-exit (exit-only safety net; see docs/LIVE_AUTO_EXIT.md) ---
   // Master kill-switch. Default OFF: the risk-exit endpoint refuses to fire and
   // the detector no-ops unless this is explicitly 'true'. EXIT-ONLY when on.
-  AUTO_EXIT_ENABLED: boolFlag(),
+  AUTO_EXIT_ENABLED: boolFlag('AUTO_EXIT_ENABLED'),
   // Dedicated bearer token for the detector/cron to call /api/cockpit/risk-exit.
   // Separate from ADMIN_SECRET so the NAS/cron never holds the admin credential.
   AUTO_EXIT_CRON_SECRET: z.string().min(1).optional(),
@@ -114,18 +118,18 @@ const envSchema = z.object({
   // authorization) only when this is 'true'. PAPER ladders work regardless. Default
   // OFF. NOTE: arming ≠ executing — this does NOT let the watcher fire autonomously;
   // that is the SEPARATE LADDER_AUTOFIRE_ENABLED switch below.
-  LADDER_LIVE_ENABLED: boolFlag(),
+  LADDER_LIVE_ENABLED: boolFlag('LADDER_LIVE_ENABLED'),
   // The "automatic execute" kill-switch — INDEPENDENT of TRADING_MODE and
   // LADDER_LIVE_ENABLED. Only when this is 'true' may the NAS watcher / fire-rung route
   // (P1d) AUTONOMOUSLY execute a pre-armed rung while the operator is AFK. Default OFF,
   // and deliberately kept OFF even when the cockpit is fully live for MANUAL execution:
   // going live ≠ enabling AFK auto-fire. The fire route checks this as its single
   // enforcement point (invariant §4b.7 kill-switch) before any autonomous fill.
-  LADDER_AUTOFIRE_ENABLED: boolFlag(),
+  LADDER_AUTOFIRE_ENABLED: boolFlag('LADDER_AUTOFIRE_ENABLED'),
   // Reversion-alert: when 'true', the ladder-watch cron auto-DRAFTS a low-qty LIVE
   // ladder + pings Discord on a fresh reversion-extreme candidate (the one proven-ish
   // edge). DRAFT only — it NEVER arms (the human gate holds); default OFF.
-  REVERSION_ALERT_ENABLED: boolFlag(),
+  REVERSION_ALERT_ENABLED: boolFlag('REVERSION_ALERT_ENABLED'),
   // Public base URL of the deployed cockpit — used to build clickable Discord deep-links
   // (e.g. the reversion-alert 👉 ladders-page link). Defaults to the production alias.
   COCKPIT_BASE_URL: z.string().url().default('https://hyperliquid-rouge.vercel.app'),
@@ -133,11 +137,11 @@ const envSchema = z.object({
   // ladder + pings Discord when the iamrossi 8h system turns bullish+confident on a
   // coin it's holding (the replacement for its retired Base leverage lane). DRAFT only
   // — it NEVER arms (the human gate holds); default OFF. Needs IAMROSSI_STANCE_URL/TOKEN.
-  TREND_ALERT_ENABLED: boolFlag(),
+  TREND_ALERT_ENABLED: boolFlag('TREND_ALERT_ENABLED'),
   // Runaway-alert (doctrine 08-19: "strong movements ARE a catalyst"): when 'true',
   // the ladder-watch cron auto-DRAFTS a low-qty LIVE continuation ladder + pings
   // Discord on an outsized 24h move (≥5%). DRAFT only — NEVER arms; default OFF.
-  RUNAWAY_ALERT_ENABLED: boolFlag(),
+  RUNAWAY_ALERT_ENABLED: boolFlag('RUNAWAY_ALERT_ENABLED'),
   // Dedicated bearer token for the NAS watcher to call /api/cockpit/ladder/fire-rung
   // (P1d). Separate from ADMIN_SECRET so the watcher never holds the admin credential.
   LADDER_CRON_SECRET: z.string().min(1).optional(),
