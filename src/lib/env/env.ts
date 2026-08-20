@@ -33,7 +33,13 @@ import { z } from 'zod';
  */
 const boolFlag = () =>
   z.preprocess(
-    (v) => (v === '' || v == null ? undefined : v),
+    (v) => {
+      // Present-but-empty = the CLI bug ate an intended value. Reading it as OFF is the
+      // safe default, but say so — an operator who set 'true' and got '' would otherwise
+      // silently believe the feature is on (review 08-20 M2).
+      if (v === '') console.warn('[env] a boolean flag is set to an EMPTY string (the vercel-CLI stdin bug?) — treating as false');
+      return v === '' || v == null ? undefined : v;
+    },
     z
       .enum(['true', 'false'])
       .default('false')

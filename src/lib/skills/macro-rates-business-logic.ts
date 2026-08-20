@@ -57,9 +57,13 @@ export function ratesRead(points: RatesPoint[]): RatesRead | null {
   const windowLowPct = Math.min(...points.map((p) => p.yieldPct));
   const mag = Math.max(Math.abs(d1Bp), Math.abs(d5Bp) / 2);
   const magnitude: RatesRead['magnitude'] = mag >= MACRO_MOVE_BP ? 'macro-move' : mag >= NOTABLE_BP ? 'notable' : 'quiet';
-  // Direction only means something when the move is at least notable.
+  // Direction follows WHICHEVER horizon made the move notable — the 1d print when it is
+  // itself notable, else the 5d grind. (The old d1+d5/2 blend could label a −9bp DOWN
+  // day 'risk-off' because last week ground up — a ±1bp blend deciding the flag was
+  // noise; review 08-20 M3.) Exactly-zero direction stays neutral.
+  const dirBp = Math.abs(d1Bp) >= NOTABLE_BP ? d1Bp : d5Bp;
   const riskSignal: RatesRead['riskSignal'] =
-    magnitude === 'quiet' ? 'neutral' : d1Bp + d5Bp / 2 > 0 ? 'risk-off-pressure' : 'easing-tailwind';
+    magnitude === 'quiet' || dirBp === 0 ? 'neutral' : dirBp > 0 ? 'risk-off-pressure' : 'easing-tailwind';
   return { latest, d1Bp, d5Bp, windowHighPct, windowLowPct, magnitude, riskSignal };
 }
 

@@ -41,6 +41,21 @@ describe('ratesRead — the fiscal barometer fold', () => {
     expect(ratesLine(r)).toMatch(/risk-ON/);
   });
 
+  it('a notable DOWN day is never labeled risk-off by an opposing 5d grind (review 08-20 M3)', () => {
+    // d1 = −9bp (yields fell today), d5 = +20bp (last week ground up). The old blend
+    // (−9 + 10 = +1) flagged risk-off on a down day; direction must follow the
+    // horizon that made the move notable — here the 1d print is notable and DOWN.
+    const pts = [
+      { date: 'd1', yieldPct: 5.0 }, { date: 'd2', yieldPct: 5.1 }, { date: 'd3', yieldPct: 5.15 },
+      { date: 'd4', yieldPct: 5.2 }, { date: 'd5', yieldPct: 5.29 }, { date: 'd6', yieldPct: 5.2 },
+    ];
+    const r = ratesRead(pts)!;
+    expect(r.d1Bp).toBe(-9);
+    expect(r.d5Bp).toBe(20);
+    expect(r.magnitude).toBe('notable');
+    expect(r.riskSignal).toBe('easing-tailwind'); // follows the notable 1d DOWN print
+  });
+
   it('a slow 5d grind can reach notable without a big 1d print', () => {
     const pts = [
       { date: 'd1', yieldPct: 5.0 }, { date: 'd2', yieldPct: 5.05 }, { date: 'd3', yieldPct: 5.09 },

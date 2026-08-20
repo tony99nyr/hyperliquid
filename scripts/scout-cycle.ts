@@ -38,8 +38,8 @@ import { type CompressionCoinRead } from '@/lib/scout/compression-scan-service';
  *  headless JSON snapshot (08-20: the json snapshot missing these + the lane scans
  *  is why the consumer stood down through four explicit breakout directives). */
 const LANE_RULES: readonly string[] = [
-  "htf-trend: enter ONLY on the htfTrend breakout directive (completed DAILY close through the 20d channel); exit ONLY on the 10d-channel daily close-through or the stop. NO fixed target, NO early exits.",
-  "compression-straddle: enter ONLY on the compression breakout directive; ONE entry per squeeze episode per coin (a stopped break is NEVER re-entered); exit ONLY on the 4h close back through BBmid or the stop.",
+  "htf-trend: enter ONLY on the htfTrend breakout directive (completed DAILY close through the 20d channel); ONE entry per coin per 24h (mechanically enforced — a stop-out is NOT re-entered while the directive persists); exit ONLY on the 10d-channel daily close-through or the stop. NO fixed target, NO early exits. Risk = the scout floor (~$8).",
+  "compression-straddle: enter ONLY on the compression breakout directive; ONE entry per squeeze episode per coin (12h cooldown mechanically enforced; a stopped break is NEVER re-entered); exit ONLY on the 4h close back through BBmid or the stop. Risk = the scout floor (~$8).",
   "leader-follow: enter ONLY on a rated-leader OPEN/ADD/FLIP ≥$1M on a major; ONE entry per coin per 24h (mechanically enforced); stop 3%; exit ONLY on the leader exiting/flipping, the stop, or 72h — never a discretionary early exit.",
   "breakdown-short / reclaim-long: enter ONLY on a rubric GO directive; stop 2.5%; exit when the side drops out of GO.",
   'vault / carry: passive benchmarks — no active management.',

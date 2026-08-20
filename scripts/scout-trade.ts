@@ -77,7 +77,11 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   // scorecard groups one paper book. REQUIRED since 08-13: the legacy default
   // ('directional') is a KILLED lane, so a lane-less open could only ever be refused
   // with a confusing error — demand the tag explicitly instead.
-  const lane = typeof args['lane'] === 'string' ? args['lane'].trim() : '';
+  // Normalized ONCE here (lowercase): the guard, the cooldown query, and the stored
+  // positions.lane row must all see the same string — a mixed-case tag ('Leader-Follow')
+  // used to pass the allowlist but dodge the cooldown's .eq() and fragment the per-lane
+  // scorecard (review 08-20 M1).
+  const lane = typeof args['lane'] === 'string' ? args['lane'].trim().toLowerCase() : '';
   if (lane === '') {
     throw new Error(
       "--lane is required for an open (the legacy default 'directional' is KILLED). " +
@@ -88,14 +92,22 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   // prose/context-only sections were not enough (42 trades churned past a fired bar).
   // Exits stay allowed (the --exit path below never calls this).
   assertLaneAlive(lane);
-  // DETERMINISTIC entry cooldown (08-17): the leader-follow pre-reg's "ONE entry per
-  // coin per 24h" was violated the first night it existed (3 BTC follows in 4h) —
-  // prose doesn't hold; enforce it here. Any positions-row activity on this coin+lane
-  // inside the window blocks a NEW open (conservative: a close also restarts the
-  // clock, which is exactly the anti-churn intent). Fail-CLOSED on a read error —
-  // paper-only, so a blocked legal entry is the cheap failure mode.
-  const LANE_ENTRY_COOLDOWN_HOURS: Record<string, number> = { 'leader-follow': 24 };
-  const cooldownH = LANE_ENTRY_COOLDOWN_HOURS[lane.toLowerCase()];
+  // DETERMINISTIC entry cooldown: prose doesn't hold (leader-follow violated night one,
+  // 08-17; trend-follow churned 42 trades, 08-13) — every lane whose frozen rule limits
+  // re-entry gets a mechanical gate here. Any positions-row activity on this coin+lane
+  // inside the window blocks a NEW open (conservative: a close also restarts the clock —
+  // exactly the anti-churn intent, and for htf/compression it blocks the open→stop→
+  // reopen loop while a breakout directive stays live all day; review 08-20 H1).
+  // htf-trend 24h = the daily-bar cadence; compression 12h = the 3×4h grace episode.
+  // NOTE (lane-boundary): the query is not sessions.mode-scoped — safe because only
+  // scout paper intents carry `lane` (live rows have lane=null); if a live lane tag
+  // ever exists, scope this to paper sessions. Fail-CLOSED on a read error.
+  const LANE_ENTRY_COOLDOWN_HOURS: Record<string, number> = {
+    'leader-follow': 24,
+    'htf-trend': 24,
+    'compression-straddle': 12,
+  };
+  const cooldownH = LANE_ENTRY_COOLDOWN_HOURS[lane];
   if (cooldownH) {
     const db = getServiceRoleClient();
     const since = new Date(Date.now() - cooldownH * 3_600_000).toISOString();

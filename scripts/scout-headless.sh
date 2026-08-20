@@ -10,8 +10,10 @@
 # needed). A standalone cron on any box still works too (the trigger sink is the
 # Supabase table, so any box sees the same queue):
 #   */30 * * * *  cd /path/to/hyperliquid && ./scripts/scout-headless.sh >> ~/.hl-scout-headless.log 2>&1
-# Don't run BOTH on the same queue — the atomic consumed_at claim makes it safe,
-# but it doubles model spend for nothing.
+# DO NOT run BOTH consumers: the consumed_at claim only covers the TRIGGER queue —
+# breakout DIRECTIVES (htfTrend/compression, b03fa6c) are recomputed in every
+# snapshot, so two consumers can BOTH open on the same directive (the per-lane entry
+# cooldown in scout-trade narrows but does not close the race). One consumer only.
 #
 # The model NEVER sees a shell; it receives the snapshot + playbook as text and must
 # reply with ONE JSON object: {"action":"open"|"close"|"stand-down", ...} — anything
@@ -49,12 +51,16 @@ standing down through one requires a concrete disqualifier (breaker halted, degr
 feed, already positioned, episode already traded) stated in your note. With multiple
 directives, take ONE this cycle (prefer the strongest breakout); the rest wait for the
 next cycle. Absent any directive, stand-down is the correct answer most cycles.
+SIZING: riskUsd is the SCOUT FLOOR — about 8 (roughly 1% of paper equity), NEVER more
+than 15. The forward test measures expectancy in R; oversizing only trips the paper
+breaker and ends the test early (the first htf fill anchored on a stale 50 example —
+that was a bug, not a precedent).
 Killed lanes — directional, reversion, trend-follow — can NEVER be opened (the
 executor refuses them).
 
 Reply with EXACTLY one JSON object on a single line, no prose, one of:
 {"action":"stand-down","note":"<why>"}
-{"action":"open","coin":"ETH","side":"buy|sell","riskUsd":50,"stopFrac":0.03,"leverage":3,"lane":"htf-trend|compression-straddle|breakdown-short|reclaim-long|leader-follow|vault|carry","setupType":"donchian-20-10|squeeze-breakout|rubric-crossing|whale-conviction|carry|other","regime":"<one word from the snapshot regime>","thesis":"<the hypothesis being tested>"}
+{"action":"open","coin":"ETH","side":"buy|sell","riskUsd":8,"stopFrac":0.03,"leverage":3,"lane":"htf-trend|compression-straddle|breakdown-short|reclaim-long|leader-follow|vault|carry","setupType":"donchian-20-10|squeeze-breakout|rubric-crossing|whale-conviction|carry|other","regime":"<one word from the snapshot regime>","thesis":"<the hypothesis being tested>"}
 {"action":"close","coin":"ETH","sessionId":"<from snapshot positions>","hypothesisId":"<if known>","fraction":1,"note":"<why>"}
 {"action":"propose","coin":"HYPE","title":"<short specific headline>","body":"<the concrete ladder amendment + the evidence: stall/health/tape numbers>","proposalKind":"exit|bank|stop-tighten|disarm|widen-target","paramPx":63.4}
 

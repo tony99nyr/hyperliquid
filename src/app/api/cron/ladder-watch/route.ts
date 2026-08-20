@@ -67,6 +67,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // REDUCING, on $-capped ladders), event-prep still gets ≥2 checks inside its 30-min
     // lead, heartbeat thresholds are 30/90min. The trend FLIP guard above is NOT
     // throttled (it must precede every fire pass).
+    // CADENCE ASSUMPTION (pinned; review 08-20): the window holds one residue of each
+    // parity, so any ≤2-min cron cadence lands a full tick exactly once per 10 min at
+    // ANY phase. A 5- or 10-min external cadence at an unlucky phase (e.g. minutes
+    // 2,7,12…) would NEVER land one and silently starve every side lane — if the
+    // cron-job.org schedule is ever eased past 2 min, widen this window to match.
     const fullTick = new Date().getUTCMinutes() % 10 < 2;
     const throttled = { skipped: 'throttled' } as const;
     //  - leader guard: DISARM-ONLY — kills copy-thesis ladders whose leader exited/flipped.

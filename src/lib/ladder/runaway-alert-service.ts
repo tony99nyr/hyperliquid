@@ -30,6 +30,9 @@ export interface RunawayAlertResult {
   skippedDedup: string[];
   skippedPositioned: string[];
   cappedOut: number;
+  /** Per-coin failures (dedupe read / createLadder). Surfaced — a silently-failing
+   *  drafter is the "dead consumer" class this desk has been burned by (review 08-20). */
+  errors: string[];
 }
 
 /** Coins with a live open position right now. FAIL-OPEN on a read blip (a draft is only
@@ -81,7 +84,7 @@ export async function runRunawayAlertCycle(
   now: number = Date.now(),
 ): Promise<RunawayAlertResult> {
   const ctxs = await fetchMetaAndAssetCtxs(validateEnv().HL_NETWORK).catch(() => null);
-  if (!ctxs) return { scanned: 0, candidates: 0, drafted: [], skippedDedup: [], skippedPositioned: [], cappedOut: 0 };
+  if (!ctxs) return { scanned: 0, candidates: 0, drafted: [], skippedDedup: [], skippedPositioned: [], cappedOut: 0, errors: ['assetCtxs fetch failed'] };
 
   const hits = [];
   let scanned = 0;
@@ -96,6 +99,7 @@ export async function runRunawayAlertCycle(
   const drafted: RunawayAlertResult['drafted'] = [];
   const skippedDedup: string[] = [];
   const skippedPositioned: string[] = [];
+  const errors: string[] = [];
   let cappedOut = 0;
 
   const positioned = hits.length > 0 ? await openPositionCoins() : new Set<string>();
@@ -117,12 +121,22 @@ export async function runRunawayAlertCycle(
       const ladderId = await createLadder(buildRunawayLadderPlan(hit, { now }));
       drafted.push({ coin: hit.coin, side: hit.side, movePct: hit.movePct24h, ladderId });
       if (isDiscordConfigured()) {
-        await sendDiscord(runawayAlertMessage(hit, ladderId, validateEnv().COCKPIT_BASE_URL), 'HL Runaway Desk').catch(() => {});
+        // The ping IS this lane's product — a draft nobody hears about is a silent
+        // failure, so a false/broken send gets logged (it lands in the cron response too).
+        const sent = await sendDiscord(runawayAlertMessage(hit, ladderId, validateEnv().COCKPIT_BASE_URL), 'HL Runaway Desk').catch(() => false);
+        if (!sent) {
+          errors.push(`${hit.coin}: drafted ${ladderId.slice(0, 8)} but the Discord ping FAILED`);
+          console.warn(`[runaway] ${hit.coin} draft ${ladderId.slice(0, 8)} created but Discord ping failed`);
+        }
       }
-    } catch {
-      /* per-coin fail-soft — one coin's failure never blocks the rest */
+    } catch (e) {
+      // Per-coin fail-soft — but VISIBLY: a persistent dedupe/insert failure must not
+      // silently disable the lane forever (the dead-consumer class).
+      const msg = `${hit.coin}: ${e instanceof Error ? e.message : String(e)}`;
+      errors.push(msg);
+      console.warn(`[runaway] draft failed — ${msg}`);
     }
   }
 
-  return { scanned, candidates: hits.length, drafted, skippedDedup, skippedPositioned, cappedOut };
+  return { scanned, candidates: hits.length, drafted, skippedDedup, skippedPositioned, cappedOut, errors };
 }
