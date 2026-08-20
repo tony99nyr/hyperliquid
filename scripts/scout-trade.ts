@@ -20,7 +20,16 @@
 import { randomUUID } from 'node:crypto';
 import { parseArgs, requireString, optionalNumber, header, line, run } from './_skill-runtime';
 import { getTradingMode } from '@/lib/env/mode';
-import { assertScoutPaperMode, assertLaneAlive } from '@/lib/scout/scout-execution-guard';
+import {
+  assertScoutPaperMode,
+  assertLaneAlive,
+  assertPortfolioCap,
+  assertEventClear,
+  CORRELATED_MAJORS,
+  SCOUT_MAX_RISK_USD,
+  SCOUT_MIN_STOP_FRAC,
+} from '@/lib/scout/scout-execution-guard';
+import { upcomingEvents } from '@/lib/skills/event-calendar-business-logic';
 import { parseScoutDecision } from '@/lib/scout/scout-cycle-business-logic';
 import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
 import { buildOpenProposal } from '@/lib/skills/open-position-business-logic';
@@ -69,8 +78,22 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
       if (Number.isFinite(mid) && mid > 0) { entryPx = mid; line(`(no --entry — sized against live mark $${mid})`); }
     } catch { /* leave NaN → proposal warning refuses */ }
   }
-  const riskUsd = optionalNumber(args, 'risk', NaN);
+  // EXECUTOR-LEVEL sizing bounds (Tier-1, 08-20): the parser's 500 ceiling and the
+  // prompt's sizing prose both failed to stop a $50-risk fill — enforce here. Risk is
+  // CLAMPED (a valid directive shouldn't waste a cycle over size); a sub-1% stop is
+  // REFUSED (that's a strategy error, not a size to fix silently).
+  const rawRisk = optionalNumber(args, 'risk', NaN);
+  const riskUsd = Number.isFinite(rawRisk) && rawRisk > SCOUT_MAX_RISK_USD ? SCOUT_MAX_RISK_USD : rawRisk;
+  if (Number.isFinite(rawRisk) && rawRisk > SCOUT_MAX_RISK_USD) {
+    line(`⚠ riskUsd ${rawRisk} clamped to the scout cap $${SCOUT_MAX_RISK_USD} (floor-risk forward test)`);
+  }
   const stopDistanceFrac = optionalNumber(args, 'stop-frac', NaN);
+  if (Number.isFinite(stopDistanceFrac) && stopDistanceFrac < SCOUT_MIN_STOP_FRAC) {
+    throw new Error(
+      `stop-frac ${stopDistanceFrac} is below the ${SCOUT_MIN_STOP_FRAC} floor — a sub-1% stop on a major is a ` +
+        'noise-harvest, not an invalidation. Widen the stop to the lane rule.',
+    );
+  }
   const limitPx = typeof args['limit'] === 'string' ? Number(args['limit']) : undefined;
   const leverage = typeof args['leverage'] === 'string' ? Number(args['leverage']) : undefined;
   // Strategy lane (scout multi-lane): tags the positions row so the per-lane
@@ -92,6 +115,34 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   // prose/context-only sections were not enough (42 trades churned past a fired bar).
   // Exits stay allowed (the --exit path below never calls this).
   assertLaneAlive(lane);
+  // EVENT BLACKOUT (Tier-1, 08-20): no new directional entries within 48h of a
+  // scheduled binary print (the scout traded blind into the July FOMC; it must not
+  // hold blind into Warsh's Jackson Hole debut). Exits never pass through here.
+  {
+    const next = upcomingEvents(Date.now(), 4)[0];
+    assertEventClear(lane, next?.name ?? null, next?.msOut ?? null);
+  }
+  // PORTFOLIO BETA CAP (Tier-1, 08-20): the correlated majors move as ONE bet — max
+  // 2 same-direction directional positions (the scout stacked 4 longs on 08-19).
+  // Counts OPEN paper positions in this direction among the majors, excluding this
+  // coin (one-per-coin is separate). Fail-CLOSED on a read error.
+  {
+    const dir = side === 'buy' ? 'long' : 'short';
+    const db = getServiceRoleClient();
+    const { data: openRows, error: capErr } = await db
+      .from('positions')
+      .select('coin, sessions!inner(mode)')
+      .eq('sessions.mode', 'paper')
+      .eq('side', dir)
+      .gt('sz', 0);
+    if (capErr) throw new Error(`portfolio-cap read failed (${capErr.message}) — refusing open (fail-closed)`);
+    const openMajors = new Set(
+      (openRows ?? [])
+        .map((r) => String((r as { coin: string }).coin).toUpperCase())
+        .filter((c) => c !== coin && CORRELATED_MAJORS.has(c)),
+    );
+    assertPortfolioCap(lane, coin, openMajors.size);
+  }
   // DETERMINISTIC entry cooldown: prose doesn't hold (leader-follow violated night one,
   // 08-17; trend-follow churned 42 trades, 08-13) — every lane whose frozen rule limits
   // re-entry gets a mechanical gate here. Any positions-row activity on this coin+lane

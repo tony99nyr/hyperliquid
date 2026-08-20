@@ -33,6 +33,7 @@ import { DEFAULT_REVERSION_CONFIG } from '@/lib/scout/reversion-signal-business-
 import { type ReversionHit, type RegimeRead } from '@/lib/scout/reversion-scan-service';
 import { type HtfTrendCoinRead } from '@/lib/scout/htf-trend-scan-service';
 import { type CompressionCoinRead } from '@/lib/scout/compression-scan-service';
+import { upcomingEvents } from '@/lib/skills/event-calendar-business-logic';
 
 /** The FROZEN per-lane rules — ONE source of truth for the text section AND the
  *  headless JSON snapshot (08-20: the json snapshot missing these + the lane scans
@@ -43,7 +44,9 @@ const LANE_RULES: readonly string[] = [
   "leader-follow: enter ONLY on a rated-leader OPEN/ADD/FLIP ≥$1M on a major; ONE entry per coin per 24h (mechanically enforced); stop 3%; exit ONLY on the leader exiting/flipping, the stop, or 72h — never a discretionary early exit.",
   "breakdown-short / reclaim-long: enter ONLY on a rubric GO directive; stop 2.5%; exit when the side drops out of GO.",
   'vault / carry: passive benchmarks — no active management.',
-  "A breakout directive with no open position on the coin is the DEFAULT action — standing down through one requires a concrete disqualifier (breaker halted, degraded feed, cooldown, already positioned). Killed lanes (directional, reversion, trend-follow) can NEVER be opened.",
+  "A breakout directive with no open position on the coin is the DEFAULT action — standing down through one requires a concrete disqualifier (breaker halted, degraded feed, cooldown, already positioned, event blackout, portfolio cap). Killed lanes (directional, reversion, trend-follow) can NEVER be opened.",
+  `PORTFOLIO CAP (mechanical): max 2 same-direction directional positions across the correlated majors (BTC/ETH/SOL/HYPE move as ONE beta bet) — the executor refuses a third.`,
+  `EVENT BLACKOUT (mechanical): no new directional entries within 48h of a snapshot.events print — the executor refuses them. Within 24h of a print, PREFER closing directional positions (a binary print is a coin-flip on a mechanical lane's edge; the forward test should not contain it).`,
 ];
 
 interface VaultRow { vault_address: string; name: string; kind: string; nav_usd: number | null; apr_annual: number | null; max_drawdown_pct: number | null; age_days: number | null; leader_fraction: number | null }
@@ -324,6 +327,15 @@ run(async () => {
       })),
       // The FROZEN per-lane rules (identical to the text section — one source of truth).
       laneRules: LANE_RULES,
+      // Scheduled macro events (Tier-1, 08-20 — the scout traded blind into the July
+      // FOMC because the calendar never reached this snapshot). hoursOut < 48 ⇒ the
+      // executor refuses directional opens; < 24 ⇒ prefer closing directional positions.
+      events: upcomingEvents(now, 10).map((e) => ({
+        name: e.name,
+        at: new Date(e.atMs).toISOString(),
+        hoursOut: Math.round((e.msOut / 3_600_000) * 10) / 10,
+        note: e.note ?? null,
+      })),
       marks: inputs.marks,
       funding: fundingCtx,
       // Advisory context (see docs/SIGNAL_ROADMAP.md): tape flow is a POINT sample

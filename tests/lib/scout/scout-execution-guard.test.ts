@@ -6,6 +6,10 @@ import {
   ScoutKilledLaneError,
   ScoutUnregisteredLaneError,
   KILLED_LANES,
+  assertPortfolioCap,
+  ScoutPortfolioCapError,
+  assertEventClear,
+  ScoutEventBlackoutError,
 } from '@/lib/scout/scout-execution-guard';
 import { executeIntent } from '@/lib/trading/fill-source';
 import type { TradeIntent } from '@/types/fill';
@@ -50,6 +54,33 @@ describe('assertLaneAlive — deterministic kill-bar enforcement (08-13 review)'
     for (const lane of ['rubric-crossing', 'my-new-idea', 'reversion2', 'scalp', '']) {
       expect(() => assertLaneAlive(lane)).toThrow(ScoutUnregisteredLaneError);
     }
+  });
+});
+
+describe('assertPortfolioCap — correlated majors are ONE bet (Tier-1, 08-20)', () => {
+  it('refuses a 3rd same-direction major (the 4-long stack of 08-19)', () => {
+    expect(() => assertPortfolioCap('htf-trend', 'BTC', 2)).toThrow(ScoutPortfolioCapError);
+    expect(() => assertPortfolioCap('htf-trend', 'BTC', 4)).toThrow(ScoutPortfolioCapError);
+  });
+
+  it('permits up to the cap, passive lanes, and non-major coins', () => {
+    expect(() => assertPortfolioCap('htf-trend', 'BTC', 1)).not.toThrow();
+    expect(() => assertPortfolioCap('vault', 'BTC', 4)).not.toThrow(); // passive exempt
+    expect(() => assertPortfolioCap('leader-follow', 'DOGE', 4)).not.toThrow(); // non-major exempt
+  });
+});
+
+describe('assertEventClear — the pre-print entry blackout (Tier-1, 08-20)', () => {
+  const H = 3_600_000;
+  it('refuses a directional open inside 48h of a print', () => {
+    expect(() => assertEventClear('htf-trend', 'Jackson Hole', 47 * H)).toThrow(ScoutEventBlackoutError);
+    expect(() => assertEventClear('htf-trend', 'FOMC', 1 * H)).toThrow(ScoutEventBlackoutError);
+  });
+
+  it('permits beyond the window, with no event, and for passive lanes', () => {
+    expect(() => assertEventClear('htf-trend', 'Jackson Hole', 49 * H)).not.toThrow();
+    expect(() => assertEventClear('htf-trend', null, null)).not.toThrow();
+    expect(() => assertEventClear('carry', 'FOMC', 1 * H)).not.toThrow(); // passive exempt
   });
 });
 

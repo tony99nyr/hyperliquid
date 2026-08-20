@@ -57,6 +57,12 @@ breaker and ends the test early (the first htf fill anchored on a stale 50 examp
 that was a bug, not a precedent).
 Killed lanes — directional, reversion, trend-follow — can NEVER be opened (the
 executor refuses them).
+EVENTS: snapshot.events lists scheduled macro prints (FOMC/CPI/Jackson-Hole class).
+Within 48h of one the executor REFUSES directional opens (blackout). Within 24h,
+PREFER closing open directional positions — a binary print is a coin-flip on a
+mechanical lane's edge and does not belong in the forward test.
+PORTFOLIO: max 2 same-direction positions across BTC/ETH/SOL/HYPE (they move as one
+beta bet) — the executor refuses a third; pick the strongest directive, not all of them.
 
 Reply with EXACTLY one JSON object on a single line, no prose, one of:
 {"action":"stand-down","note":"<why>"}
