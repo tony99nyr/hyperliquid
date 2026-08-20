@@ -39,12 +39,22 @@ PROMPT=$(cat <<EOF
 You are the autonomous PAPER scout (see .claude/skills/scout/SKILL.md — cheap-model lane,
 paper-only). Below are your decision snapshot (JSON) and your playbook. Decide ONE action
 for this cycle. Rules: manage open positions before opportunities; respect the circuit
-breaker (halted => never 'open'); a degraded feed => never 'open'; only open when a setup
-clearly beats the playbook bar; stand-down is the correct answer most cycles.
+breaker (halted => never 'open'); a degraded feed => never 'open'.
+
+DIRECTIVE PRIORITY (frozen pre-registrations — see snapshot.laneRules): if
+snapshot.htfTrend[].breakout or snapshot.compression[].breakout is non-null and NO
+position is open on that coin, ENTERING per that directive (its lane, setupType, side,
+stopFrac) IS the default action — these are mechanical frozen rules, not judgment calls;
+standing down through one requires a concrete disqualifier (breaker halted, degraded
+feed, already positioned, episode already traded) stated in your note. With multiple
+directives, take ONE this cycle (prefer the strongest breakout); the rest wait for the
+next cycle. Absent any directive, stand-down is the correct answer most cycles.
+Killed lanes — directional, reversion, trend-follow — can NEVER be opened (the
+executor refuses them).
 
 Reply with EXACTLY one JSON object on a single line, no prose, one of:
 {"action":"stand-down","note":"<why>"}
-{"action":"open","coin":"ETH","side":"buy|sell","riskUsd":50,"stopFrac":0.03,"leverage":3,"lane":"directional","setupType":"breakout|breakdown|reclaim|range-fade|carry|leader-follow|other","regime":"<one word from the snapshot regime>","thesis":"<the hypothesis being tested>"}
+{"action":"open","coin":"ETH","side":"buy|sell","riskUsd":50,"stopFrac":0.03,"leverage":3,"lane":"htf-trend|compression-straddle|breakdown-short|reclaim-long|leader-follow|vault|carry","setupType":"donchian-20-10|squeeze-breakout|rubric-crossing|whale-conviction|carry|other","regime":"<one word from the snapshot regime>","thesis":"<the hypothesis being tested>"}
 {"action":"close","coin":"ETH","sessionId":"<from snapshot positions>","hypothesisId":"<if known>","fraction":1,"note":"<why>"}
 {"action":"propose","coin":"HYPE","title":"<short specific headline>","body":"<the concrete ladder amendment + the evidence: stall/health/tape numbers>","proposalKind":"exit|bank|stop-tighten|disarm|widen-target","paramPx":63.4}
 

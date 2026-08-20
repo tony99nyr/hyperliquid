@@ -34,6 +34,18 @@ import { type ReversionHit, type RegimeRead } from '@/lib/scout/reversion-scan-s
 import { type HtfTrendCoinRead } from '@/lib/scout/htf-trend-scan-service';
 import { type CompressionCoinRead } from '@/lib/scout/compression-scan-service';
 
+/** The FROZEN per-lane rules — ONE source of truth for the text section AND the
+ *  headless JSON snapshot (08-20: the json snapshot missing these + the lane scans
+ *  is why the consumer stood down through four explicit breakout directives). */
+const LANE_RULES: readonly string[] = [
+  "htf-trend: enter ONLY on the htfTrend breakout directive (completed DAILY close through the 20d channel); exit ONLY on the 10d-channel daily close-through or the stop. NO fixed target, NO early exits.",
+  "compression-straddle: enter ONLY on the compression breakout directive; ONE entry per squeeze episode per coin (a stopped break is NEVER re-entered); exit ONLY on the 4h close back through BBmid or the stop.",
+  "leader-follow: enter ONLY on a rated-leader OPEN/ADD/FLIP ≥$1M on a major; ONE entry per coin per 24h (mechanically enforced); stop 3%; exit ONLY on the leader exiting/flipping, the stop, or 72h — never a discretionary early exit.",
+  "breakdown-short / reclaim-long: enter ONLY on a rubric GO directive; stop 2.5%; exit when the side drops out of GO.",
+  'vault / carry: passive benchmarks — no active management.',
+  "A breakout directive with no open position on the coin is the DEFAULT action — standing down through one requires a concrete disqualifier (breaker halted, degraded feed, cooldown, already positioned). Killed lanes (directional, reversion, trend-follow) can NEVER be opened.",
+];
+
 interface VaultRow { vault_address: string; name: string; kind: string; nav_usd: number | null; apr_annual: number | null; max_drawdown_pct: number | null; age_days: number | null; leader_fraction: number | null }
 
 run(async () => {
@@ -278,9 +290,40 @@ run(async () => {
       // Higher-TF (4h) regime per scan coin — the vendored iamrossi detector, run
       // coupling-free on HL candles. Gates the reversion lane + a trend-follow input.
       regime: regimeByCoin,
-      // Extreme-reversion FADE candidates (pre-registered paper lane 'reversion',
-      // setupType 'reversion-extreme'). Empty in a trending tape by design.
+      // Extreme-reversion FADE candidates — KILLED lane, CONTEXT ONLY (never enter).
       reversion: reversionHits,
+      // ==== THE ACTIVE MECHANICAL LANES (08-20 fix: these were MISSING from the
+      // headless snapshot — the model stood down through four explicit breakout
+      // directives it never saw; the text sections had them, this JSON did not). ====
+      // htf-trend (daily Donchian 20/10, pre-reg 08-01): breakout != null ⇒ an ENTER
+      // directive for lane 'htf-trend', setupType 'donchian-20-10' — a frozen
+      // pre-registered rule, NOT a judgment call. exit fields give the open-position
+      // mechanical exit levels.
+      htfTrend: htfReads.map((r) => ({
+        coin: r.coin,
+        latestDailyClose: r.latestClose,
+        don20High: r.don20High,
+        don20Low: r.don20Low,
+        openLongExitsBelow: r.don10Low,
+        openShortExitsAbove: r.don10High,
+        breakout: r.breakout
+          ? { side: r.breakout.side, entryPx: r.breakout.entryPx, stopPx: r.breakout.stopPx, stopFrac: r.breakout.stopFrac, directive: `ENTER lane 'htf-trend' setupType 'donchian-20-10' if no position open on ${r.coin} — frozen rule, no fixed target` }
+          : null,
+      })),
+      // compression-straddle (4h BBW squeeze breakout, pre-reg 08-13): breakout !=
+      // null ⇒ an ENTER directive for lane 'compression-straddle', setupType
+      // 'squeeze-breakout' — one entry per squeeze episode per coin.
+      compression: squeezeReads.map((r) => ({
+        coin: r.coin,
+        inSqueeze: r.inSqueeze,
+        bbwPctile: Number(r.bbwPctile.toFixed(2)),
+        openLongExitsBelowBBmid: r.bbMid,
+        breakout: r.breakout
+          ? { side: r.breakout.side, entryPx: r.breakout.entryPx, stopPx: r.breakout.stopPx, stopFrac: r.breakout.stopFrac, directive: `ENTER lane 'compression-straddle' setupType 'squeeze-breakout' if no position open on ${r.coin} AND this squeeze episode untraded — frozen rule` }
+          : null,
+      })),
+      // The FROZEN per-lane rules (identical to the text section — one source of truth).
+      laneRules: LANE_RULES,
       marks: inputs.marks,
       funding: fundingCtx,
       // Advisory context (see docs/SIGNAL_ROADMAP.md): tape flow is a POINT sample
@@ -468,13 +511,9 @@ run(async () => {
   }
 
   // The model trades what the snapshot shows it (every churn incident traces to this) —
-  // so the FROZEN per-lane rules ride in the snapshot itself, every cycle.
+  // so the FROZEN per-lane rules ride in the snapshot itself, every cycle (text AND json).
   header('LANE RULES (FROZEN pre-registrations — violating these corrupts the forward test; exits are MECHANICAL, never discretionary)');
-  line("htf-trend: enter ONLY on the HTF-TREND SCAN breakout directive (completed DAILY close through the 20d channel); exit ONLY on the 10d-channel daily close-through or the stop. NO fixed target, NO early exits.");
-  line("compression-straddle: enter ONLY on the SQUEEZE BREAKOUT directive; ONE entry per squeeze episode per coin (a stopped break is NEVER re-entered); exit ONLY on the 4h close back through BBmid or the stop.");
-  line("leader-follow: enter ONLY on a rated-leader OPEN/ADD/FLIP ≥$1M on a major; ONE entry per coin per 24h (a cluster of adds is ONE signal — mechanically enforced); stop 3%; exit ONLY on the leader exiting/flipping, the stop, or 72h. A 30-minute discretionary exit is a RULE VIOLATION (see 08-17: three same-night BTC follows, all violations, −$4.4).");
-  line("breakdown-short / reclaim-long: enter ONLY on a rubric GO directive; stop 2.5%; exit when the side drops out of GO.");
-  line('vault / carry: passive benchmarks — no active management.');
+  for (const r of LANE_RULES) line(r);
 
   header('PLAYBOOK');
   line(existsSync(playbookPath) ? `Read + apply: ${playbookPath}` : `(missing — create ${playbookPath})`);
