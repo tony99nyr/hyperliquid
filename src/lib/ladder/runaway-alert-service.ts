@@ -22,6 +22,11 @@ import { validateEnv } from '@/lib/env/env';
 const DEFAULT_COINS = ['BTC', 'ETH', 'SOL', 'HYPE'];
 const DEDUP_WINDOW_MS = 24 * 60 * 60 * 1000; // one draft per coin per 24h episode
 const MAX_DRAFTS_PER_CYCLE = 2; // hard cap — can never spray
+/** The majors move as ONE beta bet (the panel's correlated-exposure rule): when this
+ *  many distinct majors already have a current draft/armed ladder, stop drafting more —
+ *  a third correlated vehicle just invites the operator to overfill the book (08-21:
+ *  ETH drafted while BTC+SOL sat armed at the panel's full $15 cap). */
+const MAX_MAJORS_WITH_VEHICLES = 2;
 
 export interface RunawayAlertResult {
   scanned: number;
@@ -103,6 +108,32 @@ export async function runRunawayAlertCycle(
   let cappedOut = 0;
 
   const positioned = hits.length > 0 ? await openPositionCoins() : new Set<string>();
+
+  // Correlated-book gate: count DISTINCT majors that already carry a current
+  // draft/armed ladder — at the cap, skip drafting entirely (fail-CLOSED on a read
+  // error: not drafting is the cheap failure). One query, only when hits exist.
+  if (hits.length > 0) {
+    try {
+      const db = getServiceRoleClient();
+      const { data: rungRows, error } = await db
+        .from('ladder_rungs')
+        .select('coin, ladders!inner(status, archived_at)')
+        .in('coin', DEFAULT_COINS)
+        .in('ladders.status', ['draft', 'armed'])
+        .is('ladders.archived_at', null);
+      if (error) throw new Error(`correlated-book read failed: ${error.message}`);
+      const majorsWithVehicles = new Set((rungRows ?? []).map((r) => String((r as { coin: string }).coin).toUpperCase()));
+      if (majorsWithVehicles.size >= MAX_MAJORS_WITH_VEHICLES) {
+        return {
+          scanned, candidates: hits.length, drafted: [], skippedDedup: [], skippedPositioned: [],
+          cappedOut: hits.length,
+          errors: [`correlated-book cap: ${majorsWithVehicles.size} majors already have vehicles (${[...majorsWithVehicles].join(',')}) — not drafting more`],
+        };
+      }
+    } catch (e) {
+      return { scanned, candidates: hits.length, drafted: [], skippedDedup: [], skippedPositioned: [], cappedOut: 0, errors: [e instanceof Error ? e.message : String(e)] };
+    }
+  }
 
   for (const hit of hits) {
     if (drafted.length >= MAX_DRAFTS_PER_CYCLE) {

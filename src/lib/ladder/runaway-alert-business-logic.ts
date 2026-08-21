@@ -54,7 +54,11 @@ export interface RunawayPlanOpts {
 
 const PULLBACK_FRAC = 0.035; // the entry rests 3.5% back toward the move (a shallow dip)
 const STOP_FRAC = 0.05; // structural: 5% beyond the pullback entry (runaways retrace hard)
-const CONTINUATION_FRAC = 0.005; // the add confirms 0.5% THROUGH the pre-draft extreme
+// The add confirms 1.5% THROUGH the detection mark. Was 0.5% — arm latency made it
+// stale-by-arm-time on the first live firing (08-21 ETH: price ran through the add
+// before the operator could arm → instant-fire refusal, un-armable draft), and the
+// panel's technical skeptic had flagged sub-1% adds as inside the noise of the highs.
+const CONTINUATION_FRAC = 0.015;
 const NOTIONAL_CAP_USD = 300; // bounds risk/stopFrac so the draft stays tiny + armable
 
 /**
