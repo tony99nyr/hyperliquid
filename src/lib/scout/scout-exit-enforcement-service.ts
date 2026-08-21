@@ -68,8 +68,9 @@ const EXIT_CHILD_TIMEOUT_MS = 120_000;
  *  TRADING_MODE (the repo's own docs say local is 'live' — one env:pull would have
  *  killed every enforced exit at assertScoutPaperMode; review 08-20 H1). The scout
  *  is paper BY DEFINITION — pinning it here is the definition, not an override.
- *  (systemd note: 'pnpm' rides the daemon's PATH — use an absolute path when the
- *  daemon moves under a supervisor with a minimal environment.) */
+ *  (systemd note: 'pnpm' rides the daemon's PATH — use an absolute path under a
+ *  supervisor. SIGKILL guarantees the pnpm WRAPPER dies, not the tsx grandchild —
+ *  the age-out reclaim below is the operative hung-child fix.) */
 function executeExit(sessionId: string, coin: string, note: string): Promise<boolean> {
   return new Promise((resolve) => {
     const child = execFile(
@@ -185,7 +186,9 @@ export async function runExitEnforcement(now: number, runLaneScans: boolean): Pr
     if (!decision) continue;
 
     result.exits.push({ coin: pos.coin, lane: pos.lane, reason: decision.reason, detail: decision.detail });
-    inFlight.set(key, now);
+    const generation = now; // the .finally guard below only clears ITS OWN entry (ABA: a
+    // stale hung child's late callback must not delete a successor's in-flight record)
+    inFlight.set(key, generation);
     const note = `AUTO-EXIT (daemon-enforced frozen rule): ${decision.reason} — ${decision.detail}`;
     void executeExit(pos.sessionId, pos.coin, note)
       .then((ok) => {
@@ -203,7 +206,9 @@ export async function runExitEnforcement(now: number, runLaneScans: boolean): Pr
           console.warn(`[exit-enforcer] ${pos.coin} ${decision.reason} close FAILED (attempt ${count}) — backing off then retrying`);
         }
       })
-      .finally(() => inFlight.delete(key));
+      .finally(() => {
+        if (inFlight.get(key) === generation) inFlight.delete(key);
+      });
   }
 
   return result;
