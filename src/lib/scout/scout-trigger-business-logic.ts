@@ -167,7 +167,7 @@ export const DEFAULT_SCOUT_TRIGGER_CONFIG: ScoutTriggerConfig = {
 };
 
 export function emptyScoutState(): ScoutState {
-  return { lastOpportunity: {}, lastBadge: {}, lastMark: {}, lastHealth: {}, driftAnchorPx: {}, driftAnchorAt: {}, lastLeaderActionMs: 0, lastReversionEmit: {}, lastReversionScanAt: 0 };
+  return { lastOpportunity: {}, lastBadge: {}, lastMark: {}, lastHealth: {}, driftAnchorPx: {}, driftAnchorAt: {}, lastLeaderActionMs: 0, lastReversionEmit: {}, lastReversionScanAt: 0, oiAnchor: {} };
 }
 
 const sideKey = (coin: string, side: Side): string => `${coin.toUpperCase()}:${side}`;
