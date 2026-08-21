@@ -63,6 +63,14 @@ export function detectOiCascades(
   const events: OiCascadeEvent[] = [];
   const nextAnchors: Record<string, OiAnchor> = {};
 
+  // Carry anchors for coins ABSENT from this tick's read (a per-coin ctx blip must not
+  // reset a mid-cascade accumulation; review 08-21). windowMs bounds their staleness —
+  // an expired carried anchor is discarded on its coin's next appearance.
+  const seen = new Set(current.map((c) => c.coin.toUpperCase()));
+  for (const [coin, a] of Object.entries(anchors)) {
+    if (!seen.has(coin) && now - a.atMs < cfg.windowMs) nextAnchors[coin] = a;
+  }
+
   for (const cur of current) {
     const coin = cur.coin.toUpperCase();
     if (!(cur.oi > 0) || !(cur.px > 0)) continue; // degenerate → drop (no anchor carry)

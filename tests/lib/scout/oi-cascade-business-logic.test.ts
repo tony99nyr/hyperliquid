@@ -60,3 +60,16 @@ describe('detectOiCascades — the watchable liquidation signature', () => {
     expect(t2.events[0]?.kind).toBe('short-squeeze');
   });
 });
+
+describe('anchor carry — review 08-21 regressions', () => {
+  it('a coin ABSENT from this tick keeps its (unexpired) anchor — a ctx blip cannot reset accumulation', () => {
+    const r = detectOiCascades({ BTC: anchor(10_000, 70_000, 10) }, [{ coin: 'ETH', oi: 5_000, px: 2_300 }], NOW);
+    expect(r.nextAnchors.BTC).toEqual(anchor(10_000, 70_000, 10)); // carried
+    expect(r.nextAnchors.ETH.atMs).toBe(NOW); // newly anchored
+  });
+
+  it('an EXPIRED absent-coin anchor is dropped (windowMs bounds carried staleness)', () => {
+    const r = detectOiCascades({ BTC: anchor(10_000, 70_000, 50) }, [{ coin: 'ETH', oi: 5_000, px: 2_300 }], NOW);
+    expect(r.nextAnchors.BTC).toBeUndefined();
+  });
+});

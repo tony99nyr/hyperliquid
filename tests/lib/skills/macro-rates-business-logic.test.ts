@@ -97,9 +97,28 @@ describe('liquidityDashboard — yields × dollar × real rates (08-21)', () => 
     const y10 = mk([4.74, 4.73, 4.72, 4.72, 4.71, 4.65]);
     const d = liquidityDashboard(y10, [], mk([2.3, 2.3, 2.3, 2.3, 2.3, 2.3]));
     expect(d.dxy).toBeNull();
-    expect(d.lean).toBe('risk-on'); // y10 + real both voted
+    expect(d.lean).toBe('risk-on'); // y10 + real both voted (2 components — enough for the full label)
     const empty = liquidityDashboard([], [], []);
     expect(empty.lean).toBe('neutral');
     expect(liquidityLine(empty)).toMatch(/unavailable/);
+  });
+});
+
+describe('liquidityDashboard — partial-read honesty (review 08-21)', () => {
+  const mk = (vals: number[]) => vals.map((v, i) => ({ date: `2026-08-${10 + i}`, yieldPct: v }));
+
+  it('a SINGLE voting component is mixed, never a full risk-on/off call', () => {
+    const y10 = mk([4.74, 4.73, 4.72, 4.72, 4.71, 4.65]); // only voter (be missing → no real vote)
+    const d = liquidityDashboard(y10, [], []);
+    expect(d.votesCast).toBe(1);
+    expect(d.lean).toBe('mixed');
+    expect(liquidityLine(d)).toMatch(/mixed \[\+1\/1 components\]/);
+  });
+
+  it('the line carries per-series as-of dates (mixed FRED lags must be visible)', () => {
+    const y10 = mk([4.74, 4.73, 4.72, 4.72, 4.71, 4.65]);
+    const dxy = mk([120.1, 120.0, 119.8, 119.4, 119.2, 119.1]);
+    const be = mk([2.3, 2.3, 2.3, 2.3, 2.3, 2.3]);
+    expect(liquidityLine(liquidityDashboard(y10, dxy, be))).toMatch(/10Y .*08-15.*DXY .*08-15/);
   });
 });

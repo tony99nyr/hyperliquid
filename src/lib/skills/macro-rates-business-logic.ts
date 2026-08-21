@@ -89,8 +89,13 @@ export interface LiquidityDashboard {
   breakeven: ReturnType<typeof seriesDelta>; // % (10Y inflation breakeven)
   /** 10Y − breakeven when both present — the real-rate proxy (the purest liquidity read). */
   realYieldPct: number | null;
-  /** Crypto-desk lean from the 5d directions: yields↓ + dollar↓ + real↓ = risk-on. */
+  /** Crypto-desk lean from the 5d directions: yields↓ + dollar↓ + real↓ = risk-on.
+   *  A full risk-on/off label requires ≥2 agreeing votes; fewer = mixed/neutral. */
   lean: 'risk-on' | 'risk-off' | 'mixed' | 'neutral';
+  /** Signed vote sum (+ = easing) and how many components could vote — printed so a
+   *  partial read never masquerades as a full-dashboard call. */
+  votesFor: number;
+  votesCast: number;
 }
 
 export function liquidityDashboard(
@@ -111,23 +116,30 @@ export function liquidityDashboard(
     const realD5 = y10.d5 - breakeven.d5;
     if (Math.abs(realD5) >= 0.05) { vote += realD5 < 0 ? 1 : -1; voted++; }
   }
+  // A full risk-on/off label needs ≥2 agreeing components — one voter alone is a
+  // 'mixed' read, not a regime call (review 08-21: a single-series partial read was
+  // printing "RISK-ON (yields/dollar/real easing)" while two of the three were unread).
   const lean: LiquidityDashboard['lean'] =
-    voted === 0 ? 'neutral' : vote === voted ? 'risk-on' : vote === -voted ? 'risk-off' : 'mixed';
-  return { y10, dxy, breakeven, realYieldPct, lean };
+    voted === 0 ? 'neutral' : voted >= 2 && vote === voted ? 'risk-on' : voted >= 2 && vote === -voted ? 'risk-off' : 'mixed';
+  return { y10, dxy, breakeven, realYieldPct, lean, votesFor: vote, votesCast: voted };
 }
 
-/** One desk-review line for the dashboard. PURE. */
+/** One desk-review line for the dashboard. PURE. Per-series as-of dates are shown —
+ *  FRED publication lags DIFFER (DTWEXBGS is weekly-published and can trail DGS10 by
+ *  ~a week), so the 5d windows may end on different days; undated they'd mislead. */
 export function liquidityLine(d: LiquidityDashboard): string {
   const bp = (x: number) => `${x >= 0 ? '+' : ''}${Math.round(x * 100)}bp`;
+  const asOf = (date: string) => date.slice(5); // MM-DD
   const parts: string[] = [];
-  if (d.y10) parts.push(`10Y ${d.y10.latest.yieldPct.toFixed(2)}% (${bp(d.y10.d5)} 5d)`);
-  if (d.dxy) parts.push(`DXY ${d.dxy.latest.yieldPct.toFixed(1)} (${d.dxy.d5 >= 0 ? '+' : ''}${d.dxy.d5.toFixed(1)} 5d)`);
+  if (d.y10) parts.push(`10Y ${d.y10.latest.yieldPct.toFixed(2)}% (${bp(d.y10.d5)} 5d, ${asOf(d.y10.latest.date)})`);
+  if (d.dxy) parts.push(`DXY ${d.dxy.latest.yieldPct.toFixed(1)} (${d.dxy.d5 >= 0 ? '+' : ''}${d.dxy.d5.toFixed(1)} 5d, ${asOf(d.dxy.latest.date)})`);
   if (d.breakeven && d.realYieldPct != null) parts.push(`real 10Y ≈ ${d.realYieldPct.toFixed(2)}%`);
   if (parts.length === 0) return '(liquidity dashboard unavailable)';
+  const tally = ` [${d.votesFor >= 0 ? '+' : ''}${d.votesFor}/${d.votesCast} components]`;
   const leanTxt =
-    d.lean === 'risk-on' ? ' → liquidity lean: RISK-ON (yields/dollar/real easing)' :
-    d.lean === 'risk-off' ? ' → liquidity lean: RISK-OFF (yields/dollar/real tightening)' :
-    d.lean === 'mixed' ? ' → liquidity lean: mixed' : '';
+    d.lean === 'risk-on' ? ` → liquidity lean: RISK-ON${tally}` :
+    d.lean === 'risk-off' ? ` → liquidity lean: RISK-OFF${tally}` :
+    d.lean === 'mixed' ? ` → liquidity lean: mixed${tally}` : '';
   return `${parts.join(' · ')}${leanTxt}`;
 }
 

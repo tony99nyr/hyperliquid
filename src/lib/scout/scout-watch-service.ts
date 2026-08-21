@@ -60,6 +60,8 @@ export function loadScoutState(path = scoutStateFilePath()): ScoutState {
       // still-cooling stretch or immediately re-scan.
       lastReversionEmit: s.lastReversionEmit ?? {},
       lastReversionScanAt: s.lastReversionScanAt ?? 0,
+      // Cascade anchors survive restarts (same whitelist-omission bug class as above).
+      oiAnchor: s.oiAnchor ?? {},
     };
   } catch {
     return emptyScoutState();
@@ -459,7 +461,9 @@ export async function runScoutWatchCycle(
   // OI-CASCADE detector (Tier-3 v1, 08-21): px moving hard + OI dropping hard = forced
   // closes burning fuel — the watchable signature of a liquidation cascade (HL has no
   // clean global liquidation feed). Anchors persist in state; events emit as 'info'
-  // context triggers. Fail-soft: a ctx blip skips the check, anchors carry unchanged.
+  // context triggers. Fail-soft: a TOTAL ctx-fetch throw skips the check (anchors
+  // unchanged via the catch); a PER-COIN gap is handled inside detectOiCascades,
+  // which carries absent coins' unexpired anchors (review 08-21).
   try {
     const { fetchMetaAndAssetCtxs } = await import('@/lib/hyperliquid/hyperliquid-info-service');
     const { detectOiCascades } = await import('./oi-cascade-business-logic');

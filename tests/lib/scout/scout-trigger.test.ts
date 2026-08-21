@@ -360,3 +360,11 @@ describe('reversionTriggersFromHits', () => {
     expect(state.lastReversionScanAt).toBe(NOW);
   });
 });
+
+describe('state carry — the whitelist-omission bug class (review 08-21)', () => {
+  it('detectScoutTriggers carries oiAnchor through (omitting it shipped the cascade detector INERT)', () => {
+    const prev = { ...emptyScoutState(), oiAnchor: { BTC: { oi: 10_000, px: 70_000, atMs: 123 } } };
+    const { state } = detectScoutTriggers({ rubric: [], marks: [], positions: [], now: 1_787_400_000_000 }, prev);
+    expect(state.oiAnchor).toEqual({ BTC: { oi: 10_000, px: 70_000, atMs: 123 } });
+  });
+});

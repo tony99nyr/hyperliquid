@@ -207,6 +207,10 @@ export function detectScoutTriggers(
     // not this cheap detector — carry it through untouched.
     lastReversionEmit: { ...(prev.lastReversionEmit ?? {}) },
     lastReversionScanAt: prev.lastReversionScanAt ?? 0,
+    // OI-cascade anchors are owned by the cascade block in runScoutWatchCycle — carry
+    // through untouched. OMITTING this line shipped the detector INERT (review 08-21:
+    // this whitelist wiped anchors every tick, so no cascade could ever fire).
+    oiAnchor: { ...(prev.oiAnchor ?? {}) },
   };
 
   // --- Rubric: GO crossing + opportunity jumps (opportunity layer, "info"). ---
