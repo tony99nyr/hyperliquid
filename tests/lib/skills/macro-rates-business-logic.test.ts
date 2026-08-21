@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFredCsv, ratesRead, ratesLine } from '@/lib/skills/macro-rates-business-logic';
+import { parseFredCsv, ratesRead, ratesLine, liquidityDashboard, liquidityLine } from '@/lib/skills/macro-rates-business-logic';
 
 const csv = (rows: Array<[string, string]>): string =>
   'DATE,DGS30\n' + rows.map((r) => r.join(',')).join('\n');
@@ -65,5 +65,41 @@ describe('ratesRead — the fiscal barometer fold', () => {
     expect(r.d5Bp).toBe(20);
     expect(r.magnitude).toBe('notable');
     expect(r.riskSignal).toBe('risk-off-pressure');
+  });
+});
+
+describe('liquidityDashboard — yields × dollar × real rates (08-21)', () => {
+  const mk = (vals: number[]) => vals.map((v, i) => ({ date: `d${i}`, yieldPct: v }));
+
+  it('RISK-ON when yields, dollar and real rates all ease over 5d (this week´s shape)', () => {
+    const y10 = mk([4.74, 4.73, 4.72, 4.72, 4.71, 4.65]); // −9bp 5d
+    const dxy = mk([120.1, 120.0, 119.8, 119.4, 119.2, 119.1]); // −1.0 (−0.83%)
+    const be = mk([2.3, 2.3, 2.3, 2.3, 2.3, 2.3]); // flat → real follows y10 down
+    const d = liquidityDashboard(y10, dxy, be);
+    expect(d.lean).toBe('risk-on');
+    expect(d.realYieldPct).toBeCloseTo(2.35, 2);
+    expect(liquidityLine(d)).toMatch(/RISK-ON/);
+  });
+
+  it('RISK-OFF on the opposite shape; MIXED on disagreement; NEUTRAL inside noise floors', () => {
+    const up = mk([4.6, 4.62, 4.64, 4.68, 4.7, 4.74]);
+    const dxyUp = mk([118, 118.2, 118.5, 118.8, 119.2, 119.5]);
+    const beFlat = mk([2.3, 2.3, 2.3, 2.3, 2.3, 2.3]);
+    expect(liquidityDashboard(up, dxyUp, beFlat).lean).toBe('risk-off');
+    const down = mk([4.74, 4.72, 4.7, 4.68, 4.64, 4.6]);
+    expect(liquidityDashboard(down, dxyUp, beFlat).lean).toBe('mixed');
+    const flat = mk([4.7, 4.7, 4.7, 4.7, 4.7, 4.7]);
+    const dxyFlat = mk([119, 119, 119, 119, 119, 119.1]);
+    expect(liquidityDashboard(flat, dxyFlat, beFlat).lean).toBe('neutral');
+  });
+
+  it('degrades per-series: missing DXY still yields a partial read, all-missing is neutral+unavailable', () => {
+    const y10 = mk([4.74, 4.73, 4.72, 4.72, 4.71, 4.65]);
+    const d = liquidityDashboard(y10, [], mk([2.3, 2.3, 2.3, 2.3, 2.3, 2.3]));
+    expect(d.dxy).toBeNull();
+    expect(d.lean).toBe('risk-on'); // y10 + real both voted
+    const empty = liquidityDashboard([], [], []);
+    expect(empty.lean).toBe('neutral');
+    expect(liquidityLine(empty)).toMatch(/unavailable/);
   });
 });

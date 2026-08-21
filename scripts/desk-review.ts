@@ -40,8 +40,8 @@ import { readHouseholdExposure } from '@/lib/household/household-exposure-servic
 import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
 import { splitTrend, opportunityFlag, trendLine, conditionalSetup, type OpportunityFlag, type ConditionalSetup } from '@/lib/skills/desk-review-business-logic';
 import { upcomingEvents, eventDeskLine, calendarExhausted } from '@/lib/skills/event-calendar-business-logic';
-import { fetch30yRead } from '@/lib/skills/macro-rates-service';
-import { ratesLine } from '@/lib/skills/macro-rates-business-logic';
+import { fetch30yRead, fetchLiquidityDashboard } from '@/lib/skills/macro-rates-service';
+import { ratesLine, liquidityLine } from '@/lib/skills/macro-rates-business-logic';
 import { validateEnv } from '@/lib/env/env';
 
 const LOOKBACK_MS: Record<MarketTimeframe, number> = {
@@ -160,9 +160,10 @@ run(async () => {
   // ===================== MACRO — the 30Y fiscal/liquidity barometer =====================
   // Context + thesis tripwire (08-20 doctrine): yields spiking = fiscal stress / risk-off
   // pressure on crypto; plunging = easing tailwind. EOD data — context, never a signal.
-  header('MACRO (30Y Treasury — fiscal/liquidity barometer)');
-  const rates = await fetch30yRead(now);
+  header('MACRO (30Y Treasury + liquidity dashboard — fiscal/liquidity barometer)');
+  const [rates, liq] = await Promise.all([fetch30yRead(now), fetchLiquidityDashboard(now)]);
   line(rates ? ratesLine(rates) : '(30Y read unavailable this run — FRED unreachable)');
+  line(liquidityLine(liq));
 
   // ===== gather THE BOOK + market context in parallel =====
   const addr = getHlAccountAddress();

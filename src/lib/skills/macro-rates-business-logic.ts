@@ -67,6 +67,70 @@ export function ratesRead(points: RatesPoint[]): RatesRead | null {
   return { latest, d1Bp, d5Bp, windowHighPct, windowLowPct, magnitude, riskSignal };
 }
 
+// ---------- The liquidity dashboard (08-21): 10Y + dollar + breakevens ----------
+// Added after the Treasury-buyback rally: the 30Y alone caught the impulse, but the
+// LIQUIDITY picture that drives crypto is yields × the dollar × real rates. All FRED,
+// keyless, EOD (~1-3 day lag on DTWEXBGS) — CONTEXT ONLY, never a signal.
+
+/** Generic last/Δ1/Δ5 fold in the series' NATIVE units (%, index points). PURE. */
+export function seriesDelta(points: RatesPoint[]): { latest: RatesPoint; d1: number; d5: number } | null {
+  if (points.length < 6) return null;
+  const latest = points[points.length - 1];
+  return {
+    latest,
+    d1: latest.yieldPct - points[points.length - 2].yieldPct,
+    d5: latest.yieldPct - points[points.length - 6].yieldPct,
+  };
+}
+
+export interface LiquidityDashboard {
+  y10: ReturnType<typeof seriesDelta>; // % (yield)
+  dxy: ReturnType<typeof seriesDelta>; // index points
+  breakeven: ReturnType<typeof seriesDelta>; // % (10Y inflation breakeven)
+  /** 10Y − breakeven when both present — the real-rate proxy (the purest liquidity read). */
+  realYieldPct: number | null;
+  /** Crypto-desk lean from the 5d directions: yields↓ + dollar↓ + real↓ = risk-on. */
+  lean: 'risk-on' | 'risk-off' | 'mixed' | 'neutral';
+}
+
+export function liquidityDashboard(
+  y10Pts: RatesPoint[],
+  dxyPts: RatesPoint[],
+  bePts: RatesPoint[],
+): LiquidityDashboard {
+  const y10 = seriesDelta(y10Pts);
+  const dxy = seriesDelta(dxyPts);
+  const breakeven = seriesDelta(bePts);
+  const realYieldPct = y10 && breakeven ? Number((y10.latest.yieldPct - breakeven.latest.yieldPct).toFixed(2)) : null;
+  // Vote per component on its 5d direction past a noise floor (yields/real 5bp, DXY 0.5%).
+  let vote = 0;
+  let voted = 0;
+  if (y10 && Math.abs(y10.d5) >= 0.05) { vote += y10.d5 < 0 ? 1 : -1; voted++; }
+  if (dxy && dxy.latest.yieldPct > 0 && Math.abs(dxy.d5 / dxy.latest.yieldPct) >= 0.005) { vote += dxy.d5 < 0 ? 1 : -1; voted++; }
+  if (y10 && breakeven) {
+    const realD5 = y10.d5 - breakeven.d5;
+    if (Math.abs(realD5) >= 0.05) { vote += realD5 < 0 ? 1 : -1; voted++; }
+  }
+  const lean: LiquidityDashboard['lean'] =
+    voted === 0 ? 'neutral' : vote === voted ? 'risk-on' : vote === -voted ? 'risk-off' : 'mixed';
+  return { y10, dxy, breakeven, realYieldPct, lean };
+}
+
+/** One desk-review line for the dashboard. PURE. */
+export function liquidityLine(d: LiquidityDashboard): string {
+  const bp = (x: number) => `${x >= 0 ? '+' : ''}${Math.round(x * 100)}bp`;
+  const parts: string[] = [];
+  if (d.y10) parts.push(`10Y ${d.y10.latest.yieldPct.toFixed(2)}% (${bp(d.y10.d5)} 5d)`);
+  if (d.dxy) parts.push(`DXY ${d.dxy.latest.yieldPct.toFixed(1)} (${d.dxy.d5 >= 0 ? '+' : ''}${d.dxy.d5.toFixed(1)} 5d)`);
+  if (d.breakeven && d.realYieldPct != null) parts.push(`real 10Y ≈ ${d.realYieldPct.toFixed(2)}%`);
+  if (parts.length === 0) return '(liquidity dashboard unavailable)';
+  const leanTxt =
+    d.lean === 'risk-on' ? ' → liquidity lean: RISK-ON (yields/dollar/real easing)' :
+    d.lean === 'risk-off' ? ' → liquidity lean: RISK-OFF (yields/dollar/real tightening)' :
+    d.lean === 'mixed' ? ' → liquidity lean: mixed' : '';
+  return `${parts.join(' · ')}${leanTxt}`;
+}
+
 /** One desk-review line. PURE. */
 export function ratesLine(r: RatesRead): string {
   const arrow = r.d1Bp > 0 ? '↑' : r.d1Bp < 0 ? '↓' : '→';
