@@ -56,7 +56,8 @@ export type ScoutTriggerKind =
   | 'position-near-stop' // open position is within nearStopPct of its stop
   | 'position-at-target' // open position reached its take-profit target (mechanical reversion exit)
   | 'leader-action' // a rated leader opened/flipped/added big (leader-follow lane wake)
-  | 'reversion-extreme'; // a |z|≥minZ statistical stretch printed in a non-trending regime (the fade lane)
+  | 'reversion-extreme' // a |z|≥minZ statistical stretch printed in a non-trending regime (the fade lane)
+  | 'liquidation-cascade'; // px moved hard while OI dropped hard — forced closes burning fuel (context, 08-21)
 
 /** "info" = a fresh opportunity to consider; "act" = open-position risk (escalate first). */
 export type ScoutUrgency = 'info' | 'act';
@@ -104,6 +105,8 @@ export interface ScoutState {
   driftAnchorPx: Record<string, number>;
   /** key `COIN` → epoch ms the drift anchor was set. */
   driftAnchorAt: Record<string, number>;
+  /** key `COIN` → OI-cascade rolling anchor (px+oi+at) for the liquidation-cascade detector. */
+  oiAnchor?: Record<string, { oi: number; px: number; atMs: number }>;
   /** Cursor (epoch ms) — leader_actions at or before this were already emitted. */
   lastLeaderActionMs?: number;
   /** key `${COIN}:${side}` → epoch ms a reversion-extreme was last EMITTED. A |z|≥minZ

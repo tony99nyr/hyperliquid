@@ -456,6 +456,27 @@ export async function runScoutWatchCycle(
     }
   }
 
+  // OI-CASCADE detector (Tier-3 v1, 08-21): px moving hard + OI dropping hard = forced
+  // closes burning fuel — the watchable signature of a liquidation cascade (HL has no
+  // clean global liquidation feed). Anchors persist in state; events emit as 'info'
+  // context triggers. Fail-soft: a ctx blip skips the check, anchors carry unchanged.
+  try {
+    const { fetchMetaAndAssetCtxs } = await import('@/lib/hyperliquid/hyperliquid-info-service');
+    const { detectOiCascades } = await import('./oi-cascade-business-logic');
+    const ctxs = await fetchMetaAndAssetCtxs();
+    const current = input.marks
+      .map((m) => ({ coin: m.coin, px: m.markPx, oi: ctxs[m.coin]?.openInterest ?? 0 }))
+      .filter((c) => c.oi > 0);
+    const { events, nextAnchors } = detectOiCascades(nextState.oiAnchor ?? {}, current, now);
+    nextState = { ...nextState, oiAnchor: nextAnchors };
+    if (events.length > 0) {
+      allTriggers = [
+        ...allTriggers,
+        ...events.map((e) => ({ kind: 'liquidation-cascade' as const, coin: e.coin, urgency: 'info' as const, detail: e.detail, at: now })),
+      ];
+    }
+  } catch { /* ctx read blip — anchors unchanged, next tick retries */ }
+
   // The adapter that took the write matters operationally: 'jsonl' means Supabase was
   // unreachable and these triggers are INVISIBLE to a table-reading consumer on another
   // box; 'none' means both sinks failed. The daemon surfaces this in its heartbeat.
