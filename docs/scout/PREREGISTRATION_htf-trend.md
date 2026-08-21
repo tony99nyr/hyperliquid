@@ -66,8 +66,10 @@ Judged by `scout:review` (`setupTypeExpectancy` + the per-lane card):
   fixture-tested) + the daily scan (`htf-trend-scan-service.ts`) + the `HTF-TREND SCAN` cycle
   section are live: the scout now sees the 20-day/10-day channels + ATR20 + breakout/exit levels
   each cycle. The forward test begins once the scout daemon is revived and trades this lane per
-  this frozen rule; NO trade counts before then. (Exit is `htfTrendExitHit` — the 10-day-channel
-  close-through — surfaced for the model; nothing auto-fires it, per the honest limit above.)
+  this frozen rule; NO trade counts before then. (Exit enforcement UPGRADED 2026-08-20: the
+  producer daemon now AUTO-CLOSES on the frozen 10d-channel exit and the stop each tick
+  (scout-exit-enforcement-service) — the compliance-on-the-model limit no longer applies
+  to this lane's exit.)
 
 ## Why this, and why it's a fair test
 

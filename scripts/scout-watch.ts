@@ -166,8 +166,29 @@ async function preflight(): Promise<void> {
   line(`Trigger sink: supabase scout_triggers (primary) → JSONL fallback ${scoutTriggerFilePath()}`);
 }
 
+// FROZEN-EXIT ENFORCEMENT (Tier-2, 08-20): the daemon — not the model — executes each
+// lane's pre-registered exit. Stop checks ride every tick (mids only); the candle-scan
+// exits (htf 10d channel / compression BB-mid) run on this subcadence.
+const EXIT_LANE_SCAN_INTERVAL_MS = 15 * 60_000;
+let lastExitLaneScanAt = 0;
+
+async function enforceExits(ts: string): Promise<void> {
+  try {
+    const { runExitEnforcement } = await import('@/lib/scout/scout-exit-enforcement-service');
+    const runLaneScans = Date.now() - lastExitLaneScanAt >= EXIT_LANE_SCAN_INTERVAL_MS;
+    if (runLaneScans) lastExitLaneScanAt = Date.now();
+    const r = await runExitEnforcement(Date.now(), runLaneScans);
+    for (const x of r.exits) line(`[${ts}] 🛑 ENFORCED EXIT ${x.coin} (${x.lane ?? '?'}) — ${x.reason}: ${x.detail}`);
+    if (r.scanGaps.length > 0) line(`[${ts}] exit-enforcer: lane scan unavailable for ${r.scanGaps.join(',')} (held safe)`);
+    for (const e of r.errors) line(`[${ts}] WARN exit-enforcer: ${e}`);
+  } catch (err) {
+    line(`[${ts}] WARN exit-enforcer failed (continuing): ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 async function oneCycle(state: ScoutState): Promise<ScoutState> {
   const ts = new Date().toISOString();
+  await enforceExits(ts);
   try {
     const { triggers, state: next, degraded, degradedReason, sink, reversionCoverage } = await runScoutWatchCycle(state, WATCH_CFG);
     saveScoutState(next); // persist so a restart resumes from the latest baseline

@@ -4,7 +4,14 @@
  * the autofire gate + the full fire guard stack.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
+
+// Pin the wall clock OUTSIDE the throttle's fullTick window (minute 5): the advisory
+// side-lanes stay 'throttled' so this auth test exercises only the fire pass — and the
+// suite stops flapping with the minute of day it happens to run in.
+vi.useFakeTimers({ shouldAdvanceTime: true });
+vi.setSystemTime(new Date('2026-08-20T12:05:00Z'));
+afterAll(() => vi.useRealTimers());
 
 const verifyCronBearer = vi.fn();
 const getLadderCronSecret = vi.fn();
@@ -15,6 +22,10 @@ vi.mock('@/lib/ladder/ladder-flags', () => ({
   getLadderCronSecret: (...a: unknown[]) => getLadderCronSecret(...a),
   isReversionAlertEnabled: () => false, // sub-task stays skipped in this auth test
   isTrendAlertEnabled: () => false, // ditto (the flip guard self-skips: stance unconfigured)
+  // MUST track the route's ladder-flags imports: a missing member here is undefined()
+  // → TypeError → 500, but ONLY on fullTick minutes (getUTCMinutes()%10<2) — a
+  // time-dependent test failure that hid for a day (08-20). Time is pinned below too.
+  isRunawayAlertEnabled: () => false,
 }));
 vi.mock('@/lib/ladder/ladder-watch-service', () => ({ runLadderWatchTick: (...a: unknown[]) => runLadderWatchTick(...a) }));
 
