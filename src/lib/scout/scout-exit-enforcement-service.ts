@@ -46,18 +46,41 @@ export interface EnforcementResult {
   errors: string[];
 }
 
-/** One close at a time, and never re-spawn for a position whose close is in flight. */
-const inFlight = new Set<string>();
+/** In-flight closes keyed `${sessionId}:${coin}` → spawn epoch-ms. A Map (not a Set)
+ *  so a HUNG child can be aged out: execFile's timeout SIGTERMs only the pnpm wrapper —
+ *  a surviving tsx grandchild keeps the stdio pipes open, the 'close' callback never
+ *  fires, and a Set entry would pin that position's enforcement dead until restart
+ *  (review 08-20 H). SIGKILL + the age-out below close both halves of that. */
+const inFlight = new Map<string, number>();
+const IN_FLIGHT_MAX_AGE_MS = 10 * 60_000;
+
+/** Consecutive-failure backoff per position: a permanently-failing close is the
+ *  dead-enforcement signature (e.g. a mode misconfig) — retrying every 120s tick
+ *  forever spawns heavy pnpm+tsx children and buries the signal in warns. Backoff
+ *  grows with the count; ≥3 straight failures escalates to console.error. */
+const failState = new Map<string, { count: number; nextRetryAtMs: number }>();
 
 const EXIT_CHILD_TIMEOUT_MS = 120_000;
 
-/** Spawn `pnpm scout:trade --exit` for one position. Resolves true on exit-code 0. */
+/** Spawn `pnpm scout:trade --exit` for one position. Resolves true on exit-code 0.
+ *  TRADING_MODE is pinned to 'paper' EXPLICITLY: the child otherwise inherits the
+ *  daemon env + .env.local, and enforcement worked only while BOTH happened to lack
+ *  TRADING_MODE (the repo's own docs say local is 'live' — one env:pull would have
+ *  killed every enforced exit at assertScoutPaperMode; review 08-20 H1). The scout
+ *  is paper BY DEFINITION — pinning it here is the definition, not an override.
+ *  (systemd note: 'pnpm' rides the daemon's PATH — use an absolute path when the
+ *  daemon moves under a supervisor with a minimal environment.) */
 function executeExit(sessionId: string, coin: string, note: string): Promise<boolean> {
   return new Promise((resolve) => {
     const child = execFile(
       'pnpm',
       ['--silent', 'scout:trade', '--', '--exit', '--session', sessionId, '--coin', coin, '--note', note],
-      { cwd: process.cwd(), timeout: EXIT_CHILD_TIMEOUT_MS },
+      {
+        cwd: process.cwd(),
+        timeout: EXIT_CHILD_TIMEOUT_MS,
+        killSignal: 'SIGKILL',
+        env: { ...process.env, TRADING_MODE: 'paper' },
+      },
       (err) => resolve(!err),
     );
     child.on('error', () => resolve(false));
@@ -135,7 +158,15 @@ export async function runExitEnforcement(now: number, runLaneScans: boolean): Pr
 
   for (const pos of positions) {
     const key = `${pos.sessionId}:${pos.coin}`;
-    if (inFlight.has(key)) continue;
+    const startedAt = inFlight.get(key);
+    if (startedAt != null) {
+      if (now - startedAt < IN_FLIGHT_MAX_AGE_MS) continue;
+      // Aged out: the child hung past every timeout — reclaim so enforcement retries.
+      inFlight.delete(key);
+      console.warn(`[exit-enforcer] ${key} in-flight close aged out after ${Math.round((now - startedAt) / 60_000)}min — reclaiming`);
+    }
+    const fs = failState.get(key);
+    if (fs && now < fs.nextRetryAtMs) continue; // backing off a failing close
     const mark = mids ? Number(mids[pos.coin]) || null : null;
     if (runLaneScans && ((pos.lane === 'htf-trend' && !htfByCoin.has(pos.coin)) || (pos.lane === 'compression-straddle' && !compByCoin.has(pos.coin)))) {
       result.scanGaps.push(pos.coin);
@@ -154,11 +185,23 @@ export async function runExitEnforcement(now: number, runLaneScans: boolean): Pr
     if (!decision) continue;
 
     result.exits.push({ coin: pos.coin, lane: pos.lane, reason: decision.reason, detail: decision.detail });
-    inFlight.add(key);
+    inFlight.set(key, now);
     const note = `AUTO-EXIT (daemon-enforced frozen rule): ${decision.reason} — ${decision.detail}`;
     void executeExit(pos.sessionId, pos.coin, note)
       .then((ok) => {
-        if (!ok) console.warn(`[exit-enforcer] ${pos.coin} ${decision.reason} close FAILED — will retry next tick`);
+        if (ok) {
+          failState.delete(key);
+          return;
+        }
+        const prev = failState.get(key);
+        const count = (prev?.count ?? 0) + 1;
+        // Linear backoff, capped ~16min: retries persist but stop hammering.
+        failState.set(key, { count, nextRetryAtMs: Date.now() + Math.min(count, 8) * 120_000 });
+        if (count >= 3) {
+          console.error(`[exit-enforcer] ${pos.coin} ${decision.reason} close FAILED ${count}x IN A ROW — enforcement may be dead (mode misconfig? scout-trade error?); investigate`);
+        } else {
+          console.warn(`[exit-enforcer] ${pos.coin} ${decision.reason} close FAILED (attempt ${count}) — backing off then retrying`);
+        }
       })
       .finally(() => inFlight.delete(key));
   }
