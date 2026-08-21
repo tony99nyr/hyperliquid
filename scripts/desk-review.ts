@@ -39,7 +39,7 @@ import { scanReversionExtremes } from '@/lib/scout/reversion-scan-service';
 import { readHouseholdExposure } from '@/lib/household/household-exposure-service';
 import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
 import { splitTrend, opportunityFlag, trendLine, conditionalSetup, type OpportunityFlag, type ConditionalSetup } from '@/lib/skills/desk-review-business-logic';
-import { upcomingEvents, eventDeskLine } from '@/lib/skills/event-calendar-business-logic';
+import { upcomingEvents, eventDeskLine, calendarExhausted } from '@/lib/skills/event-calendar-business-logic';
 import { fetch30yRead } from '@/lib/skills/macro-rates-service';
 import { ratesLine } from '@/lib/skills/macro-rates-business-logic';
 import { validateEnv } from '@/lib/env/env';
@@ -142,7 +142,15 @@ run(async () => {
   // directional risk into a binary, and the straddle is the play. Lead with it.
   const events = upcomingEvents(now, 10);
   header('EVENTS');
-  if (events.length === 0) line('No scheduled macro events in the next 10 days.');
+  if (events.length === 0) {
+    // Distinguish "genuinely quiet window" from "the hand-curated calendar ran dry" —
+    // an exhausted calendar makes the scout's event blackout silently INERT (fail-open).
+    line(
+      calendarExhausted(now)
+        ? '⚠ CALENDAR EXHAUSTED — economic-events.ts has NO future entries. The scout event blackout is INERT until curated (next FOMC/CPI dates needed).'
+        : 'No scheduled macro events in the next 10 days.',
+    );
+  }
   for (const e of events) {
     line(eventDeskLine(e));
     if (e.note) line(`   ${e.note}`);

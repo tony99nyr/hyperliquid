@@ -118,11 +118,19 @@ export function assertPortfolioCap(lane: string, coin: string, sameDirectionOpen
  *  contain it. Exits are never gated. */
 export const EVENT_ENTRY_BLACKOUT_HOURS = 48;
 
+/** Entries stay blacked out this long AFTER a print too — the vol event is the speech/
+ *  release window, not the timestamp (a blackout lifting at 14:00:01 re-legalized
+ *  opens mid-keynote; review 08-20). */
+export const EVENT_POST_PRINT_BUFFER_HOURS = 4;
+
 export class ScoutEventBlackoutError extends Error {
   constructor(eventName: string, hoursOut: number) {
     super(
-      `Event blackout: '${eventName}' prints in ~${hoursOut.toFixed(0)}h (< ${EVENT_ENTRY_BLACKOUT_HOURS}h) — ` +
-        'no new directional paper entries into a scheduled binary. Manage/close existing positions only.',
+      hoursOut >= 0
+        ? `Event blackout: '${eventName}' prints in ~${hoursOut.toFixed(0)}h (< ${EVENT_ENTRY_BLACKOUT_HOURS}h) — ` +
+          'no new directional paper entries into a scheduled binary. Manage/close existing positions only.'
+        : `Event blackout: '${eventName}' printed ~${Math.abs(hoursOut).toFixed(1)}h ago (post-print window ` +
+          `${EVENT_POST_PRINT_BUFFER_HOURS}h) — the vol event is still live; no new directional entries yet.`,
     );
     this.name = 'ScoutEventBlackoutError';
   }

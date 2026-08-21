@@ -82,6 +82,12 @@ describe('assertEventClear — the pre-print entry blackout (Tier-1, 08-20)', ()
     expect(() => assertEventClear('htf-trend', null, null)).not.toThrow();
     expect(() => assertEventClear('carry', 'FOMC', 1 * H)).not.toThrow(); // passive exempt
   });
+
+  it('refuses AT the exact 48h boundary (<= semantics) and in the post-print window', () => {
+    expect(() => assertEventClear('htf-trend', 'FOMC', 48 * H)).toThrow(ScoutEventBlackoutError); // boundary
+    expect(() => assertEventClear('htf-trend', 'FOMC', -2 * H)).toThrow(ScoutEventBlackoutError); // printed 2h ago
+    expect(() => assertEventClear('htf-trend', 'FOMC', -2 * H)).toThrow(/printed .*ago/); // post-print message
+  });
 });
 
 describe('executeIntent seam guard — scout intents can never fire live', () => {

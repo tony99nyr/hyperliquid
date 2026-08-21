@@ -28,8 +28,9 @@ import {
   CORRELATED_MAJORS,
   SCOUT_MAX_RISK_USD,
   SCOUT_MIN_STOP_FRAC,
+  EVENT_POST_PRINT_BUFFER_HOURS,
 } from '@/lib/scout/scout-execution-guard';
-import { upcomingEvents } from '@/lib/skills/event-calendar-business-logic';
+import { nearestBlackoutEvent } from '@/lib/skills/event-calendar-business-logic';
 import { parseScoutDecision } from '@/lib/scout/scout-cycle-business-logic';
 import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
 import { buildOpenProposal } from '@/lib/skills/open-position-business-logic';
@@ -115,11 +116,13 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   // prose/context-only sections were not enough (42 trades churned past a fired bar).
   // Exits stay allowed (the --exit path below never calls this).
   assertLaneAlive(lane);
-  // EVENT BLACKOUT (Tier-1, 08-20): no new directional entries within 48h of a
-  // scheduled binary print (the scout traded blind into the July FOMC; it must not
-  // hold blind into Warsh's Jackson Hole debut). Exits never pass through here.
+  // EVENT BLACKOUT (Tier-1, 08-20): no new directional entries within 48h BEFORE or
+  // 4h AFTER a scheduled binary print (the scout traded blind into the July FOMC; a
+  // blackout lifting at the print instant re-legalized opens mid-keynote). Exits
+  // never pass through here. FAIL-OPEN on an exhausted calendar — but loudly: the
+  // snapshot carries calendarExhausted so a stale economic-events.ts pages via review.
   {
-    const next = upcomingEvents(Date.now(), 4)[0];
+    const next = nearestBlackoutEvent(Date.now(), EVENT_POST_PRINT_BUFFER_HOURS * 3_600_000);
     assertEventClear(lane, next?.name ?? null, next?.msOut ?? null);
   }
   // PORTFOLIO BETA CAP (Tier-1, 08-20): the correlated majors move as ONE bet — max

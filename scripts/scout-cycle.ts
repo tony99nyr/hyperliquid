@@ -33,7 +33,7 @@ import { DEFAULT_REVERSION_CONFIG } from '@/lib/scout/reversion-signal-business-
 import { type ReversionHit, type RegimeRead } from '@/lib/scout/reversion-scan-service';
 import { type HtfTrendCoinRead } from '@/lib/scout/htf-trend-scan-service';
 import { type CompressionCoinRead } from '@/lib/scout/compression-scan-service';
-import { upcomingEvents } from '@/lib/skills/event-calendar-business-logic';
+import { upcomingEvents, calendarExhausted } from '@/lib/skills/event-calendar-business-logic';
 
 /** The FROZEN per-lane rules — ONE source of truth for the text section AND the
  *  headless JSON snapshot (08-20: the json snapshot missing these + the lane scans
@@ -46,7 +46,8 @@ const LANE_RULES: readonly string[] = [
   'vault / carry: passive benchmarks — no active management.',
   "A breakout directive with no open position on the coin is the DEFAULT action — standing down through one requires a concrete disqualifier (breaker halted, degraded feed, cooldown, already positioned, event blackout, portfolio cap). Killed lanes (directional, reversion, trend-follow) can NEVER be opened.",
   `PORTFOLIO CAP (mechanical): max 2 same-direction directional positions across the correlated majors (BTC/ETH/SOL/HYPE move as ONE beta bet) — the executor refuses a third.`,
-  `EVENT BLACKOUT (mechanical): no new directional entries within 48h of a snapshot.events print — the executor refuses them. Within 24h of a print, PREFER closing directional positions (a binary print is a coin-flip on a mechanical lane's edge; the forward test should not contain it).`,
+  `EVENT BLACKOUT (mechanical): no new directional entries within 48h BEFORE or 4h AFTER a snapshot.events print — the executor refuses them. Within 24h of a print, PREFER closing directional positions (a binary print is a coin-flip on a mechanical lane's edge; the forward test should not contain it).`,
+  `SIZING (mechanical): riskUsd is clamped to $15 at the executor; a stop tighter than 1% is refused. The floor (~$8) is the norm — expectancy is measured in R, oversizing only ends the test early.`,
 ];
 
 interface VaultRow { vault_address: string; name: string; kind: string; nav_usd: number | null; apr_annual: number | null; max_drawdown_pct: number | null; age_days: number | null; leader_fraction: number | null }
@@ -336,6 +337,10 @@ run(async () => {
         hoursOut: Math.round((e.msOut / 3_600_000) * 10) / 10,
         note: e.note ?? null,
       })),
+      // TRUE = the hand-curated calendar has NO future entries — the event blackout is
+      // structurally INERT (fail-open) until docs curate economic-events.ts. Loud on
+      // purpose: a silently-dead blackout is how the scout traded through July's FOMC.
+      eventsCalendarExhausted: calendarExhausted(now),
       marks: inputs.marks,
       funding: fundingCtx,
       // Advisory context (see docs/SIGNAL_ROADMAP.md): tape flow is a POINT sample

@@ -48,7 +48,11 @@ export function scoutPlaybookPath(cwd: string = process.cwd()): string {
 
 /** Hard per-decision paper risk cap for the HEADLESS path — a model that asks for more
  *  is rejected before anything trades (defense against a runaway/hallucinated size). */
-export const SCOUT_MAX_RISK_USD = 500;
+// RENAMED from SCOUT_MAX_RISK_USD (review 08-20): the executor guard exports a
+// SCOUT_MAX_RISK_USD = 15 (the REAL clamp) — an identical name 33x apart was a
+// wrong-import away from resurrecting the $50-risk class. This is only the parse-
+// stage sanity ceiling (reject absurd JSON), never the sizing authority.
+export const SCOUT_PARSER_RISK_CEILING_USD = 500;
 
 /** The decision the headless scout model returns for ONE cycle. Exactly one action.
  *  'stand-down' is a first-class outcome (most cycles) — it carries the why. */
@@ -114,8 +118,8 @@ export function parseScoutDecision(raw: string): { kind: 'open' | 'close'; args:
   if (d.action === 'open') {
     if (!d.coin || typeof d.coin !== 'string') return { kind: 'error', error: 'open: coin required' };
     if (d.side !== 'buy' && d.side !== 'sell') return { kind: 'error', error: 'open: side must be buy|sell' };
-    if (typeof d.riskUsd !== 'number' || !Number.isFinite(d.riskUsd) || !(d.riskUsd > 0) || d.riskUsd > SCOUT_MAX_RISK_USD) {
-      return { kind: 'error', error: `open: riskUsd must be finite, > 0 and <= ${SCOUT_MAX_RISK_USD} (paper cap)` };
+    if (typeof d.riskUsd !== 'number' || !Number.isFinite(d.riskUsd) || !(d.riskUsd > 0) || d.riskUsd > SCOUT_PARSER_RISK_CEILING_USD) {
+      return { kind: 'error', error: `open: riskUsd must be finite, > 0 and <= ${SCOUT_PARSER_RISK_CEILING_USD} (paper cap)` };
     }
     if (typeof d.stopFrac !== 'number' || !Number.isFinite(d.stopFrac) || !(d.stopFrac > 0 && d.stopFrac < 1)) return { kind: 'error', error: 'open: stopFrac must be finite, in (0,1)' };
     if (!d.thesis || typeof d.thesis !== 'string') return { kind: 'error', error: 'open: thesis required (the hypothesis is the product)' };
