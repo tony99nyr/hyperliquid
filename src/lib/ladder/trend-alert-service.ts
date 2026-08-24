@@ -16,6 +16,7 @@ import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import { createLadder } from './ladder-service';
 import { fetchTrendStance, stanceFor, isBullishConfident, isTrendStanceConfigured } from './trend-stance-service';
 import { buildTrendLadderPlan, trendAlertMessage, TREND_TITLE_PREFIX, type TrendAlertContext } from './trend-alert-business-logic';
+import { clampDraftExpiryForEvents } from '@/lib/skills/event-calendar-business-logic';
 import { fetchAllMids } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { fetchCandles } from '@/lib/hyperliquid/candle-service';
 import { calculateATR } from '@/lib/strategy/indicators/indicators';
@@ -132,7 +133,15 @@ export async function runTrendAlertCycle(
         regime: stance!.regime,
         regimeConfidence: stance!.regimeConfidence,
       };
-      const ladderId = await createLadder(buildTrendLadderPlan(ctx, { now }));
+      // EVENT DISCIPLINE (08-23): a draft window crossing a scheduled print invites a
+      // fire into the event (the ETH draft expired THROUGH the Warsh keynote, twice).
+      // Clamp expiry to event−72h; too little life left → skip drafting entirely.
+      const clampedExpiry = clampDraftExpiryForEvents(now, now + 120 * 3_600_000);
+      if (clampedExpiry == null) {
+        result.skipped.push({ coin, reason: 'event-window (draft life would cross a scheduled print)' });
+        continue;
+      }
+      const ladderId = await createLadder(buildTrendLadderPlan(ctx, { now, expiryHours: (clampedExpiry - now) / 3_600_000 }));
       result.drafted.push({ coin, ladderId });
       if (isDiscordConfigured()) {
         await sendDiscord(trendAlertMessage(ctx, ladderId), 'HL Trend Scout').catch(() => {});

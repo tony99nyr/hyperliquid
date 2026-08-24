@@ -16,6 +16,7 @@ import { fetchMetaAndAssetCtxs, fetchClearinghouseState } from '@/lib/hyperliqui
 import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
 import { createLadder } from './ladder-service';
 import { detectRunaway, buildRunawayLadderPlan, runawayAlertMessage } from './runaway-alert-business-logic';
+import { clampDraftExpiryForEvents } from '@/lib/skills/event-calendar-business-logic';
 import { sendDiscord, isDiscordConfigured } from '@/lib/infrastructure/notify/discord-notify';
 import { validateEnv } from '@/lib/env/env';
 
@@ -149,7 +150,15 @@ export async function runRunawayAlertCycle(
         skippedDedup.push(hit.coin);
         continue;
       }
-      const ladderId = await createLadder(buildRunawayLadderPlan(hit, { now }));
+      // EVENT DISCIPLINE (08-23, same as the trend drafter): clamp the 48h draft window
+      // to event−72h; too little life → skip (a runaway into an event week is the
+      // straddle's job, not a continuation draft's).
+      const clampedExpiry = clampDraftExpiryForEvents(now, now + 48 * 3_600_000);
+      if (clampedExpiry == null) {
+        errors.push(`${hit.coin}: skipped — draft life would cross a scheduled print (event window)`);
+        continue;
+      }
+      const ladderId = await createLadder(buildRunawayLadderPlan(hit, { now, expiryHours: (clampedExpiry - now) / 3_600_000 }));
       drafted.push({ coin: hit.coin, side: hit.side, movePct: hit.movePct24h, ladderId });
       if (isDiscordConfigured()) {
         // The ping IS this lane's product — a draft nobody hears about is a silent

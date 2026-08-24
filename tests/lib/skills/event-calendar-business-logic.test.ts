@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { upcomingEvents, prepDueEvent, eventDeskLine, nearestBlackoutEvent, calendarExhausted } from '@/lib/skills/event-calendar-business-logic';
+import { upcomingEvents, prepDueEvent, eventDeskLine, nearestBlackoutEvent, calendarExhausted, clampDraftExpiryForEvents } from '@/lib/skills/event-calendar-business-logic';
 import type { EconEvent } from '@/lib/skills/economic-events';
 
 const FOMC = '2026-07-29T18:00:00Z';
@@ -76,5 +76,24 @@ describe('calendarExhausted — the fail-open blackout must be LOUD (08-20)', ()
     expect(calendarExhausted(at('2026-08-01T00:00:00Z'), events)).toBe(false);
     expect(calendarExhausted(at('2026-08-13T00:00:00Z'), events)).toBe(true); // both printed
     expect(calendarExhausted(at('2026-08-13T00:00:00Z'), [])).toBe(true);
+  });
+});
+
+describe('clampDraftExpiryForEvents — drafter event discipline (08-23)', () => {
+  const H = 3_600_000;
+  it('clamps a natural expiry that crosses a print to event−72h', () => {
+    const now = at('2026-07-24T00:00:00Z'); // FOMC Jul 29 18:00 → clamp to Jul 26 18:00
+    const clamped = clampDraftExpiryForEvents(now, now + 120 * H, undefined, undefined, events);
+    expect(clamped).toBe(at('2026-07-26T18:00:00Z'));
+  });
+
+  it('leaves an expiry alone when no print is in the window', () => {
+    const now = at('2026-08-13T00:00:00Z'); // both fixture events passed
+    expect(clampDraftExpiryForEvents(now, now + 48 * H, undefined, undefined, events)).toBe(now + 48 * H);
+  });
+
+  it('SKIPS (null) when the clamped life is under the minimum', () => {
+    const now = at('2026-07-26T14:00:00Z'); // event−72h is Jul 26 18:00 → only 4h of life
+    expect(clampDraftExpiryForEvents(now, now + 120 * H, undefined, undefined, events)).toBeNull();
   });
 });

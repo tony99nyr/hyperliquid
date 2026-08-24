@@ -67,6 +67,27 @@ export function calendarExhausted(now: number, events: EconEvent[] = ECONOMIC_EV
   });
 }
 
+/** Auto-drafter expiry discipline (08-23): a draft whose window crosses a scheduled
+ *  binary print invites a fire into the event (the ETH trend draft expired THROUGH the
+ *  Warsh keynote — twice). Clamp a draft's natural expiry to `eventAt − preEventBufferMs`
+ *  (default 72h — the event skeptic's no-fresh-fire window); if the clamped life is
+ *  under `minLifeMs`, drafting isn't worth it — SKIP. Null = skip drafting. PURE. */
+export function clampDraftExpiryForEvents(
+  now: number,
+  naturalExpiryMs: number,
+  preEventBufferMs: number = 72 * HOUR,
+  minLifeMs: number = 6 * HOUR,
+  events: EconEvent[] = ECONOMIC_EVENTS,
+): number | null {
+  let expiry = naturalExpiryMs;
+  for (const e of events) {
+    const at = Date.parse(e.atIso);
+    if (!Number.isFinite(at) || at <= now) continue;
+    if (at - preEventBufferMs < expiry) expiry = at - preEventBufferMs;
+  }
+  return expiry - now >= minLifeMs ? expiry : null;
+}
+
 /** The single event whose prep window is active right now (soonest), or null. PURE. */
 export function prepDueEvent(now: number, events: EconEvent[] = ECONOMIC_EVENTS): UpcomingEvent | null {
   return upcomingEvents(now, 1, events).find((e) => e.prepDue) ?? null;
