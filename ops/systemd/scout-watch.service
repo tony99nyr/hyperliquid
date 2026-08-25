@@ -1,0 +1,46 @@
+# scout-watch — supervised scout producer daemon (Tier-2 reliability item, 08-24).
+#
+# WHY: the scout has died silently at least twice (July power outage, a dead consumer)
+# because it ran as a foreground shell process. This user unit gives it auto-restart,
+# boot persistence (with lingering), and journald logs.
+#
+# INSTALL (once):
+#   cp ops/systemd/scout-watch.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now scout-watch
+#   loginctl enable-linger $USER     # survive logout / start at boot (may need sudo)
+#
+# OPERATE:
+#   systemctl --user status scout-watch      # state + recent log
+#   journalctl --user -u scout-watch -f      # follow logs (the old terminal output)
+#   systemctl --user restart scout-watch     # after every git pull that touches
+#                                            # scout-watch.ts or its imports
+#   systemctl --user stop scout-watch        # manual stop (won't auto-restart)
+#
+# NOTES:
+#  - PATH is explicit: systemd units get a minimal env — pnpm, node (nvm), and the
+#    claude CLI (the embedded consumer) all live in user dirs. Update the PATH line
+#    if node versions move.
+#  - TRADING_MODE is deliberately NOT set: the scout children pin paper themselves
+#    (scout-exit-enforcement-service) and .env.local is loaded by the scripts.
+#  - The unit runs from the repo checkout; WorkingDirectory must match your clone.
+
+[Unit]
+Description=HL cockpit scout producer daemon (paper-only trigger + exit-enforcement loop)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/tony/gitrepos/hyperliquid
+Environment=PATH=/home/tony/.local/share/pnpm:/home/tony/.nvm/versions/node/v24.11.1/bin:/home/tony/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/tony/.local/share/pnpm/pnpm scout:watch
+Restart=always
+RestartSec=15
+# A wedged daemon (no heartbeat) is worse than a restarted one; the watchdog cron
+# pages on stale heartbeats either way. Kill the whole tree on stop/restart so a
+# hung claude-CLI grandchild can't outlive the daemon.
+KillMode=control-group
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

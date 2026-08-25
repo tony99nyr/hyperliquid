@@ -51,10 +51,10 @@ standing down through one requires a concrete disqualifier (breaker halted, degr
 feed, already positioned, episode already traded) stated in your note. With multiple
 directives, take ONE this cycle (prefer the strongest breakout); the rest wait for the
 next cycle. Absent any directive, stand-down is the correct answer most cycles.
-SIZING: riskUsd is the SCOUT FLOOR — about 8 (roughly 1% of paper equity), NEVER more
-than 15. The forward test measures expectancy in R; oversizing only trips the paper
-breaker and ends the test early (the first htf fill anchored on a stale 50 example —
-that was a bug, not a precedent).
+SIZING: use the directive's suggestedRiskUsd (vol-normalized policy, 08-24) when a
+directive carries one; otherwise ~8. NEVER more than 15 (executor-clamped). The
+forward test measures expectancy in R; oversizing only trips the paper breaker and
+ends the test early.
 Killed lanes — directional, reversion, trend-follow — can NEVER be opened (the
 executor refuses them).
 EVENTS: snapshot.events lists scheduled macro prints (FOMC/CPI/Jackson-Hole class).

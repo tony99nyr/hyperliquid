@@ -34,20 +34,21 @@ import { type ReversionHit, type RegimeRead } from '@/lib/scout/reversion-scan-s
 import { type HtfTrendCoinRead } from '@/lib/scout/htf-trend-scan-service';
 import { type CompressionCoinRead } from '@/lib/scout/compression-scan-service';
 import { upcomingEvents, calendarExhausted } from '@/lib/skills/event-calendar-business-logic';
+import { volNormalizedRiskUsd } from '@/lib/scout/scout-sizing-business-logic';
 
 /** The FROZEN per-lane rules — ONE source of truth for the text section AND the
  *  headless JSON snapshot (08-20: the json snapshot missing these + the lane scans
  *  is why the consumer stood down through four explicit breakout directives). */
 const LANE_RULES: readonly string[] = [
-  "htf-trend: enter ONLY on the htfTrend breakout directive (completed DAILY close through the 20d channel); ONE entry per coin per 24h (mechanically enforced — a stop-out is NOT re-entered while the directive persists); exit ONLY on the 10d-channel daily close-through or the stop (DAEMON-ENFORCED — the producer auto-closes on the frozen rule). NO fixed target, NO early exits. Risk = the scout floor (~$8).",
-  "compression-straddle: enter ONLY on the compression breakout directive; ONE entry per squeeze episode per coin (12h cooldown mechanically enforced; a stopped break is NEVER re-entered); exit ONLY on the 4h close back through BBmid or the stop (DAEMON-ENFORCED). Risk = the scout floor (~$8).",
+  "htf-trend: enter ONLY on the htfTrend breakout directive (completed DAILY close through the 20d channel); ONE entry per coin per 24h (mechanically enforced — a stop-out is NOT re-entered while the directive persists); exit ONLY on the 10d-channel daily close-through or the stop (DAEMON-ENFORCED — the producer auto-closes on the frozen rule). NO fixed target, NO early exits. Risk = the directive's suggestedRiskUsd.",
+  "compression-straddle: enter ONLY on the compression breakout directive; ONE entry per squeeze episode per coin (12h cooldown mechanically enforced; a stopped break is NEVER re-entered); exit ONLY on the 4h close back through BBmid or the stop (DAEMON-ENFORCED). Risk = the directive's suggestedRiskUsd.",
   "leader-follow: enter ONLY on a rated-leader OPEN/ADD/FLIP ≥$1M on a major; ONE entry per coin per 24h (mechanically enforced); stop 3%; exit ONLY on the leader exiting/flipping (model-side — rows do not record WHICH leader), the stop, or 72h (stop + time-stop DAEMON-ENFORCED) — never a discretionary early exit.",
   "breakdown-short / reclaim-long: enter ONLY on a rubric GO directive; stop 2.5%; exit when the side drops out of GO.",
   'vault / carry: passive benchmarks — no active management.',
   "A breakout directive with no open position on the coin is the DEFAULT action — standing down through one requires a concrete disqualifier (breaker halted, degraded feed, cooldown, already positioned, event blackout, portfolio cap). Killed lanes (directional, reversion, trend-follow) can NEVER be opened.",
   `PORTFOLIO CAP (mechanical): max 2 same-direction directional positions across the correlated majors (BTC/ETH/SOL/HYPE move as ONE beta bet) — the executor refuses a third.`,
   `EVENT BLACKOUT (mechanical): no new directional entries within 48h BEFORE or 4h AFTER a snapshot.events print — the executor refuses them. Within 24h of a print, PREFER closing directional positions (a binary print is a coin-flip on a mechanical lane's edge; the forward test should not contain it).`,
-  `SIZING (mechanical): riskUsd is clamped to $15 at the executor; a stop tighter than 1% is refused. The floor (~$8) is the norm — expectancy is measured in R, oversizing only ends the test early.`,
+  `SIZING (mechanical + policy): use the directive's suggestedRiskUsd (vol-normalized, registered 08-24 — high-vol coins get proportionally fewer dollars so every position carries a comparable vol footprint). riskUsd is clamped to $15 at the executor; a stop tighter than 1% is refused. Expectancy is measured in R — oversizing only ends the test early.`,
 ];
 
 interface VaultRow { vault_address: string; name: string; kind: string; nav_usd: number | null; apr_annual: number | null; max_drawdown_pct: number | null; age_days: number | null; leader_fraction: number | null }
@@ -303,29 +304,43 @@ run(async () => {
       // directive for lane 'htf-trend', setupType 'donchian-20-10' — a frozen
       // pre-registered rule, NOT a judgment call. exit fields give the open-position
       // mechanical exit levels.
-      htfTrend: htfReads.map((r) => ({
-        coin: r.coin,
-        latestDailyClose: r.latestClose,
-        don20High: r.don20High,
-        don20Low: r.don20Low,
-        openLongExitsBelow: r.don10Low,
-        openShortExitsAbove: r.don10High,
-        breakout: r.breakout
-          ? { side: r.breakout.side, entryPx: r.breakout.entryPx, stopPx: r.breakout.stopPx, stopFrac: r.breakout.stopFrac, directive: `ENTER lane 'htf-trend' setupType 'donchian-20-10' if no position open on ${r.coin} — frozen rule, no fixed target` }
-          : null,
-      })),
+      htfTrend: htfReads.map((r) => {
+        // Vol-normalized sizing suggestion (policy, registered 08-24): scale the floor
+        // inversely with the coin's daily ATR fraction so HYPE-vol trades don't carry
+        // 2-3x the vol footprint of BTC-vol trades at the same ledger weight.
+        const suggestedRiskUsd = volNormalizedRiskUsd(r.atr > 0 && r.latestClose > 0 ? r.atr / r.latestClose : null);
+        return {
+          coin: r.coin,
+          latestDailyClose: r.latestClose,
+          don20High: r.don20High,
+          don20Low: r.don20Low,
+          openLongExitsBelow: r.don10Low,
+          openShortExitsAbove: r.don10High,
+          suggestedRiskUsd,
+          breakout: r.breakout
+            ? { side: r.breakout.side, entryPx: r.breakout.entryPx, stopPx: r.breakout.stopPx, stopFrac: r.breakout.stopFrac, suggestedRiskUsd, directive: `ENTER lane 'htf-trend' setupType 'donchian-20-10' with riskUsd ${suggestedRiskUsd} if no position open on ${r.coin} — frozen rule, no fixed target` }
+            : null,
+        };
+      }),
       // compression-straddle (4h BBW squeeze breakout, pre-reg 08-13): breakout !=
       // null ⇒ an ENTER directive for lane 'compression-straddle', setupType
       // 'squeeze-breakout' — one entry per squeeze episode per coin.
-      compression: squeezeReads.map((r) => ({
-        coin: r.coin,
-        inSqueeze: r.inSqueeze,
-        bbwPctile: Number(r.bbwPctile.toFixed(2)),
-        openLongExitsBelowBBmid: r.bbMid,
-        breakout: r.breakout
-          ? { side: r.breakout.side, entryPx: r.breakout.entryPx, stopPx: r.breakout.stopPx, stopFrac: r.breakout.stopFrac, directive: `ENTER lane 'compression-straddle' setupType 'squeeze-breakout' if no position open on ${r.coin} AND this squeeze episode untraded — frozen rule` }
-          : null,
-      })),
+      compression: squeezeReads.map((r) => {
+        // Same vol-normalized suggestion, sourced from the htf scan's daily ATR for
+        // the coin (both scans cover scanCoins; a missing htf read → the plain floor).
+        const htf = htfReads.find((h) => h.coin === r.coin);
+        const suggestedRiskUsd = volNormalizedRiskUsd(htf && htf.atr > 0 && htf.latestClose > 0 ? htf.atr / htf.latestClose : null);
+        return {
+          coin: r.coin,
+          inSqueeze: r.inSqueeze,
+          bbwPctile: Number(r.bbwPctile.toFixed(2)),
+          openLongExitsBelowBBmid: r.bbMid,
+          suggestedRiskUsd,
+          breakout: r.breakout
+            ? { side: r.breakout.side, entryPx: r.breakout.entryPx, stopPx: r.breakout.stopPx, stopFrac: r.breakout.stopFrac, suggestedRiskUsd, directive: `ENTER lane 'compression-straddle' setupType 'squeeze-breakout' with riskUsd ${suggestedRiskUsd} if no position open on ${r.coin} AND this squeeze episode untraded — frozen rule` }
+            : null,
+        };
+      }),
       // The FROZEN per-lane rules (identical to the text section — one source of truth).
       laneRules: LANE_RULES,
       // Scheduled macro events (Tier-1, 08-20 — the scout traded blind into the July
