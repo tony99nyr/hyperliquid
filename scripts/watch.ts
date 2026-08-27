@@ -51,6 +51,9 @@ const MIN_INTERVAL_SECONDS = 2;
  * open-position paths surface immediately anyway.
  */
 const IDLE_INTERVAL_MS = 120_000;
+/** Healthy-idle cycles before the daemon self-terminates (~1h at the idle cadence) —
+ *  ensureWatchDaemon respawns on the next fill, so a flat watcher has no job. */
+const FLAT_EXIT_AFTER_IDLE_CYCLES = 30;
 /** Consecutive total-failure cycles before a LOUD escalation log (FIX 4). */
 const ESCALATE_AFTER_FAILED_CYCLES = 3;
 
@@ -284,6 +287,7 @@ run(async () => {
   // a day (never every cycle). Best-effort — a prune failure never stops the loop.
   const PRUNE_EVERY_MS = 24 * 60 * 60 * 1000;
   let lastPruneAt = 0;
+  let consecutiveIdleCycles = 0;
 
   while (!stopping) {
     const cycleStart = Date.now();
@@ -336,6 +340,23 @@ run(async () => {
     }
 
     if (stopping) break;
+    // FLAT SELF-TERMINATE (08-27, Supabase-quota post-mortem): an instance started
+    // Aug-15 idled for TEN DAYS watching nothing — even throttled, that is pure
+    // Supabase egress with zero purpose. After a sustained healthy-idle stretch,
+    // EXIT: ensureWatchDaemon respawns the watcher the moment a new fill lands, and
+    // manual `pnpm watch` restarts are cheap. Failures never count toward idle.
+    if (outcome.ok && outcome.monitored === 0) {
+      consecutiveIdleCycles += 1;
+      if (consecutiveIdleCycles >= FLAT_EXIT_AFTER_IDLE_CYCLES) {
+        line(
+          `[${ts}] flat for ${consecutiveIdleCycles} consecutive idle cycles (~${Math.round((consecutiveIdleCycles * IDLE_INTERVAL_MS) / 60_000)}min) — ` +
+            'exiting (ensureWatchDaemon respawns on the next fill). Not an error.',
+        );
+        break;
+      }
+    } else {
+      consecutiveIdleCycles = 0;
+    }
     // Sleep in short slices so SIGINT is honored promptly mid-wait. With zero
     // open positions the cadence stretches to IDLE_INTERVAL_MS (egress fix) —
     // a HEALTHY idle cycle only; failures keep the fast cadence so recovery from

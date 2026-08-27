@@ -1,0 +1,30 @@
+# rubric-scan — supervised rubric scanner (installed 08-27 during the Supabase-outage
+# recovery: the NAS copy of this loop went dark with the quota cut and the scout's
+# feed-degradation gate treats a stale rubric as "stand down"; a blind scout through
+# Jackson Hole week was not acceptable, so the loop runs here too).
+#
+# NAS interplay: double-running with the NAS is SAFE (idempotent inserts; the scout
+# reads newest-per-coin) and costs only a little duplicate egress — when the NAS loop
+# is confirmed healthy again, EITHER stop this unit (systemctl --user disable --now
+# rubric-scan) or retire the NAS line; keep ONE as the long-term owner.
+#
+# INSTALL:  cp ops/systemd/rubric-scan.service ~/.config/systemd/user/ &&
+#           systemctl --user daemon-reload && systemctl --user enable --now rubric-scan
+# LOGS:     journalctl --user -u rubric-scan -f
+
+[Unit]
+Description=HL cockpit rubric scanner (deterministic opportunity scan, 10-min loop)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/tony/gitrepos/hyperliquid
+Environment=PATH=/home/tony/.local/share/pnpm:/home/tony/.nvm/versions/node/v24.11.1/bin:/home/tony/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/tony/.local/share/pnpm/pnpm rubric --interval 600
+Restart=always
+RestartSec=30
+KillMode=control-group
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
