@@ -233,3 +233,28 @@ Account NET **−$174.98** over 68 trades / 52.3 days (8% win) → **KILL**; run
 - **Active roster after this review:** htf-trend (the ONE live experiment) + rubric-crossing
   (n≈0, within bar) + passive controls (vault, carry). Killed: directional, reversion,
   trend-follow. Queued: [[PREREGISTRATION_compression-straddle]] (after htf-trend resolves).
+
+### 2026-08-29 review — htf-trend's first real read: +9.7R unrealized; the steward scores NET-NEGATIVE
+Account NET **−$180.53** / 83 trades / 67.4d → deterministic **KILL**, but the number is
+legacy graveyard (killed lanes −$168 of it). The LIVE experiment set reads differently:
+- **htf-trend — the first genuinely promising interim signal this desk has produced.** Four
+  entries (Aug 19-20, the treasury-rally breakouts), ZERO closed, aggregate **+9.7R
+  unrealized** (ETH +1.38R, HYPE +1.77R, BTC +2.60R, SOL +3.92R) after riding through the
+  Warsh −3% dump without any stop/channel exit. This is the fat-right-tail shape the
+  pre-reg predicted. DISCIPLINE: unrealized R is NOT the ledger — the lane's R exists only
+  when the 10d-channel/stop exits (daemon-enforced) close it. No graduation talk at n=0.
+- **leader-follow (post-registration)**: 11 closed, **net −$15.76**, whale-conviction
+  −0.14R (n=6). Trending toward its bar (KILL at n=15 or 30d/Sep-14 with net<0). Let the
+  frozen bar arrive; no early kill.
+- **compression-straddle**: n=0 — the Aug-19 squeeze resolutions were consumed by htf
+  entries (one-directive-per-cycle + the 2-major portfolio cap crowded it out). Not a
+  failure; a sampling reality. Its 45d clock only kills on ≥6 closed — patience.
+- **STEWARD COUNTERFACTUAL VERDICT (new, actionable): 2 helped / 10 hurt, net-if-followed
+  −$27.49.** Every stop-tighten it proposed during winning trends scored hurt/no-effect —
+  the twitchy-override pattern, now measured. RULE: steward proposals carry NEAR-ZERO
+  authority until this ratio inverts; the desk's default answer to a stop-tighten proposal
+  on a mechanically-managed position is NO (the 08-19/08-28 rejections were both correct).
+- **Event note (live desk, for the record):** the Warsh straddle banked +$18.13 (+0.67R on
+  $27 risk), the template's full rung choreography firing correctly — the event lane and
+  the htf lane profited from OPPOSITE sides of the same week (breakout longs into it,
+  event short through it). Diversification across mechanism, working as designed.
