@@ -258,3 +258,18 @@ legacy graveyard (killed lanes −$168 of it). The LIVE experiment set reads dif
   $27 risk), the template's full rung choreography firing correctly — the event lane and
   the htf lane profited from OPPOSITE sides of the same week (breakout longs into it,
   event short through it). Diversification across mechanism, working as designed.
+
+### 2026-09-03 review — leader-follow KILLED at its bar; htf-trend's first LEDGER R is real
+- **leader-follow: KILLED, mechanically, at the frozen bar** — n=15 closed post-registration,
+  net **−$18.54** (< 0), whale-conviction −0.12R (n=10). The registered hypothesis (rated-whale
+  ≥$1M adds carry short-horizon information) is falsified at this sample: even with the 24h
+  cooldown, real stops, and the martingale filter, following size did not pay. Enforcement:
+  added to KILLED_LANES (executor-refused), removed from the allowlist + prompt. Third
+  mechanism to die at 15m-to-3d horizons (persistence, reversion, now imitation) — the
+  surviving edges remain DAILY-timescale (htf-trend) and EVENT-window (straddle).
+- **htf-trend: first two LEDGER closes, both daemon-enforced 10d-channel exits (Sep 2):**
+  ETH +$51.28, BTC +$20.24 → per-setup expectancy **+1.78R at n=2** (100% win — meaningless
+  rate at this n, the R is what counts). The lane banked the rally mechanically on the
+  pullback and still holds SOL + HYPE. n=2 of the ≥20 graduation bar — a long way to go,
+  but the first positive-expectancy ledger entry any active lane has produced.
+- Steward counterfactuals unchanged (2 helped / 10 hurt) — the near-zero-authority rule stands.

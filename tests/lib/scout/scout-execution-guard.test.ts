@@ -26,7 +26,7 @@ describe('assertScoutPaperMode — no-auto-fire-for-real-money guarantee', () =>
 
 describe('assertLaneAlive — deterministic kill-bar enforcement (08-13 review)', () => {
   it('refuses every killed lane (directional, reversion, trend-follow)', () => {
-    for (const lane of ['directional', 'reversion', 'trend-follow']) {
+    for (const lane of ['directional', 'reversion', 'trend-follow', 'leader-follow']) {
       expect(KILLED_LANES.has(lane)).toBe(true);
       expect(() => assertLaneAlive(lane)).toThrow(ScoutKilledLaneError);
     }
@@ -45,7 +45,7 @@ describe('assertLaneAlive — deterministic kill-bar enforcement (08-13 review)'
   });
 
   it('permits every REGISTERED lane', () => {
-    for (const lane of ['htf-trend', 'compression-straddle', 'breakdown-short', 'reclaim-long', 'leader-follow', 'vault', 'carry']) {
+    for (const lane of ['htf-trend', 'compression-straddle', 'breakdown-short', 'reclaim-long', 'vault', 'carry']) {
       expect(() => assertLaneAlive(lane)).not.toThrow();
     }
   });

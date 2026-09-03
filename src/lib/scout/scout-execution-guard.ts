@@ -40,7 +40,7 @@ export function assertScoutPaperMode(mode: TradingMode): void {
  * (a killed lane must still be able to flatten). Un-killing a lane is a deliberate
  * code change with a fresh pre-registration, never a runtime flag.
  */
-export const KILLED_LANES: ReadonlySet<string> = new Set(['directional', 'reversion', 'trend-follow']);
+export const KILLED_LANES: ReadonlySet<string> = new Set(['directional', 'reversion', 'trend-follow', 'leader-follow']);
 
 /**
  * REGISTERED lanes — the ONLY lanes a scout open may carry (allowlist; 08-15). The
@@ -55,7 +55,6 @@ export const REGISTERED_LANES: ReadonlySet<string> = new Set([
   'compression-straddle', // PREREGISTRATION_compression-straddle.md
   'breakdown-short', // PREREGISTRATION_rubric-crossing.md (short side)
   'reclaim-long', // PREREGISTRATION_rubric-crossing.md (long side)
-  'leader-follow', // PREREGISTRATION_leader-follow.md
   'vault', // passive benchmark (HLP buy-hold)
   'carry', // passive benchmark (Δ-neutral funding)
 ]);

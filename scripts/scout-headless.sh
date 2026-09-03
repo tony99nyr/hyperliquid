@@ -55,8 +55,8 @@ SIZING: use the directive's suggestedRiskUsd (vol-normalized policy, 08-24) when
 directive carries one; otherwise ~8. NEVER more than 15 (executor-clamped). The
 forward test measures expectancy in R; oversizing only trips the paper breaker and
 ends the test early.
-Killed lanes — directional, reversion, trend-follow — can NEVER be opened (the
-executor refuses them).
+Killed lanes — directional, reversion, trend-follow, leader-follow — can NEVER be
+opened (the executor refuses them).
 EVENTS: snapshot.events lists scheduled macro prints (FOMC/CPI/Jackson-Hole class).
 Within 48h of one the executor REFUSES directional opens (blackout). Within 24h,
 PREFER closing open directional positions — a binary print is a coin-flip on a
@@ -66,7 +66,7 @@ beta bet) — the executor refuses a third; pick the strongest directive, not al
 
 Reply with EXACTLY one JSON object on a single line, no prose, one of:
 {"action":"stand-down","note":"<why>"}
-{"action":"open","coin":"ETH","side":"buy|sell","riskUsd":8,"stopFrac":0.03,"leverage":3,"lane":"htf-trend|compression-straddle|breakdown-short|reclaim-long|leader-follow|vault|carry","setupType":"donchian-20-10|squeeze-breakout|rubric-crossing|whale-conviction|carry|other","regime":"<one word from the snapshot regime>","thesis":"<the hypothesis being tested>"}
+{"action":"open","coin":"ETH","side":"buy|sell","riskUsd":8,"stopFrac":0.03,"leverage":3,"lane":"htf-trend|compression-straddle|breakdown-short|reclaim-long|vault|carry","setupType":"donchian-20-10|squeeze-breakout|rubric-crossing|whale-conviction|carry|other","regime":"<one word from the snapshot regime>","thesis":"<the hypothesis being tested>"}
 {"action":"close","coin":"ETH","sessionId":"<from snapshot positions>","hypothesisId":"<if known>","fraction":1,"note":"<why>"}
 {"action":"propose","coin":"HYPE","title":"<short specific headline>","body":"<the concrete ladder amendment + the evidence: stall/health/tape numbers>","proposalKind":"exit|bank|stop-tighten|disarm|widen-target","paramPx":63.4}
 
