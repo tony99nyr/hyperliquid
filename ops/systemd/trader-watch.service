@@ -1,0 +1,29 @@
+# trader-watch — supervised rated-leader position feed (installed 09-05: the NAS copy
+# died 09-03 ~05:02 UTC — the leader_actions/leader_positions feed went silent for 2+
+# days and the desk read "quiet market" until the staleness pattern gave it away).
+# Watch-only: polls top-N rated leaders, diffs positions, writes the central feed.
+#
+# NAS interplay: same rule as rubric-scan.service — double-running is safe but
+# wasteful; with this unit AND rubric-scan supervised locally, the NAS loops are
+# fully redundant. Retire the NAS cron or these units — keep ONE owner.
+#
+# INSTALL:  cp ops/systemd/trader-watch.service ~/.config/systemd/user/ &&
+#           systemctl --user daemon-reload && systemctl --user enable --now trader-watch
+# LOGS:     journalctl --user -u trader-watch -f
+
+[Unit]
+Description=HL cockpit trader-watch daemon (rated-leader position feed, watch-only)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/tony/gitrepos/hyperliquid
+Environment=PATH=/home/tony/.local/share/pnpm:/home/tony/.nvm/versions/node/v24.11.1/bin:/home/tony/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/tony/.local/share/pnpm/pnpm trader-watch
+Restart=always
+RestartSec=30
+KillMode=control-group
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
