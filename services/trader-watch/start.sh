@@ -31,6 +31,13 @@ if [ -f "$LOG_FILE" ] && [ -s "$LOG_FILE" ]; then
     echo "Archived previous log to logs/trader-watch-${TIMESTAMP}.log"
 fi
 
+# Pin Node >= 24 (ops/node-env.sh) — tsx's `#!/usr/bin/env node` under cron's
+# PATH would otherwise pick App Central's old v16 on the NAS and die at launch
+if ! . "$REPO_ROOT/ops/node-env.sh" 2> "$LOG_FILE"; then
+    cat "$LOG_FILE" >&2
+    exit 1
+fi
+
 # Run tsx directly from the repo root for a clean (single-process) PID. Falls back
 # to `pnpm --dir` if the local tsx binary is absent.
 TSX_BIN="$REPO_ROOT/node_modules/.bin/tsx"

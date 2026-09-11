@@ -202,6 +202,11 @@ the comments at the top of each vendored stub module.
   - **Trader-watch** (`pnpm trader-watch`): polls top-N rated leaders, diffs
     positions, writes the central `leader_positions`/`leader_actions` feed
     (stops per-leader HL hammering). Watch-only.
+  - **NAS runtime**: the NAS loops (trader-watch, research worker, `nas-watch.sh`,
+    `nas-rerank.sh`) run from the Asustor crontab and MUST launch Node via
+    `ops/node-env.sh` (Node 24 at `/volume1/home/admin/.local/node`) — App
+    Central's `/usr/local/bin/node` is v16 and killed every loop on 2026-09-02.
+    See `services/trader-watch/README.md` → Node.js 24.
 - **Phase 6 — perf + cockpit polish (DONE)**: Performance tab (equity = spot
   cash + perp, 30d curve, trade ledger, scout track record), live leverage
   adjustment + HL position reconciliation, URL-param tab/timeframe persistence,

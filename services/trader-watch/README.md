@@ -61,20 +61,70 @@ pnpm trader-watch --interval 15 --top 30
 
 ## Deploy on the NAS
 
-Two options:
+The NAS is an **Asustor AS6704T** (ADM — no systemd). Everything runs from the
+`admin` user's crontab, which only calls the scaffold scripts:
 
-1. **systemd** (recommended): edit `systemd/trader-watch.service` for your paths
-   (`WorkingDirectory` = the repo root, `User`, `EnvironmentFile`), then:
-   ```sh
-   sudo cp systemd/trader-watch.service /etc/systemd/system/
-   sudo systemctl daemon-reload
-   sudo systemctl enable --now trader-watch
-   sudo journalctl -u trader-watch -f
-   ```
-   `Restart=always` keeps it up; no separate watchdog cron needed.
+```
+@reboot sleep 30 && cd /volume1/home/admin/hyperliquid/services/trader-watch && /bin/sh start.sh >> logs/cron-start.log 2>&1
+*/3 * * * * cd /volume1/home/admin/hyperliquid/services/trader-watch && /bin/sh watchdog.sh >> logs/watchdog.log 2>&1
+```
 
-2. **start.sh + cron watchdog**: run `./start.sh` and add a cron entry calling
-   `./watchdog.sh` every few minutes.
+(`research-trader-worker` has the same pair on a `*/5` watchdog; `scripts/nas-watch.sh` runs `*/5`;
+`nas-rerank.sh` runs Sundays 04:00.) `systemd/trader-watch.service` is for Linux
+hosts with systemd, not the NAS.
+
+### Node.js 24 (the NAS runtime)
+
+**Do not use App Central's `nodejs` app.** It owns `/usr/local/bin/node`, and an
+App Central update on 2026-09-02 silently swapped it for **v16**. tsx needs
+Node >= 18, so every NAS loop died on its next launch: trader-watch went silent
+on 09-03, and the `nas-watch.sh` steps and research worker failed too.
+
+The NAS runs an official Node 24 build installed in the home directory, out of
+App Central's reach:
+
+```sh
+mkdir -p /volume1/home/admin/.local && cd /volume1/home/admin/.local
+V=v24.21.0   # current 24.x LTS: https://nodejs.org/dist/index.json
+curl -fsSLO https://nodejs.org/dist/$V/node-$V-linux-x64.tar.gz
+curl -fsSL https://nodejs.org/dist/$V/SHASUMS256.txt | grep "node-$V-linux-x64.tar.gz" | sha256sum -c \
+  && tar xzf node-$V-linux-x64.tar.gz && ln -sfn node-$V-linux-x64 node
+/volume1/home/admin/.local/node/bin/node -v    # → v24.x
+```
+
+The `&&` chain matters: if the checksum fails, nothing is extracted and the live
+`node` symlink is untouched.
+
+**How the scripts find it:** every NAS-run script (`start`/`build`/`update.sh` in
+`services/trader-watch` and `services/research-trader-worker`, `scripts/nas-watch.sh`,
+`nas-rerank.sh`) sources `ops/node-env.sh`, which picks,
+in order: `NODE_BIN` (env) → `/volume1/home/admin/.local/node/bin/node` → `node`
+on PATH. It uses the first **Node >= 24** it finds and puts it first on PATH
+(so `tsx`'s `#!/usr/bin/env node`, `pnpm`, and `npx` all use it). If none
+qualifies, the script **refuses to run** with a clear error (in the service log,
+or a Healthchecks `/fail` for `nas-watch.sh`), and `update.sh` checks *before*
+stopping the running service. The crontab needs no changes.
+
+The iamrossi relayer on the same NAS uses the same install (its own
+`services/relayer-service/node-env.sh`).
+
+**Interactive shell** (to run `pnpm`/`node` by hand on the NAS):
+
+```sh
+export PATH=/volume1/home/admin/.local/node/bin:$PATH
+```
+
+**pnpm**: not pinned — whichever `pnpm` is on PATH runs under Node 24 (its
+`#!/usr/bin/env node` finds the pinned Node first). `update.sh` checks `pnpm -v`
+before stopping the service. If pnpm goes missing, reinstall it with the Node 24
+PATH exported (`npm i -g pnpm`) — that lands in the versioned Node folder, so
+redo it after each Node upgrade.
+
+**Upgrading Node**: repeat the install block with the new `V` (`ln -sfn`
+repoints the symlink; the old folder stays as a rollback). Then restart each
+daemon on the new binary — `./stop.sh && ./start.sh` in each service dir
+(`update.sh` also works but pulls `main`). `nas-watch.sh`/`nas-rerank.sh` pick it
+up on their next run. Check a daemon: `readlink /proc/$(cat <service>.pid)/exe`.
 
 ## Configuration
 

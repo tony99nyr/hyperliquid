@@ -57,6 +57,15 @@ cd "$REPO" 2>/dev/null || { log "ERROR: repo not found at $REPO (set HL_COCKPIT_
 # Augment the ping URL from an out-of-git file if env didn't provide it.
 [ -z "$HC_URL" ] && [ -f "$REPO/.healthchecks-nas-watch-url" ] && HC_URL="$(cat "$REPO/.healthchecks-nas-watch-url" 2>/dev/null | tr -d '\r\n')"
 
+# Pin Node >= 24 (ops/node-env.sh). The PATH line above only APPENDS dirs, so a
+# bare `node` still resolved to App Central's /usr/local/bin/node — an old v16
+# since 2026-09-02, which silently failed every pnpm step below.
+if ! . "$REPO/ops/node-env.sh"; then
+  log "ERROR: no usable Node — see ops/node-env.sh"
+  hc "/fail"
+  exit 1
+fi
+
 PNPM="$(command -v pnpm || true)"
 if [ -z "$PNPM" ]; then
   log "ERROR: pnpm not on PATH. Run 'command -v pnpm' in an SSH shell and add that dir to PATH at the top of this script."

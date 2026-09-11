@@ -1,13 +1,13 @@
 #!/bin/sh
-# nas-rerank.sh — Synology DSM Task Scheduler entrypoint for the weekly re-rank.
+# nas-rerank.sh — NAS crontab entrypoint for the weekly re-rank.
 #
-# Create a WEEKLY "user-defined script" task in DSM Control Panel → Task Scheduler
-# and put ONE line in the run-command box:  /bin/sh /path/to/nas-rerank.sh
+# The NAS is an Asustor (ADM, no systemd/DSM). Its crontab runs it Sundays 04:00:
+#   0 4 * * 0 cd /volume1/home/admin/hyperliquid/scripts/analysis/wallet-rating && /bin/sh nas-rerank.sh >> ../../../weekly-rerank-cron.log 2>&1
 #
 # What it does: runs the full discover+rank pipeline (study 01-07 fixed-anchor +
 # fills backfill + 4 scorers + consolidate), then UPSERTS the rankings to Supabase
-# (cockpit UI + Claude skills read them live), pausing the trade-watch daemon for
-# the duration of the heavy HL crawl so they don't fight over HL's per-IP limit.
+# (cockpit UI + Claude skills read them live). The trade-watch daemon keeps running
+# alongside it (see the NOTE below).
 # It does NOT git-push (Supabase is the live source; the watcher reads the local
 # JSON), so no git push auth is needed.
 #
@@ -17,7 +17,7 @@
 # FIRST RUN regenerates ~5.6 GB of fills/study data from HL's public API (hours).
 # Every weekly run after that is incremental. Run it OFF-HOURS.
 #
-# Prereqs on the NAS: node + pnpm + python3; `pnpm install` in the HL repo;
+# Prereqs on the NAS: Node 24 (ops/node-env.sh) + pnpm + python3; `pnpm install` in the HL repo;
 # .env.local present with the Supabase keys.
 #
 # EDIT the two paths below for your NAS.
@@ -38,6 +38,9 @@ EXTRA_PATH=/usr/local/bin:/usr/bin:/bin
 # the trade-watch watchdog honor a pause flag.)
 export RERANK_LOG="$HL_REPO/weekly-rerank.log"
 export PATH="$HL_REPO/node_modules/.bin:$EXTRA_PATH:$PATH"
+
+# Pin Node >= 24 — /usr/local/bin/node (in EXTRA_PATH) is App Central's old v16
+. "$HL_REPO/ops/node-env.sh" || { echo "FATAL: no usable Node — see ops/node-env.sh"; exit 1; }
 
 cd "$HL_REPO" || { echo "FATAL: cannot cd $HL_REPO"; exit 1; }
 

@@ -29,11 +29,15 @@ drains the queue once and exits.
 
 ## Deploy on the NAS (cron watchdog — the supervised path)
 
+**Needs Node 24** — the scripts pin it via `ops/node-env.sh` (never App Central's
+v16 `/usr/local/bin/node`). Install/upgrade steps and the NAS crontab:
+[`services/trader-watch/README.md` → Node.js 24](../trader-watch/README.md#nodejs-24-the-nas-runtime).
+
 ```sh
 ./build.sh           # one-time: install deps
 ./start.sh           # launch the loop
 crontab -e           # add the watchdog (restart-if-down) every 5 min:
-# */5 * * * * /opt/hl-cockpit/services/research-trader-worker/watchdog.sh >> /opt/hl-cockpit/services/research-trader-worker/logs/watchdog.log 2>&1
+# */5 * * * * cd /volume1/home/admin/hyperliquid/services/research-trader-worker && /bin/sh watchdog.sh >> logs/watchdog.log 2>&1
 ```
 
 (A `systemd/research-trader-worker.service` unit is included for reference if you

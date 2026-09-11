@@ -7,6 +7,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 echo "Ensuring repo dependencies are installed (this service runs via tsx)…"
 cd "$REPO_ROOT" || exit 1
+. "$REPO_ROOT/ops/node-env.sh" || exit 1
 
 if command -v pnpm >/dev/null 2>&1; then
     pnpm install --frozen-lockfile || pnpm install
