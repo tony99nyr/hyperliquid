@@ -28,6 +28,10 @@
 [Unit]
 Description=HL cockpit scout producer daemon (paper-only trigger + exit-enforcement loop)
 After=network-online.target
+# Never give up at boot: a slow-network boot can crash-loop past the default
+# 5-in-10s start limit and leave the unit FAILED forever (killed trader-watch +
+# rubric-scan on the 09-12 reboot). Unlimited restarts; RestartSec paces them.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
