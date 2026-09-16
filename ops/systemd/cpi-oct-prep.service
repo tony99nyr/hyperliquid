@@ -1,0 +1,5 @@
+[Unit]
+Description=HL straddle prep for cpi-oct (T-30)
+[Service]
+Type=oneshot
+ExecStart=/home/tony/.local/bin/hl-event-prep-cpi-oct.sh

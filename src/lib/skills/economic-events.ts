@@ -46,4 +46,18 @@ export const ECONOMIC_EVENTS: EconEvent[] = [
     straddleCoin: 'BTC',
     prepLeadMinutes: 30,
   },
+  {
+    name: 'CPI (Sep data)',
+    atIso: '2026-10-14T12:30:00Z',
+    note: 'BLS CPI 08:30 ET (verified BLS schedule). Binary macro — straddle it.',
+    straddleCoin: 'BTC',
+    prepLeadMinutes: 30,
+  },
+  {
+    name: 'FOMC (Oct)',
+    atIso: '2026-10-28T18:00:00Z',
+    note: 'Rate decision 14:00 ET / 18:00 UTC (Oct 27-28 meeting; EDT still in effect) + presser 18:30. Warsh Fed #2 — binary macro, straddle it.',
+    straddleCoin: 'BTC',
+    prepLeadMinutes: 30,
+  },
 ];
