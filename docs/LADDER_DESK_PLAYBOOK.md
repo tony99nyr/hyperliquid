@@ -357,3 +357,36 @@ is gone. The plan for being wrong matters more than the entry plan:
 - [ ] Has expiry / your **time-stop** passed with no progress? → disarm pending rungs.
 - The only on-trade actions allowed: **tighten, scale out, or exit** — never add, never widen.
 </content>
+
+## Event-straddle ledger + doctrine (updated 2026-09-16)
+
+The live record of the event template (fresh T-30 reference, ±1% completed-candle
+gates, OCO, breakeven ratchet, banks, stall-exit):
+
+| Event | Prep | Outcome | Net |
+|---|---|---|---|
+| FOMC Jul 29 | ran | muted print, no fire | $0 |
+| Jackson Hole Aug 28 | ran (timer) | short leg fired, full choreography | +$18.13 (+0.67R) |
+| CPI Sep 11 | ran (timer) | long leg fired, best rep | +$25.40 (+0.94R) |
+| FOMC Sep 16 | **MISSED** | counterfactual reconstruction: no fire | $0 |
+
+Lessons, both load-bearing:
+
+1. **Prep must be mechanical at event-entry time.** The Sep 16 prep failed because
+   the timer was gated on an unconfirmed manual step (a WSL restart) with no
+   fallback. Rule: when an event enters the calendar, its T-30 prep timer is
+   installed in the same commit (persistent systemd timer, file-level, default
+   `--risk 12` to fit the standing 0.15 heat cap; bold sizing is a separate
+   opt-in the night before). The prod T-30 Discord ping is the backup, never the
+   plan. October's two events (CPI Oct 14, FOMC Oct 28) shipped this way.
+2. **Completed-candle gates are the edge, not a latency cost.** The Sep 16
+   counterfactual: the T-30 reference would have been taken AFTER the pre-print
+   dump, and every 15m candle then CLOSED inside the ±1% band, while two
+   intracandle fakeouts pierced or approached the gates (76,547 spike through the
+   long gate at 18:00; the 75,000 flush at 18:30). A tick-triggered straddle
+   fires the long into the fakeout and stops out. Ours correctly refuses the
+   whipsaw. Score across four events: two fires (both paid), two no-fires (both
+   correct), zero bad fires.
+
+Judged per its own bar: 2 fires at +0.8R average with $0 cost on non-events is a
+positive-expectancy event edge at n=4 windows. Keep running the play unchanged.
