@@ -27,7 +27,7 @@ set -u
 # The hl-cockpit repo on the NAS (pipeline + cockpit + trade-watch + .env.local).
 HL_REPO=/volume1/home/admin/hyperliquid
 # Dirs that hold node/pnpm/python3 (a cron shell isn't a login shell → set PATH).
-EXTRA_PATH=/usr/local/bin:/usr/bin:/bin
+EXTRA_PATH=/volume1/home/admin/.local/node/bin:/usr/local/bin:/usr/bin:/bin:/opt/bin
 # ---------------------------------------------------------------------------
 
 # NOTE: we deliberately do NOT pause the trade-watch daemon here. The watchdog
