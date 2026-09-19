@@ -1,4 +1,9 @@
 #!/bin/sh
+# CRON PATH (2026-09-19): root's cron has a minimal PATH and finds neither pnpm nor
+# Node 24. The App Central v16 package used to provide a /usr/local/bin pnpm by
+# accident; removing it (the Node-24 fix) silently starved this loop for 3 days.
+# Absolute dirs only — cron runs this as root, so $HOME is not the admin home.
+export PATH=/volume1/home/admin/.local/node/bin:/usr/local/bin:/opt/bin:$PATH
 # nas-watch.sh — one NAS-cron tick for the HL cockpit monitoring stack.
 #
 # Runs a single cycle of: (1) health watch (per-coin health/P&L/alerts -> Supabase),
