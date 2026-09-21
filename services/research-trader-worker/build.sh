@@ -1,4 +1,5 @@
 #!/bin/sh
+export PATH="/volume1/home/admin/.local/node/bin:/usr/local/bin:/usr/bin:/bin"
 # "Build" the research-trader worker. It runs the repo's TypeScript directly via tsx
 # (no compile step of its own — same model as `pnpm research-trader-worker`), so
 # building == making sure the repo's dependencies are installed. Run from the repo root.

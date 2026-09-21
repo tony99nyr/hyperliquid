@@ -1,4 +1,5 @@
 #!/bin/sh
+export PATH="/volume1/home/admin/.local/node/bin:/usr/local/bin:/usr/bin:/bin"
 # Start the research-trader worker (the on-demand copyability-vetting queue drainer).
 #
 # Outbound-only: it opens NO listening port (no cloudflare tunnel needed). It runs
