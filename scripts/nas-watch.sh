@@ -1,5 +1,5 @@
 #!/bin/sh
-export PATH="/volume1/home/admin/.local/node/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="/volume1/home/admin/.local/node/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 # CRON PATH (2026-09-19): root's cron has a minimal PATH and finds neither pnpm nor
 # Node 24. The App Central v16 package used to provide a /usr/local/bin pnpm by
 # accident; removing it (the Node-24 fix) silently starved this loop for 3 days.

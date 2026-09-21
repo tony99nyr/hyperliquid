@@ -1,5 +1,5 @@
 #!/bin/sh
-export PATH="/volume1/home/admin/.local/node/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="/volume1/home/admin/.local/node/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 # nas-rerank.sh — NAS crontab entrypoint for the weekly re-rank.
 #
 # The NAS is an Asustor (ADM, no systemd/DSM). Its crontab runs it Sundays 04:00:

@@ -1,5 +1,5 @@
 #!/bin/sh
-export PATH="/volume1/home/admin/.local/node/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="/volume1/home/admin/.local/node/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 # Update and restart the trade-watch service: stop, pull latest, install, restart.
 set -e
 cd "$(dirname "$0")"

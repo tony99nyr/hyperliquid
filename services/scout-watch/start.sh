@@ -1,5 +1,5 @@
 #!/bin/sh
-export PATH="/volume1/home/admin/.local/node/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="/volume1/home/admin/.local/node/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 # Start the scout-watch daemon — the FREE deterministic trigger layer of the
 # autonomous PAPER scout (pnpm scout:watch, ~60s loop). It writes triggers to a
 # JSONL file + a scout_heartbeat row; it NEVER trades (the trade path is in the

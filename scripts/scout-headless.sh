@@ -1,5 +1,5 @@
 #!/bin/sh
-export PATH="/volume1/home/admin/.local/node/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="/volume1/home/admin/.local/node/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 # scout-headless.sh — the ZERO-BABYSITTING scout consumer (C2, 2026-07-03).
 #
 # One cycle: deterministic snapshot (--json) → a headless cheap-model decision

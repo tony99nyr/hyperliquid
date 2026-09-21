@@ -1,5 +1,5 @@
 #!/bin/sh
-export PATH="/volume1/home/admin/.local/node/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="/volume1/home/admin/.local/node/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 # POSIX-leaning: runs under busybox ash on the NAS (nas-rerank.sh execs it via
 # /bin/sh, ignoring this shebang anyway). Uses only ash-supported extensions
 # (local, pipefail) — do not introduce bash-only constructs ([[ ]], arrays, ERR traps).
