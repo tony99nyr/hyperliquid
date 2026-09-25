@@ -390,3 +390,18 @@ Lessons, both load-bearing:
 
 Judged per its own bar: 2 fires at +0.8R average with $0 cost on non-events is a
 positive-expectancy event edge at n=4 windows. Keep running the play unchanged.
+
+## Panel refusal, 2026-09-25: BTC OCO dip/breakout — REJECTED (flow veto)
+
+Proposal: OCO dip-long 83,950 / breakout 87,600, $8/$6 risk. Killed by the panel.
+Flow VETO: the cited whale conviction was stale — 0xecb63caa's LIVE book was short
+$21M BTC from 84,555 (plus the second rated wallet short beside it, ~$24M combined)
+while the action feed still read as a held dip-buy. Rules made durable:
+1. **Verify the live clearinghouse book before citing a wallet in any thesis.** The
+   leader ACTION feed shows adds, not the net book; a two-sided wallet reads as
+   conviction from either direction.
+2. BACKTEST_FINDINGS stands: BTC carries no edge for this desk (breakeven, choppy);
+   prefer ETH/SOL vehicles unless BTC brings a signal the others lack.
+3. PCE joins the calendar-awareness set: end-of-month print, quarter-end flows —
+   the event skeptic found it inside the proposed window when the desk calendar
+   did not carry it.
