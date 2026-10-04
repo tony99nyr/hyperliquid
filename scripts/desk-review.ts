@@ -313,19 +313,25 @@ run(async () => {
   // Prod-cron freshness (retro 2026-10-03): the reconcile + auto-exit crons died
   // silently for six weeks once. Their heartbeat rows make staleness visible here.
   try {
-    const { data: cronHb } = await getServiceRoleClient()
+    const { data: cronHb, error: cronHbErr } = await getServiceRoleClient()
       .from('scout_heartbeat')
-      .select('source, last_tick_at')
+      .select('source, status, detail, last_tick_at')
       .in('source', ['reconcile', 'auto-exit-cron']);
+    if (cronHbErr) throw cronHbErr;
     for (const srcName of ['reconcile', 'auto-exit-cron']) {
-      const row = (cronHb ?? []).find((r) => (r as { source: string }).source === srcName) as { last_tick_at: string } | undefined;
-      const ageMin = row ? (now - new Date(row.last_tick_at).getTime()) / 60_000 : Infinity;
+      const row = (cronHb ?? []).find((r) => (r as { source: string }).source === srcName) as
+        | { status: string; detail: string | null; last_tick_at: string }
+        | undefined;
+      const ageMs = row ? now - new Date(row.last_tick_at).getTime() : NaN;
+      const ageTxt = Number.isFinite(ageMs) ? `${Math.round(ageMs / 60_000)}m ago` : 'NEVER';
       const label = srcName === 'reconcile' ? 'Reconcile cron (ledger self-heal)' : 'Auto-exit cron (catastrophe net)';
-      line(
-        ageMin <= 30
-          ? `${label}: ✓ ran ${Math.round(ageMin)}m ago`
-          : `${label}: ⚠ STALE — last ran ${row ? Math.round(ageMin) + 'm ago' : 'NEVER'} (poker dead or bearer stale; fix before trusting the book)`,
-      );
+      if (!row || !Number.isFinite(ageMs) || ageMs > 30 * 60_000) {
+        line(`${label}: ⚠ STALE — last ran ${ageTxt} (every poker dead or bearer stale; fix before trusting the book)`);
+      } else if (row.status !== 'ok') {
+        line(`${label}: ⚠ ${row.status.toUpperCase()} ${ageTxt} — ${(row.detail ?? '').slice(0, 90)}`);
+      } else {
+        line(`${label}: ✓ ${ageTxt} — ${(row.detail ?? '').slice(0, 90)}`);
+      }
     }
   } catch {
     line('Cron freshness: read failed (treat reconcile/auto-exit freshness as unknown).');

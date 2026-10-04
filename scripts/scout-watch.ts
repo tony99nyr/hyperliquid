@@ -197,27 +197,35 @@ const POKE_URLS = [
   'https://hyperliquid-rouge.vercel.app/api/cron/auto-exit',
 ];
 let lastPokeAt = 0;
-let lastPokeErrorLogAt = 0;
+const lastPokeErrorLogAt: Record<string, number> = {}; // per-URL throttle (review 10-03)
 
 async function pokeProdCrons(ts: string): Promise<void> {
   if (Date.now() - lastPokeAt < POKE_EVERY_MS) return;
   lastPokeAt = Date.now();
   const secret = process.env.AUTO_EXIT_CRON_SECRET;
   if (!secret) return; // box without the secret: the NAS poker is then the only trigger
-  for (const url of POKE_URLS) {
-    try {
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${secret}` }, signal: AbortSignal.timeout(20_000) });
-      if (!res.ok && Date.now() - lastPokeErrorLogAt > 3_600_000) {
-        lastPokeErrorLogAt = Date.now();
-        line(`[${ts}] WARN prod-cron poke ${url.split('/').pop()} → HTTP ${res.status} (stale bearer?)`);
+  // Parallel + per-URL error throttle: a slow route must not stall the trigger tick,
+  // and one URL's noise must not silence the other's first error for an hour.
+  await Promise.allSettled(
+    POKE_URLS.map(async (url) => {
+      const name = url.split('/').pop() ?? url;
+      try {
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${secret}`, 'X-Poker': 'local' },
+          signal: AbortSignal.timeout(20_000),
+        });
+        if (!res.ok && Date.now() - (lastPokeErrorLogAt[name] ?? 0) > 3_600_000) {
+          lastPokeErrorLogAt[name] = Date.now();
+          line(`[${ts}] WARN prod-cron poke ${name} → HTTP ${res.status} (stale bearer? restart me after a secret rotation)`);
+        }
+      } catch (err) {
+        if (Date.now() - (lastPokeErrorLogAt[name] ?? 0) > 3_600_000) {
+          lastPokeErrorLogAt[name] = Date.now();
+          line(`[${ts}] WARN prod-cron poke ${name} failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
-    } catch (err) {
-      if (Date.now() - lastPokeErrorLogAt > 3_600_000) {
-        lastPokeErrorLogAt = Date.now();
-        line(`[${ts}] WARN prod-cron poke failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-  }
+    }),
+  );
 }
 
 async function oneCycle(state: ScoutState): Promise<ScoutState> {

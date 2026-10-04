@@ -11,6 +11,7 @@ const performRiskExit = vi.fn();
 const listExitCandidates = vi.fn();
 const isAutoExitEnabled = vi.fn();
 const getAutoExitCronSecret = vi.fn();
+const writeScoutHeartbeat = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('@/lib/infrastructure/auth/auth', () => ({ verifyCronBearer: (...a: unknown[]) => verifyCronBearer(...a) }));
 vi.mock('@/lib/trading/risk-exit-service', () => ({ performRiskExit: (...a: unknown[]) => performRiskExit(...a) }));
@@ -22,6 +23,7 @@ vi.mock('@/lib/auto-exit/auto-exit-config', () => ({
 }));
 const scanAndAlertLiqProximity = vi.fn();
 vi.mock('@/lib/auto-exit/liq-alert-service', () => ({ scanAndAlertLiqProximity: (...a: unknown[]) => scanAndAlertLiqProximity(...a) }));
+vi.mock('@/lib/scout/scout-watch-service', () => ({ writeScoutHeartbeat: (...a: unknown[]) => writeScoutHeartbeat(...a) }));
 
 import { GET } from '@/app/api/cron/auto-exit/route';
 import type { NextRequest } from 'next/server';
@@ -75,5 +77,26 @@ describe('GET /api/cron/auto-exit', () => {
     expect(json.results).toHaveLength(2);
     expect(json.results[0].error).toMatch(/boom/);
     expect(json.results[1].fired).toBe(true);
+  });
+});
+
+describe('cron freshness heartbeats (retro 2026-10-03)', () => {
+  it('writes a DEGRADED heartbeat on the disabled branch (alive != armed)', async () => {
+    isAutoExitEnabled.mockReturnValue(false);
+    await GET(req());
+    expect(writeScoutHeartbeat).toHaveBeenCalledWith('degraded', expect.stringContaining('DISABLED'), 'auto-exit-cron');
+  });
+
+  it('writes an OK heartbeat on the enabled scan branch', async () => {
+    isAutoExitEnabled.mockReturnValue(true);
+    listExitCandidates.mockResolvedValue([]);
+    await GET(req());
+    expect(writeScoutHeartbeat).toHaveBeenCalledWith('ok', expect.stringContaining('scanned 0'), 'auto-exit-cron');
+  });
+
+  it('writes NO heartbeat on the 401 path (an unauthorised poke must not look alive)', async () => {
+    verifyCronBearer.mockReturnValue(false);
+    await GET(req());
+    expect(writeScoutHeartbeat).not.toHaveBeenCalled();
   });
 });

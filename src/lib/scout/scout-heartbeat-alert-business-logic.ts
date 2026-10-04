@@ -17,6 +17,11 @@ export interface HeartbeatRow {
 export const STALE_AFTER_MS: Record<string, number> = {
   'scout-watch': 30 * 60 * 1000,
   'scout-cycle': 90 * 60 * 1000,
+  // Prod crons (retro 2026-10-03): both are poked every 5-10 min by two pokers;
+  // 30 min stale = every poker dead or the bearer stale. Pages via the existing
+  // ladder-watch checkScoutHeartbeats path — the six-week silent death class.
+  reconcile: 30 * 60 * 1000,
+  'auto-exit-cron': 30 * 60 * 1000,
 };
 
 /** Re-page at most every 6h while stale (the operator got the message; don't spam). */

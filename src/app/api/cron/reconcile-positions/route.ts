@@ -34,9 +34,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // Freshness heartbeat (retro 2026-10-03): this cron ran silently DEAD for six
     // weeks (a stale poker bearer) while three phantom-position incidents piled up.
     // The heartbeat row makes the next silent death visible in every desk review.
+    const poker = request.headers.get('x-poker') ?? 'unknown';
     await writeScoutHeartbeat(
-      'ok',
-      `reconcile ran: checked ${summary.checked}, backfill scanned ${backfill.scanned} inserted ${backfill.inserted}`,
+      backfill.skipped ? 'degraded' : 'ok',
+      backfill.skipped
+        ? `reconcile ran but backfill SKIPPED (${backfill.reason}) via ${poker}`
+        : `reconcile ran: checked ${summary.checked}, backfill scanned ${backfill.scanned} inserted ${backfill.inserted} via ${poker}`,
       'reconcile',
     ).catch(() => {});
     return NextResponse.json({ ok: true, ...summary, backfill });

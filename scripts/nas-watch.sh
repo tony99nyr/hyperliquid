@@ -120,13 +120,13 @@ SECRET="${AUTO_EXIT_CRON_SECRET:-}"
 RECONCILE_URL="${RECONCILE_URL:-https://hyperliquid-rouge.vercel.app/api/cron/reconcile-positions}"
 if [ -n "$SECRET" ]; then
   log "-> auto-exit poke ($AUTO_EXIT_URL)"
-  curl -s -m 30 -H "Authorization: Bearer $SECRET" "$AUTO_EXIT_URL" 2>&1 | sed 's/^/   /'
+  curl -s -m 30 -H "Authorization: Bearer $SECRET" -H "X-Poker: nas" "$AUTO_EXIT_URL" 2>&1 | sed 's/^/   /'
   echo ""
   # Position reconciliation — mirror the cockpit's positions to the REAL HL account
   # (flatten/resync anything closed or changed directly in the HL app). NOT gated by
   # AUTO_EXIT — it's a data sync, never a trade. Runs server-side where the address lives.
   log "-> reconcile-positions poke ($RECONCILE_URL)"
-  curl -s -m 30 -H "Authorization: Bearer $SECRET" "$RECONCILE_URL" 2>&1 | sed 's/^/   /'
+  curl -s -m 30 -H "Authorization: Bearer $SECRET" -H "X-Poker: nas" "$RECONCILE_URL" 2>&1 | sed 's/^/   /'
   echo ""
 else
   log "-> Vercel pokes SKIPPED (no AUTO_EXIT_CRON_SECRET env and no $REPO/.auto-exit-secret file)"

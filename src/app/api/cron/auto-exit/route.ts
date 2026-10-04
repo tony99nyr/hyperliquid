@@ -44,7 +44,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   if (!isAutoExitEnabled()) {
-    await writeScoutHeartbeat('ok', 'auto-exit cron ran (auto-close disabled; liq alerts only)', 'auto-exit-cron').catch(() => {});
+    await writeScoutHeartbeat(
+      'degraded',
+      `auto-exit cron alive but auto-close DISABLED (liq alerts only) via ${request.headers.get('x-poker') ?? 'unknown'}`,
+      'auto-exit-cron',
+    ).catch(() => {});
     return NextResponse.json({ ok: true, skipped: 'auto-close disabled', liqAlert });
   }
 
@@ -69,7 +73,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       : 'DISABLED (needs live mode + HL_ACCOUNT_ADDRESS) — only loss-USD + health triggers run';
 
   const firedCount = results.filter((r) => r.fired === true).length;
-  await writeScoutHeartbeat('ok', `auto-exit cron ran: scanned ${candidates.length}, fired ${firedCount}`, 'auto-exit-cron').catch(() => {});
+  await writeScoutHeartbeat(
+    'ok',
+    `auto-exit cron ran: scanned ${candidates.length}, fired ${firedCount} via ${request.headers.get('x-poker') ?? 'unknown'}`,
+    'auto-exit-cron',
+  ).catch(() => {});
   return NextResponse.json({
     ok: true,
     scanned: candidates.length,
