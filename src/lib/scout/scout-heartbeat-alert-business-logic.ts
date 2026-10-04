@@ -48,9 +48,16 @@ export function heartbeatVerdict(row: HeartbeatRow, now: number): HeartbeatVerdi
   return 'stale-quiet';
 }
 
-/** The Discord line for a stale heartbeat. */
+/** The Discord line for a stale heartbeat. Per-source wording matters: a dead PROD
+ *  cron must not page as a scout failure (review 10-03 — the wrong-runbook page). */
 export function staleMessage(row: HeartbeatRow, now: number): string {
   const hours = ((now - row.lastTickAtMs) / 3_600_000).toFixed(1);
+  if (row.source === 'reconcile') {
+    return `⚠️ **RECONCILE CRON SILENT ${hours}h** — the ledger self-heal (venue-fill backfill) is not running. Phantom positions can accumulate. Check the pokers: the NAS .auto-exit-secret bearer and the local scout daemon, then the Vercel route.`;
+  }
+  if (row.source === 'auto-exit-cron') {
+    return `⚠️ **AUTO-EXIT CRON SILENT ${hours}h** — the catastrophe-close scanner is not running; open live positions have NO automated risk net. Check the pokers (NAS bearer / local daemon) and the Vercel route NOW.`;
+  }
   const what = row.source === 'scout-cycle' ? 'decision engine (headless consumer)' : 'trigger producer (scout-watch daemon)';
   return `⚠️ **SCOUT ${row.source.toUpperCase()} SILENT ${hours}h** — the ${what} has not ticked. Triggers ${row.source === 'scout-cycle' ? 'are piling up unconsumed' : 'are not being produced'}. Check the box + cron (see scout-repair runbook).`;
 }

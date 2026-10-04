@@ -3,7 +3,7 @@
  * tick (production, always on) so a dead scout box CANNOT be the thing that
  * fails to report a dead scout box. Fail-soft: alerting can never affect the
  * money path. Cooldown bookkeeping lives on the heartbeat row itself
- * (stale_alerted_at), cleared on recovery.
+ * (stale_alerted_at), stamped on page; the 6h cooldown governs re-pages (never cleared by a fresh tick).
  */
 
 import 'server-only';

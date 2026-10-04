@@ -85,6 +85,7 @@ describe('cron freshness heartbeats (retro 2026-10-03)', () => {
     isAutoExitEnabled.mockReturnValue(false);
     await GET(req());
     expect(writeScoutHeartbeat).toHaveBeenCalledWith('degraded', expect.stringContaining('DISABLED'), 'auto-exit-cron');
+    expect(writeScoutHeartbeat).toHaveBeenCalledTimes(1);
   });
 
   it('writes an OK heartbeat on the enabled scan branch', async () => {
@@ -92,6 +93,7 @@ describe('cron freshness heartbeats (retro 2026-10-03)', () => {
     listExitCandidates.mockResolvedValue([]);
     await GET(req());
     expect(writeScoutHeartbeat).toHaveBeenCalledWith('ok', expect.stringContaining('scanned 0'), 'auto-exit-cron');
+    expect(writeScoutHeartbeat).toHaveBeenCalledTimes(1);
   });
 
   it('writes NO heartbeat on the 401 path (an unauthorised poke must not look alive)', async () => {

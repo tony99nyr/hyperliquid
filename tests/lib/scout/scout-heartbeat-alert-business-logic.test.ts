@@ -52,3 +52,21 @@ describe('staleMessage', () => {
     expect(msg).toContain('decision engine');
   });
 });
+
+describe('staleMessage routes the operator to the RIGHT system (review 10-03)', () => {
+  const row = (source: string) => ({ source, lastTickAtMs: 0, staleAlertedAtMs: null });
+  it('a dead reconcile cron pages as a LEDGER problem, not a scout problem', () => {
+    const m = staleMessage(row('reconcile'), 3_600_000);
+    expect(m).toMatch(/RECONCILE CRON/);
+    expect(m).toMatch(/poker/i);
+    expect(m).not.toMatch(/scout-repair/);
+  });
+  it('a dead auto-exit cron pages as a RISK-NET problem', () => {
+    const m = staleMessage(row('auto-exit-cron'), 3_600_000);
+    expect(m).toMatch(/AUTO-EXIT CRON/);
+    expect(m).toMatch(/NO automated risk net/);
+  });
+  it('scout sources keep the scout wording', () => {
+    expect(staleMessage(row('scout-watch'), 3_600_000)).toMatch(/scout-repair runbook/);
+  });
+});
