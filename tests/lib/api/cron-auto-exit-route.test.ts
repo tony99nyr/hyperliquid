@@ -23,7 +23,7 @@ vi.mock('@/lib/auto-exit/auto-exit-config', () => ({
 }));
 const scanAndAlertLiqProximity = vi.fn();
 vi.mock('@/lib/auto-exit/liq-alert-service', () => ({ scanAndAlertLiqProximity: (...a: unknown[]) => scanAndAlertLiqProximity(...a) }));
-vi.mock('@/lib/scout/scout-watch-service', () => ({ writeScoutHeartbeat: (...a: unknown[]) => writeScoutHeartbeat(...a) }));
+vi.mock('@/lib/scout/scout-heartbeat-service', () => ({ writeScoutHeartbeat: (...a: unknown[]) => writeScoutHeartbeat(...a) }));
 
 import { GET } from '@/app/api/cron/auto-exit/route';
 import type { NextRequest } from 'next/server';

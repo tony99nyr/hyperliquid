@@ -16,7 +16,7 @@ vi.mock('@/lib/infrastructure/auth/auth', () => ({ verifyCronBearer: (...a: unkn
 vi.mock('@/lib/auto-exit/auto-exit-config', () => ({ getAutoExitCronSecret: (...a: unknown[]) => getAutoExitCronSecret(...a) }));
 vi.mock('@/lib/cockpit/position-reconcile-service', () => ({ reconcileLivePositions: (...a: unknown[]) => reconcileLivePositions(...a) }));
 vi.mock('@/lib/cockpit/fill-backfill-service', () => ({ backfillExchangeFills: (...a: unknown[]) => backfillExchangeFills(...a) }));
-vi.mock('@/lib/scout/scout-watch-service', () => ({ writeScoutHeartbeat: (...a: unknown[]) => writeScoutHeartbeat(...a) }));
+vi.mock('@/lib/scout/scout-heartbeat-service', () => ({ writeScoutHeartbeat: (...a: unknown[]) => writeScoutHeartbeat(...a) }));
 
 import { GET } from '@/app/api/cron/reconcile-positions/route';
 import type { NextRequest } from 'next/server';

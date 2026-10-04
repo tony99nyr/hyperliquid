@@ -17,7 +17,7 @@ import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 import { getAutoExitCronSecret } from '@/lib/auto-exit/auto-exit-config';
 import { reconcileLivePositions } from '@/lib/cockpit/position-reconcile-service';
 import { backfillExchangeFills } from '@/lib/cockpit/fill-backfill-service';
-import { writeScoutHeartbeat } from '@/lib/scout/scout-watch-service';
+import { writeScoutHeartbeat } from '@/lib/scout/scout-heartbeat-service';
 
 export const dynamic = 'force-dynamic';
 

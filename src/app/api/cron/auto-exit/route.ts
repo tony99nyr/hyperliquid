@@ -13,7 +13,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { writeScoutHeartbeat } from '@/lib/scout/scout-watch-service';
+import { writeScoutHeartbeat } from '@/lib/scout/scout-heartbeat-service';
 import { verifyCronBearer } from '@/lib/infrastructure/auth/auth';
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 import { performRiskExit } from '@/lib/trading/risk-exit-service';

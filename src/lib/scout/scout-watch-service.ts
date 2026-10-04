@@ -367,22 +367,10 @@ export async function gatherScoutInputs(now: number): Promise<ScoutInputs> {
   return { rubric, marks, positions, leaderActions, now, degraded, degradedReason, rubricAgeMs };
 }
 
-/** Upsert a liveness heartbeat so the cockpit can show "scout last tick Nm ago"
- * and a hung/dead daemon (crash, OAuth expiry) is detectable. Best-effort. */
-export async function writeScoutHeartbeat(
-  status: string,
-  detail: string,
-  source = 'scout-watch',
-  now: number = Date.now(),
-): Promise<void> {
-  try {
-    await getServiceRoleClient()
-      .from('scout_heartbeat')
-      .upsert({ source, last_tick_at: new Date(now).toISOString(), status, detail }, { onConflict: 'source' });
-  } catch {
-    /* best-effort liveness */
-  }
-}
+// The heartbeat write lives in the slim scout-heartbeat-service (cron lambdas import
+// it there so this module's fs/HL/scanner imports stay out of their bundles); the
+// re-export keeps the daemon scripts' existing imports working.
+export { writeScoutHeartbeat } from './scout-heartbeat-service';
 
 /** Append triggers to the sink (table primary, JSONL fallback — see scout-trigger-sink). */
 export async function appendScoutTriggers(triggers: ScoutTrigger[]): Promise<'supabase' | 'jsonl' | 'none'> {
