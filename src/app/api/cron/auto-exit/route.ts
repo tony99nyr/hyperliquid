@@ -13,6 +13,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { writeScoutHeartbeat } from '@/lib/scout/scout-watch-service';
 import { verifyCronBearer } from '@/lib/infrastructure/auth/auth';
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 import { performRiskExit } from '@/lib/trading/risk-exit-service';
@@ -43,6 +44,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   if (!isAutoExitEnabled()) {
+    await writeScoutHeartbeat('ok', 'auto-exit cron ran (auto-close disabled; liq alerts only)', 'auto-exit-cron').catch(() => {});
     return NextResponse.json({ ok: true, skipped: 'auto-close disabled', liqAlert });
   }
 
@@ -66,6 +68,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       ? 'active'
       : 'DISABLED (needs live mode + HL_ACCOUNT_ADDRESS) — only loss-USD + health triggers run';
 
+  const firedCount = results.filter((r) => r.fired === true).length;
+  await writeScoutHeartbeat('ok', `auto-exit cron ran: scanned ${candidates.length}, fired ${firedCount}`, 'auto-exit-cron').catch(() => {});
   return NextResponse.json({
     ok: true,
     scanned: candidates.length,

@@ -17,6 +17,7 @@ import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 import { getAutoExitCronSecret } from '@/lib/auto-exit/auto-exit-config';
 import { reconcileLivePositions } from '@/lib/cockpit/position-reconcile-service';
 import { backfillExchangeFills } from '@/lib/cockpit/fill-backfill-service';
+import { writeScoutHeartbeat } from '@/lib/scout/scout-watch-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +31,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // handles residual drift (and its freshness guards still apply).
     const backfill = await backfillExchangeFills();
     const summary = await reconcileLivePositions();
+    // Freshness heartbeat (retro 2026-10-03): this cron ran silently DEAD for six
+    // weeks (a stale poker bearer) while three phantom-position incidents piled up.
+    // The heartbeat row makes the next silent death visible in every desk review.
+    await writeScoutHeartbeat(
+      'ok',
+      `reconcile ran: checked ${summary.checked}, backfill scanned ${backfill.scanned} inserted ${backfill.inserted}`,
+      'reconcile',
+    ).catch(() => {});
     return NextResponse.json({ ok: true, ...summary, backfill });
   } catch (e) {
     return NextResponse.json({ ok: false, error: extractErrorMessage(e) }, { status: 500 });

@@ -186,9 +186,44 @@ async function enforceExits(ts: string): Promise<void> {
   }
 }
 
+// PROD-CRON POKE (retro 2026-10-03): the reconcile + auto-exit crons ran DEAD for
+// six weeks because their external poker (the NAS secret file) went stale after a
+// secret rotation. This daemon holds the CURRENT secret via .env.local, so it pokes
+// both routes every POKE_EVERY_MS as a redundant trigger. Idempotent server-side;
+// a failure logs at most once per hour (the heartbeat rows are the real alarm).
+const POKE_EVERY_MS = 10 * 60_000;
+const POKE_URLS = [
+  'https://hyperliquid-rouge.vercel.app/api/cron/reconcile-positions',
+  'https://hyperliquid-rouge.vercel.app/api/cron/auto-exit',
+];
+let lastPokeAt = 0;
+let lastPokeErrorLogAt = 0;
+
+async function pokeProdCrons(ts: string): Promise<void> {
+  if (Date.now() - lastPokeAt < POKE_EVERY_MS) return;
+  lastPokeAt = Date.now();
+  const secret = process.env.AUTO_EXIT_CRON_SECRET;
+  if (!secret) return; // box without the secret: the NAS poker is then the only trigger
+  for (const url of POKE_URLS) {
+    try {
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${secret}` }, signal: AbortSignal.timeout(20_000) });
+      if (!res.ok && Date.now() - lastPokeErrorLogAt > 3_600_000) {
+        lastPokeErrorLogAt = Date.now();
+        line(`[${ts}] WARN prod-cron poke ${url.split('/').pop()} → HTTP ${res.status} (stale bearer?)`);
+      }
+    } catch (err) {
+      if (Date.now() - lastPokeErrorLogAt > 3_600_000) {
+        lastPokeErrorLogAt = Date.now();
+        line(`[${ts}] WARN prod-cron poke failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+}
+
 async function oneCycle(state: ScoutState): Promise<ScoutState> {
   const ts = new Date().toISOString();
   await enforceExits(ts);
+  await pokeProdCrons(ts);
   try {
     const { triggers, state: next, degraded, degradedReason, sink, reversionCoverage } = await runScoutWatchCycle(state, WATCH_CFG);
     saveScoutState(next); // persist so a restart resumes from the latest baseline
