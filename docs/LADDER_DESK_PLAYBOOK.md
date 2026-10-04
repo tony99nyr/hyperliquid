@@ -405,3 +405,40 @@ while the action feed still read as a held dip-buy. Rules made durable:
 3. PCE joins the calendar-awareness set: end-of-month print, quarter-end flows —
    the event skeptic found it inside the proposed window when the desk calendar
    did not carry it.
+
+## Retro 2026-10-03: doctrine written down, caps reconciled, drafter put on a bar
+
+Two adversarial reviews (desk + scout) ran on day 103. Accepted findings:
+
+### Macro tripwires (now doctrine IN THE REPO, not chat history)
+The 30Y yield is the desk's fiscal-stress tripwire. Levels and actions:
+- **30Y > 5.37** (the August spike high): arm NO new long ladders. Long drafts stay
+  drafts. Short-side catalyst drafts remain allowed.
+- **30Y > 5.60**: disarm the risk-adding rungs of armed long ladders (desk-review
+  authority), move open long stops to breakeven or close, and state the household
+  ETH beta next to the desk P&L (a -3% ETH day ≈ -$780 on $26k, ~14x a good desk
+  week). Applied 2026-10-03: the ETH trend ladder's add rungs were skipped.
+- Reset when the 30Y closes back under 5.37 for 3 sessions.
+
+### One heat cap
+The authoritative book-heat cap is the production env `LADDER_BOOK_HEAT_MAX_FRAC`:
+**0.15 standing, 0.35 only inside a scheduled event window, reverted after**. This
+supersedes the 6%/4% manual figures earlier in this file and the 0.10 figure in
+src/lib/ladder/CLAUDE.md.
+
+### Catalyst drafter: pre-registered kill bar (from 2026-10-03)
+Record: ~12 drafts, 5 live fires, net ≈ +$12 (one stop erases ~80% of it). That is
+noise, not edge. Bar: **kill the runaway+trend drafter pattern if the mean fire is
+below +0.2R after 20 live fires.** Fires to date count. The event-straddle play is
+measured separately (4 windows: 2 paid fires, 2 correct no-fires) and the word
+"positive-expectancy" at n=4 is withdrawn: the record is promising, not proven.
+
+### Standing fixes
+- **Re-anchor-on-arm**: stale-gate drafts are re-anchored to the live mark at arm
+  time (manual via the desk agent until built in the cockpit). Auto-arm is REJECTED:
+  the drafter's governance defect rate (3 bugs in ~12 drafts) does not earn autonomy.
+- **BUILD FREEZE**: no new drafters, detectors or dashboards until venue-side fill
+  ingestion ships in the reconcile cron. Three phantom-position incidents is enough.
+- **Verify-before-acting rule**: never state or act on a position, book, env value
+  or wallet read without reading the source of truth in the same turn (the stale-
+  whale, phantom-position and env-wipe incidents are one defect class).

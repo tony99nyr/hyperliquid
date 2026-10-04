@@ -273,3 +273,25 @@ legacy graveyard (killed lanes −$168 of it). The LIVE experiment set reads dif
   pullback and still holds SOL + HYPE. n=2 of the ≥20 graduation bar — a long way to go,
   but the first positive-expectancy ledger entry any active lane has produced.
 - Steward counterfactuals unchanged (2 helped / 10 hurt) — the near-zero-authority rule stands.
+
+### 2026-10-03 review (day 103, adversarial retro)
+- **htf-trend: HOLD, and stop the graduation talk.** n=8, +0.90R nominal, but four
+  of eight entries were ONE correlated cluster (Aug 19-20, all four majors on the
+  same breakout). Effective n ≈ 5, t ≈ 1.1. Under a 6-lane search, the chance that
+  at least one lane shows +0.90R at n=8 by luck is ~37%. The lane earned its
+  CONTINUE, nothing more. The "surviving set is green" framing is retired: the
+  honest statement is "search cost -$189; one unproven candidate remains".
+- **Graduation bar amended (stricter only, 2026-10-03):** at n>=20 the >=+0.25R must
+  ALSO hold with the largest 5-day entry cluster removed, and the live-decay
+  haircut is now a number: multiply paper expectancy by 0.7. Both changes tighten
+  the bar; neither can rescue a failing lane.
+- **compression-straddle: HOLD by the letter of its bar.** 0/4 is a 24% event at
+  the design win rate. The lane auto-dies at its 6th close unless trades 5+6 net
+  more than +$5.30. No early kill; check the four stops for same-episode re-entry
+  violations at the next review.
+- **Blind-day policy:** outages (~6 days) are missing-at-random; expectancy is
+  unbiased but n shrinks and time-based bars overcount. TODO: replay daily candles
+  for blind windows and log SHADOW trades (off-ledger) so sample loss is visible.
+- Economics: live break-even needs ~+0.5R at 1% risk; a clean n=20 pass justifies
+  only $5-10 risk per trade (quarter-Kelly on the haircut expectancy). The
+  programme's value is option value on a proven edge, not its paper run-rate.
