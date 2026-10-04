@@ -292,6 +292,26 @@ legacy graveyard (killed lanes −$168 of it). The LIVE experiment set reads dif
 - **Blind-day policy:** outages (~6 days) are missing-at-random; expectancy is
   unbiased but n shrinks and time-based bars overcount. TODO: replay daily candles
   for blind windows and log SHADOW trades (off-ledger) so sample loss is visible.
+
+### 2026-10-04 shadow replay (the blind-day TODO, built)
+- **Tool:** `pnpm scout:shadow-replay [--days 60] [--coins ETH,BTC,HYPE,SOL]
+  [--lanes htf-trend,compression-straddle] [--json]`. READ-ONLY. It replays the two
+  mechanical lanes' frozen rules over every completed bar (windows clamped to each
+  lane's registration date), groups signals into entry EPISODES (consecutive
+  breakout bars = one opportunity), and diffs them against the hypotheses ledger.
+  A missed episode = the rule fired but nothing reached the ledger. The miss count
+  is an UPPER bound on daemon-attributable loss: the live cycle only scans the
+  top-6 rubric coins, so a ranked-out coin's episode counts as missed too.
+- **First run (60d, 2026-10-04):** htf-trend 26 episodes, 9 matched, 17 missed
+  (65%). compression-straddle 24 episodes, 5 matched, 19 missed (79%).
+- **Consequence for the bars:** the ledger's n is a FLOOR on the lanes' signal
+  population. The tool CANNOT attribute a miss (heartbeats keep no history): a
+  missed episode may be an outage, the rubric ranking the coin out of the top-6,
+  a concurrency cap, or an open position — attribute only after cross-checking a
+  specific date. The n=20 graduation checkpoint must quote the shadow-replay miss
+  count beside the ledger n, and a time-based kill bar (compression's "6th
+  close") counts LEDGER closes only — it must not be read as "the lane only
+  found 6 setups". Re-run the replay at every weekly review.
 - Economics: live break-even needs ~+0.5R at 1% risk; a clean n=20 pass justifies
   only $5-10 risk per trade (quarter-Kelly on the haircut expectancy). The
   programme's value is option value on a proven edge, not its paper run-rate.
