@@ -109,6 +109,9 @@ export function buildRunawayLadderPlan(hit: RunawayHit, opts: RunawayPlanOpts): 
       `(~$${riskUsd} risk), panel-gate before arming. ${expiryHours}h expiry (runaway structure goes stale fast).`,
     author: 'operator',
     mode: 'live',
+    // Every rung price below is a fixed ratio of this mark — storing it lets a
+    // stale draft re-anchor to the live mark instead of dying un-armable (0043).
+    anchorPx: round(hit.mark),
     maxTotalLossUsd: Math.max(20, Math.ceil((riskUsd / stopFrac) * 0.25)),
     maxTotalNotionalUsd: Math.ceil(NOTIONAL_CAP_USD * 1.6), // core + half-size add headroom
     expiresAtMs: opts.now + expiryHours * 60 * 60 * 1000,

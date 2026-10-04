@@ -67,7 +67,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const limit = checkRateLimit(`ladder-arm:${getClientIdentifier(request)}`, ARM_MAX_PER_MIN, 60_000);
   if (!limit.allowed) return NextResponse.json({ ok: false, error: 'Too many requests' }, { status: 429 });
 
-  let body: { ladderId?: unknown; confirmPhrase?: unknown; allowInstantFire?: unknown };
+  let body: { ladderId?: unknown; confirmPhrase?: unknown; allowInstantFire?: unknown; expectedUpdatedAt?: unknown };
   try { body = (await request.json()) as typeof body; } catch { return NextResponse.json({ ok: false, error: 'Invalid body' }, { status: 400 }); }
   const ladderId = typeof body.ladderId === 'string' ? body.ladderId.trim() : '';
   if (!ladderId) return NextResponse.json({ ok: false, error: 'ladderId required' }, { status: 400 });
@@ -79,6 +79,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: extractErrorMessage(err) }, { status: 502 });
   }
   if (!ladder) return NextResponse.json({ ok: false, error: 'ladder not found' }, { status: 404 });
+
+  // CONSENT VERSION PIN (review 2026-10-04 round 2): the modal sends the updated_at of
+  // the row the OPERATOR actually reviewed. If the row changed before this request read
+  // it (e.g. a re-anchor from another tab), refuse — otherwise the operator would arm
+  // prices they never saw. Optional so non-modal callers (builder arms its own fresh
+  // create) keep working; the armLadder guard below still pins the route's own read.
+  if (body.expectedUpdatedAt !== undefined) {
+    if (typeof body.expectedUpdatedAt !== 'string' || body.expectedUpdatedAt !== ladder.updatedAt) {
+      return NextResponse.json(
+        { ok: false, error: 'ladder changed since you reviewed it (edited/re-anchored elsewhere) — reload, re-review, and arm again' },
+        { status: 409 },
+      );
+    }
+  }
   if (ladder.status !== 'draft') return NextResponse.json({ ok: false, error: `ladder is '${ladder.status}', only a draft can be armed` }, { status: 409 });
   // Defense-in-depth with the DB CHECK: a scout-authored ladder can NEVER be armed.
   if (ladder.author !== 'operator') return NextResponse.json({ ok: false, error: 'only operator-authored ladders can be armed' }, { status: 403 });
@@ -186,8 +200,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   for (const r of ladder.rungs) cloidByRungId[r.id] = `${ladder.id}:${r.id}`;
 
   try {
-    const armed = await armLadder(ladder.id, { preconditionHash, expiresAtMs: expiresAtMs as number, cloidByRungId });
-    if (!armed) return NextResponse.json({ ok: false, error: 'ladder was already armed/disarmed (lost the race)' }, { status: 409 });
+    // expectedUpdatedAt pins the arm to the EXACT row version this request read and
+    // validated — an edit (e.g. a re-anchor) landing after the read makes this a 409
+    // instead of arming prices the operator never reviewed (review 2026-10-04).
+    const armed = await armLadder(ladder.id, { preconditionHash, expiresAtMs: expiresAtMs as number, cloidByRungId, expectedUpdatedAt: ladder.updatedAt });
+    if (!armed) return NextResponse.json({ ok: false, error: 'ladder changed since you reviewed it (armed/disarmed/edited elsewhere) — reload, re-review, and arm again' }, { status: 409 });
   } catch (err) {
     return NextResponse.json({ ok: false, error: extractErrorMessage(err) }, { status: 502 });
   }

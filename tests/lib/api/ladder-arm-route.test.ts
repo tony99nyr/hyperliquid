@@ -42,7 +42,7 @@ function postReq(body: unknown): NextRequest {
 function draftLadder(over: Partial<LadderWithRungs> = {}): LadderWithRungs {
   return {
     id: 'abcd1234-0000-0000', title: 'Breakout', thesis: null, author: 'operator', mode: 'paper', status: 'draft',
-    preconditionHash: null, ocoGroupId: null, leaderAddress: null, maxTotalNotionalUsd: 100_000, maxTotalLossUsd: 5_000,
+    preconditionHash: null, ocoGroupId: null, leaderAddress: null, maxTotalNotionalUsd: 100_000, maxTotalLossUsd: 5_000, anchorPx: null,
     expiresAt: new Date(Date.now() + 3_600_000).toISOString(), activeFrom: null, armedAt: null, disarmedAt: null, disarmReason: null, archivedAt: null, expiryAlertAt: null,
     createdAt: new Date(Date.now() - 1000).toISOString(), updatedAt: new Date(Date.now() - 1000).toISOString(),
     rungs: [{
@@ -172,5 +172,30 @@ describe('ladder arm route', () => {
     armLadder.mockResolvedValue(false);
     const res = await POST(postReq({ ladderId: 'abcd1234-0000-0000' }));
     expect(res.status).toBe(409);
+  });
+
+  it('pins the arm to the row version it READ (expectedUpdatedAt — the re-anchor race guard)', async () => {
+    const ladder = draftLadder();
+    getLadderWithRungs.mockResolvedValue(ladder);
+    const res = await POST(postReq({ ladderId: 'abcd1234-0000-0000' }));
+    expect(res.status).toBe(200);
+    expect(armLadder).toHaveBeenCalledWith('abcd1234-0000-0000', expect.objectContaining({ expectedUpdatedAt: ladder.updatedAt }));
+  });
+
+  it("409s when the body's expectedUpdatedAt mismatches (the operator reviewed a stale version)", async () => {
+    const ladder = draftLadder();
+    getLadderWithRungs.mockResolvedValue(ladder);
+    const res = await POST(postReq({ ladderId: 'abcd1234-0000-0000', expectedUpdatedAt: '2020-01-01T00:00:00.000Z' }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain('re-review');
+    expect(armLadder).not.toHaveBeenCalled();
+  });
+
+  it('arms when the body expectedUpdatedAt MATCHES the persisted row (the modal path)', async () => {
+    const ladder = draftLadder();
+    getLadderWithRungs.mockResolvedValue(ladder);
+    const res = await POST(postReq({ ladderId: 'abcd1234-0000-0000', expectedUpdatedAt: ladder.updatedAt }));
+    expect(res.status).toBe(200);
+    expect(armLadder).toHaveBeenCalled();
   });
 });

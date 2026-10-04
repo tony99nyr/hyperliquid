@@ -55,6 +55,10 @@ describe('buildRunawayLadderPlan — the draft is genuinely armable', () => {
   const hit = detectRunaway({ coin: 'HYPE', mark: 70, prevDayPx: 58 })!;
   const plan = buildRunawayLadderPlan(hit, { now: NOW });
 
+  it('stores the detection mark as the anchor (enables the draft re-anchor, 0043)', () => {
+    expect(plan.anchorPx).toBe(70);
+  });
+
   it('is a LIVE low-qty draft with caps, expiry, and the doctrine in the thesis', () => {
     expect(plan.mode).toBe('live');
     expect(plan.author).toBe('operator');

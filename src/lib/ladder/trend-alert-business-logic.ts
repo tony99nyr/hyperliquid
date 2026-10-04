@@ -108,6 +108,9 @@ export function buildTrendLadderPlan(ctx: TrendAlertContext, opts: TrendPlanOpts
       `leaves bullish; the ${expiryHours}h expiry is the backstop. LIVE low-qty draft; the operator ARMS it.`,
     author: 'operator',
     mode: 'live',
+    // Every rung price below is a fixed ratio of this mark — storing it lets a
+    // stale draft re-anchor to the live mark instead of dying un-armable (0043).
+    anchorPx: round(mark),
     maxTotalLossUsd: Math.max(10, Math.ceil(slippedLoss * 1.15)), // +15% headroom for the funding fold-in at arm
     maxTotalNotionalUsd: Math.ceil(totalNotional * 1.3),
     expiresAtMs: opts.now + expiryHours * 60 * 60 * 1000,

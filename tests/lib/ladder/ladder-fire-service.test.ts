@@ -87,7 +87,7 @@ function ladder(over: Partial<LadderWithRungs> = {}, rungs?: LadderRung[]): Ladd
   const hash = hashPreconditionSnapshot(buildPreconditionSnapshot(r, []));
   return {
     id: 'L1', title: 'T', thesis: null, author: 'operator', mode: 'paper', status: 'armed',
-    preconditionHash: hash, ocoGroupId: null, leaderAddress: null, maxTotalNotionalUsd: 100_000, maxTotalLossUsd: 5_000,
+    preconditionHash: hash, ocoGroupId: null, leaderAddress: null, maxTotalNotionalUsd: 100_000, maxTotalLossUsd: 5_000, anchorPx: null,
     expiresAt: new Date(NOW + 3_600_000).toISOString(), activeFrom: null, armedAt: null, disarmedAt: null, disarmReason: null, archivedAt: null, expiryAlertAt: null,
     createdAt: '', updatedAt: '', rungs: r, ...over,
   };

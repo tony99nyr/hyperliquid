@@ -145,11 +145,39 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
 
   async function arm(): Promise<void> {
     if (!ladder || !phraseOk) return;
-    if (await post('/api/cockpit/ladder/arm', { ladderId, confirmPhrase: isLive ? typed : undefined })) { onChanged?.(); onClose(); }
+    // expectedUpdatedAt pins the arm to the exact row version THIS modal rendered —
+    // the server 409s if the ladder changed (e.g. re-anchored from another device).
+    if (await post('/api/cockpit/ladder/arm', { ladderId, confirmPhrase: isLive ? typed : undefined, expectedUpdatedAt: ladder.updatedAt })) { onChanged?.(); onClose(); }
   }
   async function disarm(): Promise<void> {
     if (await post('/api/cockpit/ladder/disarm', { ladderId })) { onChanged?.(); onClose(); }
   }
+  // Re-anchor keeps the modal OPEN: the operator must review the re-priced plan
+  // before arming it (consent stays honest). Drop the stale ladder BEFORE reloading —
+  // if the reload fails, the modal shows Loading (no Arm button) rather than the old
+  // levels over the new persisted ones — and clear any typed phrase so the re-priced
+  // plan needs a fresh confirmation.
+  const refocusAfterReanchor = useRef(false);
+  async function reanchor(): Promise<void> {
+    if (await post('/api/cockpit/ladder/reanchor', { ladderId })) {
+      setLadder(null);
+      setTyped('');
+      refocusAfterReanchor.current = true;
+      await load();
+      setBusy(false);
+      onChanged?.();
+    }
+  }
+  // setLadder(null) unmounted the focused Re-anchor button, dropping focus to <body>,
+  // where the overlay's keydown trap can't see it. Restore focus AFTER the commit that
+  // re-enables the Close button — calling focus() in reanchor() is a no-op because the
+  // batched setBusy(false) hasn't reached the DOM yet and a disabled button won't focus.
+  useEffect(() => {
+    if (refocusAfterReanchor.current && !busy) {
+      refocusAfterReanchor.current = false;
+      closeRef.current?.focus();
+    }
+  }, [busy]);
   async function archive(): Promise<void> {
     if (await post('/api/cockpit/ladder/archive', { ladderId })) { onChanged?.(); onClose(); }
   }
@@ -313,6 +341,15 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
                   className={css({ width: '100%', border: 'none', borderRadius: '9px', fontFamily: 'sans', fontSize: '13.5px', fontWeight: 'bold', letterSpacing: '0.03em', padding: '13px', cursor: 'pointer', _disabled: { opacity: 0.6, cursor: 'not-allowed' } })}>
                   {busy ? 'Arming…' : isLive ? 'Arm LIVE →' : 'Arm →'}
                 </button>
+                {ladder.anchorPx != null && (
+                  // Drafter ladders price every rung as a ratio of the detection mark; when
+                  // price ran through a gate before arming, the instant-fire guard refuses.
+                  // This re-prices the whole plan to the live mark (same ratios, same $ risk).
+                  <button type="button" data-testid="ladder-detail-reanchor" disabled={busy} onClick={() => void reanchor()}
+                    title="Scales every price level by live mark ÷ draft anchor (same ratios, same $ risk). Use when the market moved through a gate and arming is refused as instant-fire."
+                    className={css({ width: '100%', marginTop: '8px', fontFamily: 'sans', fontSize: '12px', fontWeight: 'semibold', borderRadius: '9px', padding: '10px', cursor: 'pointer', border: '1px solid rgba(91,140,255,.35)', _disabled: { opacity: 0.6 } })}
+                    style={{ background: 'rgba(91,140,255,.08)', color: TERM.accent }}>{busy ? '…' : '⚓ Re-anchor levels to the live mark'}</button>
+                )}
                 <button type="button" data-testid="ladder-detail-archive" disabled={busy} onClick={() => void archive()}
                   className={css({ width: '100%', marginTop: '8px', fontFamily: 'sans', fontSize: '12px', fontWeight: 'semibold', borderRadius: '9px', padding: '10px', cursor: 'pointer', border: '1px solid rgba(255,255,255,.1)', _disabled: { opacity: 0.6 } })}
                   style={{ background: 'transparent', color: GH.textMuted }}>{busy ? '…' : 'Discard draft (archive)'}</button>

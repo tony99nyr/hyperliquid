@@ -8,6 +8,10 @@ const ctx: TrendAlertContext = {
 };
 
 describe('buildTrendLadderPlan', () => {
+  it('stores the detection mark as the anchor (enables the draft re-anchor, 0043)', () => {
+    expect(buildTrendLadderPlan(ctx, { now: NOW }).anchorPx).toBe(ctx.mark);
+  });
+
   it('live low-qty long pyramid: mode live, long-only, momentum-confirmed core, ≤2 adds', () => {
     const p = buildTrendLadderPlan(ctx, { now: NOW });
     expect(p.mode).toBe('live'); // NEVER paper

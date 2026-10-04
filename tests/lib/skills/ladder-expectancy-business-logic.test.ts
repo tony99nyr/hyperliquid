@@ -25,7 +25,7 @@ function ladder(rungs: LadderRung[], over: Partial<LadderWithRungs> = {}): Ladde
   return {
     id: 'aaaa1111-0000-0000-0000-000000000000', title: 'HYPE long', thesis: null,
     author: 'operator', mode: 'live', status: 'done', preconditionHash: null, ocoGroupId: null, leaderAddress: null,
-    maxTotalNotionalUsd: 100, maxTotalLossUsd: 20,
+    maxTotalNotionalUsd: 100, maxTotalLossUsd: 20, anchorPx: null,
     expiresAt: new Date(NOW + 86_400_000).toISOString(),
     activeFrom: null,
     armedAt: new Date(ARMED_AT).toISOString(), disarmedAt: null, disarmReason: null, archivedAt: null, expiryAlertAt: null,

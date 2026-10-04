@@ -155,6 +155,10 @@ export interface Ladder {
   leaderAddress: string | null;
   maxTotalNotionalUsd: number | null;
   maxTotalLossUsd: number | null;
+  /** Drafter detection mark (0043): every rung price is a fixed ratio of it, so a
+   *  stale DRAFT can be re-anchored (all levels scaled by live mark / anchor).
+   *  null = a manually built draft — its levels are structural, re-anchor refuses. */
+  anchorPx: number | null;
   expiresAt: string | null;
   /** Earliest evaluation/fire time (ISO); null = active immediately on arm. The
    *  activation window is PURELY RESTRICTIVE — it can only prevent fires. */

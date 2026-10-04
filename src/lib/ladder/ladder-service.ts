@@ -10,6 +10,7 @@
 
 import 'server-only';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
+import type { ReanchorRungPatch } from './ladder-reanchor-business-logic';
 import type {
   Ladder,
   LadderRung,
@@ -55,6 +56,9 @@ export interface CreateLadderInput {
   leaderAddress?: string | null;
   maxTotalNotionalUsd?: number | null;
   maxTotalLossUsd?: number | null;
+  /** Drafter detection mark — every rung price is a fixed ratio of it (enables the
+   *  draft re-anchor). Omit for manual drafts (structural levels; re-anchor refuses). */
+  anchorPx?: number | null;
   expiresAtMs?: number | null;
   /** Optional activation-window start (epoch ms) — triggers evaluate only from here. */
   activeFromMs?: number | null;
@@ -75,6 +79,7 @@ function rowToLadder(r: any): Ladder {
     leaderAddress: r.leader_address ?? null,
     maxTotalNotionalUsd: r.max_total_notional_usd ?? null,
     maxTotalLossUsd: r.max_total_loss_usd ?? null,
+    anchorPx: r.anchor_px ?? null,
     expiresAt: r.expires_at ?? null,
     activeFrom: r.active_from ?? null,
     armedAt: r.armed_at ?? null,
@@ -127,6 +132,7 @@ export async function createLadder(input: CreateLadderInput): Promise<string> {
       leader_address: input.leaderAddress ?? null,
       max_total_notional_usd: input.maxTotalNotionalUsd ?? null,
       max_total_loss_usd: input.maxTotalLossUsd ?? null,
+      anchor_px: input.anchorPx ?? null,
       expires_at: input.expiresAtMs != null ? new Date(input.expiresAtMs).toISOString() : null,
       active_from: input.activeFromMs != null ? new Date(input.activeFromMs).toISOString() : null,
     })
@@ -211,12 +217,16 @@ export async function listLaddersWithRungs(status?: Ladder['status'], opts?: Lis
 /**
  * Arm a DRAFT ladder: status→'armed', stamp armed_at + the precondition hash + expiry,
  * and set each rung's deterministic cloid. CONDITIONAL on the row still being a draft
- * (the `.eq('status','draft')` guard makes a double-arm a no-op). Returns true if the
- * transition happened, false if it was already non-draft (lost the race).
+ * (the `.eq('status','draft')` guard makes a double-arm a no-op) AND on `updated_at`
+ * still matching what the arm route READ (optimistic concurrency, review 2026-10-04:
+ * the route validates rungs, then awaits network calls — without this guard a
+ * re-anchor could re-price the rungs inside that window and the arm would authorize
+ * prices the operator never saw). Returns true if the transition happened, false if
+ * it lost either race (non-draft, or edited since the read).
  */
 export async function armLadder(
   id: string,
-  args: { preconditionHash: string; expiresAtMs: number; cloidByRungId: Record<string, string> },
+  args: { preconditionHash: string; expiresAtMs: number; cloidByRungId: Record<string, string>; expectedUpdatedAt: string },
 ): Promise<boolean> {
   const db = getServiceRoleClient();
   const { data, error } = await db
@@ -230,6 +240,7 @@ export async function armLadder(
     })
     .eq('id', id)
     .eq('status', 'draft') // only a draft can be armed — idempotent guard
+    .eq('updated_at', args.expectedUpdatedAt) // only the exact row version the operator reviewed
     .select('id');
   if (error) throw new Error(`armLadder failed: ${error.message}`);
   if (!data || data.length === 0) return false; // already armed/disarmed — no transition
@@ -358,4 +369,37 @@ export async function disarmLadder(id: string, reason: string): Promise<void> {
     .update({ status: 'disarmed', disarmed_at: new Date().toISOString(), disarm_reason: reason, updated_at: new Date().toISOString() })
     .eq('id', id);
   if (error) throw new Error(`disarmLadder failed: ${error.message}`);
+}
+
+export interface DraftReanchorArgs {
+  /** The live mark the plan was scaled to — becomes the stored anchor. */
+  newAnchorPx: number;
+  /** The FULL replacement thesis (route composes old thesis + the audit note). */
+  thesis: string | null;
+  patches: ReanchorRungPatch[];
+}
+
+/**
+ * Apply a re-anchor to a DRAFT ladder: rewrite the rung prices + the stored anchor.
+ * This is a DRAFT-ONLY edit — it moves no money and never touches a non-pending rung.
+ *
+ * The write is ONE Postgres transaction (reanchor_draft_ladder, migration 0044) under
+ * a ladders-row lock, so it is all-or-nothing: no partially scaled draft can exist
+ * (review 2026-10-04, High #2), and nothing interleaves mid-write. An arm racing a
+ * re-anchor is handled on the ARM side: armLadder's `expectedUpdatedAt` guard refuses
+ * any arm whose review read predates the re-anchor's updated_at bump.
+ */
+export async function applyDraftReanchor(id: string, args: DraftReanchorArgs): Promise<'applied' | 'not-draft' | 'not-found'> {
+  const db = getServiceRoleClient();
+  const { data, error } = await db.rpc('reanchor_draft_ladder', {
+    p_ladder_id: id,
+    p_new_anchor: args.newAnchorPx,
+    p_thesis: args.thesis,
+    p_patches: args.patches,
+  });
+  if (error) throw new Error(`applyDraftReanchor failed: ${error.message}`);
+  if (data !== 'applied' && data !== 'not-draft' && data !== 'not-found') {
+    throw new Error(`applyDraftReanchor: unexpected RPC result '${String(data)}'`);
+  }
+  return data;
 }
