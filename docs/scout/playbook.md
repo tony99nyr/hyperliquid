@@ -343,3 +343,26 @@ legacy graveyard (killed lanes −$168 of it). The LIVE experiment set reads dif
 - No frozen-rule changes. Cadence repair: reviews slipped to 10-day gaps twice; a
   weekly reminder now fires (Mondays) bundling scout-review + shadow-replay +
   ladder-expectancy + a discard vet of archived drafts.
+
+### 2026-10-13 addendum — htf-trend miss attribution (all 21 misses cross-checked)
+- Full attribution of the replay's 21 htf-trend misses against `hypotheses` open
+  intervals, `scout_decisions`, event windows and decision-cadence gaps:
+  **14 position-blocks** (the Donchian re-signals while the lane already holds that
+  coin — by design, one position per lane+coin), **4 logged stand-downs** (one
+  feed-degraded, one rubric NO-EDGE, one single-bet concurrency choice while the
+  ETH breakout was live, one no-active-directive), **2 event blackouts**, and only
+  **1 daemon gap** (2026-09-21, ~10.5h).
+- **Consequence: the "66% missed" headline is NOT sample loss.** True
+  infrastructure-attributable loss is ~1-3 episodes (~5-15%); the rest is the
+  lane's own entry guards working. The n=20 checkpoint should quote THIS
+  attribution, not the raw miss count, and no capture-widening work is justified
+  by the replay. Consecutive-episode re-signals while holding are a PYRAMIDING
+  question — a separate strategy that would need its own pre-registration, not a
+  "recovered" sample.
+- Live-account cost audit (113d, all 156 fills): **100% taker, $39.32 fees on
+  $87.4k notional (4.5 bps/side)**; mean entry overshoot on price-triggered
+  opens/adds ≈ **+16 bps adverse** (median ~+10, worst +143 — the documented
+  fill-at-candle-close design, dollar risk unaffected). Maker entries would save
+  ~3 bps/side (≈ $2-3/mo at current size) — not worth the build until size
+  scales post-graduation; a max-overshoot fire guard is a candidate rung field,
+  to be pre-registered, not slipped in.
