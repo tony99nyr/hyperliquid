@@ -117,7 +117,7 @@ supabase/migrations/0001_init.sql … 0036_*.sql       # migrations (RLS + realt
 data/{backups/wallet-rating/rated-wallets.json,auto-exit/}  # vendored dataset + versioned auto-exit thresholds
 docs/{CONTEXT.md, CODE_ORGANIZATION.md, adr/, scout/, LIVE_*.md, OPERATOR_MANUAL.md,
       ARMED_LADDER_ARCHITECTURE.md, LADDER_OPERATOR_RUNBOOK.md,
-      LADDER_DESK_PLAYBOOK.md}  # what-runs-where manual + ladder design/runbook/methodology
+      LADDER_DESK_PLAYBOOK.md, DESK_PROFITABILITY.md}  # what-runs-where manual + ladder design/runbook/methodology + the profitability ledger
 ```
 
 ## Vendored from iamrossi

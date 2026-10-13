@@ -77,6 +77,10 @@ change a rule on its own.** Its honest limits, all of which apply every run:
 
 - Append the dated retro entry to `docs/scout/playbook.md` (step 1 usually carries
   it; fold in anything steps 2-4 changed). Commit + push so the daemons' hosts see it.
+- If a number moved a LEVER'S VERDICT (graduation, a kill, a cost or capture
+  finding), update `docs/DESK_PROFITABILITY.md` with a dated entry — that file is
+  the durable answer to "how do we get more profitable" and must never silently
+  drift from the ledger.
 - Re-arm the next Monday reminder (session reminders do not persist — schedule the
   next one-shot BEFORE finishing the retro).
 - Report to the operator in a few lines: verdicts, playbook changes, discard-vet
