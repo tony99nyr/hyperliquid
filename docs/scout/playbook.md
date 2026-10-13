@@ -315,3 +315,31 @@ legacy graveyard (killed lanes −$168 of it). The LIVE experiment set reads dif
 - Economics: live break-even needs ~+0.5R at 1% risk; a clean n=20 pass justifies
   only $5-10 risk per trade (quarter-Kelly on the haircut expectancy). The
   programme's value is option value on a proven edge, not its paper run-rate.
+
+### 2026-10-13 review (day 113)
+- Account NET **−$73.99** over 105 trades → the deterministic account verdict stays
+  **KILL**, but ALL of the bleed sits in lanes already killed at their own bars
+  (trend-follow −$135, leader-follow −$26, directional −$22, reversion −$7). The two
+  active lanes are both net positive: **htf-trend +$81, compression +$35**. The 10-03
+  framing stands: search cost ≈ −$189; what remains is option value on two candidates.
+- **htf-trend: CONTINUE.** n=11 (7 confirmed / 4 invalidated), donchian-20-10
+  **+0.70R, 64% win, net +7.7R**. Expectancy drifted down from +0.90R at n=8, as the
+  10-03 cluster caution predicted. After the 0.7 live-decay haircut it is ~+0.49R —
+  sitting exactly at the ~+0.5R live break-even. No graduation talk before n=20 plus
+  the cluster-robust check.
+- **compression-straddle: CONTINUE — it survived its 6th-close kill condition.** The
+  Oct 7-8 squeeze gave the lane its first two confirms (BTC and ETH shorts, both
+  entered 10-07, resolved 10-08). Record 2/7, net **+$34.51**. The coded bar returns
+  CONTINUE; the next checkpoint is simply more closes.
+- **Shadow replay re-run (60d to 10-13):** htf-trend 32 episodes, 11 matched (66%
+  missed); compression 29, 7 matched (76% missed) — stable vs the 10-04 run. NEW:
+  recent misses are now attributable via `scout_decisions` — the 10-12 htf-trend
+  shorts (ETH/HYPE/SOL) were refused by the 48h CPI event blackout (logged
+  stand-downs), and ETH/HYPE also had open lane positions. So the miss count mixes
+  DISCIPLINE refusals with outages and rubric ranking; it remains an upper bound on
+  attributable sample loss, never a defect count on its own.
+- **Steward counterfactuals: 5 helped / 11 hurt, net if-followed −$17.74** — the
+  near-zero-authority rule stands and hardened slightly.
+- No frozen-rule changes. Cadence repair: reviews slipped to 10-day gaps twice; a
+  weekly reminder now fires (Mondays) bundling scout-review + shadow-replay +
+  ladder-expectancy + a discard vet of archived drafts.
