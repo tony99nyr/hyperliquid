@@ -52,6 +52,7 @@
     "scout:trade": "tsx --tsconfig tsconfig.scripts.json scripts/scout-trade.ts",
     "scout:review": "tsx --tsconfig tsconfig.scripts.json scripts/scout-review.ts",
     "scout:shadow-replay": "tsx --tsconfig tsconfig.scripts.json scripts/scout-shadow-replay.ts",
+    "skill:desk-retro": "tsx --tsconfig tsconfig.scripts.json scripts/desk-retro.ts",
     "backtest": "tsx --tsconfig tsconfig.scripts.json scripts/backtest.ts",
     "backtest:study": "tsx --tsconfig tsconfig.scripts.json scripts/backtest-study.ts",
     "backtest:oos": "tsx --tsconfig tsconfig.scripts.json scripts/backtest-oos.ts",
