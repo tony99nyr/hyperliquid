@@ -366,3 +366,33 @@ legacy graveyard (killed lanes −$168 of it). The LIVE experiment set reads dif
   ~3 bps/side (≈ $2-3/mo at current size) — not worth the build until size
   scales post-graduation; a max-overshoot fire guard is a candidate rung field,
   to be pre-registered, not slipped in.
+
+### 2026-10-19 review (day 118)
+- **Verdicts unchanged** (deterministic scorecard): account headline **KILL**
+  (net −$56/105 trades, all bleed in already-killed lanes), **htf-trend CONTINUE**
+  (donchian-20-10: 11 closed, +0.70R, 64% win; lane net $99.46 with the ETH and
+  SOL shorts opened 2026-10-15 still open, daemon-managed on the 10d channel or
+  the stop), **compression-straddle CONTINUE** (7 trades, +$34.51).
+- **Shadow replay, all 30 htf-trend misses attributed** (same method as the
+  2026-10-13 addendum): **20 position-blocks · 5 stand-downs · 4 event
+  blackouts · 1 daemon gap (2026-09-21) · 0 unexplained.** The Oct-14 misses were
+  the CPI blackout; the Oct-17 misses were position-blocks on the open ETH/SOL
+  shorts. Infrastructure loss stays ~3% (1/30). Still no capture multiplier.
+- **Observation, not a rule change:** the 2026-10-16 BTC and HYPE misses were the
+  2-short portfolio cap — the scout ranked BTC its strongest signal (12.7 risk)
+  and correctly refused a third same-direction short. Lifting the cap is a
+  concurrency redesign = a NEW pre-registration; at n=11 nothing changes.
+- **Desk ledger (live):** the CPI (Sep) BTC straddle short leg **won +0.09R
+  (+$8.68 net)**; the long leg was a costless OCO pass. The SOL runaway short
+  resolved **scratch +0.03R** on the operator's weekend flat. Ledger: 27 closed,
+  +0.19R, every setup family still COLLECT (below the 10-close sample bar).
+  That is the desk's 2nd live event-straddle win of 2 fired (Retail Sales
+  +0.82R, CPI +0.09R) — evidence for the event lane, no pre-registered verdict
+  moved.
+- **Discard vet (3d window, 2026-10-16 sub-weekly rows not re-counted):** nothing
+  missed — the weekend-cleared ETH runaway draft never triggered, 0 missed
+  targets. The 2026-10-16 interim vet also replayed the Oct-13 HYPE prune as
+  dodged-stop (−1R avoided).
+- **Steward:** unchanged (5 helped / 11 hurt) — near-zero authority stands.
+- No frozen-rule changes. `docs/DESK_PROFITABILITY.md` untouched: no lever
+  verdict moved (htf-trend checkpoint still pends ~9 closes; 2 are open now).
