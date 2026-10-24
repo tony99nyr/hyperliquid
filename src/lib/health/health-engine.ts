@@ -68,7 +68,7 @@ export async function assessHealth(
     TIMEFRAMES.map((tf) =>
       fetchMultiTimeframeCandles(coin, [tf], now - LOOKBACK_MS[tf], now).then((r) => ({
         tf,
-        candles: r[tf]?.candles ?? [],
+        candles: r[tf]?.stale ? [] : r[tf]?.candles ?? [],
       })),
     ),
   );

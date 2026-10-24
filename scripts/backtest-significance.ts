@@ -19,6 +19,7 @@ import { parseArgs, optionalNumber, header, line, run } from './_skill-runtime';
 import { runBacktest } from '@/lib/backtest/backtest-replay-service';
 import { tStat, blockBootstrapTotal, mulberry32, sharpe, mean } from '@/lib/backtest/significance-business-logic';
 import type { CandleInterval } from '@/lib/hyperliquid/candle-service';
+import { supportsStrongSignificance } from '@/lib/backtest/significance-verdict-business-logic';
 
 const COINS = ['BTC', 'ETH', 'SOL'];
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -99,7 +100,7 @@ run(async () => {
   const p = bw.pLessEqualZero;
   const perTradeSig = Math.abs(tt.t) > 1.96;
   const smallN = windowTotals.length < 12; // window bootstrap p is partly mechanical at small n
-  if (bw.ciLow > 0 && p < 0.05 && perTradeSig) {
+  if (supportsStrongSignificance({ windowCount: windowTotals.length, ciLow: bw.ciLow, pLessEqualZero: p, perTradeSignificant: perTradeSig })) {
     line(`→ DISTINGUISHABLE FROM ZERO at BOTH levels (per-trade t=${tt.t.toFixed(2)}, window 95% CI excludes 0, p=${(p * 100).toFixed(1)}%). Statistically real within the backtest's scope.`);
   } else if (bw.ciLow > 0 && p < 0.05 && !perTradeSig) {
     line(`→ POSITIVE WITHIN-SAMPLE, BUT WEAK + UNPROVEN. The window total is unlikely to be luck GIVEN this sample (CI [${'$' + bw.ciLow.toFixed(0)}, ${'$' + bw.ciHigh.toFixed(0)}]), yet per-trade it is NOT significant (t=${tt.t.toFixed(2)}, |t|<1.96) — the edge only emerges aggregated.`);

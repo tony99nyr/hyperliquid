@@ -35,6 +35,18 @@ function fill(
 
 describe('performance-business-logic', () => {
   describe('buildLedger', () => {
+    it('fees_turn_gross_win_into_net_loss', () => {
+      const ledger = buildLedger([
+        fill({ side: 'buy', px: 100, sz: 1, feeUsd: 1, filledAt: 1 }),
+        fill({ side: 'sell', px: 101, sz: 1, feeUsd: 1, filledAt: 2 }),
+      ], {}, DAY);
+      expect(ledger[0].pnlUsd).toBe(-1);
+      expect(ledger[0].feesUsd).toBe(2);
+      expect(ledger[0].status).toBe('loss');
+      const kpis = computeKpis(ledger, {}, []);
+      expect(kpis.netPnlUsd).toBe(-1);
+      expect(kpis.winCount).toBe(0);
+    });
     it('folds a winning long round-trip into a WIN row with realized PnL', () => {
       const now = 10 * DAY;
       const fills = [
@@ -49,8 +61,8 @@ describe('performance-business-logic', () => {
       expect(t.coin).toBe('ETH');
       expect(t.entryPx).toBeCloseTo(100);
       expect(t.exitPx).toBeCloseTo(110);
-      // realized gross = (110-100)*2 = 20; fees folded into realizedPnl? pnl is realized only.
-      expect(t.pnlUsd).toBeCloseTo(20);
+      // Net = $20 gross less $2 fees.
+      expect(t.pnlUsd).toBeCloseTo(18);
       expect(t.feesUsd).toBeCloseTo(2);
     });
 

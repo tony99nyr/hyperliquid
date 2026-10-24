@@ -266,6 +266,8 @@ export function buildLaneScorecards(args: {
 }): LaneScorecard[] {
   const lanes = new Set<string>();
   const realized = new Map<string, number>();
+  const feesPaid = new Map<string, number>();
+  const grossWins = new Map<string, number>();
   const openCount = new Map<string, number>();
   const realisedRs = new Map<string, number[]>();
   const wins = new Map<string, number>();
@@ -278,6 +280,8 @@ export function buildLaneScorecards(args: {
     const lane = normLane(p.lane);
     lanes.add(lane);
     bump(realized, lane, (Number(p.realizedPnlUsd) || 0) - (Number(p.feesPaidUsd) || 0));
+    bump(feesPaid, lane, Number(p.feesPaidUsd) || 0);
+    bump(grossWins, lane, Math.max(0, Number(p.realizedPnlUsd) || 0));
     if (p.side !== 'flat') bump(openCount, lane);
   }
 
@@ -309,6 +313,8 @@ export function buildLaneScorecards(args: {
       wins: wins.get(lane) ?? 0,
       losses: losses.get(lane) ?? 0,
       periodDays: args.periodDaysFor?.(lane) ?? args.periodDays,
+      feesPaidUsd: feesPaid.get(lane) ?? 0,
+      grossWinsUsd: grossWins.get(lane) ?? 0,
     };
     const cfg = args.configFor?.(lane) ?? DEFAULT_SCORECARD_CONFIG;
     const card = buildScorecard(input, cfg);

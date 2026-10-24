@@ -18,6 +18,20 @@ function bar(over: Partial<BacktestBar> & { time: number; close: number }): Back
 }
 
 describe('simulateBacktest', () => {
+  it('accrues_changing_funding_during_trade', () => {
+    const long = simulateBacktest([
+      bar({ time: 0, close: 100, go: true, side: 'long', invalidation: 50, target: 200, fundingHourly: 0.001 }),
+      bar({ time: 1, close: 100, go: false, side: 'none', invalidation: 50, target: 200, fundingHourly: -0.002 }),
+      bar({ time: 2, close: 100, go: false, side: 'none', invalidation: 50, target: 200, fundingHourly: 0.003 }),
+    ], { slippageBps: 0, barHours: 1, notionalUsd: 1000 });
+    expect(long.trades[0].fundingUsd).toBeCloseTo(-1);
+    const short = simulateBacktest([
+      bar({ time: 0, close: 100, go: true, side: 'short', invalidation: 150, target: 50, fundingHourly: 0.001 }),
+      bar({ time: 1, close: 100, go: false, side: 'none', invalidation: 150, target: 50, fundingHourly: -0.002 }),
+      bar({ time: 2, close: 100, go: false, side: 'none', invalidation: 150, target: 50, fundingHourly: 0.003 }),
+    ], CFG);
+    expect(short.trades[0].fundingUsd).toBeCloseTo(1);
+  });
   it('enters on a GO and exits at TARGET on a later bar (winning long)', () => {
     const bars: BacktestBar[] = [
       bar({ time: 1, close: 100, go: true, side: 'long', invalidation: 95, target: 110 }),

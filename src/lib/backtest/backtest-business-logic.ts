@@ -202,7 +202,7 @@ export function simulateBacktest(bars: BacktestBar[], cfg: BacktestSimConfig): B
   const trailAtrMult = cfg.trailAtrMult ?? 1.5;
 
   let open:
-    | { side: Side; entryPx: number; entryTime: number; entryIdx: number; stop: number; target: number; fundingHourly: number; entryRebateUsd: number; entryConfidence: number; entryAtrPct: number }
+    | { side: Side; entryPx: number; entryTime: number; entryIdx: number; stop: number; target: number; fundingUsd: number; entryRebateUsd: number; entryConfidence: number; entryAtrPct: number }
     | null = null;
   // Maker-only: a posted passive entry awaiting fill (fills when price trades to it).
   let pending: { side: Side; limit: number; stop: number; target: number; fundingHourly: number; postedIdx: number; postedTime: number; entryConfidence: number; entryAtrPct: number } | null = null;
@@ -217,7 +217,7 @@ export function simulateBacktest(bars: BacktestBar[], cfg: BacktestSimConfig): B
     const qty = cfg.notionalUsd / open.entryPx;
     const grossPnlUsd = dir * (exitPx - open.entryPx) * qty + open.entryRebateUsd + exitRebateUsd;
     const barsHeld = Math.max(1, exitIdx - open.entryIdx);
-    const fundingUsd = dir * open.fundingHourly * cfg.notionalUsd * (barsHeld * cfg.barHours);
+    const fundingUsd = open.fundingUsd;
     const netPnlUsd = grossPnlUsd - fundingUsd;
     trades.push({ side: open.side, entryTime: open.entryTime, exitTime, entryPx: open.entryPx, exitPx, barsHeld, grossPnlUsd, fundingUsd, netPnlUsd, reason, entryConfidence: open.entryConfidence, entryAtrPct: open.entryAtrPct });
     open = null;
@@ -230,6 +230,10 @@ export function simulateBacktest(bars: BacktestBar[], cfg: BacktestSimConfig): B
     // protective stop); TARGET is a resting limit (maker when in maker mode); a
     // signal FLIP crosses out (taker).
     if (open) {
+      const direction = open.side === 'long' ? 1 : -1;
+      if (i > 0) {
+        open.fundingUsd += direction * bars[i - 1].fundingHourly * cfg.notionalUsd * cfg.barHours;
+      }
       const targetLeg = model === 'maker' ? 'maker' : 'taker';
       const trailing = exitMode === 'trail' && (bar.atr ?? 0) > 0;
       if (open.side === 'long') {
@@ -253,7 +257,7 @@ export function simulateBacktest(bars: BacktestBar[], cfg: BacktestSimConfig): B
       // Cross immediately at this bar's close (adverse).
       if (!open && bar.go && bar.side !== 'none') {
         const entryPx = bps(bar.close, cfg.slippageBps, bar.side === 'long' ? 1 : -1);
-        open = { side: bar.side, entryPx, entryTime: bar.time, entryIdx: i, stop: bar.invalidation, target: bar.target, fundingHourly: bar.fundingHourly, entryRebateUsd: 0, entryConfidence: bar.confidence ?? 0, entryAtrPct: entryPx > 0 ? (bar.atr ?? 0) / entryPx : 0 };
+        open = { side: bar.side, entryPx, entryTime: bar.time, entryIdx: i, stop: bar.invalidation, target: bar.target, fundingUsd: 0, entryRebateUsd: 0, entryConfidence: bar.confidence ?? 0, entryAtrPct: entryPx > 0 ? (bar.atr ?? 0) / entryPx : 0 };
       }
     } else {
       // MAKER: fill a resting entry only if price trades to it; else it ages out
@@ -267,7 +271,7 @@ export function simulateBacktest(bars: BacktestBar[], cfg: BacktestSimConfig): B
         if (filled) {
           const adverseSign = pending.side === 'long' ? 1 : -1;
           const entryPx = pending.limit * (1 + adverseSign * adverseSel);
-          open = { side: pending.side, entryPx, entryTime: bar.time, entryIdx: i, stop: pending.stop, target: pending.target, fundingHourly: pending.fundingHourly, entryRebateUsd: rebateUsd, entryConfidence: pending.entryConfidence, entryAtrPct: entryPx > 0 ? (bar.atr ?? 0) / entryPx : 0 };
+          open = { side: pending.side, entryPx, entryTime: bar.time, entryIdx: i, stop: pending.stop, target: pending.target, fundingUsd: 0, entryRebateUsd: rebateUsd, entryConfidence: pending.entryConfidence, entryAtrPct: entryPx > 0 ? (bar.atr ?? 0) / entryPx : 0 };
           pending = null;
         } else if (i - pending.postedIdx >= maxBarsToFill) {
           pending = null; // expired unfilled — missed

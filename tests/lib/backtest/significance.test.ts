@@ -8,6 +8,7 @@ import {
   blockBootstrapTotal,
   sharpe,
 } from '@/lib/backtest/significance-business-logic';
+import { supportsStrongSignificance } from '@/lib/backtest/significance-verdict-business-logic';
 
 describe('significance — basic stats', () => {
   it('mean + sample stdDev (n−1)', () => {
@@ -53,6 +54,12 @@ describe('significance — mulberry32 determinism', () => {
 });
 
 describe('significance — block bootstrap', () => {
+  it('two_windows_cannot_establish_significance', () => {
+    const blocks = [100, 200];
+    const result = blockBootstrapTotal(blocks, 5000, mulberry32(5));
+    expect(supportsStrongSignificance({ windowCount: 2, ciLow: result.ciLow, pLessEqualZero: result.pLessEqualZero, perTradeSignificant: true })).toBe(false);
+    expect(supportsStrongSignificance({ windowCount: 12, ciLow: result.ciLow, pLessEqualZero: result.pLessEqualZero, perTradeSignificant: true })).toBe(true);
+  });
   it('a clearly-positive block set → CI well above 0 and p≈0', () => {
     const blocks = [200, 350, 410, 250, 300, 390, 210, 280]; // all positive, like trending windows
     const r = blockBootstrapTotal(blocks, 5000, mulberry32(1));

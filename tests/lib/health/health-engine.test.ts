@@ -74,6 +74,16 @@ describe('health-engine (I/O)', () => {
     expect(result.timeframeReads).toHaveLength(4);
   });
 
+  it('stale_candles_cannot_authorise_add', async () => {
+    mockedFetch.mockImplementation(async (_coin, intervals) => {
+      const tf = intervals[0];
+      return { [tf]: { coin: 'ETH', interval: tf, candles: series(220, 1000, 0.01), fetchedAt: 0, stale: true } } as Awaited<ReturnType<typeof fetchMultiTimeframeCandles>>;
+    });
+    const result = await assessHealth('ETH', { side: 'long', entryPx: 1000 });
+    expect(result.timeframeReads.every((read) => read.weight === 0)).toBe(true);
+    expect(result.score).toBeLessThan(70);
+  });
+
   it('assessAndPersistHealth writes the snapshot via the snapshot service', async () => {
     const result = await assessAndPersistHealth('sess-1', 'ETH', { side: 'long', entryPx: 1000 });
     expect(mockedWrite).toHaveBeenCalledTimes(1);

@@ -242,6 +242,20 @@ describe('rows + inputs_hash', () => {
     expect(rubricInputsHash(a)).toBe(rubricInputsHash(b));
     expect(rubricInputsHash(inputs({ markPx: 1701 }))).not.toBe(rubricInputsHash(inputs({ markPx: 1700 })));
   });
+
+  it('verdict_driver_changes_persist', () => {
+    const onCfg = deepMerge(CFG, { gates: { leaderDeriskVeto: { enabled: true, threshold: 0.7 } } }) as RubricConfig;
+    const before = inputs({ regimeByTf: tfAll('bullish'), derisk: 0 });
+    const after = inputs({ regimeByTf: tfAll('bullish'), derisk: 0.95 });
+    const beforeResult = computeRubric(before, onCfg);
+    const afterResult = computeRubric(after, onCfg);
+    expect(beforeResult.long.gates.leaderDeriskVeto).toBe(false);
+    expect(afterResult.long.gates.leaderDeriskVeto).toBe(true);
+    const beforeRows = buildRubricScoreRows(beforeResult, before, onCfg.version);
+    const afterRows = buildRubricScoreRows(afterResult, after, onCfg.version);
+    expect(afterRows[0].inputs_hash).not.toBe(beforeRows[0].inputs_hash);
+    expect(afterRows[0].killed_by).not.toBe(beforeRows[0].killed_by);
+  });
   it('buildRubricScoreRows yields one row per side with the shared hash', () => {
     const inp = inputs({ regimeByTf: tfAll('bearish'), consensus: { coin: 'ETH', net: -4, longCount: 0, shortCount: 4, topN: 4 } });
     const rows = buildRubricScoreRows(computeRubric(inp, CFG), inp, CFG.version);

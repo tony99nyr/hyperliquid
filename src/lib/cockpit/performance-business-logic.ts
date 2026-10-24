@@ -214,9 +214,9 @@ function tradesForCoin(
       entryPx,
       exitPx: fill.px,
       leverage: null,
-      pnlUsd: realized,
+      pnlUsd: realized - fees,
       feesUsd: fees,
-      status: realized >= 0 ? 'win' : 'loss',
+      status: realized - fees >= 0 ? 'win' : 'loss',
       today: fill.filledAt >= todayStartMs,
     });
     openSide = null;
@@ -406,7 +406,7 @@ export function buildEquitySeries(
   const realizedCumByBucket = new Map<number, number>();
   let cum = 0;
   for (const t of closed) {
-    cum += t.pnlUsd - t.feesUsd;
+    cum += t.pnlUsd;
     realizedCumByBucket.set(dayStart(t.closedAt ?? t.openedAt), cum);
   }
   const totalRealized = cum;

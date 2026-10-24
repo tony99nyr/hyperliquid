@@ -54,6 +54,8 @@ export function rubricInputsHash(inp: RubricInputs): string {
     bookImb: r(bk.imbalance, 3),
     spreadBps: Number.isFinite(bk.spreadBps) ? r(bk.spreadBps, 1) : null,
     funding: inp.ctx ? r(inp.ctx.fundingHourly, 8) : null,
+    takerFlow: inp.takerFlow == null ? null : r(inp.takerFlow, 3),
+    derisk: inp.derisk == null ? null : r(inp.derisk, 3),
   });
   return fnv1a(canonical);
 }

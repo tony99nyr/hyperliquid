@@ -56,8 +56,9 @@ export async function computeScoutLaneCards(
   const sessionIds = await scoutSessionIds(client);
   const queryIds = sessionIds.length > 0 ? sessionIds : ['00000000-0000-0000-0000-000000000000'];
 
-  const { data: positions } = await client
+  const { data: positions, error: positionsError } = await client
     .from('positions').select('session_id, coin, side, lane, realized_pnl_usd, fees_paid_usd').in('session_id', queryIds);
+  if (positionsError) throw positionsError;
   let realizedGrossUsd = 0;
   let openCount = 0;
   let feesPaidUsd = 0;
@@ -71,8 +72,9 @@ export async function computeScoutLaneCards(
     grossWinsUsd += Math.max(0, Number(r.realized_pnl_usd) || 0);
   }
 
-  const { data: fills } = await client
+  const { data: fills, error: fillsError } = await client
     .from('fills').select('session_id, coin, side, sz, px, filled_at').in('session_id', queryIds);
+  if (fillsError) throw fillsError;
   const scoutFills = (fills ?? []) as ScoutFill[];
   const earliestFillMs = Math.min(...scoutFills.map((fill) => Date.parse(fill.filled_at)).filter(Number.isFinite));
   const coins = [...new Set(scoutFills.map((fill) => fill.coin.toUpperCase()))];
@@ -89,11 +91,12 @@ export async function computeScoutLaneCards(
   const { totalUsd: fundingHaircutUsd, earliestMs } = funding;
   const periodDays = Number.isFinite(earliestMs) ? Math.max(1, (now - earliestMs) / 86_400_000) : 1;
 
-  const { data: hyps } = await client
+  const { data: hyps, error: hypothesesError } = await client
     .from('hypotheses')
     .select('status, lane, realized_r')
     .eq('excluded', false) // janitorial/reaped rows are NOT trades (Jul-16 quarantine)
     .in('session_id', queryIds);
+  if (hypothesesError) throw hypothesesError;
   let wins = 0, losses = 0, closed = 0;
   for (const h of hyps ?? []) {
     const st = (h as { status: string }).status;
@@ -109,7 +112,7 @@ export async function computeScoutLaneCards(
   const account: LaneCard = {
     lane: 'ALL', kind: 'account', netUsd: acc.netUsd, realizedUsd: acc.realizedGrossUsd, fundingUsd: acc.fundingHaircutUsd,
     unrealizedUsd: 0, tradeCount: acc.tradeCount, winRate: acc.winRate, monthlyRunRateUsd: acc.monthlyRunRateUsd,
-    periodDays, verdict: acc.verdict,
+    periodDays, verdict: fundingMissingHours > 0 && acc.verdict === 'graduate' ? 'incomplete' : acc.verdict,
     label: `${acc.reason}${fundingMissingHours ? ` Funding estimate misses ${fundingMissingHours} historical hours.` : ''}`,
     openCount, detail: { vsBarUsd: acc.vsBarUsd, fundingMissingHours },
   };
@@ -136,7 +139,7 @@ export async function computeScoutLaneCards(
     lanes.push({
       lane, kind: 'positions', netUsd: c.netUsd, realizedUsd: c.realizedGrossUsd, fundingUsd: c.fundingHaircutUsd,
       unrealizedUsd: 0, tradeCount: c.tradeCount, winRate: c.winRate, monthlyRunRateUsd: c.monthlyRunRateUsd,
-      periodDays: laneDays, verdict: c.verdict, openCount: lo,
+      periodDays: laneDays, verdict: missingHours > 0 && c.verdict === 'graduate' ? 'incomplete' : c.verdict, openCount: lo,
       label: `net $${c.netUsd.toFixed(2)} · ${c.tradeCount} trades · win ${(c.winRate * 100).toFixed(0)}%${missingHours ? ` · funding estimate missing ${missingHours}h` : ''}`,
       detail: { fundingMissingHours: missingHours, barVersion: registeredLaneBar(lane)?.version ?? null, reason: c.reason },
     });

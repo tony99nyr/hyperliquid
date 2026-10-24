@@ -6,6 +6,7 @@ import {
   DEFAULT_LANE,
   type ScorecardInput,
 } from '@/lib/scout/scout-review-business-logic';
+import { registeredLaneBar } from '@/lib/scout/scout-lane-bars-business-logic';
 
 function input(over: Partial<ScorecardInput> = {}): ScorecardInput {
   return {
@@ -129,6 +130,18 @@ describe('buildScorecard — GRADUATE gating', () => {
 });
 
 describe('buildLaneScorecards — per-lane grouping', () => {
+  it('registered_lane_preserves_fee_gate', () => {
+    const cards = buildLaneScorecards({
+      positions: [{ lane: 'trend-follow', coin: 'ETH', side: 'flat', realizedPnlUsd: 20_000, feesPaidUsd: 10_000 }],
+      hypotheses: Array.from({ length: 30 }, () => ({ lane: 'trend-follow', status: 'confirmed', realizedR: 0.2 })),
+      fundingByLane: {}, periodDays: 90,
+      periodDaysFor: () => 90,
+      configFor: (lane) => registeredLaneBar(lane)?.config ?? DEFAULT_SCORECARD_CONFIG,
+      minExpectancyRFor: () => 0.15,
+    });
+    expect(cards[0].card.verdict).toBe('continue');
+    expect(cards[0].card.feeDragFrac).toBe(0.5);
+  });
   it('groups realised results and attributed funding by lane', () => {
     const cards = buildLaneScorecards({
       positions: [
