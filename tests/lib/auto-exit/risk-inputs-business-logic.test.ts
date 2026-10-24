@@ -66,7 +66,7 @@ describe('buildAutoExitInputs', () => {
   });
 
   it('falls back to computed uPnL when clearinghouse uPnL is non-finite', () => {
-    const hl = { coin: 'ETH', szi: 2, size: 2, entryPx: 1000, positionValue: 2000,
+    const hl = { coin: 'ETH', side: 'long', szi: 2, size: 2, entryPx: 1000, positionValue: 2000,
       unrealizedPnl: Number.NaN, returnOnEquity: null, leverage: 5, leverageType: 'cross',
       liquidationPx: 880, marginUsed: 400, maxLeverage: 50 } as HlPosition;
     const inp = buildAutoExitInputs({ position: longPos, markPx: 950, hlPosition: hl });
@@ -75,12 +75,20 @@ describe('buildAutoExitInputs', () => {
   });
 
   it('falls back to computed uPnL when clearinghouse marks uPnL invalid', () => {
-    const hl = { coin: 'ETH', szi: 2, size: 2, entryPx: 1000, positionValue: 2000,
+    const hl = { coin: 'ETH', side: 'short', szi: -3, size: 3, entryPx: 900, positionValue: 2700,
       unrealizedPnl: 0, unrealizedPnlValid: false, returnOnEquity: null, leverage: 5, leverageType: 'cross',
       liquidationPx: 880, marginUsed: 400, maxLeverage: 50 } as HlPosition;
     const inp = buildAutoExitInputs({ position: longPos, markPx: 950, hlPosition: hl });
-    expect(inp.unrealizedPnlUsd).toBe(-100);
+    expect(inp.unrealizedPnlUsd).toBe(-150);
+    expect(inp.side).toBe('short');
     expect(inp.marginUsd).toBe(400);
+  });
+
+  it('marks fallback uPnL degraded when the HL entry price is invalid', () => {
+    const hl = { coin: 'ETH', side: 'long', szi: 2, size: 2, entryPx: 0, positionValue: 2000,
+      unrealizedPnl: 0, unrealizedPnlValid: false, marginUsed: 400 } as HlPosition;
+    const inp = buildAutoExitInputs({ position: longPos, markPx: 950, hlPosition: hl });
+    expect(Number.isNaN(inp.unrealizedPnlUsd)).toBe(true);
   });
 });
 

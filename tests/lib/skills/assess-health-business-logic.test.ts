@@ -14,6 +14,9 @@ function health(over: Partial<HealthResult> = {}): HealthResult {
 }
 
 describe('recommendFromHealth (advisory only)', () => {
+  it('holds on a feed outage (no-data) instead of trimming at the neutral score', () => {
+    expect(recommendFromHealth(health({ score: 50, alerts: ['no-data'] })).action).toBe('hold');
+  });
   it('holds a healthy position', () => {
     expect(recommendFromHealth(health({ score: 75 })).action).toBe('hold');
   });

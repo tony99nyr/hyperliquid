@@ -50,6 +50,7 @@ import type { LadderRung, LadderWithRungs } from './ladder-types';
 import { buildOpenProposal } from '@/lib/skills/open-position-business-logic';
 import { buildMarketReduceOnlyClose } from '@/lib/trading/safe-exit-business-logic';
 import { executeIntent } from '@/lib/trading/fill-source';
+import { PreSubmitError } from '@/lib/trading/pre-submit-error';
 import { placeBracketOnHl, placeStopOnHl, findOpenStop, cancelStopOnHl } from '@/lib/trading/stop-order-service';
 import { setAdvisoryStop } from '@/lib/scout/scout-watch-service';
 import { loadPosition } from '@/lib/cockpit/fill-persistence-service';
@@ -270,6 +271,10 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
     }
   }
 
+  if (rung.action === 'open' && ladder.mode === 'live' && preClaimPositionSize == null) {
+    return skip('cannot-verify-position-before-open');
+  }
+
   // 6) ATOMIC claim — the double-fire guard. Only the inserter proceeds. TRAIL
   // stop_move rungs claim PER COMPLETED CANDLE (they re-fire as price advances);
   // everything else stays strictly one-shot.
@@ -368,12 +373,18 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
   // (never leave it unstopped). filledSize defaults to the intended size for that flatten.
   let filledSize = proposal.intent.sz;
   const sizeBefore = forcePaper ? 0 : preClaimPositionSize;
-  if (sizeBefore == null) return skip('cannot-verify-position-before-open');
   let fill;
   try {
     fill = await executeIntent(proposal.intent, { forcePaper });
   } catch (err) {
     const reason = `open-threw: ${err instanceof Error ? err.message : String(err)}`;
+    if (err instanceof PreSubmitError) {
+      await releaseNoFillOcoClaim(ladder, rung, sessionId, 'rejected open');
+      await markFireOutcome(fireId, 'failed', reason);
+      await setRungStatus(rung.id, 'failed');
+      await alert(sessionId, `Ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: open rejected with no fill. ${reason}`);
+      return skip('open-rejected');
+    }
     let pos: Position | null;
     try {
       pos = await loadEffectivePosition(sessionId, coin, forcePaper);
@@ -381,7 +392,7 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
       return await flattenAfterFault(ladder, rung, sessionId, coin, fireId, forcePaper, filledSize, reason);
     }
     const unchanged = forcePaper ? !pos || pos.side === 'flat' || !(pos.sz > 0) : (pos?.sz ?? 0) === sizeBefore;
-    const parsedRejection = err instanceof Error && (err.message.startsWith('HL order error:') || err.message.startsWith('HL exchange rejected:'));
+    const parsedRejection = forcePaper || (err instanceof Error && (err.message.startsWith('HL order error:') || err.message.startsWith('HL exchange rejected:')));
     if (unchanged && parsedRejection) {
       await releaseNoFillOcoClaim(ladder, rung, sessionId, 'rejected open');
       await markFireOutcome(fireId, 'failed', reason);

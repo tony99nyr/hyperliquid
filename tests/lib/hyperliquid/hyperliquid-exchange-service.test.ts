@@ -22,6 +22,7 @@ vi.mock('@/lib/hyperliquid/hyperliquid-info-service', () => ({
 }));
 
 import { submitOrder, submitBracket } from '@/lib/hyperliquid/hyperliquid-exchange-service';
+import { PreSubmitError } from '@/lib/trading/pre-submit-error';
 
 const intent = (over: Partial<TradeIntent> = {}): TradeIntent => ({
   clientIntentId: 'i1',
@@ -83,12 +84,33 @@ describe('submitOrder', () => {
 
   it('throws when the agent key is missing', async () => {
     delete process.env.HL_AGENT_PRIVATE_KEY;
-    await expect(submitOrder(intent())).rejects.toThrow(/HL_AGENT_PRIVATE_KEY/);
+    await expect(submitOrder(intent())).rejects.toBeInstanceOf(PreSubmitError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('marks a malformed agent key as pre-submit', async () => {
+    process.env.HL_AGENT_PRIVATE_KEY = 'not-a-key';
+    await expect(submitOrder(intent())).rejects.toBeInstanceOf(PreSubmitError);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('refuses a sub-lot size that floors to 0 (never ships a zero-size order)', async () => {
     // ETH szDecimals 4 → 0.00005 floors to "0".
-    await expect(submitOrder(intent({ sz: 0.00005 }))).rejects.toThrow(/rounds below the ETH lot size/);
+    await expect(submitOrder(intent({ sz: 0.00005 }))).rejects.toBeInstanceOf(PreSubmitError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('marks a missing live mid and signing failure before the order POST', async () => {
+    h.fetchAllMids.mockResolvedValueOnce({});
+    await expect(submitOrder(intent())).rejects.toBeInstanceOf(PreSubmitError);
+    h.signL1Action.mockRejectedValueOnce(new Error('sign failed'));
+    await expect(submitOrder(intent())).rejects.toBeInstanceOf(PreSubmitError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps a transport failure after the order POST unclassified', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('fetch timed out'));
+    await expect(submitOrder(intent())).rejects.not.toBeInstanceOf(PreSubmitError);
   });
 
   it('resting IOC → filledSz 0, feeUsd 0', async () => {

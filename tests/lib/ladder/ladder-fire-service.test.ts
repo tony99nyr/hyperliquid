@@ -71,6 +71,7 @@ vi.mock('@/lib/env/env', () => ({ validateEnv: () => ({ HL_NETWORK: 'mainnet' })
 vi.mock('@/lib/cockpit/analysis-log-service', () => ({ writeAnalysisLog: (...a: unknown[]) => writeAnalysisLog(...a) }));
 
 import { performLadderRungFire } from '@/lib/ladder/ladder-fire-service';
+import { PreSubmitError } from '@/lib/trading/pre-submit-error';
 import { buildPreconditionSnapshot, hashPreconditionSnapshot } from '@/lib/ladder/ladder-risk-business-logic';
 
 const NOW = 1_700_000_000_000;
@@ -97,6 +98,7 @@ function ladder(over: Partial<LadderWithRungs> = {}, rungs?: LadderRung[]): Ladd
 
 beforeEach(() => {
   vi.clearAllMocks();
+  fetchClearinghouseState.mockReset();
   isLadderAutofireEnabled.mockReturnValue(true);
   isLadderLiveEnabled.mockReturnValue(true);
   getLadderWithRungs.mockResolvedValue(ladder());
@@ -326,6 +328,40 @@ describe('performLadderRungFire — execution', () => {
     expect(markFireOutcome).toHaveBeenCalledWith('f1', 'failed', expect.stringContaining('insufficient margin'));
     expect(writeAnalysisLog).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('insufficient margin') }));
     expect(writeAnalysisLog).not.toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('fault after fill') }));
+  });
+
+  it.each(['no live mid', 'size rounds below lot size', 'HL updateLeverage failed', 'missing agent key', 'Conflicting live intent'])('releases an OCO claim for a pre-submit failure: %s', async (message) => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc');
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live', ocoGroupId: 'grp-1' }));
+    fetchClearinghouseState.mockResolvedValue({ stale: false, positions: [] });
+    executeIntent.mockRejectedValue(new PreSubmitError(message));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toBe('open-rejected');
+    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1');
+    expect(writeAnalysisLog).not.toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('outcome unknown') }));
+  });
+
+  it('treats a flat paper position after an open throws as a rejection', async () => {
+    getLadderWithRungs.mockResolvedValue(ladder({ ocoGroupId: 'grp-1' }));
+    executeIntent.mockRejectedValue(new Error('paper book unavailable'));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toBe('open-rejected');
+    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1');
+  });
+
+  it('releases a pre-submit OCO claim even when the position read fails', async () => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc');
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live', ocoGroupId: 'grp-1' }));
+    fetchClearinghouseState.mockResolvedValue({ stale: false, positions: [] });
+    executeIntent.mockRejectedValue(new PreSubmitError('sign failed'));
+    fetchClearinghouseState.mockResolvedValueOnce({ stale: false, positions: [] })
+      .mockRejectedValueOnce(new Error('read failed'));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toBe('open-rejected');
+    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1');
+    expect(fetchClearinghouseState).toHaveBeenCalledTimes(1);
   });
 
   it('does not flatten an existing position when the exchange rejects an open', async () => {

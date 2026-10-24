@@ -54,6 +54,11 @@ export function recommendFromHealth(health: HealthResult): HealthRecommendation 
     alerts: health.alerts,
   };
 
+  // A feed outage is not evidence against the position: hold and say why.
+  if (health.alerts.includes('no-data')) {
+    return { action: 'hold', reason: 'No usable candle data (feed stale): holding; re-check when the feed returns.', ...base };
+  }
+
   const hardExit = health.alerts.find((a) => (t.exitAlerts as readonly string[]).includes(a));
   if (hardExit) {
     return { action: 'exit', reason: `Hard exit signal: ${hardExit} opposes the position.`, ...base };

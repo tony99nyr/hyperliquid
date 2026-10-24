@@ -142,10 +142,18 @@ export async function computeScoutLaneCards(
     if (registeredAt && Date.parse(r.created_at) < Date.parse(`${registeredAt}T00:00:00Z`)) return null;
     return { lane: r.lane ?? null, status: r.status, realizedR: r.realized_r };
   }).filter((row): row is LaneHypothesisRow => row !== null);
+  // Keep or drop whole session+coin groups by their FIRST fill: a position opened
+  // before registration and closed after it must not leave an orphan closing fill
+  // (which would read as a fresh opposite position and accrue funding to now).
+  const firstFillMs = new Map<string, number>();
+  for (const fill of fills) {
+    const key = `${fill.session_id}\u0000${fill.coin.toUpperCase()}`;
+    firstFillMs.set(key, Math.min(firstFillMs.get(key) ?? Infinity, Date.parse(fill.filled_at)));
+  }
   const laneFills = fills.filter((fill) => {
-    const lane = laneBySessionCoin[`${fill.session_id}\u0000${fill.coin.toUpperCase()}`] ?? 'directional';
-    const registeredAt = registeredLaneBar(lane)?.registeredAt;
-    return !registeredAt || Date.parse(fill.filled_at) >= Date.parse(`${registeredAt}T00:00:00Z`);
+    const key = `${fill.session_id}\u0000${fill.coin.toUpperCase()}`;
+    const registeredAt = registeredLaneBar(laneBySessionCoin[key] ?? 'directional')?.registeredAt;
+    return !registeredAt || (firstFillMs.get(key) ?? Infinity) >= Date.parse(`${registeredAt}T00:00:00Z`);
   });
   const laneFunding = estimateScoutFunding(laneFills, laneBySessionCoin,
     Object.fromEntries(history.map(({ coin, points }) => [coin, points])), now);

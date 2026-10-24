@@ -33,6 +33,7 @@ import { fetchL2Book } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { submitOrder, submitUpdateLeverage } from '@/lib/hyperliquid/hyperliquid-exchange-service';
 import { persistFillRow, applyFillToPositionRows } from '@/lib/cockpit/fill-persistence-service';
 import { executeIntent } from '@/lib/trading/fill-source';
+import { PreSubmitError } from '@/lib/trading/pre-submit-error';
 
 const mockedFetchL2Book = vi.mocked(fetchL2Book);
 const mockedSubmitOrder = vi.mocked(submitOrder);
@@ -72,6 +73,15 @@ describe('executeIntent (live retry after persistence failure)', () => {
       coin: 'ETH', side: 'long', sz: 0.4, avgEntryPx: 2001,
       realizedPnlUsd: 0, feesPaidUsd: 0.4,
     });
+  });
+
+  it('classifies a conflicting same-ID intent before another order submission', async () => {
+    const trade = intent({ clientIntentId: 'live-conflict-1' });
+    mockedSubmitOrder.mockResolvedValue({ avgPx: 0, filledSz: 0, partial: false, feeUsd: 0, hlOrderId: null, raw: {} });
+    const first = executeIntent(trade);
+    await expect(executeIntent({ ...trade, sz: 2 })).rejects.toBeInstanceOf(PreSubmitError);
+    await first;
+    expect(mockedSubmitOrder).toHaveBeenCalledTimes(1);
   });
 
   it('liveRetryAfterPersistenceFailure_submitsOnce', async () => {

@@ -48,6 +48,7 @@ export function reviewPosition(inp: PositionReviewInput, cfg: RubricConfig): Pos
   } else if (
     health.score >= cfg.review.addAbove &&
     !hasAlerts &&
+    !health.alerts.includes('no-data') && // a feed outage can never justify adding risk
     rubric.badge === 'GO' &&
     rubric.chosenSide === positionSide
   ) {

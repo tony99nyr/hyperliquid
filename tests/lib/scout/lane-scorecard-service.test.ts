@@ -84,18 +84,31 @@ describe('computeScoutLaneCards', () => {
     expect(result.lanes.find((card) => card.lane === 'directional')?.tradeCount).toBe(1);
   });
 
-  it('excludes pre-registration fills from each lane funding estimate', async () => {
+  const laneCard = async (fills: unknown[]) => {
     vi.mocked(scoutSessionIds).mockResolvedValue(['session-1']);
     const tables: Record<'positions' | 'fills' | 'hypotheses', unknown[]> = qualifyingTables();
     tables.positions[0] = {
       session_id: 'session-1', coin: 'ETH', side: 'long', lane: 'trend-follow', realized_pnl_usd: 0,
       fees_paid_usd: 0, opened_at: '2026-10-23T10:00:00Z', updated_at: '2026-10-23T10:00:00Z',
     };
-    tables.fills = [
-      { session_id: 'session-1', coin: 'ETH', side: 'buy', sz: 1, px: 2000, filled_at: '2026-07-27T10:00:00Z' },
-      { session_id: 'session-1', coin: 'ETH', side: 'buy', sz: 1, px: 2000, filled_at: '2026-10-23T10:00:00Z' },
-    ];
+    tables.fills = fills;
     const result = await computeScoutLaneCards(Date.parse('2026-10-23T12:00:00Z'), strictClient(tables));
-    expect(result.lanes.find((card) => card.lane === 'trend-follow')?.detail.fundingMissingHours).toBe(1);
+    return result.lanes.find((card) => card.lane === 'trend-follow');
+  };
+
+  it('charges lane funding for a position opened inside the registration window', async () => {
+    const card = await laneCard([{ session_id: 'session-1', coin: 'ETH', side: 'buy', sz: 1, px: 2000, filled_at: '2026-10-23T10:00:00Z' }]);
+    expect(card?.detail.fundingMissingHours).toBe(1);
+  });
+
+  it('drops a whole position that opened before registration, even when it closes after', async () => {
+    // Without the group rule the post-registration closing sell would read as a fresh
+    // short and accrue funding until now.
+    const card = await laneCard([
+      { session_id: 'session-1', coin: 'ETH', side: 'buy', sz: 1, px: 2000, filled_at: '2026-07-27T10:00:00Z' },
+      { session_id: 'session-1', coin: 'ETH', side: 'sell', sz: 1, px: 2100, filled_at: '2026-10-23T10:00:00Z' },
+    ]);
+    expect(card?.detail.fundingMissingHours).toBe(0);
+    expect(card?.fundingUsd ?? 0).toBe(0);
   });
 });

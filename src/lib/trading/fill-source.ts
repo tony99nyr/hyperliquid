@@ -15,6 +15,7 @@ import { getTradingMode } from '@/lib/env/mode';
 import { assertScoutPaperMode } from '@/lib/scout/scout-execution-guard';
 import { paperFill } from './fill-source-paper';
 import { liveFill } from './fill-source-live';
+import { PreSubmitError } from './pre-submit-error';
 import { applyFillToPosition } from './position-tracker';
 import { persistFillRow } from '@/lib/cockpit/fill-persistence-service';
 
@@ -27,7 +28,7 @@ function submitLiveOnce(intent: TradeIntent): Promise<CanonicalFill> {
   const signature = JSON.stringify(intent);
   const existing = liveSubmissions.get(key);
   if (existing) {
-    if (existing.intent !== signature) throw new Error(`Conflicting live intent for ${key}`);
+    if (existing.intent !== signature) throw new PreSubmitError(`Conflicting live intent for ${key}`);
     return existing.fill;
   }
   const fill = Promise.resolve().then(() => liveFill(intent));

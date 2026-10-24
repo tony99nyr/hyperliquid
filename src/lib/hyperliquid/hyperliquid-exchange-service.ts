@@ -25,6 +25,7 @@ import { signL1Action } from '@nktkas/hyperliquid/signing';
 import type { TradeIntent } from '@/types/fill';
 import { fetchPerpMeta, fetchAllMids } from './hyperliquid-info-service';
 import { modelFeeUsd } from '@/lib/trading/paper-fee-model';
+import { PreSubmitError } from '@/lib/trading/pre-submit-error';
 import {
   resolveAsset,
   formatHlSize,
@@ -168,51 +169,58 @@ export async function submitUpdateIsolatedMargin(coin: string, amountUsd: number
  */
 export async function submitOrder(intent: TradeIntent): Promise<HlOrderResult> {
   const testnet = isTestnet();
-  const network = testnet ? 'testnet' : 'mainnet';
-  const wallet = privateKeyToAccount(readAgentKey());
+  let action: ReturnType<typeof buildIocOrderAction>;
+  let nonce: number;
+  let signature: Awaited<ReturnType<typeof signL1Action>>;
+  try {
+    const network = testnet ? 'testnet' : 'mainnet';
+    const wallet = privateKeyToAccount(readAgentKey());
 
-  // Resolve the asset index + szDecimals from the SAME network we submit to (a
-  // testnet rehearsal must use testnet's universe ordering, not mainnet's).
-  const universe = await fetchPerpMeta(network);
-  const { assetIndex, szDecimals } = resolveAsset(universe, intent.coin);
+    // Resolve the asset index + szDecimals from the SAME network we submit to (a
+    // testnet rehearsal must use testnet's universe ordering, not mainnet's).
+    const universe = await fetchPerpMeta(network);
+    const { assetIndex, szDecimals } = resolveAsset(universe, intent.coin);
 
-  // Aggressive IOC price: use the operator's limit if supplied, else cross from
-  // the live mid (network-matched). fetchAllMids keys by upper-cased coin.
-  const isBuy = intent.side === 'buy';
-  let priceBasis = intent.limitPx;
-  if (priceBasis == null || priceBasis <= 0) {
-    const mids = await fetchAllMids(network);
-    const mid = mids[intent.coin.trim().toUpperCase()];
-    if (!Number.isFinite(mid) || mid <= 0) {
-      throw new Error(`no live mid for ${intent.coin} — cannot price the IOC order`);
+    // Aggressive IOC price: use the operator's limit if supplied, else cross from
+    // the live mid (network-matched). fetchAllMids keys by upper-cased coin.
+    const isBuy = intent.side === 'buy';
+    let priceBasis = intent.limitPx;
+    if (priceBasis == null || priceBasis <= 0) {
+      const mids = await fetchAllMids(network);
+      const mid = mids[intent.coin.trim().toUpperCase()];
+      if (!Number.isFinite(mid) || mid <= 0) {
+        throw new Error(`no live mid for ${intent.coin} — cannot price the IOC order`);
+      }
+      priceBasis = aggressiveIocPrice(mid, isBuy, SLIPPAGE_BUFFER);
     }
-    priceBasis = aggressiveIocPrice(mid, isBuy, SLIPPAGE_BUFFER);
+
+    // Floor-format the size, then REFUSE a sub-lot order that floors to 0 (HL would
+    // bounce it, and a silently-dropped reduce-only close is dangerous).
+    const sizeStr = formatHlSize(intent.sz, szDecimals);
+    if (!(Number(sizeStr) > 0)) {
+      throw new Error(`order size ${intent.sz} rounds below the ${intent.coin} lot size (szDecimals ${szDecimals}).`);
+    }
+
+    action = buildIocOrderAction({
+      assetIndex,
+      isBuy,
+      priceStr: formatHlPrice(priceBasis, szDecimals),
+      sizeStr,
+      reduceOnly: intent.reduceOnly,
+    });
+
+    nonce = nextNonce();
+    // signL1Action types `action` as a loose Record/array (it hashes by key order);
+    // our HlOrderAction is the audited concrete shape — cast at this one boundary.
+    signature = await signL1Action({
+      wallet,
+      action: action as unknown as Record<string, unknown>,
+      nonce,
+      isTestnet: testnet,
+    });
+  } catch (err) {
+    throw new PreSubmitError(err instanceof Error ? err.message : String(err), err);
   }
-
-  // Floor-format the size, then REFUSE a sub-lot order that floors to 0 (HL would
-  // bounce it, and a silently-dropped reduce-only close is dangerous).
-  const sizeStr = formatHlSize(intent.sz, szDecimals);
-  if (!(Number(sizeStr) > 0)) {
-    throw new Error(`order size ${intent.sz} rounds below the ${intent.coin} lot size (szDecimals ${szDecimals}).`);
-  }
-
-  const action = buildIocOrderAction({
-    assetIndex,
-    isBuy,
-    priceStr: formatHlPrice(priceBasis, szDecimals),
-    sizeStr,
-    reduceOnly: intent.reduceOnly,
-  });
-
-  const nonce = nextNonce();
-  // signL1Action types `action` as a loose Record/array (it hashes by key order);
-  // our HlOrderAction is the audited concrete shape — cast at this one boundary.
-  const signature = await signL1Action({
-    wallet,
-    action: action as unknown as Record<string, unknown>,
-    nonce,
-    isTestnet: testnet,
-  });
 
   const res = await fetch(testnet ? EXCHANGE_URL.testnet : EXCHANGE_URL.mainnet, {
     method: 'POST',

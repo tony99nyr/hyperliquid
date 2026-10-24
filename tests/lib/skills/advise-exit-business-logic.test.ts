@@ -27,6 +27,9 @@ function health(over: Partial<HealthResult> = {}): HealthResult {
 }
 
 describe('recommendExit', () => {
+  it('advises no exit on a feed outage (no-data), even at the neutral score', () => {
+    expect(recommendExit(pos(), health({ score: 50, alerts: ['no-data'] })).kind).toBe('none');
+  });
   it('advises no exit when healthy', () => {
     expect(recommendExit(pos(), health({ score: 75 })).kind).toBe('none');
   });

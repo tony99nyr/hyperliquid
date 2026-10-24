@@ -51,13 +51,18 @@ export interface BuildInputsArgs {
 
 /** Assemble `AutoExitInputs`. Prefers clearinghouse uPnL/liq/margin when present. */
 export function buildAutoExitInputs(a: BuildInputsArgs): AutoExitInputs {
-  // flat should be filtered upstream; default to 'short' is never reached for a real call.
-  const side: 'long' | 'short' = a.position.side === 'long' ? 'long' : 'short';
-  const hasCh = a.hlPosition != null;
+  const hl = a.hlPosition;
+  // Flat ledger positions are filtered upstream. A live position is the authority.
+  const side: 'long' | 'short' = hl?.side ?? (a.position.side === 'long' ? 'long' : 'short');
+  const hasCh = hl != null;
   const upnl =
-    hasCh && a.hlPosition!.unrealizedPnlValid !== false && Number.isFinite(a.hlPosition!.unrealizedPnl)
-      ? a.hlPosition!.unrealizedPnl
-      : computeUnrealizedPnlUsd(a.position, a.markPx);
+    hl && hl.unrealizedPnlValid !== false && Number.isFinite(hl.unrealizedPnl)
+      ? hl.unrealizedPnl
+      : hl
+        ? (hl.entryPx == null || !(hl.entryPx > 0)
+            ? Number.NaN
+            : computeUnrealizedPnlUsd({ side: hl.side, sz: hl.size, avgEntryPx: hl.entryPx }, a.markPx))
+        : computeUnrealizedPnlUsd(a.position, a.markPx);
   return {
     coin: a.position.coin,
     side,

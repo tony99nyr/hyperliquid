@@ -227,6 +227,11 @@ describe('position review', () => {
   it('TRIM on alerts + mid health', () => {
     expect(reviewPosition({ health: health(50, ['stop-within-1-ATR']), rubric: rubricFor('short', false), positionSide: 'short' }, CFG).verdict).toBe('TRIM');
   });
+  it('a feed outage (no-data) never trims and never adds, even with a high score', () => {
+    expect(reviewPosition({ health: health(50, ['no-data']), rubric: rubricFor('short', false, 'GO'), positionSide: 'short' }, CFG).verdict).toBe('HOLD');
+    expect(reviewPosition({ health: health(90, ['no-data']), rubric: rubricFor('short', false, 'GO'), positionSide: 'short' }, CFG).verdict).not.toBe('ADD');
+  });
+
   it('ADD on high health + rubric GO same side', () => {
     expect(reviewPosition({ health: health(80), rubric: rubricFor('short', false, 'GO'), positionSide: 'short' }, CFG).verdict).toBe('ADD');
   });

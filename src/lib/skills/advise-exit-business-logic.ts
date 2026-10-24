@@ -61,6 +61,10 @@ export function recommendExit(position: Position, health: HealthResult): ExitRec
   if (position.side === 'flat' || position.sz <= 0) {
     return { kind: 'none', exitFraction: 0, exitSz: 0, reason: 'No open position to exit.' };
   }
+  // A feed outage is not evidence against the position: no exit on missing data.
+  if (health.alerts.includes('no-data')) {
+    return { kind: 'none', exitFraction: 0, exitSz: 0, reason: 'No usable candle data (feed stale): no exit advised until the feed returns.' };
+  }
 
   const hardExit = health.alerts.find((a) => (t.fullExitAlerts as readonly string[]).includes(a));
   if (hardExit || health.score < t.fullExitScore) {

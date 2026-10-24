@@ -18,6 +18,7 @@ vi.mock('@/lib/hyperliquid/hyperliquid-exchange-service', () => ({
 }));
 
 import { liveFill } from '@/lib/trading/fill-source-live';
+import { PreSubmitError } from '@/lib/trading/pre-submit-error';
 import { nextPosition } from '@/lib/trading/position-tracker';
 
 const intent: TradeIntent = {
@@ -99,7 +100,7 @@ describe('liveFill — sets leverage on HL for OPENS (the silent-20x fix)', () =
 
   it('FAIL-CLOSED: a rejected leverage update aborts the open (order never placed)', async () => {
     submitUpdateLeverage.mockRejectedValue(new Error('updateLeverage rejected'));
-    await expect(liveFill(intent)).rejects.toThrow('updateLeverage rejected');
+    await expect(liveFill(intent)).rejects.toBeInstanceOf(PreSubmitError);
     expect(submitOrder).not.toHaveBeenCalled();
   });
 });

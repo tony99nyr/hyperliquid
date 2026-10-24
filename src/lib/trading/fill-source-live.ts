@@ -16,6 +16,7 @@
 
 import type { CanonicalFill, TradeIntent } from '@/types/fill';
 import { submitOrder, submitUpdateLeverage } from '@/lib/hyperliquid/hyperliquid-exchange-service';
+import { PreSubmitError } from './pre-submit-error';
 
 export async function liveFill(intent: TradeIntent): Promise<CanonicalFill> {
   // OPENS: set the per-coin leverage on HL FIRST so the cockpit's chosen leverage is
@@ -28,7 +29,11 @@ export async function liveFill(intent: TradeIntent): Promise<CanonicalFill> {
   // whole account). Cross would make the displayed liq price wrong once a 2nd
   // position exists — exactly the risk-legibility gap to avoid.
   if (!intent.reduceOnly && typeof intent.leverage === 'number' && intent.leverage > 0) {
-    await submitUpdateLeverage(intent.coin, intent.leverage, false);
+    try {
+      await submitUpdateLeverage(intent.coin, intent.leverage, false);
+    } catch (err) {
+      throw new PreSubmitError(err instanceof Error ? err.message : String(err), err);
+    }
   }
   const result = await submitOrder(intent);
 
