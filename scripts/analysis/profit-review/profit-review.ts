@@ -97,7 +97,7 @@ async function buildBundle() {
   const { trips, open, excludedFills } = buildRoundTrips(fills, funding);
   attributeTrips(trips, fires, rungs, outcomes);
   const recon = reconcile(trips, outcomes, fills);
-  const straddles = straddleReport(outcomes, rungs);
+  const straddles = straddleReport(outcomes, rungs, fires);
   const lanes = scoutLaneStats(hyps);
   const htf = removeLargestCluster(hyps.filter((h) => h.lane === 'htf-trend'), 5);
   const sinceTrips = trips.filter((t) => t.t0 >= since);
@@ -153,7 +153,7 @@ function renderMarkdown(b: Bundle): string {
   for (const r of b.reconciliation.bySetup) L.push(`| ${r.setup} | ${r.fillsN} | ${f2(r.fillsNet)} | ${f2(r.fillsNetExFunding)} | ${r.outcomesClosedN} | ${f2(r.outcomesNet)} | ${r.outcomesMeanR == null ? 'n/a' : f2(r.outcomesMeanR)} | ${f2(r.delta)} |`);
   L.push('', `Mismatches (${b.reconciliation.mismatches.length}):`, '');
   for (const m of b.reconciliation.mismatches) L.push(`- ${m.ladderId.slice(0, 8)} ${m.title.slice(0, 60)} [${m.setup}] outcome ${f2(m.outcomeNet)} vs trips ${m.tripNetExFunding == null ? 'none' : f2(m.tripNetExFunding)}: ${m.reason}`);
-  L.push('', '## 3. Event straddles', '', `Fired: ${b.eventStraddles.fired} (of which titled "event template": ${b.eventStraddles.firedTemplateOnly}); never_filled: ${b.eventStraddles.neverFilled}`, '', '| ladder | outcome | planned risk (slip-aware) | nominal risk | net $ | slip-aware R | nominal R |', '|---|---|---|---|---|---|---|');
+  L.push('', '## 3. Event straddles', '', `Fired: ${b.eventStraddles.fired} (of which titled "event template": ${b.eventStraddles.firedTemplateOnly}); never_filled: ${b.eventStraddles.neverFilled}. FIRED means the leg has an open rung with a ladder_fires row whose status is 'filled'; each leg counts once.`, '', '| ladder | outcome | planned risk (slip-aware) | nominal risk | net $ | slip-aware R | nominal R |', '|---|---|---|---|---|---|---|');
   for (const r of b.eventStraddles.rows.filter((x) => x.fired)) L.push(`| ${r.title.slice(0, 55)} | ${r.outcome} | ${r.plannedRiskSlipAware == null ? '' : f2(r.plannedRiskSlipAware)} | ${r.nominalRisk == null ? '' : f2(r.nominalRisk)} | ${f2(r.net)} | ${r.slipAwareR == null ? '' : f2(r.slipAwareR)} | ${r.nominalR == null ? '' : f2(r.nominalR)} |`);
   L.push('', '## 4. Scout lanes (closed hypotheses)', '', '| lane | n | win | mean R | sum R | net $ |', '|---|---|---|---|---|---|');
   for (const l of b.scout.lanes) L.push(`| ${l.lane} | ${l.n} | ${pct(l.winRate)} | ${f2(l.meanR)} | ${f2(l.sumR)} | ${f2(l.netUsd)} |`);

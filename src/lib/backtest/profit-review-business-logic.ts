@@ -381,14 +381,20 @@ export interface StraddleRow {
 export function straddleReport(
   outcomes: OutcomeRow[],
   rungs: RungRow[],
+  fires: FireRow[],
 ): { rows: StraddleRow[]; fired: number; neverFilled: number; firedTemplateOnly: number } {
+  const firedOpenRungs = new Set(
+    fires.filter((fire) => fire.status === 'filled').map((fire) => fire.rung_id),
+  );
   const rows: StraddleRow[] = outcomes
     .filter((o) => /straddle/i.test(o.title) && !/runner management/i.test(o.title))
     .map((o) => {
       const nominal = rungs
         .filter((r) => r.ladder_id === o.ladder_id && r.action === 'open')
         .reduce((s, r) => s + (r.risk_usd ?? 0), 0);
-      const fired = o.outcome !== 'never_filled';
+      const fired = rungs.some(
+        (r) => r.ladder_id === o.ladder_id && r.action === 'open' && firedOpenRungs.has(r.id),
+      );
       const net = o.realized_pnl_usd ?? 0;
       const planned = o.planned_risk_usd;
       return {

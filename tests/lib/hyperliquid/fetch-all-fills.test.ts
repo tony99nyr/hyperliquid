@@ -84,6 +84,17 @@ describe('fetchAllFills — deep time-window pagination (mocked, no network)', (
     expect(res.truncated).toBe(false);
   });
 
+  it('keeps distinct fills that share one transaction hash (tid leads the key)', async () => {
+    // One taker order sweeping two makers: same hash, time, px and sz; distinct tid.
+    const twin = { hash: '0xsame', px: '3900.5', sz: '0.0064', startPosition: '0.0' };
+    mockFetchPages([[rawFill(5000, { ...twin, tid: 11 }), rawFill(5000, { ...twin, tid: 12, startPosition: '0.0064' })]]);
+
+    const res = await fetchAllFills(ADDR, { sinceMs: 0, maxFills: 12000 });
+
+    expect(res.fills).toHaveLength(2);
+    expect(res.fills.map((fill) => fill.startPosition).sort()).toEqual([0, 0.0064]);
+  });
+
   it('stops and flags truncated when maxFills is reached', async () => {
     const p1 = page(1000, HL_FILLS_PAGE_CAP);
     const p2 = page(1000 + HL_FILLS_PAGE_CAP + 1, HL_FILLS_PAGE_CAP);
@@ -108,6 +119,7 @@ describe('fetchAllFills — deep time-window pagination (mocked, no network)', (
 
     // Only one unique row (all identical), and the loop broke on no progress.
     expect(res.fills).toHaveLength(1);
+    expect(res.truncated).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

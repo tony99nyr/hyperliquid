@@ -97,6 +97,10 @@ export interface HlFill {
   /** HL order id this fill belongs to (several partial fills can share one oid).
    *  Optional so long-lived test fixtures stay valid; absent ≡ unknown. */
   oid?: number | null;
+  /** Client order id, when returned by userFills. */
+  cloid?: string | null;
+  /** Signed position size on this coin BEFORE the fill (HL `startPosition`). Optional. */
+  startPosition?: number | null;
 }
 
 export interface HlFillsResult {
@@ -527,13 +531,16 @@ function mapRawFill(f: Record<string, unknown>): HlFill {
     fee: numOrNull(f.fee),
     dir: typeof f.dir === 'string' ? f.dir : null,
     oid: numOrNull(f.oid),
+    cloid: typeof f.cloid === 'string' ? f.cloid : null,
+    startPosition: numOrNull(f.startPosition),
   };
 }
 
 /** Stable dedup key for a fill (HL may overlap rows across windows). */
 function fillKey(f: Record<string, unknown>): string {
-  // Prefer the strongest unique ids HL provides; fall back to value tuple.
-  const id = f.hash ?? f.tid ?? `${String(f.oid ?? '')}|${String(f.time ?? '')}`;
+  // `tid` is unique per fill. `hash` is per transaction: one taker order that sweeps
+  // several makers at the same px/sz shares it, so it must not lead the key.
+  const id = f.tid ?? f.hash ?? `${String(f.oid ?? '')}|${String(f.time ?? '')}`;
   return `${String(id)}|${String(f.time ?? '')}|${String(f.coin ?? '')}|${String(f.px ?? '')}|${String(f.sz ?? '')}|${String(f.dir ?? '')}`;
 }
 
@@ -610,7 +617,10 @@ export async function fetchAllFills(
       // Exhausted: a short page means there's nothing after this window.
       if (rows.length < HL_FILLS_PAGE_CAP) break;
       // No forward progress (all rows at/<= cursor) — avoid an infinite loop.
-      if (maxTime <= cursor) break;
+      if (maxTime <= cursor) {
+        truncated = true;
+        break;
+      }
 
       if (accumulated.length >= maxFills) {
         truncated = true;

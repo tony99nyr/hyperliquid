@@ -16,11 +16,12 @@
 
 import { parseArgs, header, line, run } from './_skill-runtime';
 import { listLaddersWithRungs, getLadderWithRungs } from '@/lib/ladder/ladder-service';
-import { upsertLadderOutcome, listLadderOutcomes, fireStatusesByLadder } from '@/lib/ladder/ladder-outcome-service';
+import { upsertLadderOutcome, listLadderOutcomes, outcomeFires } from '@/lib/ladder/ladder-outcome-service';
+import { attributeLadderFills } from '@/lib/ladder/ladder-outcome-business-logic';
 import { resolveLadderOutcome, buildExpectancyReport, DEFAULT_EXPECTANCY_BAR } from '@/lib/skills/ladder-expectancy-business-logic';
 import { resolveArmRung } from '@/lib/ladder/ladder-arm-business-logic';
 import { computeLadderRisk } from '@/lib/ladder/ladder-risk-business-logic';
-import { fetchRecentFills, fetchClearinghouseState, type HlFill } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { fetchAllFills, type HlFill } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 
@@ -59,20 +60,15 @@ run(async () => {
     } else {
       const address = getHlAccountAddress();
       let hlFills: HlFill[] | null = null;
-      const openCoins = new Set<string>();
       if (address) {
-        const oldest = Math.min(...toResolve.map((l) => Date.parse(l.armedAt ?? l.createdAt)));
-        const fillsRes = await fetchRecentFills(address, Math.max(now - oldest + 3_600_000, 24 * 3_600_000), 2000);
-        hlFills = fillsRes.error ? null : fillsRes.fills;
-        try {
-          const ch = await fetchClearinghouseState(address, { uncached: true });
-          for (const p of ch.positions) if (p.size > 0) openCoins.add(p.coin.toUpperCase());
-        } catch { /* unknown → treat coins as possibly open only if fills also missing */ }
+        const fillsRes = await fetchAllFills(address, { sinceMs: 0, maxFills: 100_000 });
+        hlFills = fillsRes.error || fillsRes.truncated ? null : fillsRes.fills;
       } else {
         line('(no HL_ACCOUNT_ADDRESS — only never_filled outcomes resolve fully)');
       }
 
-      const fires = await fireStatusesByLadder(toResolve.map((l) => l.id));
+      const fires = await outcomeFires(all.map((l) => l.id));
+      const attribution = hlFills ? attributeLadderFills(all, fires, hlFills) : null;
       // Persisted thesis scores (review-ladder writes them; migration 0030) — priority:
       // explicit --ladder annotation > persisted-on-ladder > previously-recorded outcome.
       const thesisById = new Map<string, { s: number | null; t: number | null }>();
@@ -83,13 +79,16 @@ run(async () => {
       } catch { /* fail-soft */ }
       for (const l of toResolve) {
         const plannedRisk = computeLadderRisk(l.rungs.map(resolveArmRung), { maxTotalNotionalUsd: l.maxTotalNotionalUsd, maxTotalLossUsd: l.maxTotalLossUsd }).worstCaseLossWithFundingUsd;
-        const coin = (l.rungs[0]?.coin ?? '').toUpperCase();
+        const nominalRisk = l.rungs.filter((rung) => rung.action === 'open' || rung.action === 'add')
+          .reduce((sum, rung) => sum + (rung.riskUsd ?? 0), 0);
         const outcome = resolveLadderOutcome({
           ladder: l,
-          fireStatuses: fires.get(l.id) ?? [],
+          fireStatuses: fires.filter((fire) => fire.ladderId === l.id && l.rungs.some((rung) => rung.id === fire.rungId && rung.action === 'open')).map((fire) => fire.status),
           hlFills,
+          ownerLedger: attribution?.byLadder.get(l.id),
           plannedRiskUsd: plannedRisk,
-          positionStillOpen: openCoins.has(coin),
+          nominalRiskUsd: nominalRisk,
+          positionStillOpen: false,
           signalScore: annotateId && l.id.startsWith(annotateId) ? signal : (thesisById.get(l.id)?.s ?? existing.get(l.id)?.signalScore ?? null),
           timingScore: annotateId && l.id.startsWith(annotateId) ? timing : (thesisById.get(l.id)?.t ?? existing.get(l.id)?.timingScore ?? null),
           now,

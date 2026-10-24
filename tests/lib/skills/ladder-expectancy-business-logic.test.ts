@@ -8,6 +8,7 @@ import {
 } from '@/lib/skills/ladder-expectancy-business-logic';
 import type { LadderRung, LadderWithRungs } from '@/lib/ladder/ladder-types';
 import type { HlFill } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { attributeLadderFills } from '@/lib/ladder/ladder-outcome-business-logic';
 
 const NOW = 1_700_000_000_000;
 const ARMED_AT = NOW - 3 * 86_400_000;
@@ -59,48 +60,97 @@ describe('deriveSetupType', () => {
   });
 });
 
-describe('resolveLadderOutcome', () => {
-  const base = { plannedRiskUsd: 16, positionStillOpen: false, now: NOW };
+describe('position inventory attribution', () => {
+  const eth = (id: string, side: 'long' | 'short' = 'long', action: LadderRung['action'] = 'open') =>
+    ladder([rung({ id: `${id}-r`, ladderId: id, coin: 'ETH', side, action })], { id, title: `ETH ${id}` });
+  const fire = (id: string, at: number, oid?: number) => ({ ladderId: id, rungId: `${id}-r`, status: 'filled',
+    detail: oid == null ? null : JSON.stringify({ entryOid: oid }), firedAt: at });
+  // HL sends numeric fields as strings. The service normalises them before this pure ledger.
+  const hl = (side: 'buy' | 'sell', size: string, at: number, pnl = '0', fee = '0', oid?: number): HlFill =>
+    fill({ coin: 'ETH', side, sz: Number(size), time: at, closedPnl: Number(pnl), fee: Number(fee), oid });
+  const net = (row: { closedPnl: number; fees: number }) => row.closedPnl - row.fees;
 
-  it('never_filled: no filled fires → costless pass, R=0', () => {
-    const o = resolveLadderOutcome({ ...base, ladder: ladder([rung({ status: 'pending' })]), fireStatuses: ['failed'], hlFills: [] });
-    expect(o.outcome).toBe('never_filled');
-    expect(o.realizedR).toBe(0);
+  it('splits overlapping ETH ladder exits by FIFO lots and conserves every partial fill', () => {
+    const a = eth('a'); const b = eth('b');
+    const fills = [hl('buy', '1', 1_000, '0', '0.1', 11), hl('buy', '2', 2_000, '0', '0.2', 22),
+      hl('sell', '1.5', 3_000, '15', '0.15'), hl('sell', '1.5', 4_000, '6', '0.15')];
+    const result = attributeLadderFills([a, b], [fire('a', 999, 11), fire('b', 1_999, 22)], [...fills].reverse());
+    expect(net(result.byLadder.get('a')!)).toBeCloseTo(9.8);
+    expect(net(result.byLadder.get('b')!)).toBeCloseTo(10.6);
+    expect(result.conservation[0].passed).toBe(true);
+    expect(result.byLadder.get('a')?.openSize).toBeCloseTo(0);
   });
 
-  it('open: position still live → unresolved', () => {
-    const o = resolveLadderOutcome({ ...base, ladder: ladder([rung({})]), fireStatuses: ['filled'], hlFills: [], positionStillOpen: true });
-    expect(o.outcome).toBe('open');
-    expect(o.realizedR).toBeNull();
+  it('keeps a straddle runner with its opening ladder, not its management ladder', () => {
+    const straddle = eth('straddle', 'short'); const runner = eth('runner', 'short', 'stop_move');
+    const fills = [hl('sell', '2', 1_000, '0', '0.2'), hl('buy', '1', 2_000, '8', '0.1'),
+      hl('buy', '1', 3_000, '4', '0.1')];
+    const result = attributeLadderFills([straddle, runner], [fire('straddle', 998), fire('runner', 2_500)], fills);
+    expect(net(result.byLadder.get('straddle')!)).toBeCloseTo(11.6);
+    expect(result.byLadder.get('runner')?.entrySize).toBe(0);
+    expect(result.conservation[0].passed).toBe(true);
   });
 
-  it('open: fired but HL fills unavailable → cannot resolve yet', () => {
-    const o = resolveLadderOutcome({ ...base, ladder: ladder([rung({})]), fireStatuses: ['filled'], hlFills: null });
-    expect(o.outcome).toBe('open');
+  it('charges a resting stop without a recorded oid to the entry lot', () => {
+    const cpi = eth('cpi', 'short');
+    const result = attributeLadderFills([cpi], [fire('cpi', 1_000)],
+      [hl('sell', '1', 1_012, '0', '0.2', 9), hl('buy', '1', 40_000, '9.08', '0.2', 80)]);
+    expect(net(result.byLadder.get('cpi')!)).toBeCloseTo(8.68);
+    expect(result.fallbackCount).toBe(1);
   });
 
-  it('won: net closedPnl − fees inside the window → positive R', () => {
-    const fills = [
-      fill({ closedPnl: 8, fee: 0.1 }),
-      fill({ closedPnl: 4, fee: 0.1 }),
-      fill({ coin: 'ETH', closedPnl: 999 }),                    // other coin — excluded
-      fill({ closedPnl: 999, time: ARMED_AT - 86_400_000 }),    // before window — excluded
-    ];
-    const o = resolveLadderOutcome({ ...base, ladder: ladder([rung({})]), fireStatuses: ['filled'], hlFills: fills });
-    expect(o.outcome).toBe('won');
-    expect(o.realizedPnlUsd).toBeCloseTo(11.8, 2);
-    expect(o.realizedR).toBeCloseTo(11.8 / 16, 2);
+  it('keeps interleaved manual inventory and its exit separate', () => {
+    const a = eth('a');
+    const result = attributeLadderFills([a], [fire('a', 1_000, 11)],
+      [hl('buy', '1', 1_001, '0', '0.1', 11), hl('buy', '1', 2_000, '0', '0.1', 12),
+        hl('sell', '1', 3_000, '5', '0.1'), hl('sell', '1', 4_000, '-3', '0.1')]);
+    expect(net(result.byLadder.get('a')!)).toBeCloseTo(4.8);
+    expect(net(result.manual.get('ETH')!)).toBeCloseTo(-3.2);
+    expect(result.conservation[0].passed).toBe(true);
   });
 
-  it('scratch: |R| ≤ 0.05', () => {
-    const o = resolveLadderOutcome({ ...base, ladder: ladder([rung({})]), fireStatuses: ['filled'], hlFills: [fill({ closedPnl: 0.5, fee: 0 })] });
-    expect(o.outcome).toBe('scratch');
+  it('splits a flip into a close and a new manual lot', () => {
+    const a = eth('a');
+    const result = attributeLadderFills([a], [fire('a', 1_000, 11)],
+      [hl('buy', '1', 1_001, '0', '0.1', 11), hl('sell', '2', 2_000, '10', '0.2', 55),
+        hl('buy', '1', 3_000, '3', '0.1')]);
+    expect(net(result.byLadder.get('a')!)).toBeCloseTo(9.8);
+    expect(net(result.manual.get('ETH')!)).toBeCloseTo(2.8);
+    expect(result.manual.get('ETH')?.openSize).toBeCloseTo(0);
+    expect(result.conservation[0].passed).toBe(true);
   });
 
-  it('lost: negative net → lost with negative R', () => {
-    const o = resolveLadderOutcome({ ...base, ladder: ladder([rung({})]), fireStatuses: ['filled'], hlFills: [fill({ closedPnl: -9, fee: 0.2 })] });
-    expect(o.outcome).toBe('lost');
-    expect(o.realizedR).toBeLessThan(-0.5);
+  it('does not grant lots to an unfilled ladder while another ladder trades', () => {
+    const a = eth('a'); const unfilled = eth('unfilled');
+    const fills = [hl('buy', '1', 1_001, '0', '0.1', 11), hl('sell', '1', 2_000, '5', '0.1')];
+    const attribution = attributeLadderFills([a, unfilled], [fire('a', 1_000, 11)], fills);
+    const outcome = resolveLadderOutcome({ ladder: unfilled, fireStatuses: [], hlFills: fills,
+      ownerLedger: attribution.byLadder.get('unfilled'), plannedRiskUsd: 10, positionStillOpen: false, now: NOW });
+    expect(outcome.outcome).toBe('never_filled');
+  });
+
+  it('keeps a partly closed owned position open and exposes nominal R once flat', () => {
+    const a = eth('a');
+    const partial = attributeLadderFills([a], [fire('a', 1_000, 11)],
+      [hl('buy', '2', 1_001, '0', '0.2', 11), hl('sell', '1', 2_000, '5', '0.1')]);
+    expect(resolveLadderOutcome({ ladder: a, fireStatuses: ['filled'], hlFills: [],
+      ownerLedger: partial.byLadder.get('a'), plannedRiskUsd: 20, positionStillOpen: false, now: NOW }).outcome).toBe('open');
+    const flat = attributeLadderFills([a], [fire('a', 1_000, 11)],
+      [hl('buy', '2', 1_001, '0', '0.2', 11), hl('sell', '2', 2_000, '10', '0.2')]);
+    const outcome = resolveLadderOutcome({ ladder: a, fireStatuses: ['filled'], hlFills: [],
+      ownerLedger: flat.byLadder.get('a'), plannedRiskUsd: 20, nominalRiskUsd: 10,
+      positionStillOpen: false, now: NOW });
+    expect(outcome.realizedR).toBe(0.48);
+    expect(outcome.nominalR).toBe(0.96);
+  });
+
+  it('uses the nearest unclaimed filled fire and prefers an entry oid', () => {
+    const a = eth('a'); const b = eth('b');
+    const result = attributeLadderFills([a, b], [fire('a', 1_000), fire('b', 1_005, 22)],
+      [hl('buy', '1', 1_004, '0', '0', 22), hl('buy', '1', 1_006, '0', '0', 33)]);
+    expect(result.byLadder.get('a')?.entrySize).toBe(1);
+    expect(result.byLadder.get('b')?.entrySize).toBe(1);
+    expect(result.fallbackCount).toBe(1);
   });
 });
 

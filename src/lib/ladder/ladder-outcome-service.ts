@@ -9,6 +9,7 @@
 import 'server-only';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import type { LadderOutcomeRow } from '@/lib/skills/ladder-expectancy-business-logic';
+import type { OutcomeFire } from './ladder-outcome-business-logic';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function rowToOutcome(r: any): LadderOutcomeRow {
@@ -81,4 +82,17 @@ export async function fireStatusesByLadder(ladderIds: string[]): Promise<Map<str
     (out.get(id) ?? out.set(id, []).get(id)!).push(r.status as string);
   }
   return out;
+}
+
+/** Order identities and entry evidence for exclusive outcome attribution. */
+export async function outcomeFires(ladderIds: string[]): Promise<OutcomeFire[]> {
+  if (ladderIds.length === 0) return [];
+  const { data, error } = await getServiceRoleClient().from('ladder_fires')
+    .select('ladder_id,rung_id,status,detail,fired_at').in('ladder_id', ladderIds);
+  if (error) throw new Error(`outcomeFires failed: ${error.message}`);
+  return (data ?? []).map((row) => ({
+    ladderId: String(row.ladder_id), rungId: String(row.rung_id),
+    status: String(row.status), detail: typeof row.detail === 'string' ? row.detail : null,
+    firedAt: Date.parse(String(row.fired_at)),
+  }));
 }

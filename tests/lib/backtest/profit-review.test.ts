@@ -87,8 +87,15 @@ describe('straddleReport', () => {
       { ladder_id: 'B', title: 'BTC CPI straddle - long leg (event template)', coin: 'BTC', side: 'long', setup_type: 'x', planned_risk_usd: 132, realized_pnl_usd: 0, fees_usd: 0, realized_r: 0, outcome: 'never_filled', window_start: null, window_end: null },
       { ladder_id: 'C', title: 'ETH runner management (post-straddle)', coin: 'ETH', side: 'short', setup_type: 'x', planned_risk_usd: 0, realized_pnl_usd: 30, fees_usd: 1, realized_r: null, outcome: 'scratch', window_start: null, window_end: null },
     ];
-    const rungs: RungRow[] = [{ id: 'r', ladder_id: 'A', coin: 'BTC', action: 'open', trigger_kind: 'price_below', trigger_px: 1, risk_usd: 12 }];
-    const r = straddleReport(outs, rungs);
+    const rungs: RungRow[] = [
+      { id: 'r', ladder_id: 'A', coin: 'BTC', action: 'open', trigger_kind: 'price_below', trigger_px: 1, risk_usd: 12 },
+      { id: 'manage', ladder_id: 'B', coin: 'BTC', action: 'stop_move', trigger_kind: 'price_below', trigger_px: 1, risk_usd: null },
+    ];
+    const fires: FireRow[] = [
+      { id: 'entry-filled', ladder_id: 'A', rung_id: 'r', status: 'filled', fired_at: new Date(T0).toISOString() },
+      { id: 'management-filled', ladder_id: 'B', rung_id: 'manage', status: 'filled', fired_at: new Date(T0).toISOString() },
+    ];
+    const r = straddleReport(outs, rungs, fires);
     expect(r.fired).toBe(1);
     expect(r.neverFilled).toBe(1);
     expect(r.rows[0].slipAwareR).toBeCloseTo(0.0856, 3);

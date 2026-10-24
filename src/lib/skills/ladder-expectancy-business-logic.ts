@@ -7,14 +7,12 @@
  * PRE-REGISTERED bar → KILL / HOLD / SIZE-UP / COLLECT. Without this loop you cannot
  * distinguish profitable-by-skill from profitable-by-luck.
  *
- * No I/O. Realized PnL comes from HL's OWN fills (closedPnl, net of fee when present) —
- * the app's fills table can't see exchange-side stop/TP fills. Attribution is per-coin
- * over the ladder's active window, which is sound under the playbook's one-active-
- * campaign-per-coin rule (§5b); overlapping same-coin trades would blur it (flagged).
+ * No I/O. Realised P&L follows the owner of each exchange position lot.
  */
 
 import type { LadderWithRungs } from '@/lib/ladder/ladder-types';
 import type { HlFill } from '@/lib/hyperliquid/hyperliquid-info-service';
+import type { OwnerLedger } from '@/lib/ladder/ladder-outcome-business-logic';
 
 export type LadderOutcomeClass = 'never_filled' | 'open' | 'won' | 'lost' | 'scratch';
 
@@ -31,6 +29,7 @@ export interface LadderOutcomeRow {
   realizedPnlUsd: number | null;
   feesUsd: number | null;
   realizedR: number | null;
+  nominalR?: number | null;
   outcome: LadderOutcomeClass;
   windowStartMs: number;
   windowEndMs: number | null;
@@ -68,8 +67,12 @@ export interface ResolveOutcomeInput {
   /** HL fills for the OWNER account (any coin — filtered here), or null when unavailable
    *  (no address / paper): realized stays null unless the ladder never filled. */
   hlFills: HlFill[] | null;
+  /** Position inventory owned by this ladder. */
+  ownerLedger?: OwnerLedger;
   /** Slip-aware no-netting worst case (computeLadderRisk) — the planned R denominator. */
   plannedRiskUsd: number;
+  /** Sum of planned rung risk before slip, when available. */
+  nominalRiskUsd?: number | null;
   /** True when the ladder's coin still has a live position (outcome stays 'open'). */
   positionStillOpen: boolean;
   signalScore?: number | null;
@@ -83,7 +86,7 @@ export function resolveLadderOutcome(input: ResolveOutcomeInput): LadderOutcomeR
   const coin = (ladder.rungs[0]?.coin ?? '').toUpperCase();
   const side = ladder.rungs.find((r) => r.action === 'open')?.side ?? ladder.rungs[0]?.side ?? 'long';
   const windowStartMs = Date.parse(ladder.armedAt ?? ladder.createdAt);
-  const anyFilled = input.fireStatuses.some((s) => s === 'filled');
+  const anyFilled = input.ownerLedger ? input.ownerLedger.entrySize > 0 : input.fireStatuses.some((s) => s === 'filled');
 
   const base = {
     ladderId: ladder.id,
@@ -101,29 +104,28 @@ export function resolveLadderOutcome(input: ResolveOutcomeInput): LadderOutcomeR
   if (!anyFilled) {
     return { ...base, realizedPnlUsd: 0, feesUsd: 0, realizedR: 0, outcome: 'never_filled', windowEndMs: ladder.disarmedAt ? Date.parse(ladder.disarmedAt) : now, notes: 'No entry rung ever filled — costless pass (selectivity, not a loss).' };
   }
-  if (input.positionStillOpen) {
+  if (input.ownerLedger ? input.ownerLedger.openSize > 1e-9 : input.positionStillOpen) {
     return { ...base, realizedPnlUsd: null, feesUsd: null, realizedR: null, outcome: 'open', windowEndMs: null, notes: 'Position still live — re-resolve once flat.' };
   }
   if (input.hlFills == null) {
     return { ...base, realizedPnlUsd: null, feesUsd: null, realizedR: null, outcome: 'open', windowEndMs: null, notes: 'HL fills unavailable (no account address) — cannot resolve realized PnL yet.' };
   }
 
-  // Realized: Σ closedPnl − Σ fee for this coin inside [windowStart, now]. HL's closedPnl
-  // is the realized PnL on closing fills (excl. fees); fee is per-fill when HL sends it.
-  const inWindow = input.hlFills.filter((f) => f.coin.toUpperCase() === coin && f.time >= windowStartMs && f.time <= now);
-  const gross = inWindow.reduce((a, f) => a + (f.closedPnl ?? 0), 0);
-  const fees = inWindow.reduce((a, f) => a + (f.fee ?? 0), 0);
+  const gross = input.ownerLedger?.closedPnl ?? 0;
+  const fees = input.ownerLedger?.fees ?? 0;
   const net = gross - fees;
   const r = input.plannedRiskUsd > 0 ? net / input.plannedRiskUsd : null;
+  const nominalR = input.nominalRiskUsd && input.nominalRiskUsd > 0 ? net / input.nominalRiskUsd : null;
   const outcome: LadderOutcomeClass = r == null ? 'scratch' : r > SCRATCH_R ? 'won' : r < -SCRATCH_R ? 'lost' : 'scratch';
   return {
     ...base,
     realizedPnlUsd: Math.round(net * 100) / 100,
     feesUsd: Math.round(fees * 100) / 100,
     realizedR: r == null ? null : Math.round(r * 100) / 100,
+    nominalR: nominalR == null ? null : Math.round(nominalR * 100) / 100,
     outcome,
-    windowEndMs: now,
-    notes: inWindow.length === 0 ? 'Entry fired but no HL fills found in the window — check attribution.' : null,
+    windowEndMs: input.ownerLedger?.lastCloseMs ?? now,
+    notes: nominalR == null ? null : `Nominal R: ${nominalR.toFixed(2)} (funding excluded).`,
   };
 }
 

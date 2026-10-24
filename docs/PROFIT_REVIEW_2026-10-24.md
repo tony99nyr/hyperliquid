@@ -124,10 +124,17 @@ expectancy at n=7.
 - Event straddles are pooled into `breakout-long-single` /
   `breakdown-short-single` (`ladder-expectancy-business-logic.ts:48`), so the
   event lane has no verdict of its own.
-- **The count is disputed.** The Ladder Expert reads 2 fired straddles:
-  Retail Sales ETH short (+0.82R slip-aware) and CPI Sep BTC short (+0.09R
-  slip-aware, +$8.68 net). Item 0 counts 6 fired legs: 5 titled "(event
-  template)" plus FOMC v3. Both sources agree on 12 `never_filled` legs.
+- **The count is settled at 6 fired legs** (2026-10-24). The definition: a leg
+  is FIRED when its `open` rung has a `ladder_fires` row with
+  `status='filled'`, counted per leg, never per management fire. The six legs:
+  - PPI ETH long b965df6d (lost)
+  - CPI-Aug BTC long 7a024889
+  - Jackson Hole BTC short ce7d63cd
+  - FOMC v3 BTC short 880bdd71
+  - Retail Sales ETH short 1fa6710c
+  - CPI-Sep BTC short 9ddfcf7e
+
+  The other 12 legs are `never_filled` costless passes.
   - Several of the 6 rows carry the double-counted P&L above, so their R is
     unreliable either way.
   - Settle the definition of "fired" (and fix the overlap) before quoting any
@@ -231,6 +238,7 @@ expectancy at n=7.
 | 0 | **Reconciled evidence bundle.** Commit the reconstruction scripts (fills to round trips, `ladder_outcomes` join, straddle count, scorecard inputs) under `scripts/analysis/`. Reconcile the fill ledger with `ladder_outcomes`. | No number in this doc is verified. The F1 and F3 counts disagree. Reconcile "trend-follow +$164" against `ladder_outcomes` trend-follow-8h-long (net $112.90, 27 closed, +0.19R as of 2026-10-19). Exclude `stop_move` rows and trigger-0 indicator reduces from the fire-to-fill join (the pitfall in `DESK_PROFITABILITY.md`). | One reproducible run that every later verdict cites | S-M |
 | 1 | **Fix the lane scorecard.** Five fixes: per-session windows, quantity netting, historical funding, funding charged to the holding lane, per-lane registered bars and periods. Then re-score compression-straddle, and apply its bar only if the fixed code shows a negative net. | F2 | Unit tests with cross-session and partial-exit fixtures. Re-run the 10-13 and 10-19 scorecards inside the Monday retro, so the weekly cadence stays the multiplicity guard. | S-M |
 | 1b | **Fix `ladder_outcomes` attribution.** Attribute fills to ladders by their order ids or cloids, not by coin-and-window. Then backfill the existing rows. | F1: overlapping windows double-count P&L, so every ladder verdict is inflated | Fixture: two overlapping ETH ladders must sum to the fill total. Backfilled totals must match item 0. | S-M |
+
 | 2 | **Make `scout:review` read-only by default** (`--write` to persist). | F6 | Existing tests | S |
 | 3 | **Report both R units.** Add an `event-straddle` setup type. Add nominal-R and realised gap-past-stop beside slip-aware R. Keep slip-aware R for the arm cap. | F3 | Do NOT set a new pass bar after seeing these 6 trades. Pre-register the event lane's bar on fresh fires only. | S |
 | 4 | **Calendar and prep reliability.** Add NFP, PCE and PPI. Move straddle prep to the prod cron at T-30, with duplicate-prep protection. Prep creates `mode: 'live'` drafts; arming stays manual. | F5. **Land after the 2026-10-28 FOMC.** Do not change that print's prep path mid-flight. The proven path is a manual `pnpm straddle:prep` at T-30 plus the prod Discord ping (4-event track record). | Prints prepped / prints listed = 100%; no duplicate drafts | S |
@@ -241,6 +249,17 @@ expectancy at n=7.
 | 9 | **Shadow-test the runaway entries.** Measure the existing fills from the fill price. Compare pullback vs continuation vs split, with identical horizons, costs, stops and overshoot. | F5. The desk-retro discard vet already replays unarmed and expired drafts. The 2026-10-16 vet showed a pruned HYPE runaway as a dodged stop at -1R, so the unfilled set is not obviously money left behind. | Paired executable outcomes; correlated drafts collapsed to episodes | M |
 | 10 | **Structured blackout counterfactuals.** Record the refused trade's would-be outcome next to the existing stand-down log. | F5 | Paired per-event comparison; no exemption on raw "ghosts beat taken" | S |
 | 11 | **Research queue**, each pre-registered and only after 0-4: DVOL filter on straddles, OI-direction filter on htf breakouts, cross-venue funding as a crowding veto, regime-split expectancy, episode-based n. | F6 | Kill bars set per pre-registration | M each |
+
+Item 1b implementation note: older ladder orders did not send the stored rung cloid to HL.
+New fires record entry, reduce, stop and take-profit oids in `ladder_fires.detail`.
+The outcome resolver now walks the full account fill stream by coin. An opening fill
+uses its recorded entry oid first. Historical entries match the nearest unclaimed
+filled open/add fire from one second before to ten seconds after its fire time.
+Unmatched openings are manual lots. Closing fills consume lots FIFO, including
+resting stops and position flips. Funding is excluded. The backfill prints per-coin
+conservation and ladder/manual totals. `--write --backup PATH` requires a backup
+and refuses an incomplete fill history or a conservation failure. The historical
+ladder total still needs a dry run against account data before it is cited.
 
 ### Performance page (agent-first)
 
