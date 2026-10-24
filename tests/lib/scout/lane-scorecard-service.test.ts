@@ -13,10 +13,23 @@ function strictClient(tables: Record<'positions' | 'fills' | 'hypotheses', unkno
   return {
     from(table: keyof typeof tables) {
       const result = { data: tables[table], error: table === 'positions' ? failure : null };
+      let ordered = false;
+      const pageQuery = {
+        order: (column: string, options: { ascending: boolean }) => {
+          expect(column).toBe('id');
+          expect(options).toEqual({ ascending: true });
+          ordered = true;
+          return pageQuery;
+        },
+        range: () => {
+          expect(ordered).toBe(true);
+          return Promise.resolve(result);
+        },
+      };
       const checked = (column: string, ids: string[]) => {
         expect(column).toBe('session_id');
         expect(ids).toEqual(['session-1']);
-        return { range: () => Promise.resolve(result) };
+        return pageQuery;
       };
       return { select: () => ({
         in: checked,
@@ -50,5 +63,39 @@ describe('computeScoutLaneCards', () => {
     vi.mocked(scoutSessionIds).mockResolvedValue(['session-1']);
     await expect(computeScoutLaneCards(Date.parse('2026-10-24T12:00:00Z'), strictClient(qualifyingTables(), new Error('positions query failed'))))
       .rejects.toThrow('positions query failed');
+  });
+
+  it('counts only the closed statuses in the registered rubric family', async () => {
+    vi.mocked(scoutSessionIds).mockResolvedValue(['session-1']);
+    const tables: Record<'positions' | 'fills' | 'hypotheses', unknown[]> = qualifyingTables();
+    tables.hypotheses = [
+      { status: 'confirmed', lane: 'breakdown-short', excluded: false, created_at: '2026-10-01T00:00:00Z' },
+      { status: 'invalidated', lane: 'reclaim-long', excluded: false, created_at: '2026-10-01T00:00:00Z' },
+      { status: 'resolved', lane: 'breakdown-short', excluded: false, created_at: '2026-10-01T00:00:00Z' },
+      { status: 'open', lane: 'reclaim-long', excluded: false, created_at: '2026-10-01T00:00:00Z' },
+      { status: 'open', lane: 'unregistered-lane', excluded: false, created_at: '2026-10-01T00:00:00Z' },
+      { status: 'confirmed', lane: '', excluded: false, created_at: '2026-10-01T00:00:00Z' },
+    ];
+    const result = await computeScoutLaneCards(Date.parse('2026-10-24T12:00:00Z'), strictClient(tables));
+    expect(result.lanes.find((card) => card.lane === 'breakdown-short')?.tradeCount).toBe(3);
+    expect(result.lanes.find((card) => card.lane === 'reclaim-long')?.tradeCount).toBe(3);
+    expect(result.lanes.find((card) => card.lane === 'trend-follow')?.tradeCount).toBe(0);
+    expect(result.lanes.find((card) => card.lane === 'unregistered-lane')?.tradeCount).toBe(0);
+    expect(result.lanes.find((card) => card.lane === 'directional')?.tradeCount).toBe(1);
+  });
+
+  it('excludes pre-registration fills from each lane funding estimate', async () => {
+    vi.mocked(scoutSessionIds).mockResolvedValue(['session-1']);
+    const tables: Record<'positions' | 'fills' | 'hypotheses', unknown[]> = qualifyingTables();
+    tables.positions[0] = {
+      session_id: 'session-1', coin: 'ETH', side: 'long', lane: 'trend-follow', realized_pnl_usd: 0,
+      fees_paid_usd: 0, opened_at: '2026-10-23T10:00:00Z', updated_at: '2026-10-23T10:00:00Z',
+    };
+    tables.fills = [
+      { session_id: 'session-1', coin: 'ETH', side: 'buy', sz: 1, px: 2000, filled_at: '2026-07-27T10:00:00Z' },
+      { session_id: 'session-1', coin: 'ETH', side: 'buy', sz: 1, px: 2000, filled_at: '2026-10-23T10:00:00Z' },
+    ];
+    const result = await computeScoutLaneCards(Date.parse('2026-10-23T12:00:00Z'), strictClient(tables));
+    expect(result.lanes.find((card) => card.lane === 'trend-follow')?.detail.fundingMissingHours).toBe(1);
   });
 });

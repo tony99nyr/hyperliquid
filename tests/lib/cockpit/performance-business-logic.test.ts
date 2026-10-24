@@ -88,6 +88,21 @@ describe('performance-business-logic', () => {
       expect(ledger[0].coin).toBe('BTC');
     });
 
+    it('keeps open-position PnL and the headline net total after entry fees', () => {
+      const fills = [
+        fill({ side: 'buy', px: 100, sz: 1, feeUsd: 1, filledAt: DAY }),
+        fill({ side: 'sell', px: 110, sz: 1, feeUsd: 1, filledAt: DAY + 1 }),
+        fill({ side: 'buy', px: 100, sz: 1, feeUsd: 2, filledAt: 2 * DAY, coin: 'BTC' }),
+      ];
+      const ledger = buildLedger(fills, { BTC: 105 }, 3 * DAY);
+      const closed = ledger.find((trade) => trade.status !== 'open');
+      const open = ledger.find((trade) => trade.status === 'open');
+      expect(closed?.pnlUsd).toBeCloseTo(8);
+      expect(open?.pnlUsd).toBeCloseTo(3);
+      expect(open?.feesUsd).toBeCloseTo(2);
+      expect(ledger.reduce((sum, trade) => sum + trade.pnlUsd, 0)).toBeCloseTo(11);
+    });
+
     it('returns newest-first across coins', () => {
       const fills = [
         fill({ side: 'buy', px: 100, sz: 1, filledAt: 1 * DAY, coin: 'ETH' }),

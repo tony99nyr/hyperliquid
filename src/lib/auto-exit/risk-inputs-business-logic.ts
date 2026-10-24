@@ -55,7 +55,7 @@ export function buildAutoExitInputs(a: BuildInputsArgs): AutoExitInputs {
   const side: 'long' | 'short' = a.position.side === 'long' ? 'long' : 'short';
   const hasCh = a.hlPosition != null;
   const upnl =
-    hasCh && Number.isFinite(a.hlPosition!.unrealizedPnl)
+    hasCh && a.hlPosition!.unrealizedPnlValid !== false && Number.isFinite(a.hlPosition!.unrealizedPnl)
       ? a.hlPosition!.unrealizedPnl
       : computeUnrealizedPnlUsd(a.position, a.markPx);
   return {

@@ -127,8 +127,13 @@ export async function placeBracketOnHl(coin: string, stopPx: number, tpPx: numbe
   const expectedPx = Number(formatHlPrice(stopPx, asset.szDecimals));
   const expectedSize = Number(formatHlSize(size, asset.szDecimals));
   const expectedSide = side === 'long' ? 'A' : 'B';
-  const confirmedStopOid = stopOid ?? (await findOpenStops(coin)).find((stop) =>
-    !priorOids.has(stop.oid) && stop.side === expectedSide && stop.triggerPx === expectedPx && stop.sz === expectedSize,
-  )?.oid ?? null;
+  let confirmedStopOid = stopOid;
+  for (let attempt = 0; confirmedStopOid == null && attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 250));
+    confirmedStopOid = (await findOpenStops(coin)).find((stop) =>
+      !priorOids.has(stop.oid) && stop.side === expectedSide && stop.triggerPx === expectedPx &&
+      (stop.sz === expectedSize || (stop.sz === 0 && stop.isPositionTpsl === true)),
+    )?.oid ?? null;
+  }
   return { pushed: true, stopOid: confirmedStopOid, tpOid };
 }

@@ -92,6 +92,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   try {
     const res = await placeBracketOnHl(coin, stopPx, tpPx, position.sz, side);
+    if (res.pushed && res.stopOid == null) throw new Error('Bracket stop was not confirmed resting');
     await writeAnalysisLog({ sessionId: session.id, source: 'position-bracket', severity: 'info', message: `PLACE BRACKET: ${coin} ${side} stop $${stopPx} / tp $${tpPx} sz ${position.sz} (${res.pushed ? `pushed stop ${res.stopOid} tp ${res.tpOid}` : 'paper'}).` }).catch(() => {});
     return NextResponse.json({ ok: true, pushed: res.pushed, stopOid: res.stopOid, tpOid: res.tpOid, stopPx, tpPx });
   } catch (err) {

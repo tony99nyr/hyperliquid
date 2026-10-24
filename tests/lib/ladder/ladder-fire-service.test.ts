@@ -288,6 +288,13 @@ describe('performLadderRungFire — execution', () => {
     expect(releaseOcoClaim).not.toHaveBeenCalled(); // not an OCO ladder
   });
 
+  it('a paper open does not consume its claim on an unrelated position read error', async () => {
+    loadPosition.mockRejectedValue(new Error('ledger temporarily unavailable'));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.fired).toBe(true);
+    expect(executeIntent).toHaveBeenCalledTimes(1);
+  });
+
   it('OCO no-fill releases the group claim so the sibling leg stays live', async () => {
     getLadderWithRungs.mockResolvedValue(ladder({ ocoGroupId: 'grp-1' }));
     executeIntent.mockResolvedValue({ sz: 0, avgPx: 0 });
@@ -312,20 +319,46 @@ describe('performLadderRungFire — execution', () => {
     getHlAccountAddress.mockReturnValue('0xabc');
     getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live', ocoGroupId: 'grp-1' }));
     fetchClearinghouseState.mockResolvedValue({ stale: false, positions: [] });
-    executeIntent.mockRejectedValue(new Error('HL margin reject'));
+    executeIntent.mockRejectedValue(new Error('HL order error: insufficient margin'));
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(res).toMatchObject({ fired: false, skipped: 'open-rejected' });
     expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1');
-    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'failed', expect.stringContaining('HL margin reject'));
-    expect(writeAnalysisLog).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('HL margin reject') }));
+    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'failed', expect.stringContaining('insufficient margin'));
+    expect(writeAnalysisLog).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('insufficient margin') }));
     expect(writeAnalysisLog).not.toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('fault after fill') }));
+  });
+
+  it('does not flatten an existing position when the exchange rejects an open', async () => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc');
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live', ocoGroupId: 'grp-1' }));
+    fetchClearinghouseState.mockResolvedValue({ stale: false, positions: [{ coin: 'ETH', side: 'long', size: 1, entryPx: 1800 }] });
+    executeIntent.mockRejectedValue(new Error('HL order error: insufficient margin'));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toBe('open-rejected');
+    expect(executeIntent).toHaveBeenCalledTimes(1);
+    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1');
+  });
+
+  it('keeps the OCO claim and reports an unknown outcome after a transport timeout', async () => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc');
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live', ocoGroupId: 'grp-1' }));
+    fetchClearinghouseState.mockResolvedValue({ stale: false, positions: [{ coin: 'ETH', side: 'long', size: 1, entryPx: 1800 }] });
+    executeIntent.mockRejectedValue(new Error('fetch timed out'));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.fired).toBe(false);
+    expect(executeIntent).toHaveBeenCalledTimes(1);
+    expect(releaseOcoClaim).not.toHaveBeenCalled();
+    expect(writeAnalysisLog).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('outcome unknown') }));
   });
 
   it('a rejected live open keeps the OCO claim when the position read finds a fill', async () => {
     getTradingMode.mockReturnValue('live');
     getHlAccountAddress.mockReturnValue('0xabc');
     getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live', ocoGroupId: 'grp-1' }));
-    fetchClearinghouseState.mockResolvedValue({ stale: false, positions: [{ coin: 'ETH', side: 'long', size: 0.625, entryPx: 2000 }] });
+    fetchClearinghouseState.mockResolvedValueOnce({ stale: false, positions: [] })
+      .mockResolvedValue({ stale: false, positions: [{ coin: 'ETH', side: 'long', size: 0.625, entryPx: 2000 }] });
     executeIntent.mockRejectedValueOnce(new Error('persist failed')).mockResolvedValue({ sz: 0.625, hlOrderId: '102' });
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(res.skipped).toBe('fault-flattened');
@@ -431,7 +464,8 @@ describe('performLadderRungFire — execution', () => {
     getHlAccountAddress.mockReturnValue('0xabc'); // live → loadEffectivePosition reads HL
     placeStopOnHl.mockRejectedValue(new Error('HL stop rejected'));
     // loadEffectivePosition reads the LIVE HL position for a live ladder.
-    fetchClearinghouseState.mockResolvedValue({ positions: [{ coin: 'ETH', side: 'long', size: 0.625, entryPx: 2000 }] });
+    fetchClearinghouseState.mockResolvedValueOnce({ positions: [] })
+      .mockResolvedValue({ positions: [{ coin: 'ETH', side: 'long', size: 0.625, entryPx: 2000 }] });
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(res.flattened).toBe(true);
     expect(res.fired).toBe(false);
@@ -446,7 +480,8 @@ describe('performLadderRungFire — execution', () => {
     // The live order FILLED on HL, but persistFill threw → executeIntent throws on the open.
     getHlAccountAddress.mockReturnValue('0xabc'); // live → loadEffectivePosition reads HL
     executeIntent.mockRejectedValueOnce(new Error('Supabase persistFill failed')).mockResolvedValue({ sz: 0.625, avgPx: 2000 });
-    fetchClearinghouseState.mockResolvedValue({ positions: [{ coin: 'ETH', side: 'long', size: 0.625, entryPx: 2000 }] });
+    fetchClearinghouseState.mockResolvedValueOnce({ positions: [] })
+      .mockResolvedValue({ positions: [{ coin: 'ETH', side: 'long', size: 0.625, entryPx: 2000 }] });
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(res.flattened).toBe(true); // the (possible) exposure was flattened, not left unstopped
     expect(executeIntent).toHaveBeenCalledTimes(2); // the throwing open, then the flatten close
@@ -483,6 +518,20 @@ describe('performLadderRungFire — execution', () => {
     expect(markFireOutcome).toHaveBeenCalledWith('f1', 'filled', JSON.stringify({ entryOid: null, stopOid: 501, tpOid: null }));
   });
 
+  it('does not flatten the healthy base when a live add is rejected', async () => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc');
+    const add = openRung({ action: 'add' });
+    const liveState = [{ coin: 'ETH', side: 'long' as const, leverage: 5 }];
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live', preconditionHash: hashPreconditionSnapshot(buildPreconditionSnapshot([add], liveState)) }, [add]));
+    fetchClearinghouseState.mockResolvedValue({ stale: false, positions: [{ coin: 'ETH', side: 'long', size: 1, entryPx: 1800, leverage: 5, unrealizedPnl: 500 }] });
+    loadPosition.mockResolvedValue({ coin: 'ETH', side: 'long', sz: 1, avgEntryPx: 1800 });
+    executeIntent.mockRejectedValue(new Error('HL order error: insufficient margin'));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toBe('open-rejected');
+    expect(executeIntent).toHaveBeenCalledTimes(1);
+  });
+
   it('a stale live-add read skips before the claim and leaves the rung pending', async () => {
     getTradingMode.mockReturnValue('live');
     getHlAccountAddress.mockReturnValue('0xabc');
@@ -494,6 +543,19 @@ describe('performLadderRungFire — execution', () => {
       .mockResolvedValueOnce({ stale: true, positions: [] });
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(res.skipped).toContain('cannot-verify-add');
+    expect(claimRungFire).not.toHaveBeenCalled();
+    expect(setRungStatus).not.toHaveBeenCalled();
+  });
+
+  it('invalid live add uPnL skips before the claim and stays retryable', async () => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc');
+    const add = openRung({ action: 'add' });
+    const liveState = [{ coin: 'ETH', side: 'long' as const, leverage: 5 }];
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live', preconditionHash: hashPreconditionSnapshot(buildPreconditionSnapshot([add], liveState)) }, [add]));
+    fetchClearinghouseState.mockResolvedValue({ stale: false, positions: [{ coin: 'ETH', side: 'long', size: 1, leverage: 5, unrealizedPnl: 0, unrealizedPnlValid: false }] });
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toBe('cannot-verify-add: invalid uPnL');
     expect(claimRungFire).not.toHaveBeenCalled();
     expect(setRungStatus).not.toHaveBeenCalled();
   });

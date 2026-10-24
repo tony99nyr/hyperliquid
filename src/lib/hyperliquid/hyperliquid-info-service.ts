@@ -735,7 +735,7 @@ export interface HlOpenOrder {
   sz: number;
   triggerPx: number | null;
   isTrigger: boolean;
-  reduceOnly: boolean;
+  reduceOnly: boolean; isPositionTpsl?: boolean;
   /** e.g. "Stop Market", "Take Profit Market", "Limit". */
   orderType: string;
 }
@@ -750,7 +750,7 @@ export async function fetchOpenOrders(rawAddress: string, network: 'mainnet' | '
   const address = normalizeHlAddress(rawAddress);
   if (!isValidHlAddress(address)) return [];
   const raw = await hlInfoPost<Array<Record<string, unknown>>>({ type: 'frontendOpenOrders', user: address }, hlInfoUrlFor(network));
-  if (!Array.isArray(raw)) return [];
+  if (!Array.isArray(raw)) throw new Error('frontendOpenOrders returned a non-array payload');
   return raw.map((o) => ({
     coin: String(o.coin ?? '').toUpperCase(),
     oid: num(o.oid),
@@ -758,7 +758,7 @@ export async function fetchOpenOrders(rawAddress: string, network: 'mainnet' | '
     sz: num(o.sz),
     triggerPx: o.triggerPx == null ? null : num(o.triggerPx),
     isTrigger: o.isTrigger === true,
-    reduceOnly: o.reduceOnly === true,
+    reduceOnly: o.reduceOnly === true, isPositionTpsl: o.isPositionTpsl === true,
     orderType: String(o.orderType ?? ''),
   }));
 }

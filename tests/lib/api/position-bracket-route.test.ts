@@ -84,6 +84,13 @@ describe('position-bracket route', () => {
     expect(res.status).toBe(502);
   });
 
+  it('502 when a pushed bracket has no confirmed stop order ID', async () => {
+    placeBracketOnHl.mockResolvedValue({ pushed: true, stopOid: null, tpOid: 12 });
+    const res = await POST(postReq({ coin: 'SOL', stopPx: 108, tpPx: 90 }));
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ ok: false });
+  });
+
   it('403 cross-origin', async () => {
     isSameOrigin.mockReturnValue(false);
     expect((await POST(postReq({ coin: 'SOL', stopPx: 108, tpPx: 90 }))).status).toBe(403);

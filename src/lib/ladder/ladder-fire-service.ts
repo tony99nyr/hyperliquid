@@ -16,12 +16,13 @@
  *   6. ATOMIC claim via ladder_fires.dedupe_key — a double-fire gets claimed=false.
  *      An OCO 'open' rung claims its whole group atomically (claim_oco_ladder_fire,
  *      migration 0045), so concurrent ticks can never fire both straddle legs. A
- *      no-fill open releases the group claim (no exposure); a fill keeps it.
+ *      confirmed no-fill opens release the group claim; uncertain outcomes keep it.
  *   7. ADD gates: an 'add' refuses an opposite-side live position, and fires only
  *      if its worst-case loss is covered by the position's current unrealized profit
  *   8. execute → for open/add, ATOMICALLY bracket the fill. The fill counts as 'filled'
- *      only once the stop is CONFIRMED resting (pushed + oid); a reject or unconfirmed
- *      stop FLATTENS (the "filled-but-unstopped" hard fault). A stale or errored
+ *      only once the stop is CONFIRMED resting (pushed + oid). A post-fill fault or
+ *      unconfirmed stop FLATTENS. An explicit unfilled rejection leaves the base intact.
+ *      A stale or errored
  *      position read never counts as flat: report unflattened + critical alert.
  */
 
@@ -184,6 +185,7 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
   if (!Number.isFinite(markPx) || markPx <= 0) return skip('bad-mark');
 
   let liveAddPosition: HlPosition | null = null;
+  let preClaimPositionSize: number | null = null;
 
   // 5b) EXPOSURE GATES (live opens/adds only; risk-reducing rungs are NEVER blocked).
   // Both fail CLOSED on unreadable state and sit BEFORE the claim (skip = retryable).
@@ -205,6 +207,7 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
       if (!address) return skip('cannot-verify-heat: no account address');
       const ch = await fetchClearinghouseState(address, { uncached: true });
       if (ch.stale || ch.error) return skip('cannot-verify-heat: clearinghouse unreadable');
+      preClaimPositionSize = ch.positions.find((p) => p.coin.toUpperCase() === coin)?.size ?? 0;
       const stops = await findAllStops();
       const heatPositions = ch.positions.map((p) => ({
         sz: p.size,
@@ -233,6 +236,8 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
         const ch = await fetchClearinghouseState(address, { uncached: true });
         if (ch.stale || ch.error) return skip('cannot-verify-add: clearinghouse unreadable');
         liveAddPosition = ch.positions.find((p) => p.coin.toUpperCase() === coin) ?? null;
+        if (liveAddPosition?.unrealizedPnlValid === false) return skip('cannot-verify-add: invalid uPnL');
+        preClaimPositionSize = liveAddPosition?.size ?? 0;
       } catch (e) {
         return skip(`cannot-verify-add: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -297,7 +302,7 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
       await setRungStatus(rung.id, 'failed');
       return skip('indicator triggers are exit-only — refusing open/add');
     }
-    return await fireOpenOrAdd(ladder, rung, session.id, coin, markPx, fireId, forcePaper, liveAddPosition);
+    return await fireOpenOrAdd(ladder, rung, session.id, coin, markPx, fireId, forcePaper, liveAddPosition, preClaimPositionSize);
   } catch (e) {
     await markFireOutcome(fireId, 'failed', e instanceof Error ? e.message : String(e));
     await setRungStatus(rung.id, 'failed');
@@ -305,9 +310,9 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
   }
 }
 
-/** OPEN / ADD — increases exposure. ADD is gated by the runtime risk-covered-by-profit
- *  rule; both atomically bracket the fill (stop[+target]); a bracket reject FLATTENS. */
-async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionId: string, coin: string, markPx: number, fireId: string, forcePaper: boolean, liveAddPosition: HlPosition | null): Promise<LadderFireResult> {
+/** OPEN / ADD increases exposure. The add gate checks profit coverage.
+ *  Both actions bracket a fill; an unconfirmed stop triggers the flatten fault path. */
+async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionId: string, coin: string, markPx: number, fireId: string, forcePaper: boolean, liveAddPosition: HlPosition | null, preClaimPositionSize: number | null): Promise<LadderFireResult> {
   const side = rung.side;
   // Size + stop come from the rung's risk inputs, computed at the CURRENT mark.
   const stopFrac = rung.stopFrac ?? (rung.stopPx != null && rung.stopPx > 0 ? Math.abs(markPx - rung.stopPx) / markPx : null);
@@ -362,6 +367,8 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
   // so a Supabase write throwing AFTER a live fill leaves a real open position → FLATTEN
   // (never leave it unstopped). filledSize defaults to the intended size for that flatten.
   let filledSize = proposal.intent.sz;
+  const sizeBefore = forcePaper ? 0 : preClaimPositionSize;
+  if (sizeBefore == null) return skip('cannot-verify-position-before-open');
   let fill;
   try {
     fill = await executeIntent(proposal.intent, { forcePaper });
@@ -373,12 +380,20 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
     } catch {
       return await flattenAfterFault(ladder, rung, sessionId, coin, fireId, forcePaper, filledSize, reason);
     }
-    if (!pos || pos.side === 'flat' || !(pos.sz > 0)) {
+    const unchanged = forcePaper ? !pos || pos.side === 'flat' || !(pos.sz > 0) : (pos?.sz ?? 0) === sizeBefore;
+    const parsedRejection = err instanceof Error && (err.message.startsWith('HL order error:') || err.message.startsWith('HL exchange rejected:'));
+    if (unchanged && parsedRejection) {
       await releaseNoFillOcoClaim(ladder, rung, sessionId, 'rejected open');
       await markFireOutcome(fireId, 'failed', reason);
       await setRungStatus(rung.id, 'failed');
       await alert(sessionId, `Ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: open rejected with no fill. ${reason}`);
       return skip('open-rejected');
+    }
+    if (unchanged) {
+      await markFireOutcome(fireId, 'failed', `CRITICAL outcome unknown — possible late fill and UNSTOPPED position: ${reason}`);
+      await setRungStatus(rung.id, 'failed');
+      await alert(sessionId, `CRITICAL: Ladder ${ladder.id.slice(0, 8)} rung ${rung.seq} outcome unknown; OCO claim retained. Check ${coin} for a late fill and resting stop. ${reason}`);
+      return { fired: false, skipped: 'fault-flatten-failed', flattened: false };
     }
     return await flattenAfterFault(ladder, rung, sessionId, coin, fireId, forcePaper, filledSize, reason);
   }

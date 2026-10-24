@@ -33,6 +33,26 @@ describe('placeBracketOnHl', () => {
     expect(h.fetchOpenOrders).toHaveBeenCalledTimes(2);
   });
 
+  it('confirms a position-attached stop with zero size', async () => {
+    h.submitBracket.mockResolvedValue({ stopOid: null, tpOid: null });
+    h.fetchOpenOrders.mockReset().mockResolvedValueOnce([]).mockResolvedValueOnce([
+      { ...restingStop, sz: 0, isPositionTpsl: true },
+    ]);
+    await expect(placeBracketOnHl('ETH', 1900, 2200, 1.5, 'long')).resolves.toEqual({
+      pushed: true, stopOid: 73, tpOid: null,
+    });
+  });
+
+  it('retries read-back twice when the new stop is delayed', async () => {
+    h.submitBracket.mockResolvedValue({ stopOid: null, tpOid: null });
+    h.fetchOpenOrders.mockReset().mockResolvedValueOnce([]).mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]).mockResolvedValueOnce([restingStop]);
+    await expect(placeBracketOnHl('ETH', 1900, 2200, 1.5, 'long')).resolves.toEqual({
+      pushed: true, stopOid: 73, tpOid: null,
+    });
+    expect(h.fetchOpenOrders).toHaveBeenCalledTimes(4);
+  });
+
   it('uses a returned stop order ID without a second read', async () => {
     h.submitBracket.mockResolvedValue({ stopOid: 71, tpOid: 72 });
     await expect(placeBracketOnHl('ETH', 1900, 2200, 1.5, 'long')).resolves.toEqual({
@@ -84,10 +104,35 @@ describe('placeBracketOnHl', () => {
 
   it('does not confirm a new order with the wrong protective side', async () => {
     h.submitBracket.mockResolvedValue({ stopOid: null, tpOid: null });
-    h.fetchOpenOrders.mockReset().mockResolvedValueOnce([]).mockResolvedValueOnce([{ ...restingStop, side: 'B' }]);
+    h.fetchOpenOrders.mockReset().mockResolvedValueOnce([]).mockResolvedValue([{ ...restingStop, side: 'B' }]);
     await expect(placeBracketOnHl('ETH', 1900, 2200, 1.5, 'long')).resolves.toEqual({
       pushed: true, stopOid: null, tpOid: null,
     });
+  });
+
+  it('does not confirm a zero-size stop without the position TP/SL flag', async () => {
+    h.submitBracket.mockResolvedValue({ stopOid: null, tpOid: null });
+    h.fetchOpenOrders.mockReset().mockResolvedValueOnce([]).mockResolvedValue([{ ...restingStop, sz: 0 }]);
+    await expect(placeBracketOnHl('ETH', 1900, 2200, 1.5, 'long')).resolves.toEqual({
+      pushed: true, stopOid: null, tpOid: null,
+    });
+  });
+
+  it.each([
+    { side: 'B' },
+    { triggerPx: 1910 },
+    { reduceOnly: false },
+    { isTrigger: false },
+    { orderType: 'Take Profit Market' },
+  ])('does not confirm a zero-size position stop with invalid fields: %j', async (invalid) => {
+    h.submitBracket.mockResolvedValue({ stopOid: null, tpOid: null });
+    h.fetchOpenOrders.mockReset().mockResolvedValueOnce([]).mockResolvedValue([
+      { ...restingStop, sz: 0, isPositionTpsl: true, ...invalid },
+    ]);
+    await expect(placeBracketOnHl('ETH', 1900, 2200, 1.5, 'long')).resolves.toEqual({
+      pushed: true, stopOid: null, tpOid: null,
+    });
+    expect(h.fetchOpenOrders).toHaveBeenCalledTimes(4);
   });
 
   it.each([
@@ -95,7 +140,7 @@ describe('placeBracketOnHl', () => {
     { field: 'sz', stop: { sz: 1.4 } },
   ])('does not confirm a new order with the wrong $field', async ({ stop }) => {
     h.submitBracket.mockResolvedValue({ stopOid: null, tpOid: null });
-    h.fetchOpenOrders.mockReset().mockResolvedValueOnce([]).mockResolvedValueOnce([{ ...restingStop, ...stop }]);
+    h.fetchOpenOrders.mockReset().mockResolvedValueOnce([]).mockResolvedValue([{ ...restingStop, ...stop }]);
     await expect(placeBracketOnHl('ETH', 1900, 2200, 1.5, 'long')).resolves.toEqual({
       pushed: true, stopOid: null, tpOid: null,
     });

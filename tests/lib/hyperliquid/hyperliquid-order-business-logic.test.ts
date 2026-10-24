@@ -168,6 +168,9 @@ describe('parseOrderResponse', () => {
   it('throws on a top-level failure (status !== ok)', () => {
     expect(() => parseOrderResponse({ status: 'err', response: 'bad nonce' })).toThrow(/HL exchange rejected: bad nonce/);
   });
+  it('does not label a missing exchange status as an explicit rejection', () => {
+    expect(() => parseOrderResponse({ response: 'bad gateway' })).toThrow(/unknown response status/);
+  });
   it('throws when there is no status', () => {
     expect(() => parseOrderResponse({ status: 'ok', response: { type: 'order', data: { statuses: [] } } })).toThrow(/no order status/);
   });

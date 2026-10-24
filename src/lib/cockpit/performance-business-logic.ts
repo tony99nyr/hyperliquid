@@ -270,7 +270,7 @@ function tradesForCoin(
       entryPx: pos.avgEntryPx,
       exitPx: mark ?? null,
       leverage: null,
-      pnlUsd: unrealized,
+      pnlUsd: unrealized - (pos.feesPaidUsd - feesBase),
       feesUsd: pos.feesPaidUsd - feesBase,
       status: 'open',
       today: openedAt >= todayStartMs,

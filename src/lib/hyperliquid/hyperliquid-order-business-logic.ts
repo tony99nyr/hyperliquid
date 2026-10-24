@@ -229,10 +229,11 @@ export function parseOrderResponse(json: unknown): ParsedOrderResult {
     status?: string;
     response?: unknown;
   };
-  if (j?.status !== 'ok') {
+  if (j?.status === 'err') {
     const detail = typeof j?.response === 'string' ? j.response : JSON.stringify(j?.response ?? j);
     throw new Error(`HL exchange rejected: ${detail}`);
   }
+  if (j?.status !== 'ok') throw new Error(`HL exchange: unknown response status ${JSON.stringify(j?.status)}`);
   const data = (j.response as { data?: { statuses?: OrderStatus[] } } | undefined)?.data;
   const st = data?.statuses?.[0];
   if (!st) throw new Error('HL exchange: no order status in response');
