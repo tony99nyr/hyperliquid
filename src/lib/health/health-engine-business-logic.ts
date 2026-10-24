@@ -165,9 +165,10 @@ export function computeHealth(
     readTimeframe(tf, candles[tf], weights.timeframeWeights[tf]),
   );
 
-  if (reads.every((read) => read.weight === 0)) {
-    return { score: 0, pContinuation: 0, pAdverse: 0, alerts: ['no-data'], timeframeReads: reads };
-  }
+  // No usable timeframe (every feed stale or empty): stay NEUTRAL, never adverse.
+  // A score of 0 here would make auto-exit flatten a live position on a feed outage.
+  // The 'no-data' alert carries no penalty; neutral can never authorise an ADD.
+  const noData = reads.every((read) => read.weight === 0);
 
   // 2. Weighted directional score in [-1, 1] (bull positive, bear negative).
   const totalWeight = reads.reduce((sum, r) => sum + r.weight, 0);
@@ -190,8 +191,8 @@ export function computeHealth(
     totalWeight > 0 ? (agreeingWeight / totalWeight) * weights.score.alignmentBonusMax : 0;
 
   // 5. Alerts + penalty.
-  const alerts = computeAlerts(candles, reads, position, weights);
-  const alertPenalty = Math.min(
+  const alerts: HealthAlert[] = noData ? ['no-data'] : computeAlerts(candles, reads, position, weights);
+  const alertPenalty = noData ? 0 : Math.min(
     alerts.length * weights.score.alertPenaltyEach,
     weights.score.alertPenaltyMax,
   );

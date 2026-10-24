@@ -32,7 +32,8 @@ export function reviewPosition(inp: PositionReviewInput, cfg: RubricConfig): Pos
 
   // Thesis broken: the higher-TF regime is confirmed AGAINST the held side.
   const regimeOpposed = rubric[positionSide].gates.againstConfirmedHtf;
-  const hasAlerts = health.alerts.length > 0;
+  // 'no-data' (feed outage) is a visibility flag, not a reason to trim or exit.
+  const hasAlerts = health.alerts.some((a) => a !== 'no-data');
 
   let verdict: Verdict;
   if (health.score < cfg.review.exitBelow) {
