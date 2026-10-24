@@ -347,6 +347,15 @@ push), the ladder_outcomes backfill (75 rows, backup in ~/hl-backups/), and thre
 polish-loop iterations (2 High and 1 Critical caught before deploy, plus 20
 Medium).
 
+Performance page (agent-first): shipped 2026-10-24 (583deae backend, 1ca2040
+Lanes view). Migration 0046 applied and verified. The NAS checkout was updated,
+and its scorecard writer now records compression-straddle at -$12.39, KILL
+(19:50 UTC). Caveat: the forecast resamples whole episodes, so its downside
+(P5, worst 30-day loss) is optimistic until more trades accumulate.
+
+Next in the plan: item 4 (NFP, PCE, PPI and cron-driven prep) after the
+2026-10-28 FOMC; then items 6-10.
+
 Deferred Low items (fix in a later session, not in the loop):
 
 - `releaseOcoClaim`: the check and the delete are separate statements; a ladder
