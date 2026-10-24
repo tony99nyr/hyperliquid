@@ -1,6 +1,12 @@
-/** Read-only DVOL straddle study. Run with --fixture FILE or --outcomes FILE. */
+/**
+ * Read-only DVOL straddle study. Default (no flags): reads filled live event-straddle
+ * outcomes from Supabase (SELECT only) and pulls Deribit public DVOL and daily closes.
+ * Offline: --fixture FILE or --outcomes FILE.
+ */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { loadStudyEnv, politeFetch, sleep } from './_study-io';
+import { loadStraddleLegs } from './_straddle-legs';
 import {
   evaluateDvolStraddles,
   type DailyClose,
@@ -58,8 +64,8 @@ async function cachedRequest(endpoint: string, params: Record<string, string>, k
   catch (error) { if (object(error)?.code !== 'ENOENT') throw error; }
   const url = new URL(`https://www.deribit.com/api/v2/public/${endpoint}`);
   for (const [name, value] of Object.entries(params)) url.searchParams.set(name, value);
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Deribit ${endpoint}: HTTP ${response.status}`);
+  await sleep(250);
+  const response = await politeFetch(url, {}, { label: `Deribit ${endpoint}` });
   const payload: unknown = await response.json();
   if (!object(payload) || object(payload)?.error) throw new Error(`Deribit ${endpoint} returned an error`);
   await mkdir(CACHE_DIR, { recursive: true });
@@ -83,15 +89,19 @@ async function downloadHistory(coin: 'BTC' | 'ETH', legs: StraddleLeg[]): Promis
   // Short chunks keep each public endpoint response bounded and make cache reuse explicit.
   for (let start = first - 32 * DAY_MS; start <= last; start += 20 * DAY_MS) {
     const end = Math.min(start + 20 * DAY_MS, last + DAY_MS);
-    const key = `${coin}-chart-${start}-${end}`;
+    const key = `${coin}-chart60-${start}-${end}`;
     const result = resultOf(await cachedRequest('get_tradingview_chart_data', {
-      instrument_name: `${coin}-PERPETUAL`, start_timestamp: String(start), end_timestamp: String(end), resolution: '1D',
+      instrument_name: `${coin}-PERPETUAL`, start_timestamp: String(start), end_timestamp: String(end), resolution: '60',
     }, key));
     if (!Array.isArray(result.ticks) || !Array.isArray(result.close)) throw new Error(`Deribit ${key} lacks daily candles`);
+    // Deribit's own daily bar ends at 08:00 UTC. The study needs UTC calendar days, so build each
+    // day's close from the last hourly bucket (23:00-24:00 UTC), stamped at the midnight that ends it.
     for (let index = 0; index < result.ticks.length; index++) {
       const tick = result.ticks[index];
       const close = result.close[index];
-      if (typeof tick === 'number' && typeof close === 'number') closes.push({ timestamp: tick + DAY_MS, close });
+      if (typeof tick === 'number' && typeof close === 'number' && tick % DAY_MS === DAY_MS - 3_600_000) {
+        closes.push({ timestamp: tick + 3_600_000, close });
+      }
     }
   }
   for (let start = first - 3_600_000; start <= last; start += 20 * DAY_MS) {
@@ -103,7 +113,8 @@ async function downloadHistory(coin: 'BTC' | 'ETH', legs: StraddleLeg[]): Promis
     if (!Array.isArray(result.data)) throw new Error(`Deribit ${key} lacks DVOL observations`);
     for (const item of result.data) {
       if (!Array.isArray(item) || typeof item[0] !== 'number' || typeof item[4] !== 'number') continue;
-      dvol.push({ timestamp: item[0], value: item[4] });
+      // Deribit stamps a bucket by its start. Its close is known one bucket later, so stamp it then (no look-ahead).
+      dvol.push({ timestamp: item[0] + 3_600_000, value: item[4] });
     }
   }
   return { closes, dvol };
@@ -117,24 +128,31 @@ function argument(name: string): string | null {
 async function main(): Promise<void> {
   const fixture = argument('--fixture');
   const outcomes = argument('--outcomes');
-  if (fixture === null && outcomes === null) throw new Error('Use --fixture FILE or --outcomes FILE');
   if (fixture !== null && outcomes !== null) throw new Error('Choose one input mode');
   let legs: StraddleLeg[];
   let history: Partial<Record<'BTC' | 'ETH', VolatilityHistory>>;
+  let notes: string[] = [];
   if (fixture !== null) {
     const data = object(JSON.parse(await readFile(fixture, 'utf8')) as unknown);
     if (!data) throw new Error('Fixture must be an object with legs and history');
     legs = legsFrom(data.legs);
     history = historyFrom(data.history);
   } else {
-    legs = legsFrom(JSON.parse(await readFile(outcomes as string, 'utf8')) as unknown);
+    if (outcomes !== null) {
+      legs = legsFrom(JSON.parse(await readFile(outcomes, 'utf8')) as unknown);
+    } else {
+      loadStudyEnv();
+      const loaded = await loadStraddleLegs();
+      legs = loaded.legs;
+      notes = loaded.notes;
+    }
     history = {
       BTC: await downloadHistory('BTC', legs),
       ETH: await downloadHistory('ETH', legs),
     };
   }
   const result = evaluateDvolStraddles(legs, history);
-  console.log(JSON.stringify(result, null, 2));
+  console.log(JSON.stringify(notes.length ? { dataNotes: notes, ...result } : result, null, 2));
 }
 
 main().catch((error: unknown) => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });

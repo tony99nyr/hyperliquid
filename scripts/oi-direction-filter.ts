@@ -1,19 +1,21 @@
 /**
  * Read-only OI direction study. No live closes or trading imports.
  * Offline: --fixture path.json with { source, inputs: ReplayInput[], snapshots: OiSnapshot[] }.
- * Real data: --replay path.json [--snapshots export.json]. The replay file has
- * { source, inputs: ReplayInput[] }, as in backtest-htf-replay.ts. Without a
- * snapshot export, this script downloads select-only market_snapshots pages.
- * Set HL_TRADERS_SUPABASE_URL and HL_TRADERS_SUPABASE_SERVICE_ROLE_KEY for that.
+ * Default (no flags): reads the replay output written by pnpm backtest:htf-replay
+ * (cache dir replay-output.json) and the OI snapshots from Supabase (SELECT only).
+ * Optional: --replay path.json ({source, trades} or {source, inputs}) [--snapshots export.json].
+ * Env: HL_TRADERS_SUPABASE_URL and HL_TRADERS_SUPABASE_SERVICE_ROLE_KEY (from .env.local).
  */
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { cachedJson, loadStudyEnv, STUDY_CACHE_ROOT, supabaseSelect } from './_study-io';
 import { assessOiDirection, type OiSnapshot } from '@/lib/backtest/oi-direction-filter-business-logic';
-import { replayHtfPortfolio, type ReplayInput } from '@/lib/backtest/htf-replay-business-logic';
+import { replayHtfPortfolio, type ReplayInput, type ReplayTrade } from '@/lib/backtest/htf-replay-business-logic';
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
-const CACHE = path.resolve('data/backups/hyperliquid-study/oi-direction-filter');
+const CACHE = path.join(STUDY_CACHE_ROOT, 'oi-direction-filter');
+const DEFAULT_REPLAY = path.join(STUDY_CACHE_ROOT, 'htf-replay', 'replay-output.json');
 
 function option(name: string): string | null {
   const index = process.argv.indexOf(`--${name}`);
@@ -79,58 +81,78 @@ function snapshotsFrom(value: unknown): OiSnapshot[] {
   });
 }
 
-async function downloadSnapshots(coins: string[], from: number, to: number): Promise<OiSnapshot[]> {
-  await mkdir(CACHE, { recursive: true });
-  const key = `${coins.join('-')}-${from}-${to}.json`;
-  const file = path.join(CACHE, key);
-  try { return snapshotsFrom(await jsonFile(file)); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+/** Earliest market_snapshots row (one tiny SELECT). Older trades cannot have an OI pair. */
+async function earliestSnapshot(): Promise<number | null> {
+  const rows = await supabaseSelect('market_snapshots', 'captured_at', {}, 'captured_at.asc', 1);
+  const at = Date.parse(String(rows[0]?.captured_at));
+  return Number.isFinite(at) ? at : null;
+}
+
+/**
+ * Select-only and egress-light: for each trade it reads only the two windows the frozen rule
+ * can use, [entry-24h-6h, entry-24h] and [entry-6h, entry), for that coin.
+ */
+async function downloadSnapshots(trades: ReplayTrade[]): Promise<{ snapshots: OiSnapshot[]; since: number | null }> {
+  const since = await earliestSnapshot();
+  if (since === null) return { snapshots: [], since };
+  const seen = new Map<string, OiSnapshot>();
+  const candidates = trades.filter((trade) => trade.entryTime >= since);
+  for (const trade of candidates) {
+    for (const [lo, hi] of [[trade.entryTime - DAY - 6 * HOUR, trade.entryTime - DAY], [trade.entryTime - 6 * HOUR, trade.entryTime - 1]]) {
+      const name = `${trade.coin}-${lo}-${hi}.json`;
+      const rows = await cachedJson(CACHE, name, () => supabaseSelect('market_snapshots', 'coin,captured_at,open_interest', {
+        coin: `eq.${trade.coin}`, and: `(captured_at.gte.${new Date(lo).toISOString()},captured_at.lte.${new Date(hi).toISOString()})`,
+      }, 'captured_at.asc', 2000));
+      for (const point of snapshotsFrom(rows)) seen.set(`${point.coin}-${point.time}`, point);
+    }
   }
-  const base = process.env.HL_TRADERS_SUPABASE_URL;
-  const token = process.env.HL_TRADERS_SUPABASE_SERVICE_ROLE_KEY;
-  if (!base || !token) throw new Error('Set HL_TRADERS_SUPABASE_URL and HL_TRADERS_SUPABASE_SERVICE_ROLE_KEY');
-  const all: OiSnapshot[] = [];
-  for (let offset = 0; ; offset += 1000) {
-    const url = new URL('/rest/v1/market_snapshots', base);
-    url.searchParams.set('select', 'coin,captured_at,open_interest');
-    url.searchParams.set('coin', `in.(${coins.join(',')})`);
-    url.searchParams.append('captured_at', `gte.${new Date(from).toISOString()}`);
-    url.searchParams.append('captured_at', `lte.${new Date(to).toISOString()}`);
-    url.searchParams.set('order', 'captured_at.asc,coin.asc');
-    url.searchParams.set('limit', '1000');
-    url.searchParams.set('offset', String(offset));
-    const response = await fetch(url, { headers: { apikey: token, Authorization: `Bearer ${token}` } });
-    if (!response.ok) throw new Error(`Snapshot SELECT failed: ${response.status} ${response.statusText}`);
-    const page = snapshotsFrom(await response.json() as unknown);
-    all.push(...page);
-    if (page.length < 1000) break;
+  return { snapshots: [...seen.values()], since };
+}
+
+function tradesFrom(value: unknown): { source: string; trades: ReplayTrade[]; blockedByCap: number | null; openAtEnd: number | null } {
+  const root = object(value);
+  if (typeof root.source !== 'string') throw new Error('Replay file needs source');
+  if (Array.isArray(root.trades)) {
+    return { source: root.source, trades: root.trades as ReplayTrade[],
+      blockedByCap: typeof root.blockedByCap === 'number' ? root.blockedByCap : null,
+      openAtEnd: typeof root.openAtEnd === 'number' ? root.openAtEnd : null };
   }
-  await writeFile(file, JSON.stringify(all));
-  return all;
+  const replay = replayHtfPortfolio(inputsFrom(root).inputs);
+  return { source: root.source, trades: replay.trades, blockedByCap: replay.blockedByCap, openAtEnd: replay.openAtEnd };
 }
 
 async function main(): Promise<void> {
   const fixture = option('fixture');
   const replayFile = option('replay');
-  if (Boolean(fixture) === Boolean(replayFile)) {
-    throw new Error('Supply exactly one of --fixture or --replay');
-  }
-  const root = object(await jsonFile((fixture ?? replayFile) as string));
-  const replayInput = inputsFrom(root);
-  const replay = replayHtfPortfolio(replayInput.inputs);
+  if (fixture && replayFile) throw new Error('Supply at most one of --fixture or --replay');
   const snapshotFile = option('snapshots');
   if (fixture && snapshotFile) throw new Error('--fixture already contains snapshots');
-  const snapshots = fixture ? snapshotsFrom(root)
-    : snapshotFile ? snapshotsFrom(await jsonFile(snapshotFile))
-      : replay.trades.length ? await downloadSnapshots(
-        [...new Set(replay.trades.map((trade) => trade.coin))].sort(),
-        Math.min(...replay.trades.map((trade) => trade.entryTime)) - DAY - 6 * HOUR,
-        Math.max(...replay.trades.map((trade) => trade.entryTime)),
-      ) : [];
+  const file = fixture ?? replayFile ?? DEFAULT_REPLAY;
+  let root: unknown;
+  try { root = await jsonFile(file); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' && !fixture && !replayFile) {
+      throw new Error(`No replay output at ${file}. Run pnpm backtest:htf-replay first (it writes this file).`);
+    }
+    throw error;
+  }
+  const replay = tradesFrom(root);
+  let snapshots: OiSnapshot[];
+  let snapshotSource: string;
+  let snapshotsSince: number | null = null;
+  if (fixture) { snapshots = snapshotsFrom(root); snapshotSource = 'fixture'; }
+  else if (snapshotFile) { snapshots = snapshotsFrom(await jsonFile(snapshotFile)); snapshotSource = snapshotFile; }
+  else {
+    loadStudyEnv();
+    const downloaded = await downloadSnapshots(replay.trades);
+    snapshots = downloaded.snapshots;
+    snapshotsSince = downloaded.since;
+    snapshotSource = 'select-only market_snapshots, per-trade windows, cached';
+  }
   const report = assessOiDirection(replay.trades, snapshots);
-  console.log(JSON.stringify({ study: 'oi-direction-filter', source: replayInput.source,
-    snapshotSource: fixture ? 'fixture' : snapshotFile ?? 'select-only market_snapshots cache',
+  console.log(JSON.stringify({ study: 'oi-direction-filter', source: replay.source, snapshotSource,
+    marketSnapshotsEarliest: snapshotsSince === null ? null : new Date(snapshotsSince).toISOString(),
+    tradesBeforeSnapshotHistory: snapshotsSince === null ? null : replay.trades.filter((t) => t.entryTime < snapshotsSince).length,
     blockedByCap: replay.blockedByCap, openAtEnd: replay.openAtEnd,
     ...report, interpretation: 'Historical replay study only; no live filter change.' }, null, 2));
 }

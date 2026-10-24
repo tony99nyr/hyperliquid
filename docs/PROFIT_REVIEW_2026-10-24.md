@@ -353,8 +353,28 @@ and its scorecard writer now records compression-straddle at -$12.39, KILL
 (19:50 UTC). Caveat: the forecast resamples whole episodes, so its downside
 (P5, worst 30-day loss) is optimistic until more trades accumulate.
 
-Next in the plan: item 4 (NFP, PCE, PPI and cron-driven prep) after the
-2026-10-28 FOMC; then items 6-10.
+Items 3, 5, 7, 8, 9, 10 and 11 shipped to main on 2026-10-24 (03db6aa, 70e4ede),
+with migrations 0047 and 0048 applied. Items 4 and 6 and the live Low follow-ups
+wait on branch `post-fomc-2026-10` (migrations 0049-0051). Do not merge that
+branch before 2026-10-29.
+
+### Study results on real data (2026-10-24)
+
+No study crossed a bar, so no live change follows.
+
+- **htf replay (item 7, prior only):**
+  - All coins: -0.065R (95% CI -0.18 to +0.05), n=8,275, 242 episodes.
+  - Registered four coins: +0.33R (CI -0.16 to +1.00), n=132. Twelve 2023 trades
+    at +2.9R carry that figure.
+  - Read: no all-coin edge after 2023. The forward bar has about a 1% pass chance.
+- **dvol, oi, funding-veto:** insufficient evidence (n=6, n=10 and n=0 against
+  bars of 15, 20 and a filled archive).
+  - funding-veto needs captures: run `pnpm study:funding-veto -- --capture` daily
+    at 23:55 UTC.
+- **regime split (descriptive):** most cells have fewer than 5 observations.
+  - Scout `reversion` in bearish regimes: -0.80R (n=6, 2 episodes).
+  - Scout `htf-trend` in bullish regimes: +1.11R (n=7, 3 episodes).
+  - Treat both as retro discussion points, not verdicts.
 
 Deferred Low items (fix in a later session, not in the loop):
 

@@ -18,7 +18,15 @@ export interface ReplayTrade {
   entryPx: number; exitPx: number; stopPx: number; fundingFraction: number; netR: number;
   exitReason: 'stop' | 'channel';
 }
-export interface ReplayResult { trades: ReplayTrade[]; blockedByCap: number; openAtEnd: number }
+export interface ReplayResult {
+  trades: ReplayTrade[]; blockedByCap: number; openAtEnd: number;
+  /** Trades dropped because hourly funding was missing in their holding period (only with rejectUncoveredFunding). */
+  rejectedMissingFunding: number;
+}
+export interface ReplayOptions {
+  /** Default false: missing funding throws. True: the position still runs, but the uncovered trade is rejected and counted, never zero-filled. */
+  rejectUncoveredFunding?: boolean;
+}
 
 interface Position { side: 'long' | 'short'; entryTime: number; entryPx: number; stopPx: number }
 interface CoinState {
@@ -65,7 +73,7 @@ function adversePx(raw: number, side: 'long' | 'short', entry: boolean): number 
 }
 
 /** Replays every listed coin on one clock. Same-day entries use alphabetical priority. */
-export function replayHtfPortfolio(inputs: ReplayInput[]): ReplayResult {
+export function replayHtfPortfolio(inputs: ReplayInput[], options: ReplayOptions = {}): ReplayResult {
   const names = new Set<string>();
   const states = inputs.map((input): CoinState => {
     if (names.has(input.coin)) throw new Error(`Duplicate coin ${input.coin}`);
@@ -75,6 +83,7 @@ export function replayHtfPortfolio(inputs: ReplayInput[]): ReplayResult {
   const times = [...new Set(states.flatMap((s) => s.bars.map((b) => b.time)))].sort((a, b) => a - b);
   const trades: ReplayTrade[] = [];
   let blockedByCap = 0;
+  let rejectedMissingFunding = 0;
 
   function close(s: CoinState, time: number, raw: number, reason: 'stop' | 'channel'): void {
     const p = s.position;
@@ -82,7 +91,15 @@ export function replayHtfPortfolio(inputs: ReplayInput[]): ReplayResult {
     const exitPx = adversePx(raw, p.side, false);
     const direction = p.side === 'long' ? 1 : -1;
     const risk = Math.abs(p.entryPx - p.stopPx);
-    const fundingFraction = fundingDuring(s.input.funding, p.entryTime, time, s.input.coin);
+    let fundingFraction: number;
+    try { fundingFraction = fundingDuring(s.input.funding, p.entryTime, time, s.input.coin); }
+    catch (error) {
+      if (!options.rejectUncoveredFunding) throw error;
+      rejectedMissingFunding++;
+      s.position = null;
+      s.pendingExit = false;
+      return;
+    }
     const netR = (direction * (exitPx - p.entryPx) - TAKER * (p.entryPx + exitPx)
       - direction * fundingFraction * p.entryPx) / risk;
     trades.push({ coin: s.input.coin, side: p.side, entryTime: p.entryTime,
@@ -134,7 +151,7 @@ export function replayHtfPortfolio(inputs: ReplayInput[]): ReplayResult {
     }
   }
   trades.sort((a, b) => a.entryTime - b.entryTime || a.coin.localeCompare(b.coin));
-  return { trades, blockedByCap, openAtEnd: states.filter((s) => s.position).length };
+  return { trades, blockedByCap, rejectedMissingFunding, openAtEnd: states.filter((s) => s.position).length };
 }
 
 function episodeKey(time: number): number { return Math.floor(time / EPISODE); }

@@ -2,7 +2,10 @@
  * Read-only htf-trend replay. No credentials, Supabase calls or trading actions.
  *
  * Offline: pnpm exec tsx --tsconfig tsconfig.scripts.json scripts/backtest-htf-replay.ts --fixture path.json
- * Online:  pnpm exec tsx --tsconfig tsconfig.scripts.json scripts/backtest-htf-replay.ts --listings path.json
+ * Default (no flags): downloads the current HL perp universe itself, paced and cached
+ * under data/backups/hyperliquid-study/htf-replay (gitignored). Reruns are cheap and
+ * an interrupted run resumes from the cache. Optional: --start, --end, --only BTC,ETH,
+ * --listings path.json, --out path.json (default: the cache dir's replay-output.json).
  * A fixture contains { source, inputs: ReplayInput[] }. For synthetic fixtures,
  * an input may use fundingHourly instead of an hourly funding array.
  * A listing manifest contains { source, complete: true, listings: ReplayListing[] }.
@@ -11,15 +14,14 @@
  */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fetchCandles, fetchFundingHistory } from '@/lib/hyperliquid/candle-service';
-import { fetchPerpMeta } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { loadStudyEnv } from './_study-io';
+import { discoverTrades, HTF_CACHE, loadFundingWindows, loadUniverse, type UniverseResult } from './_htf-replay-data';
 import {
   replayHtfPortfolio, simulateForwardBar, summariseHtfReplay,
   type ReplayBar, type ReplayFunding, type ReplayInput, type ReplayListing,
 } from '@/lib/backtest/htf-replay-business-logic';
 
 const DAY = 86_400_000;
-const CACHE = path.resolve('data/backups/hyperliquid-study/htf-replay');
 
 function option(name: string): string | null {
   const at = process.argv.indexOf(`--${name}`);
@@ -58,39 +60,18 @@ function listingsFromJson(value: unknown): { source: string; complete: boolean; 
   return { source: root.source, complete: true, listings };
 }
 
-async function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
-  await mkdir(CACHE, { recursive: true });
-  const file = path.join(CACHE, key);
-  try { return JSON.parse(await readFile(file, 'utf8')) as T; }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
-  const result = await load();
-  await writeFile(file, JSON.stringify(result));
-  return result;
+
+interface RealExtras {
+  excluded: { coin: string; reason: string }[]; delisted: string[]; window: { start: number; end: number };
 }
 
-async function fetchInput(listing: ReplayListing, start: number, end: number): Promise<ReplayInput> {
-  const from = Math.max(start - 25 * DAY, listing.from);
-  const to = Math.min(end, listing.to);
-  const key = `${listing.coin}-${from}-${to}`;
-  return cached(`${key}.json`, async () => {
-    const response = await fetchCandles(listing.coin, '1d', from, to);
-    if (response.stale || response.error || !response.candles.length) {
-      throw new Error(`Candle fetch failed for ${listing.coin}: ${response.error ?? 'empty or stale'}`);
-    }
-    const bars: ReplayBar[] = response.candles.map((bar) => ({
-      time: bar.timestamp, open: bar.open, high: bar.high, low: bar.low, close: bar.close,
-    }));
-    const funding: ReplayFunding[] = [];
-    // Existing funding service caps a call near 625 days. Chunk with overlap avoided.
-    for (let cursor = from; cursor < to; cursor += 400 * DAY) {
-      const stop = Math.min(cursor + 400 * DAY, to);
-      funding.push(...await fetchFundingHistory(listing.coin, cursor, stop));
-    }
-    const unique = [...new Map(funding.map((p) => [p.time, p])).values()].sort((a, b) => a.time - b.time);
-    return { coin: listing.coin, listing, bars, funding: unique };
-  });
+/** Pass 1 finds holding windows, then real funding is fetched for those windows only. */
+async function buildInputs(universe: UniverseResult): Promise<{ inputs: ReplayInput[]; excluded: { coin: string; reason: string }[] }> {
+  const funding = await loadFundingWindows(discoverTrades(universe));
+  const inputs = universe.listings.map((listing): ReplayInput => ({
+    coin: listing.coin, listing, bars: universe.bars.get(listing.coin) ?? [], funding: funding.get(listing.coin) ?? [],
+  }));
+  return { inputs, excluded: [...universe.excluded] };
 }
 
 async function main(): Promise<void> {
@@ -98,6 +79,7 @@ async function main(): Promise<void> {
   let inputs: ReplayInput[];
   let source: string;
   let complete: boolean;
+  let realExtras: RealExtras | null = null;
   if (fixturePath) {
     const fixture = object(JSON.parse(await readFile(fixturePath, 'utf8')) as unknown);
     if (!Array.isArray(fixture.inputs) || typeof fixture.source !== 'string') {
@@ -119,27 +101,31 @@ async function main(): Promise<void> {
     source = fixture.source;
     complete = fixture.complete === true;
   } else {
+    loadStudyEnv();
     const start = dateOption('start', '2022-01-01');
-    const end = dateOption('end', '2026-10-24');
+    const end = dateOption('end', new Date(Math.floor(Date.now() / DAY) * DAY).toISOString().slice(0, 10));
     if (end <= start) throw new Error('--end must follow --start');
+    const only = option('only')?.split(',').map((x) => x.trim().toUpperCase()).filter(Boolean) ?? null;
     const manifest = option('listings');
-    let listings: ReplayListing[];
+    let bounds: Map<string, ReplayListing> | null = null;
     if (manifest) {
       const parsed = listingsFromJson(JSON.parse(await readFile(manifest, 'utf8')) as unknown);
-      listings = parsed.listings;
+      bounds = new Map(parsed.listings.map((l) => [l.coin, l]));
       source = parsed.source;
       complete = parsed.complete;
     } else {
-      const meta = await fetchPerpMeta('mainnet');
-      listings = meta.map((asset) => ({ coin: asset.name, from: start, to: end }));
-      source = 'current HL meta.universe proxy; excludes delisted perps and true listing dates';
+      source = 'current HL meta.universe (delisted perps flagged by HL kept) with listing dates inferred from first candle and first funding row';
       complete = false;
     }
-    inputs = [];
-    for (const listing of listings) {
-      if (listing.to <= start || listing.from >= end) continue;
-      inputs.push(await fetchInput(listing, start, end));
+    const universe = await loadUniverse(start, end, only ?? (bounds ? [...bounds.keys()] : null));
+    for (const l of universe.listings) {
+      const b = bounds?.get(l.coin);
+      if (b) { l.from = Math.max(l.from, b.from); l.to = Math.min(l.to, b.to); }
     }
+    universe.listings = universe.listings.filter((l) => l.to > l.from);
+    const built = await buildInputs(universe);
+    inputs = built.inputs;
+    realExtras = { excluded: built.excluded, delisted: universe.delisted, window: { start, end } };
   }
   const seed = Number(option('seed') ?? 20261024);
   const iterations = Number(option('iterations') ?? 10_000);
@@ -147,16 +133,20 @@ async function main(): Promise<void> {
     throw new Error('Seed and iterations must be integers; iterations must be positive');
   }
   if (!inputs.length) throw new Error('No listed coins overlap the requested replay window');
-  const replay = replayHtfPortfolio(inputs);
+  // Real data: a trade whose holding period lacks an hourly funding row is rejected and counted, never zero-filled.
+  const replay = replayHtfPortfolio(inputs, { rejectUncoveredFunding: !fixturePath });
   const registered = replay.trades.filter((t) => ['BTC', 'ETH', 'SOL', 'HYPE'].includes(t.coin));
-  const observedEnd = Math.max(...inputs.flatMap((input) => input.bars.map((bar) => bar.time)));
+  const observedEnd = inputs.reduce((max, input) => Math.max(max, input.bars.reduce((m, bar) => Math.max(m, bar.time), 0)), 0);
   const report = {
     status: complete ? 'historical manifest supplied; verify source coverage' : 'INCOMPLETE UNIVERSE PROXY',
     source, seed, iterations, inputCoins: inputs.length, blockedByCap: replay.blockedByCap,
-    openAtEnd: replay.openAtEnd, trades: replay.trades.length,
+    openAtEnd: replay.openAtEnd, rejectedMissingFunding: replay.rejectedMissingFunding, trades: replay.trades.length,
     coverage: { delistedBeforeObservedEnd: inputs.filter((input) => input.listing.to <= observedEnd).length,
-      missingDailyBars: 0, missingHoldingPeriodFundingHours: 0,
-      policy: 'fail the replay on a candle gap or missing holding-period funding' },
+      excludedCoins: realExtras ? realExtras.excluded : [],
+      excludedCoinCount: realExtras ? realExtras.excluded.length : 0,
+      hlFlaggedDelisted: realExtras ? realExtras.delisted.length : null,
+      window: realExtras ? { start: new Date(realExtras.window.start).toISOString().slice(0, 10), end: new Date(realExtras.window.end).toISOString().slice(0, 10) } : null,
+      policy: 'a coin with a candle gap or no funding history is excluded and listed; a trade with a funding hole in its holding period is rejected and counted (rejectedMissingFunding); nothing is zero-filled' },
     fullUniverse: replay.trades.length ? summariseHtfReplay(replay.trades, iterations, seed) : null,
     forwardBar: replay.trades.length ? simulateForwardBar(replay.trades, iterations, seed + 1) : null,
     registeredFourCoins: registered.length ? {
@@ -166,6 +156,15 @@ async function main(): Promise<void> {
     interpretation: 'Historical prior only. The forward paper record is the sole out-of-sample gate.',
   };
   console.log(JSON.stringify(report, null, 2));
+  if (!fixturePath) {
+    // Hand-off for study:oi and study:funding-veto.
+    const out = option('out') ?? path.join(HTF_CACHE, 'replay-output.json');
+    await mkdir(path.dirname(out), { recursive: true });
+    await writeFile(out, JSON.stringify({ source, status: report.status, generatedAt: new Date().toISOString(),
+      blockedByCap: replay.blockedByCap, openAtEnd: replay.openAtEnd,
+      rejectedMissingFunding: replay.rejectedMissingFunding, trades: replay.trades }));
+    process.stderr.write(`[htf-replay] wrote ${out}\n`);
+  }
 }
 
 main().catch((error: unknown) => { console.error(error); process.exitCode = 1; });

@@ -18,6 +18,18 @@ function series(coin: string, signalClose = 105, entryOpen = 110): ReplayInput {
     funding: Array.from({ length: 27 * 24 }, (_, i) => ({ time: start + i * 3_600_000, fundingHourly: 0 })) };
 }
 
+describe('htf replay funding coverage', () => {
+  it('throws on a funding hole by default and rejects only that trade when asked', () => {
+    const input = series('BTC');
+    input.funding = input.funding.filter((p) => p.time !== start + 24 * DAY + 5 * 3_600_000);
+    expect(() => replayHtfPortfolio([input])).toThrow(/Missing hourly funding/);
+    const result = replayHtfPortfolio([input], { rejectUncoveredFunding: true });
+    expect(result.trades).toHaveLength(0);
+    expect(result.rejectedMissingFunding).toBe(1);
+    expect(replayHtfPortfolio([series('BTC')], { rejectUncoveredFunding: true }).rejectedMissingFunding).toBe(0);
+  });
+});
+
 describe('htf replay', () => {
   it('lags a completed breakout by one bar and uses the next open', () => {
     const result = replayHtfPortfolio([series('BTC')]);

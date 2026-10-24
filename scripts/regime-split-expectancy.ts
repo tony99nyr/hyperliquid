@@ -1,13 +1,16 @@
-/** Read-only regime split. Fixture JSON: {outcomes,candlesByCoin}. */
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+/**
+ * Read-only regime split. Default (no flags): select-only Supabase reads (HL_TRADERS_* service role)
+ * plus paced, cached public HL 4h candles. Offline: --fixture JSON {outcomes,candlesByCoin}.
+ */
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fetchCandles } from '@/lib/hyperliquid/candle-service';
+import { cachedJson, hlCandles, loadStudyEnv, STUDY_CACHE_ROOT, supabaseSelect } from './_study-io';
 import { splitRegimeExpectancy, type RegimeOutcome } from '@/lib/backtest/regime-split-expectancy-business-logic';
 import type { PriceCandle } from '@/types/trading-core';
 
-const CACHE = path.resolve('data/backups/hyperliquid-study/regime-split-expectancy');
+const CACHE = path.join(STUDY_CACHE_ROOT, 'regime-split-expectancy');
+const TABLE_TTL_MS = 3_600_000;
 const FOUR_HOURS = 4 * 3_600_000;
-const PAGE = 1000;
 
 function option(name: string): string | null {
   const at = process.argv.indexOf(`--${name}`);
@@ -31,40 +34,8 @@ function num(value: unknown): number {
   return n;
 }
 
-async function cached<T>(name: string, load: () => Promise<T>): Promise<T> {
-  await mkdir(CACHE, { recursive: true });
-  const file = path.join(CACHE, name);
-  try { return JSON.parse(await readFile(file, 'utf8')) as T; }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-  const value = await load();
-  await writeFile(file, JSON.stringify(value));
-  return value;
-}
-
-function database(): { url: string; key: string } {
-  const url = process.env.HL_TRADERS_SUPABASE_URL ?? process.env.HL_SUPABASE_URL ??
-    process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_HL_SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) throw new Error('Set a Supabase URL and anon key for select-only reads');
-  return { url: url.replace(/\/$/, ''), key };
-}
-
-async function select(table: string, columns: string): Promise<Record<string, unknown>[]> {
-  const { url, key } = database();
-  const rows: Record<string, unknown>[] = [];
-  for (let offset = 0; ; offset += PAGE) {
-    const params = new URLSearchParams({ select: columns, order: 'id.asc', limit: String(PAGE), offset: String(offset) });
-    const response = await fetch(`${url}/rest/v1/${table}?${params}`, {
-      headers: { apikey: key, Authorization: `Bearer ${key}` },
-    });
-    if (!response.ok) throw new Error(`${table} read failed: ${response.status} ${await response.text()}`);
-    const page = await response.json() as unknown;
-    if (!Array.isArray(page)) throw new Error(`${table} response is not an array`);
-    rows.push(...page.map(record));
-    if (page.length < PAGE) break;
-  }
-  return rows;
-}
+const select = (table: string, columns: string) => supabaseSelect(table, columns);
+const cached = <T,>(name: string, load: () => Promise<T>, ttl?: number) => cachedJson(CACHE, name, load, ttl);
 
 function outcomesFromRows(outcomes: Record<string, unknown>[], fires: Record<string, unknown>[],
   rungs: Record<string, unknown>[], hypotheses: Record<string, unknown>[]): RegimeOutcome[] {
@@ -93,10 +64,10 @@ function outcomesFromRows(outcomes: Record<string, unknown>[], fires: Record<str
 
 async function realOutcomes(): Promise<RegimeOutcome[]> {
   const tables = await Promise.all([
-    cached('ladder_outcomes.json', () => select('ladder_outcomes', 'id,ladder_id,mode,outcome,setup_type,coin,realized_r')),
-    cached('ladder_fires.json', () => select('ladder_fires', 'id,ladder_id,rung_id,status,fired_at')),
-    cached('ladder_rungs.json', () => select('ladder_rungs', 'id,action')),
-    cached('hypotheses.json', () => select('hypotheses', 'id,coin,lane,setup_type,status,excluded,realized_r,created_at')),
+    cached('ladder_outcomes.json', () => select('ladder_outcomes', 'id,ladder_id,mode,outcome,setup_type,coin,realized_r'), TABLE_TTL_MS),
+    cached('ladder_fires.json', () => select('ladder_fires', 'id,ladder_id,rung_id,status,fired_at'), TABLE_TTL_MS),
+    cached('ladder_rungs.json', () => select('ladder_rungs', 'id,action'), TABLE_TTL_MS),
+    cached('hypotheses.json', () => select('hypotheses', 'id,coin,lane,setup_type,status,excluded,realized_r,created_at'), TABLE_TTL_MS),
   ]);
   return outcomesFromRows(tables[0], tables[1], tables[2], tables[3]);
 }
@@ -112,9 +83,7 @@ async function candlesFor(outcomes: RegimeOutcome[]): Promise<Record<string, Pri
       const stop = Math.min(cursor + 400 * FOUR_HOURS, end);
       const key = `${coin}-${cursor}-${stop}.json`;
       pieces.push(...await cached(key, async () => {
-        const response = await fetchCandles(coin, '4h', cursor, stop);
-        if (response.stale || response.error) throw new Error(`Candle read failed for ${coin}: ${response.error ?? 'stale'}`);
-        return response.candles;
+        return hlCandles(coin, '4h', cursor, stop);
       }));
     }
     result[coin] = [...new Map(pieces.map((bar) => [bar.timestamp, bar])).values()]
@@ -132,6 +101,7 @@ async function main(): Promise<void> {
       record(value.candlesByCoin) as Record<string, PriceCandle[]>), null, 2));
     return;
   }
+  loadStudyEnv();
   const outcomes = await realOutcomes();
   const candles = await candlesFor(outcomes);
   console.log(JSON.stringify({ source: 'select-only Supabase and public HL 4h candles',

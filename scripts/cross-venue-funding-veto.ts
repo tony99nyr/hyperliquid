@@ -1,11 +1,21 @@
-/** Read-only funding veto study. Capture forward quotes before replay analysis. */
+/**
+ * Read-only funding veto study.
+ * Default (no flags): takes the trades from pnpm backtest:htf-replay (replay-output.json) and the archived
+ * HL predictedFundings observations (hl-observations.json, written by --capture), as preregistered.
+ * Archive coverage starts the day capture starts, so the preregistered result is "insufficient" until
+ * enough forward observations exist. The run also prints a separate, labelled PROXY from the market_snapshots
+ * table (HL funding_hourly, not predictedFundings), which is NOT the preregistered data definition.
+ * Other modes: --capture, --fixture FILE, --replay FILE --hl-archive FILE.
+ */
 import { execFileSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { loadStudyEnv, politeFetch, STUDY_CACHE_ROOT, supabaseSelect, cachedJson } from './_study-io';
 import { assessFundingVeto, type FundingQuote, type FundingStudyTrade } from '@/lib/backtest/cross-venue-funding-veto-business-logic';
 import { replayHtfPortfolio, type ReplayInput } from '@/lib/backtest/htf-replay-business-logic';
 
-const CACHE = path.resolve('data/backups/hyperliquid-study/cross-venue-funding');
+const CACHE = path.join(STUDY_CACHE_ROOT, 'cross-venue-funding');
+const DEFAULT_REPLAY = path.join(STUDY_CACHE_ROOT, 'htf-replay', 'replay-output.json');
 const HOUR = 3_600_000;
 
 function option(name: string): string | null {
@@ -86,18 +96,23 @@ function months(start: number, end: number): string[] {
   return result;
 }
 
+/** HL k-prefixed coins (kPEPE) trade as 1000PEPE on Binance. */
+function binanceSymbol(coin: string): string {
+  return /^k[A-Z]/.test(coin) ? `1000${coin.slice(1)}USDT` : `${coin}USDT`;
+}
+
 async function binanceRates(coin: string, start: number, end: number): Promise<{ time: number; rate: number }[]> {
   const rows: { time: number; rate: number }[] = [];
   await mkdir(CACHE, { recursive: true });
   for (const month of months(start, end)) {
-    const name = `${coin}USDT-fundingRate-${month}.zip`;
+    const symbol = binanceSymbol(coin);
+    const name = `${symbol}-fundingRate-${month}.zip`;
     const file = path.join(CACHE, name);
     try { await readFile(file); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      const url = `https://data.binance.vision/data/futures/um/monthly/fundingRate/${coin}USDT/${name}`;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`Binance archive ${response.status}: ${url}`);
+      const url = `https://data.binance.vision/data/futures/um/monthly/fundingRate/${symbol}/${name}`;
+      const response = await politeFetch(url, {}, { label: `Binance archive ${name}`, retries: 3 });
       await writeFile(file, Buffer.from(await response.arrayBuffer()));
     }
     const csv = execFileSync('unzip', ['-p', file], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
@@ -131,23 +146,88 @@ async function main(): Promise<void> {
     console.log(JSON.stringify(assessFundingVeto(trades, data.quotes as FundingQuote[]), null, 2));
     return;
   }
-  const replayPath = option('replay');
-  const archivePath = option('hl-archive');
-  if (!replayPath || !archivePath) throw new Error('Use --fixture FILE, --capture, or --replay FILE --hl-archive FILE');
-  const trades = tradesFromFixture(JSON.parse(await readFile(replayPath, 'utf8')) as unknown);
-  const archived = observations(JSON.parse(await readFile(archivePath, 'utf8')) as unknown);
+  const replayPath = option('replay') ?? DEFAULT_REPLAY;
+  const archivePath = option('hl-archive') ?? path.join(CACHE, 'hl-observations.json');
+  let replayJson: unknown;
+  try { replayJson = JSON.parse(await readFile(replayPath, 'utf8')) as unknown; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error(`No replay output at ${replayPath}. Run pnpm backtest:htf-replay first.`);
+    throw error;
+  }
+  const trades = tradesFromFixture(replayJson);
+  let archived: HlObservation[] = [];
+  try { archived = observations(JSON.parse(await readFile(archivePath, 'utf8')) as unknown); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  const registered = await quotesFor(archived, new Set());
+  const preregistered = {
+    source: 'HL timestamped predictedFundings archive plus Binance Vision',
+    archivedObservations: archived.length,
+    archiveFirstCapture: archived.length ? new Date(Math.min(...archived.map((o) => o.time))).toISOString() : null,
+    tradesAfterFirstCapture: archived.length ? trades.filter((t) => t.entryTime >= Math.min(...archived.map((o) => o.time))).length : 0,
+    forwardCaptureNeeded: archived.length === 0
+      ? 'No archive yet. Run pnpm study:funding-veto -- --capture at least once every 8 hours (ideally 23:55 UTC daily, before each daily signal close) and rerun later.'
+      : 'Keep capturing until each of vetoed and kept has 5 or more independent entry episodes.',
+    ...assessFundingVeto(trades, registered.quotes),
+    binanceUnavailable: registered.unavailable,
+  };
+  let proxy: unknown = null;
+  if (!option('hl-archive') && !option('replay')) {
+    loadStudyEnv();
+    proxy = await proxyFromSnapshots(trades);
+  }
+  console.log(JSON.stringify({ preregistered, proxy }, null, 2));
+}
+
+async function quotesFor(archived: HlObservation[], skip: Set<string>): Promise<{ quotes: FundingQuote[]; unavailable: string[] }> {
   const quotes: FundingQuote[] = [];
+  const unavailable: string[] = [];
   for (const coin of [...new Set(archived.map((row) => row.coin))]) {
+    if (skip.has(coin)) continue;
     const coinRows = archived.filter((row) => row.coin === coin);
-    const rates = await binanceRates(coin, Math.min(...coinRows.map((row) => row.time)) - HOUR * 8,
-      Math.max(...coinRows.map((row) => row.time)));
+    let rates: { time: number; rate: number }[];
+    try {
+      rates = await binanceRates(coin, Math.min(...coinRows.map((row) => row.time)) - HOUR * 8, Math.max(...coinRows.map((row) => row.time)));
+    } catch (error) {
+      unavailable.push(`${coin}: ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
     for (const row of coinRows) {
       const last = rates.filter((rate) => rate.time <= row.time && row.time - rate.time <= HOUR * 8).at(-1);
       if (last) quotes.push({ ...row, binanceTime: last.time, binanceEightHour: last.rate });
     }
   }
-  console.log(JSON.stringify({ source: 'HL timestamped predictedFundings archive plus Binance Vision',
-    ...assessFundingVeto(trades, quotes) }, null, 2));
+  return { quotes, unavailable };
+}
+
+/** PROXY, not the preregistered data: HL funding_hourly from market_snapshots (select-only, per-trade 8h windows). */
+async function proxyFromSnapshots(trades: FundingStudyTrade[]): Promise<unknown> {
+  const first = (await supabaseSelect('market_snapshots', 'captured_at', {}, 'captured_at.asc', 1))[0];
+  const since = Date.parse(String(first?.captured_at));
+  if (!Number.isFinite(since)) return { note: 'market_snapshots is empty' };
+  const inRange = trades.filter((t) => t.entryTime >= since);
+  const observed: HlObservation[] = [];
+  for (const trade of inRange) {
+    const lo = trade.entryTime - 8 * HOUR;
+    const rows = await cachedJson(path.join(CACHE, 'proxy'), `${trade.coin}-${lo}.json`, () => supabaseSelect(
+      'market_snapshots', 'coin,captured_at,funding_hourly', {
+        coin: `eq.${trade.coin}`, and: `(captured_at.gte.${new Date(lo).toISOString()},captured_at.lte.${new Date(trade.entryTime).toISOString()})`,
+      }, 'captured_at.asc', 500));
+    for (const row of rows) {
+      const hl = Number(row.funding_hourly);
+      const time = Date.parse(String(row.captured_at));
+      if (Number.isFinite(hl) && Number.isFinite(time) && row.funding_hourly !== null) observed.push({ coin: trade.coin, time, hlHourly: hl });
+    }
+  }
+  const unique = [...new Map(observed.map((o) => [`${o.coin}-${o.time}`, o])).values()];
+  const built = await quotesFor(unique, new Set());
+  return {
+    label: 'PROXY ONLY. HL funding_hourly from market_snapshots, not archived predictedFundings. Not the preregistered data definition.',
+    marketSnapshotsEarliest: new Date(since).toISOString(),
+    tradesBeforeSnapshotHistory: trades.length - inRange.length,
+    snapshotObservations: unique.length,
+    binanceUnavailable: built.unavailable,
+    ...assessFundingVeto(trades, built.quotes),
+  };
 }
 
 main().catch((error: unknown) => { console.error(error); process.exitCode = 1; });
