@@ -1,5 +1,8 @@
 # Trader Discovery & Evaluation — Discovery + Fixes Plan
 
+> **Historical (point-in-time, not maintained).** The code may have moved on; for the
+> current state read the code and the root `CLAUDE.md`.
+
 > Handoff plan. Self-contained: an agent should be able to act on this without
 > the originating chat. Pairs with the trader-panel refactor prompt and the
 > data-processing cost audit. Status: PROPOSED (no code changes yet).

@@ -15,8 +15,10 @@ verified deep-research pass (24/25 claims confirmed, mostly HL primary docs, 202
 > protective stop, then self-completed. P0 + P1 are **delivered** (the `LADDER_LIVE_ENABLED`
 > / `LADDER_AUTOFIRE_ENABLED` gates are ON in production; the watcher runs via an external
 > cron-job.org schedule, not a Vercel cron — Hobby caps crons at daily). **Live-proven:**
-> the single-rung `open` → bracket → `done` path. **Built but NOT yet live-exercised:**
-> multi-rung adds, the runtime add-coverage gate, and trailing stops (P2/P3).
+> the single-rung `open` → bracket → `done` path, and since 2026-08-19 multi-rung adds,
+> the runtime add-coverage gate and trailing stops. **Never filled live:** take-profit
+> brackets (`targetPx`). Current desk-wide status: the root `CLAUDE.md` banner. Decision
+> record for autonomous fires: [ADR-0008](./adr/0008-autonomous-armed-ladders.md).
 >
 > - **Operate it:** [LADDER_OPERATOR_RUNBOOK.md](./LADDER_OPERATOR_RUNBOOK.md)
 > - **Modify it (agents):** [src/lib/ladder/CLAUDE.md](../src/lib/ladder/CLAUDE.md)
@@ -115,6 +117,8 @@ exchange-level double-fire rejection.
     a stop (loud UI disclosure — operator brackets after fill) (commit 869190e).
   - ⚠ Both new live signing paths (bracket `positionTpsl`, stop-entry `reduceOnly:false`
     trigger) are gated behind the §4b testnet rehearsal — NOT yet exercised on a live key.
+    *(2026-10-24: the protective stop bracket now rests on every live ladder fire;
+    take-profit brackets have never filled live.)*
 - **P1 — single-coin armed ladder + watcher** (migration 0023 with the §3.6 DB
   constraint; `/ladder/arm` typed-phrase; `/ladder/fire-rung` cron-bearer + claim/dedupe
   + `assertLadderArmed` + precondition-snapshot re-check; NAS watcher tick; preview modal).
@@ -128,11 +132,10 @@ exchange-level double-fire rejection.
   - ✅ **P1c arm path** (DONE): `ladder-service.ts` service-role CRUD + `/ladder/arm`
     (admin + typed-phrase → validate → snapshot → status='armed'). Arming is AUTHORIZATION
     only — moves no money.
-  - ✅ **P1d fire path** (DONE, LIVE): `performLadderRungFire` (the guard stack — see
-    [CLAUDE.md](../src/lib/ladder/CLAUDE.md)) via `/ladder/fire-rung` + `/api/cron/ladder-watch`
-    (cron-bearer + `ladder_fires` claim/dedupe + author/mode/armed + precondition re-check +
-    runtime risk-covered-by-profit + atomic bracket → flatten-on-fault → executeIntent); the
-    cron-job.org watcher tick; the rich `LadderDetailModal`. First live fire 2026-06-29.
+  - ✅ **P1d fire path** (DONE, LIVE): `performLadderRungFire` (the guard stack; its
+    canonical order is in [src/lib/ladder/CLAUDE.md](../src/lib/ladder/CLAUDE.md)) via
+    `/ladder/fire-rung` + `/api/cron/ladder-watch`; the cron-job.org watcher tick; the rich
+    `LadderDetailModal`. First live fire 2026-06-29.
   Surfaces native **Scale + TWAP**. Watcher owns volume/funding/indicator triggers.
   **MUST also include (moved up from P2 — P1 already adds to a live position):** the
   pyramiding-guardrail enforcement (a rung that *increases* exposure fires only if its
@@ -263,7 +266,5 @@ What actually shipped, where it differs from or extends the plan:
   `LADDER_AUTOFIRE_ENABLED` (autonomous-fire gate) are independent of `TRADING_MODE`. See
   `ladder-flags.ts` and the runbook.
 
-**Not yet delivered:** multi-rung live exercise (adds + the add-coverage gate are
-unit-tested only), trailing stops (P2), multi-leg/delta-neutral (P3), the dead-watcher
-heartbeat, and a per-tick watcher lock for cross-coin portfolio-cap atomicity (§invariant 2
+**Not yet delivered:** multi-leg/delta-neutral (P3) and a per-tick watcher lock for cross-coin portfolio-cap atomicity (§invariant 2
 is enforced per-fire today, not under one ladder-wide lock).

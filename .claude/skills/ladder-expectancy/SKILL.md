@@ -46,8 +46,11 @@ profitable-by-skill from profitable-by-luck. **This skill never trades.**
 - **The bar is pre-registered.** Never adjust `killExpectancyR` / `minTrades` after seeing
   the data to keep a favorite setup alive — that is the exact failure mode this exists to
   prevent.
-- Attribution is per-coin over the ladder's window — sound under the playbook's
-  one-active-campaign-per-coin rule (§5b). Overlapping same-coin trades blur it; the row is
-  flagged when no fills are found.
+- Attribution is **lot-based** (`src/lib/ladder/ladder-outcome-business-logic.ts`). Each
+  fire owns the HL fills inside a 10 s entry window from `fired_at` (1 s early jitter allowed); closes consume lots
+  FIFO; an open that matches no fire becomes a `manual` lot; conservation checks run per
+  coin (lots must equal the replayed and the account position).
+- **Rebuild the ledger** with `pnpm ladder:backfill-outcomes`. It is a dry run by default;
+  `--write` refuses to run without `--backup PATH` (a copy of the current rows).
 - Requires `HL_ACCOUNT_ADDRESS` for realized math (prod); without it only `never_filled`
   outcomes fully resolve.

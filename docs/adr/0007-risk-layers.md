@@ -46,7 +46,8 @@ never open, add, or flip.** Enforced structurally:
   (the order may have filled before the response was lost) HOLDS the lock until
   expiry so a blind retry can't double-close.
 - **Shipped DISABLED** behind `AUTO_EXIT_ENABLED` (default off). Detail +
-  enable checklist in `docs/LIVE_AUTO_EXIT.md`. Honest limit: a ~5-min cron +
+  enable checklist in `docs/LIVE_AUTO_EXIT.md`. *Status 2026-09-05: enabled in
+  production as the catastrophe backstop; LIVE sessions only.* Honest limit: a ~5-min cron +
   HTTP hop + IOC cannot beat a fast cascade — it's a *gradual-drift* backstop,
   not a liquidation preventer.
 
@@ -69,11 +70,14 @@ fixture-tested; the service persists state.
 
 ## Consequences
 
-- No-auto-fire is preserved end-to-end: the circuit-breaker only *gates and
-  recommends*; the auto-exit is the single narrow, opt-in, structurally
-  exit-only exception, and even it can only ever flatten — never take on risk.
+- No-auto-fire is preserved for these layers: the circuit-breaker only *gates and
+  recommends*; the auto-exit is a narrow, opt-in, structurally exit-only
+  exception, and even it can only ever flatten, never take on risk. (Armed
+  ladders, which DO take on live risk after a one-time arm, are a separate
+  recorded exception: ADR-0008.)
 - Both layers are deterministic-threshold only (no LLM in the loop); the health
   engine is the market read. Discretionary live judgment is a separate, larger
   Layer-2 build.
-- Because auto-exit rides the same seam, enabling it in paper is a harmless
-  rehearsal of the exact live path (ADR-0001).
+- *Superseded 2026-07-28:* the scan now skips every non-live session
+  (`auto-exit-scan.ts`, after a paper signal flattened a live position), so paper
+  cannot rehearse it. Rehearse on testnet with a live-mode session.

@@ -9,21 +9,21 @@ never fire**.
 
 For the design rationale + roadmap see [docs/ARMED_LADDER_ARCHITECTURE.md](../../../docs/ARMED_LADDER_ARCHITECTURE.md).
 For operating it (arm/fire/disarm, env flags, the cron watcher) see
-[docs/LADDER_OPERATOR_RUNBOOK.md](../../../docs/LADDER_OPERATOR_RUNBOOK.md).
+[docs/LADDER_OPERATOR_RUNBOOK.md](../../../docs/LADDER_OPERATOR_RUNBOOK.md). The decision that
+an arm pre-authorises autonomous live fires is
+[ADR-0008](../../../docs/adr/0008-autonomous-armed-ladders.md). This file is the canonical home
+for the fire guard stack.
 
 ## Status
-**Shipped + LIVE** (first real fire 2026-06-29: a single-rung ETH short opened
-autonomously on a 15m close with an atomic stop, then self-completed). Single-rung
-`open` is live-proven; **multi-rung adds + the add-coverage gate are built + unit-tested
-but NOT yet exercised against the live exchange** — treat that path as unproven.
+**Shipped + LIVE.** Live/paper status for the whole desk: the root `CLAUDE.md` banner.
+Live-proven: single-rung `open` (2026-06-29), `reduce`, breakeven `stop_move`, multi-rung
+`add` + the add-coverage gate and `'trail'` stop moves (2026-08-19, ladder `8c9573f2`).
+Still never filled live: take-profit brackets (`targetPx`).
 
-**This is NOT paper trading.** `TRADING_MODE=live` (local + prod); `LADDER_LIVE_ENABLED` +
-`LADDER_AUTOFIRE_ENABLED` are ON in production. **Ladders fire on the PRODUCTION Vercel
-deployment**, and a ladder's **`mode` field** decides paper vs live (the firing deployment
-must match it via the mode-match guard). So a real ladder MUST be created `mode: 'live'`;
-a `mode: 'paper'` ladder will NOT fire on the live production watcher and no paper watcher
-runs, so it just sits. Don't be misled by older "paper-first" docs — that was pre-go-live,
-and the still-paper subsystem is the *scout*, not ladders.
+**A paper ladder never fires.** Ladders fire on the PRODUCTION Vercel deployment, and the
+mode-match guard fires only ladders whose `mode` matches it. A `mode: 'paper'` ladder just
+sits, so a real ladder MUST be created `mode: 'live'`. The still-paper subsystem is the
+*scout*, not ladders.
 
 ## The pieces (canonical locations — don't duplicate)
 
@@ -41,7 +41,13 @@ and the still-paper subsystem is the *scout*, not ladders.
 | `ladder-service.ts` | Service-role CRUD (server-only). `armLadder` (race-safe), `claimRungFire` (atomic dedupe), `setRungStatus`, `markLadderDone`, `disarmLadder`. |
 | `ladder-fire-service.ts` | **The one money-moving site.** `performLadderRungFire` = the guard stack below. |
 | `ladder-watch-service.ts` + `ladder-watch-business-logic.ts` | The tick: load armed → build completed-candle snapshots → evaluate → fire met rungs. |
-| `ladder-flags.ts` | The two kill-switches + the cron secret resolver. |
+| `ladder-flags.ts` | The two kill-switches, the drafter alert flags (reversion, trend, runaway) + the cron secret resolver. |
+| `ladder-outcome-business-logic.ts` + `ladder-outcome-service.ts` | Lot-based outcome attribution for the expectancy ledger (`ladder-expectancy`, `pnpm ladder:backfill-outcomes`). |
+| `ladder-leader-guard-*` | DISARM-ONLY: disarms a `leader_address`-tagged ladder when the leader exits. |
+| `trend-flip-guard-service.ts` + `trend-stance-service.ts` | DISARM-ONLY 8h-regime guard for trend-follow ladders, fed by the iamrossi stance API. |
+| `ladder-expiry-alert-*` | Advisory pages: expiry approaching, and a residual live position at expiry. |
+| `ladder-stop-hygiene-business-logic.ts` | **PURE** stop-placement checks (round numbers, recent wick extremes). |
+| `event-prep-alert-service.ts`, `price-alert-*`, `reversion-alert-*`, `runaway-alert-*`, `trend-alert-*` | Advisory alerts and auto-DRAFTERS run from the ladder-watch tick. Draft only, never arm; fail-soft. |
 
 Routes: `api/cockpit/ladder/{route,[id],arm,disarm,fire-rung}` + `api/cron/ladder-watch`.
 UI: `app/cockpit/components/ladders/{LaddersView,LadderBuilderModal,LadderDetailModal,LadderChart}` + `app/cockpit/components/ArmedLaddersPanel`.
@@ -63,7 +69,7 @@ auto-disarms. **Do not reorder, weaken, or short-circuit these.**
      (i) the LIVE circuit breaker (`checkCircuitBreaker('live')` — unified-account equity =
      spot USDC + Σ uPnL; a daily-loss/drawdown trip skips `circuit-breaker:*`); (ii) the
      BOOK-HEAT ceiling (`bookHeatUsd` of all open positions + this rung ≤
-     `LADDER_BOOK_HEAT_MAX_FRAC`(0.10) × live equity → skip `book-heat-exceeded`).
+     `LADDER_BOOK_HEAT_MAX_FRAC` × live equity (code default 0.10; prod value: runbook) → skip `book-heat-exceeded`).
      Both fail CLOSED on unreadable state (`cannot-verify-*`) and sit BEFORE the claim.
      A live `add` also reads its position before the claim. A stale, errored, or invalid-uPnL read
      skips `cannot-verify-add` and leaves the rung pending.
@@ -79,7 +85,7 @@ auto-disarms. **Do not reorder, weaken, or short-circuit these.**
 
 ## Invariants you must not break
 
-- **Parity (with one documented exception).** `projectRung` (display) must reuse
+- **Parity (with one documented exception; operator view in the runbook, "When a rung fires").** `projectRung` (display) must reuse
   `resolveArmRung` so the card/preview shows exactly what ARM consents to. **The
   exception, intentional:** the fire path sizes off the live **candle-close mark**, not
   the trigger (`fireOpenOrAdd` → `buildOpenProposal({ entryPx: markPx })`). Since a rung
@@ -102,9 +108,9 @@ auto-disarms. **Do not reorder, weaken, or short-circuit these.**
   adds, and reduces stop at expiry. The operator decides how to manage the exit.
 - **Server re-reads the persisted row, never the request.** `mode`/`author`/`status`/
   rung params all come from `getLadderWithRungs`, not the POST body.
-- **Two orthogonal kill-switches + TRADING_MODE.** `LADDER_LIVE_ENABLED` = a live ladder
-  may be *armed*; `LADDER_AUTOFIRE_ENABLED` = the watcher may *autonomously fire*. Both
-  default OFF and are independent of `TRADING_MODE`. "Go live for manual trading" must
+- **Two orthogonal kill-switches + TRADING_MODE** (operator table: runbook, "The three
+  switches"). `LADDER_LIVE_ENABLED` = a live ladder may be *armed*; `LADDER_AUTOFIRE_ENABLED`
+  = the watcher may *autonomously fire*. Both default OFF and are independent of `TRADING_MODE`. "Go live for manual trading" must
   never imply "let the watcher fire." `forcePaper = !(ladder.mode==='live' && getTradingMode()==='live')` — a paper ladder NEVER touches the live exchange (bracket placement is gated on `!forcePaper`).
 - **Money math separation.** `computeLadderRisk` is the *consent* surface (worst-case,
   caps, breaches) — it must stay self-defending against understatement (a stopless rung
@@ -125,11 +131,12 @@ auto-disarms. **Do not reorder, weaken, or short-circuit these.**
 - A fully-fired ladder transitions to `done` and drops out of `ArmedLaddersPanel` (polls
   `status=armed`); the position lives on in Open Positions with its resting stop. That's
   the intended hand-off, not a disappearance bug.
-- Tests: `tests/lib/ladder/**` (108+). When you add a `ladder-service` export that the
+- Tests: `tests/lib/ladder/**` (290+). When you add a `ladder-service` export that the
   fire path calls, add it to the fire-service test's `vi.mock('@/lib/ladder/ladder-service')`
   or the mocked module returns `undefined` and the `.catch` chain throws.
 
 ## Validate
-`pnpm type:check && pnpm vitest run tests/lib/ladder/ && pnpm lint`. For UI changes also
-proofshot (`scripts/_proof-ladder-detail.ts`) and `pnpm smoke`. The smoke harness waits
-for the cockpit heading instead of networkidle because realtime connections stay open.
+The general commands are in the root `CLAUDE.md` (Build & Validation). Ladder fast loop:
+`pnpm vitest run tests/lib/ladder/`. For UI changes also proofshot
+(`scripts/_proof-ladder-detail.ts`). The smoke harness waits for the `cockpit-view` test id
+instead of networkidle because realtime connections stay open.

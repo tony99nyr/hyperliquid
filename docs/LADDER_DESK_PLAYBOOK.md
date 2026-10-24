@@ -222,6 +222,10 @@ never place the stop *on* obvious liquidity (round numbers, prior swing lows) wh
 
 ## 5b. Portfolio heat (the book-level cap — operator-enforced)
 
+> *Superseded for the total-book cap:* the fire path now enforces `LADDER_BOOK_HEAT_MAX_FRAC`
+> automatically (see "One heat cap" below and the runbook). The 6%/4% figures below are the
+> original manual rule; the per-coin and cluster discipline still applies.
+
 The engine sizes and caps **each ladder in isolation**; it does **not** aggregate risk across
 ladders. That is the classic small-account blowup: three "Conservative" 2% alt-long ladders are
 *not* three independent 2% bets — crypto alts carry high BTC-beta, so in a flush they stop out
@@ -421,10 +425,10 @@ The 30Y yield is the desk's fiscal-stress tripwire. Levels and actions:
 - Reset when the 30Y closes back under 5.37 for 3 sessions.
 
 ### One heat cap
-The authoritative book-heat cap is the production env `LADDER_BOOK_HEAT_MAX_FRAC`:
-**0.15 standing, 0.35 only inside a scheduled event window, reverted after**. This
-supersedes the 6%/4% manual figures earlier in this file and the 0.10 figure in
-src/lib/ladder/CLAUDE.md.
+The authoritative book-heat cap is the production env `LADDER_BOOK_HEAT_MAX_FRAC`. Its
+canonical home (code default, the desk policy for prod, how to read the live value) is
+[LADDER_OPERATOR_RUNBOOK.md](./LADDER_OPERATOR_RUNBOOK.md), "Env: LADDER_BOOK_HEAT_MAX_FRAC".
+It supersedes the 6%/4% manual figures in §5b.
 
 ### Catalyst drafter: pre-registered kill bar (from 2026-10-03)
 Record: ~12 drafts, 5 live fires, net ≈ +$12 (one stop erases ~80% of it). That is
@@ -435,10 +439,13 @@ measured separately (4 windows: 2 paid fires, 2 correct no-fires) and the word
 
 ### Standing fixes
 - **Re-anchor-on-arm**: stale-gate drafts are re-anchored to the live mark at arm
-  time (manual via the desk agent until built in the cockpit). Auto-arm is REJECTED:
+  time. *Resolved:* the cockpit detail modal has a Re-anchor button (runbook
+  troubleshooting table). Auto-arm is REJECTED:
   the drafter's governance defect rate (3 bugs in ~12 drafts) does not earn autonomy.
 - **BUILD FREEZE**: no new drafters, detectors or dashboards until venue-side fill
   ingestion ships in the reconcile cron. Three phantom-position incidents is enough.
+  *Resolved:* the reconcile cron now backfills exchange-side fills (migration 0036);
+  the Performance and Lanes views shipped after it.
 - **Verify-before-acting rule**: never state or act on a position, book, env value
   or wallet read without reading the source of truth in the same turn (the stale-
   whale, phantom-position and env-wipe incidents are one defect class).

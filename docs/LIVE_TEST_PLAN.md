@@ -1,5 +1,9 @@
 # Cockpit LIVE Test Plan — run one feature at a time
 
+> **Status (2026-10-24):** largely historical. Protective stop brackets and `stop_move`
+> have since fired live on ladders; take-profit brackets have never filled live. The
+> stop-entry and manual OCO paths were not re-checked for this note.
+
 **You execute each step in the cockpit; I verify after each** (HL open-orders / fills / DB
 row / analysis-log) and say PASS/FAIL before you move on. Production is **LIVE — these are
 REAL orders.**

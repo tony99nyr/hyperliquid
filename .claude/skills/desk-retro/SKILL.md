@@ -10,8 +10,9 @@ It answers four questions, each with its own deterministic gather, and ends with
 dated playbook entry. **Weekly, not daily** — at ~1-2 resolved events per week a
 daily retro chases noise and invites p-hacking against the pre-registered bars.
 The weekly cadence IS the multiplicity guard: do not run the bundle sub-weekly.
+Run it on Mondays. This skill is the canonical weekly retro procedure; other docs point here.
 
-## Protocol (run all four, in this order)
+## Protocol (run steps 0-4 in this order, then step 5)
 
 ### 0. Performance report, markers and forecast
 

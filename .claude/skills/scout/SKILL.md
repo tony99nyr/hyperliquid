@@ -28,12 +28,13 @@ polling and wakes you only when something material happened (the inverted loop).
   (daily-loss or drawdown trip), do NOT open any new position — `scout:trade` will
   refuse it anyway. Manage/exit existing positions only; if a flatten is
   recommended, propose a safe exit (the breaker never auto-fires).
-- **Bar before trade.** Open a paper position ONLY when a setup clears the
-  pre-registered bar in `docs/scout/README.md`. The default action is STAND DOWN.
+- **Bar before trade.** Open a paper position ONLY on a registered lane, when the setup
+  clears that lane's pre-registered rule (`docs/scout/PREREGISTRATION_*.md`; bars in
+  `data/scout/lane-bars-*.json`). The default action is STAND DOWN.
   Chop, thin edge, fighting funding, no-confluence → do nothing + log why.
-- `leader-action` triggers open the **leader-follow lane** (see the playbook's lane
-  rules): vet the whale's move with the full context (is it conviction or a
-  martingale add?), and if you trade it, tag `--lane leader-follow`.
+- **Killed lanes stay killed.** `leader-follow`, `directional`, `reversion` and
+  `trend-follow` are on `KILLED_LANES` (`src/lib/scout/scout-execution-guard.ts`); the
+  executor refuses them. A `leader-action` trigger is context only: never open on it.
 - **STEWARD LANE (live book, READ-ONLY):** the snapshot's `liveBook` shows the LIVE
   positions + armed ladders. You may NEVER trade/touch them — but when the context
   says a ladder deserves management (momentum stalled on a green live position, an
@@ -51,7 +52,9 @@ polling and wakes you only when something material happened (the inverted loop).
 
 ## The loop (you, on wake)
 
-You are driven by scheduled wake-ups. Triggers live in the **Supabase `scout_triggers`
+In normal running, `scout:watch` drives the consumer headlessly (architecture:
+`docs/scout/README.md`); this loop is for a manual session. Do not run a manual session
+beside the embedded consumer. You are driven by scheduled wake-ups. Triggers live in the **Supabase `scout_triggers`
 table** (the ScoutTriggerSink — visible from any box, with a consumed-cursor so the same
 trigger never re-surfaces; the JSONL `~/.hl-cockpit-scout-trigger.jsonl` is only the
 offline fallback). `pnpm scout:cycle` reads UNCONSUMED triggers and stamps them. On EACH

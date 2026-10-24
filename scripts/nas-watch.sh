@@ -8,8 +8,12 @@ export PATH="/volume1/home/admin/.local/node/bin:/usr/local/bin:/usr/bin:/bin:$P
 #
 # Runs a single cycle of: (1) health watch (per-coin health/P&L/alerts -> Supabase),
 # (2) rubric scan (deterministic opportunity scan + position reviews + market_snapshots
-# -> Supabase), and (3) an OPTIONAL auto-exit poke (pokes the Vercel executor; only
-# fires when a CRON_SECRET is present). LEADER-watch is intentionally NOT here — the
+# -> Supabase), (3) vault-watch --once (vault NAV snapshots), (4) scout:lanes (per-lane
+# scorecards), and (5) OPTIONAL Vercel pokes of /api/cron/auto-exit AND
+# /api/cron/reconcile-positions. The pokes run only when a bearer is present:
+# AUTO_EXIT_CRON_SECRET in the env, else the $REPO/.auto-exit-secret file. scout:watch on
+# the office box pokes the same routes, so a secret rotation must update BOTH boxes.
+# LEADER-watch is intentionally NOT here — the
 # always-on `services/trader-watch` daemon already keeps leader_positions fresh ~every
 # 30s, so a 5-min `--once` tick here would just double-write (wasted HL calls).
 #

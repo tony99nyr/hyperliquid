@@ -3,11 +3,9 @@
 How the HL Cockpit places **real** orders on Hyperliquid, what you need to
 provision, and the exact testnet → mainnet checklist for flipping it on.
 
-> **Status (updated 2026-06-29): LIVE.** `TRADING_MODE=live` is set — real orders fire
-> (manual approvals AND armed-ladder autonomous fires; the watcher has fired real money).
-> This was a deliberate operator go-live; the checklist below documents how it was done /
-> how to re-verify. To return to paper, set `TRADING_MODE=paper` (and disable the ladder
-> autofire flag). Note: the **scout** remains independently paper-only regardless.
+> **Status:** LIVE in production (canonical statement: the root `CLAUDE.md` banner).
+> The checklist below documents how the go-live was done and how to re-verify. To return
+> to paper, set `TRADING_MODE=paper` in Vercel (and disable the ladder autofire flag).
 
 ---
 

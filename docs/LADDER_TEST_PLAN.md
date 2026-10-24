@@ -2,15 +2,14 @@
 
 Interactive: **you execute each step in the UI** at `hyperliquid-rouge.vercel.app` →
 **Ladders** tab; tell me when done and I **validate** (proofshot + admin API + DB read +
-analysis-log). Firing steps (Section E) **I drive locally in paper** — they never touch
-production money.
+analysis-log). Firing steps (Section E) were driven locally in paper.
 
-> **Status (2026-06-29):** the system is now fully LIVE — `LADDER_AUTOFIRE_ENABLED=true`,
-> and a single-rung ETH short has fired autonomously end-to-end (open → atomic stop →
-> `done`). **Single-rung `open` is live-proven; multi-rung adds + the add-coverage gate
-> are the next untested live surface.** For day-to-day operation see
-> [LADDER_OPERATOR_RUNBOOK.md](./LADDER_OPERATOR_RUNBOOK.md); this plan stays as the
-> step-by-step UI validation script.
+> **Historical (pre-go-live script).** The local-paper firing in Section E no longer
+> applies: ladders are always `mode:'live'`, and a paper ladder never fires on the
+> production watcher. Status: root `CLAUDE.md` banner. Live-proven since: single-rung
+> `open` (2026-06-29), multi-rung adds + the add-coverage gate and trailing stops
+> (2026-08-19). For day-to-day operation see
+> [LADDER_OPERATOR_RUNBOOK.md](./LADDER_OPERATOR_RUNBOOK.md).
 
 **Environment under test (current):** production LIVE · `LADDER_LIVE_ENABLED=true` ·
 `LADDER_AUTOFIRE_ENABLED=true` (autonomous firing ON) · migrations 0023/0024 applied.

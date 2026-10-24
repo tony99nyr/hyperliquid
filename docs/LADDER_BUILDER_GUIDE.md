@@ -7,8 +7,8 @@ This is the practical companion to [ARMED_LADDER_ARCHITECTURE.md](./ARMED_LADDER
 `src/lib/ladder/CLAUDE.md` (code-modification rules). Read this FIRST when the task is
 "make a ladder"; read the code CLAUDE.md before *changing* the engine.
 
-> ⚠ **These are LIVE-MONEY plans.** `TRADING_MODE=live` in production, autofire is ON,
-> and a `mode:'live'` ladder fires real orders on the production watcher. You (the agent)
+> ⚠ **These are LIVE-MONEY plans** (status: root `CLAUDE.md` banner). A `mode:'live'`
+> ladder fires real orders on the production watcher. You (the agent)
 > draft; **only the operator arms** (typed phrase `arm <id8>`). Never attempt to arm,
 > never weaken a validation to make a draft pass, and never create `mode:'live'` unless
 > the operator asked for a real ladder.
@@ -154,7 +154,8 @@ Every LIVE open/add passes two gates BEFORE the claim (skips are retryable; redu
 close/stop_move are NEVER gated): (1) the LIVE circuit breaker — a daily-loss/drawdown
 trip freezes autonomous entries account-wide; (2) the BOOK-HEAT ceiling — slip-aware
 worst case of all open positions + this rung must stay under `LADDER_BOOK_HEAT_MAX_FRAC`
-(default 10%) of live equity. Unstopped positions are priced punitively in the heat sum.
+of live equity (code default and prod value: runbook, "Env: LADDER_BOOK_HEAT_MAX_FRAC";
+full guard order: `src/lib/ladder/CLAUDE.md`). Unstopped positions are priced punitively in the heat sum.
 Both fail CLOSED on unreadable account state. Design ladders assuming the gate exists:
 an over-heated book silently skips your entry until room frees up.
 
@@ -180,7 +181,8 @@ row; a warning list means NOT armable.
 2. **Price BOTH structures**: graded (starter + adds at confirmations — the default
    offer at medium risk) AND conservative (single confirmation gate). The operator picks.
 3. **Risk tiers** (operator-set, medium): campaign risk ~$8–10 (~1% of equity), worst
-   case ≤ ~2.5%, book heat (OCO counted once) ≤ ~5%. Floor tier $4–5 for unproven setup
+   case ≤ ~2.5%, book heat (OCO counted once) ≤ ~5% as a desk target (a stricter
+  build-time habit; the fire-time env gate is separate, see §4b). Floor tier $4–5 for unproven setup
    types (COLLECT). SIZE-UP only when the ledger says so (n≥10 closed, ≥+0.15R).
 4. **No entry trigger armed through a binary print** (CPI/FOMC/PPI/testimony). Use
    activation windows to go hot post-print, or the event-straddle template (§7).

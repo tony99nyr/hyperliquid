@@ -8,10 +8,10 @@ The shared vocabulary for the HL Cockpit. Use these terms precisely; the
 A **human + Claude collaborative trading cockpit** for Hyperliquid. The human
 sits down, runs Claude skills to analyze HL traders and multi-timeframe candles,
 and together they pick a setup to follow. Claude orchestrates analysis and trade
-health; **the human decides and confirms every action.** A phone-accessible web
-cockpit live-renders Claude's work. **STATUS: LIVE — `TRADING_MODE=live`, real orders
-fire** (incl. autonomous armed-ladder fires; the scout remains separately paper-only; see
-the root `CLAUDE.md` STATUS banner). It lives deliberately OUTSIDE the iamrossi autonomous system.
+health; **the human decides and confirms every action** (per order, or once per
+ladder at arm time: an arm pre-authorises that ladder's autonomous live fires, see
+ADR-0008). A phone-accessible web cockpit live-renders Claude's work. Live/paper status:
+the root `CLAUDE.md` STATUS banner. It lives deliberately OUTSIDE the iamrossi autonomous system.
 
 ## Core terms
 
@@ -24,7 +24,7 @@ the root `CLAUDE.md` STATUS banner). It lives deliberately OUTSIDE the iamrossi 
   the paper and live sources. Downstream consumes only this and cannot tell the
   modes apart. `source` is audit-only, never branched on.
 - **Fill source** — `paperFill` (book-match) or `liveFill` (HL exchange). The
-  ONE util `executeIntent` is the only mode branch.
+  ONE util `executeIntent` is the only place that chooses the fill source.
 - **Position** — the running fold of fills for a coin: side (long/short/flat),
   size, avg entry, realized P&L, fees. Mode-unaware.
 - **Order book / l2Book** — HL level-2 book snapshot (bids/asks). The paper
@@ -75,23 +75,28 @@ the root `CLAUDE.md` STATUS banner). It lives deliberately OUTSIDE the iamrossi 
 
 ## Autonomous PAPER scout (ADR-0005)
 
-- **Scout** — an autonomous, **paper-only** opportunity finder + manager. It is
-  the ONE path that executes without the human approval popup — allowed for
-  paper fills ONLY, hard-guarded by `assertScoutPaperMode` (the boundary travels
-  with the intent: `origin: 'scout'` is refused live at the seam). Runs on the
-  cheap-model tier; escalates to Opus only for ambiguous calls.
+- **Scout**: an autonomous, **paper-only** opportunity finder + manager. It
+  executes paper fills without the approval popup, hard-guarded by
+  `assertScoutPaperMode` (the boundary travels with the intent: `origin: 'scout'`
+  is refused live at the seam). Architecture: `docs/scout/README.md`.
 - **Playbook** (`docs/scout/playbook.md`) — the scout's curated trading rules;
   read each cycle, deliberately updated by the weekly `scout-review` (not
   recency-biased).
 - **Track record** — the scout's resolved `hypotheses` + `fills`/`pnl`, scored
-  on a **pre-registered kill/graduation bar** (paper net P&L incl. modeled
-  funding + slippage) decided before looking at results.
+  per lane on **pre-registered bars** (`data/scout/lane-bars-*.json`) decided
+  before looking at results.
 
-## Risk layers (no-auto-fire preserved)
+## Armed ladders (ADR-0008)
+
+- **Armed ladder**: a multi-rung plan whose rungs fire autonomously on completed
+  candles after a one-time operator **arm**. The arm is the authorisation; the
+  watcher has zero discretion. Code rules: `src/lib/ladder/CLAUDE.md`.
+
+## Risk layers
 
 - **Auto-exit (Layer 1)** — a scoped, structurally **exit-only** autonomous
   close on hard risk triggers (liq-proximity / loss / unhealthy). Can only
-  reduce/close (never open/add/flip). BUILT, shipped DISABLED. See
+  reduce/close (never open/add/flip). LIVE in production. See
   `docs/LIVE_AUTO_EXIT.md` + ADR-0007.
 - **Circuit-breaker** — account-level daily-loss / drawdown halt: BLOCKS new
   entries and *recommends* a flatten (never auto-fires it). The account brake

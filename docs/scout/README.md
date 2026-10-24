@@ -1,67 +1,54 @@
 # Autonomous Paper Scout — runbook
 
-> ## STATUS — repaired 2026-07-03 (C1+C2 of the architecture review)
-> The sink is now the **Supabase `scout_triggers` table** (ScoutTriggerSink: any-box
-> visibility + a consumed-cursor; the JSONL is the offline fallback), and the consumer is
-> **schedulable** (`scripts/scout-headless.sh`: `scout:cycle --json` → headless Sonnet →
-> `scout:trade --from-json`, strict-validated). Consumer liveness is its own heartbeat row
-> (`source='scout-cycle'`). To finish the repair: add the headless cron line (see
-> OPERATOR_MANUAL) — the history below explains why.
->
-> ### Previous status — PRODUCER-ONLY since ~Jun 24 (found 2026-07-02)
-> The deterministic half is HEALTHY: `scout:watch` writes ~200–300 triggers/day to the
-> **machine-local** JSONL (`~/.hl-cockpit-scout-trigger.jsonl`). What has been DEAD is the
-> **consumer** — the Sonnet Claude scout session that reads the JSONL and makes paper calls
-> was dropped from the operating rituals during the trader-follow/ladder pivot, so no
-> hypotheses have been created since Jun 24. The heartbeat's "0 trigger(s)" is PER-TICK,
-> not cumulative — do not read it as producer silence.
->
-> Known traps (as-built): the JSONL sink is homedir-local, so a NAS-resident daemon's
-> triggers are INVISIBLE to a desktop scout session (only the heartbeat travels through
-> Supabase); two daemons on different boxes clobber one heartbeat row. Realtime for scout
-> tables was dropped in migration 0024 (the Scout tab polls, ~60s). The playbook has never
-> been curated (`scout:review` has never run). The pre-registered checkpoint verdict was
-> never recorded — the Jun-26 multi-lane refactor reset the book instead.
-
+> **Status:** paper-only and running. History: the consumer was dead from ~Jun 24 to the
+> 2026-07-03 repair (Supabase sink + headless consumer; see ADR-0005 addendum), and since
+> Jul 17 the consumer runs embedded in `scout:watch`. `scout:review` has run regularly since
+> 2026-07-28 (11 rows in `scout_reviews` by 2026-10-19), now inside the `desk-retro` skill.
 
 The scout is an **autonomous, paper-only** opportunity finder + position manager
-that runs on the home PC against your Claude **subscription** (no API key). It
+that runs on the office box against your Claude **subscription** (no API key). It
 exists to answer one question cheaply: **can Claude find enough trading edge to be
-worth running?** — measured on a pre-registered bar before any real money.
+worth running?** It is measured on pre-registered bars before any real money.
 
-## Architecture (the inverted loop + cheap-model cascade)
+This README is the canonical home for the scout architecture. ADR-0005 is the
+decision record.
 
-1. **Deterministic daemon (FREE, no model)** — `pnpm scout:watch` polls the latest
-   rubric scores, fresh marks, and open paper positions every ~60s and appends
-   *material triggers* to a JSONL file. Zero tokens. This is the fast layer.
-2. **Cheap model = the scout (Sonnet)** — a Claude Code session running the
-   `scout` skill, woken by a Monitor on the trigger file. It vets triggers and
-   makes the clear paper calls. Cheap against the subscription allowance.
-3. **Opus — rare escalation** — the scout spawns an Opus subagent only for
-   ambiguous, high-stakes calls. Opus is otherwise your Tier-1 manual session +
-   the weekly review.
+## Architecture (one supervised process + cheap-model cascade)
 
-## Multi-lane (since 2026-06-26)
+1. **Deterministic producer (FREE, no model).** `pnpm scout:watch` polls the latest
+   rubric scores, fresh marks, and open paper positions (every 120s by default) and
+   writes *material triggers* to the Supabase `scout_triggers` table (any-box
+   visibility, `consumed_at` cursor; JSONL is the offline fallback). Zero tokens.
+2. **Embedded consumer (Sonnet, headless).** Every `SCOUT_CONSUMER_INTERVAL_MIN`
+   (default 30; a shorter floor when an act-class trigger is pending) `scout:watch`
+   spawns `scripts/scout-headless.sh`: `scout:cycle --json` → `claude -p` (Sonnet) →
+   `scout:trade --from-json`, strict-validated by `parseScoutDecision`. Liveness is the
+   `scout_heartbeat` row `source='scout-cycle'`. **Run ONE consumer only:** do not add a
+   separate `scout-headless.sh` cron next to the daemon, because two consumers can both
+   open on the same directive.
+3. **Opus: rare escalation + the weekly review.** The interactive `scout` skill session
+   still works for a manual run, but it is not the main path.
 
-The scout now runs **multiple lanes**, each scored on its own number in
-`scout:review` and the cockpit Scout tab (see `SCOUT_ALPHA_ROADMAP.md`):
+Supervision and the paper-mode pins: `services/scout-watch/README.md`.
 
-- **directional** — the original lane below (Claude trades the rubric, paper).
-- **vault:HLP** (Lane A) — a passive HLP allocation, scored on HLP's flow-free
-  per-capital return. Ingested by `pnpm vault-watch` (NAS tick).
-- **carry** (Lane B) — a delta-neutral funding-carry **benchmark** (earn funding
-  on the funding-receiving side, exit on a sign flip). Scored from live HL funding.
-- Lanes A + B are paper **benchmarks** ("does the edge pay?"), not live-executed.
-  Lane C (cross-sectional) was gate-checked and **rejected** (no edge on majors).
+## Lanes
 
-`pnpm scout:lanes` (on the NAS tick) computes the per-lane breakdown and persists
-it to `lane_scorecards`; the cockpit reads it. Env knobs:
-`SCOUT_{VAULT,CARRY}_{LOOKBACK_DAYS,NOTIONAL_USD,BAR_USD}`. The account-level NET +
-verdict (the pre-registered bar + circuit breaker) stays the aggregate.
+Every scout open must carry a lane on `REGISTERED_LANES`, and a lane on `KILLED_LANES`
+is refused (`src/lib/scout/scout-execution-guard.ts`; that file is the truth).
+At 2026-10-24:
 
-## What the directional lane trades (decision model)
+- **Registered:** `htf-trend`, `compression-straddle` (its KILL is pending the Monday
+  retro), `breakdown-short` / `reclaim-long` (rubric crossing), and the passive
+  benchmarks `vault` (HLP) and `carry`.
+- **Killed:** `directional`, `reversion`, `trend-follow`, `leader-follow`.
 
-The honest baseline for the **directional** lane. All values from
+`pnpm scout:lanes` (on the NAS tick) persists per-lane scorecards to `lane_scorecards`;
+the cockpit Scout tab reads them. Env knobs for the benchmarks:
+`SCOUT_{VAULT,CARRY}_{LOOKBACK_DAYS,NOTIONAL_USD,BAR_USD}`.
+
+## What the directional lane traded (historical: the lane is KILLED)
+
+Kept as the record of the original decision model. All values from
 `data/rubric/rubric-v0.1.0.json`.
 
 - **Universe:** ETH, BTC, SOL, HYPE only.
@@ -92,23 +79,15 @@ The honest baseline for the **directional** lane. All values from
   is no thesis-invalidation exit. **Net: a directional bet on liquid majors —
   the lowest-edge corner — on signals our own backtests rate weak/unproven.**
 
-## Launch (home PC, both run continuously)
+## Launch
 
-```bash
-# 0) one-time: TRADING_MODE must be paper (it's the default; do NOT set live)
-#    optional: export SCOUT_TRIGGER_FILE=/path/to/trigger.jsonl
+Start `scout:watch` under its supervisor (`services/scout-watch/README.md`). It runs the
+producer, the embedded consumer and the prod-cron poker. Paper mode is pinned by the
+start script and the systemd unit, not by `.env.local`.
 
-# 1) the FREE deterministic trigger daemon (its own terminal / tmux pane)
-pnpm scout:watch
-
-# 2) the scout session (a Claude Code session on SONNET), then tell it:
-#    "run the scout"  → it invokes the `scout` skill and self-paces.
-```
-
-The scout drives itself via scheduled wake-ups + a Monitor on the trigger file.
-It runs `pnpm scout:cycle` each wake to gather the snapshot, decides per
-`.claude/skills/scout/SKILL.md`, and only on a setup that clears the bar runs
-`pnpm scout:trade` (paper).
+For a manual session instead, open a Claude Code session on Sonnet and say "run the
+scout" (the `scout` skill). Do not leave a manual session running beside the embedded
+consumer.
 
 ## Safety model
 
@@ -122,29 +101,22 @@ It runs `pnpm scout:cycle` each wake to gather the snapshot, decides per
 - **Open paper positions are covered by these layers:** (a) the scout reviews
   every open position on every wake (risk before opportunity); (b) the crash-safe
   `pnpm watch` daemon monitors + writes health/alerts even if the scout session
-  dies; (c) the manual Safe-Exit button; (d) **optionally** the deterministic
-  auto-exit Layer-1 (`risk-exit-service.ts`, ADR-0007). That layer is
-  mode-agnostic, so pointing a cron at `/api/cron/auto-exit` with
-  `AUTO_EXIT_ENABLED=true` while the scout's session is the active one gives a
-  real auto-close-when-scout-is-down floor for PAPER positions too (harmless
-  rehearsal of the live path). With it off, a dead scout session leaves a paper
-  position to the watch alerts + your manual Safe-Exit.
+  dies; (c) the manual Safe-Exit button; (d) the scout's own exit enforcement in
+  `scout:watch`. The auto-exit Layer-1 (ADR-0007) does NOT cover paper: it scans
+  LIVE sessions only.
 
-## Pre-registered success / kill bar (decide BEFORE looking at results)
+## Pre-registered bars (decide BEFORE looking at results)
 
-Metric = **paper net P&L including modeled funding + slippage** (the paper fill
-only models taker fee; `paper-funding-business-logic` adds funding-while-holding +
-a ~5bps/leg latency penalty so the number isn't optimistic).
+The numbers live in one place each; do not restate them here:
 
-- **Checkpoint 1 (~2 weeks):** net-positive and not just churning fees
-  (~9bps round-trip)? If it is clearly bleeding → **KILL.** (Same discipline that
-  rejected the funding / copy-trading lanes.)
-- **Graduation to live (~90 days):** net ≥ **~$1,000/mo-equivalent**, max
-  drawdown **< 15%**, funding modeled. Only then consider the Phase-2 live seam
-  (two gates: `TRADING_MODE=live` + a per-coin allowlist + human approval per trade).
+- **Per-lane kill / graduation bars** (these decide each lane's verdict):
+  `data/scout/lane-bars-*.json`, with the rationale in `docs/scout/PREREGISTRATION_*.md`.
+- **Account-level aggregate bar** (monthly net and drawdown ceiling):
+  `src/lib/scout/scout-review-business-logic.ts`. It scores the whole book; it does not
+  override a lane verdict.
 
-$400/mo (electricity + subscription) is *breakeven* — the ~$1k/mo target is the
-margin that survives the estimated 40–70% paper→real edge haircut.
+Metric = **paper net P&L including modeled funding + slippage**. Graduating to live is
+never automatic: it needs the bar AND the separate live gates (ADR-0005).
 
 ## The learning loop
 
@@ -152,6 +124,6 @@ margin that survives the estimated 40–70% paper→real edge haircut.
   the hypothesis with the outcome. That + `fills`/`pnl` is the track record.
 - Each cycle the scout reads its recent track record + `docs/scout/playbook.md`
   and applies the playbook's rules.
-- `pnpm scout:review -- --write` (the `scout-review` skill, weekly / on-demand, Opus) scores
+- The `scout-review` skill (weekly inside `desk-retro`, or on demand; Opus) scores
   the record and **curates the playbook** — the deliberate, non-recency-biased
   update step.

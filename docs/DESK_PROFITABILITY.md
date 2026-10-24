@@ -29,7 +29,7 @@ regime (few, evidence-gated trades) IS the edge this account has demonstrated.
 - 100% taker. $39.32 total fees on $87.4k notional = **4.5 bps per side**.
 - Mean entry overshoot on price-triggered opens/adds ≈ **+16 bps adverse**
   (median ~+10, worst +143). This is the documented fill-at-candle-close
-  design, not a leak — dollar risk per rung is fill-invariant.
+  design, not a leak (rule: runbook, "When a rung fires").
 - Maker entries would save ~3 bps per side ≈ $2-3/month at current size.
   **Verdict: not worth the build until size scales after a graduation.** A
   max-overshoot fire guard is a candidate rung field; it must be
@@ -52,6 +52,9 @@ infrastructure loss ≈ 5-15%, not the raw "66% missed" headline.
 2. **The event lane.** compression-straddle survived its 6th-close bar (2/7,
    +$35). Binary events are where our size does not fight fee drag. Keep the
    straddle discipline by the book.
+   *2026-10-24 note:* the fixed scorecard (`pnpm scout:review`) shows
+   compression-straddle at -$12.39 on 7 closes, so the registered bar has fired
+   (`PROFIT_REVIEW_2026-10-24.md`, F2). The Monday 2026-10-26 retro formalises the KILL.
 3. **Ops reliability.** The only real capture losses were one daemon gap and
    one degraded feed. Keep the NAS crons healthy; nothing new to build.
 4. **Costs.** Deferred (see the audit) — revisit after a graduation.
@@ -67,7 +70,10 @@ conditional-ladder lattices · sizing up to "make it back".
 
 ## How to reproduce the numbers
 
-- **Fills/fees/monthly arc:** POST `https://api.hyperliquid.xyz/info` with
+- **Core numbers:** run `pnpm analysis:profit-review` (`scripts/analysis/profit-review/`).
+  It regenerates the lifetime and since-August totals and the lane figures. Use the
+  manual recipes below only for figures the bundle does not port.
+- **Fills/fees/monthly arc (manual):** POST `https://api.hyperliquid.xyz/info` with
   `{"type":"userFills","user":<HL_ACCOUNT_ADDRESS>}`; sum `closedPnl` and
   `fee` per month; `crossed` = taker. Overshoot: join `ladder_fires`
   (status='filled') to `ladder_rungs.trigger_px` and compare the matched
@@ -79,4 +85,4 @@ conditional-ladder lattices · sizing up to "make it back".
   (stand-down), and >2h gaps in the decision cadence (daemon gap).
 - **Lane verdicts:** `pnpm scout:review` (deterministic; do not re-derive).
 
-The weekly retro bundle that maintains this file: `.claude/skills/desk-retro`.
+The weekly retro that maintains this file: the `desk-retro` skill (`.claude/skills/desk-retro/SKILL.md`).

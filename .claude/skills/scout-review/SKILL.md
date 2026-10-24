@@ -41,9 +41,11 @@ the fee-drag ceiling in code), the Opus review MUST apply these judgment checks:
    verdict in `scout_reviews`. Without `--write`, the command only reads and
    prints the scorecard. It prints:
    trades, win-rate, realized (net of fees), the slippage + funding haircuts, the
-   honest NET, the monthly run-rate vs the $1000/mo bar, and a verdict
-   (KILL / CONTINUE / GRADUATE). The scoring is deterministic — don't second-guess
-   the math; interpret it.
+   honest NET, and verdicts (KILL / CONTINUE / GRADUATE). Per-lane verdicts use the
+   per-lane bars (`data/scout/lane-bars-*.json`, rationale in
+   `docs/scout/PREREGISTRATION_*.md`); the account aggregate uses the bar in
+   `scout-review-business-logic.ts`. The scoring is deterministic: don't
+   second-guess the math; interpret it.
 
 2. **Read the record.** Pull the recent resolved hypotheses (the scorecard run
    shows counts; query `hypotheses` for the statements + resolution notes if you
@@ -64,8 +66,8 @@ the fee-drag ceiling in code), the Opus review MUST apply these judgment checks:
 ## Guardrails
 
 - NEVER trade or edit positions — this is analysis + a markdown edit only.
-- Respect the bar: only call GRADUATE when the deterministic verdict says so
-  (run-rate ≥ bar over ≥90 days with DD < 15%). Graduation means *propose* the
+- Respect the bar: only call GRADUATE when the deterministic verdict says so (the
+  thresholds live in the files above; do not restate them). Graduation means *propose* the
   Phase-2 live seam to the user — it does NOT flip anything to live.
 - A KILL verdict is a real outcome — recommend stopping the lane, same as the
   rejected funding/copy-trading lanes. Don't rationalize a losing record.
@@ -73,6 +75,6 @@ the fee-drag ceiling in code), the Opus review MUST apply these judgment checks:
 ## What lives where
 
 - `scripts/scout-review.ts` — the deterministic scorecard (reads the paper ledger).
-- `src/lib/scout/scout-review-business-logic.ts` — the PURE scorecard + verdict
-  (the thresholds ARE the pre-registered bar).
+- `src/lib/scout/scout-review-business-logic.ts`: the PURE account scorecard + verdict.
+- `data/scout/lane-bars-*.json`: the per-lane pre-registered bars.
 - `docs/scout/playbook.md` — what you curate; the scout reads it every cycle.

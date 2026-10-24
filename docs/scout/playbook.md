@@ -54,6 +54,9 @@ signals graduate into gates only after a backtest). How to read them honestly:
 
 ## Lane: leader-follow (opened 2026-07-13 — paper, expectancy-gated like every lane)
 
+> **KILLED (2026-09-03).** `leader-follow` is on `KILLED_LANES`; the executor refuses it.
+> Do not open on a `leader-action` trigger. The rules below are kept as history.
+
 Wakes: `leader-action` triggers (a RATED whale opened / flipped / added ≥ $1M notional;
 reduces/closes never wake). Rules of engagement:
 

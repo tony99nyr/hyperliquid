@@ -1,5 +1,8 @@
 # Repo Health / DRY Audit — June 2026
 
+> **Historical (point-in-time, not maintained).** The code may have moved on; for the
+> current state read the code and the root `CLAUDE.md`.
+
 A 3-agent sweep (DRY/reusable-functions, missing-test-cases, repo-healthiness) run
 alongside the Layer-1 auto-exit polish-loop. **Overall grade: A−** — genuinely
 healthy, safety-conscious codebase. Auto-exit-specific findings were fixed in the

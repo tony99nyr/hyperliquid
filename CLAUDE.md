@@ -2,14 +2,19 @@
 
 A **human + Claude collaborative trading cockpit for Hyperliquid**. The human
 runs Claude skills to analyze HL traders + multi-timeframe candles, picks a setup,
-and Claude manages trade health — **the human confirms every action.** A
+and Claude manages trade health. **The human confirms every action**, with one
+recorded exception: an operator **arm** pre-authorises an Armed Ladder's autonomous live
+fires within its arm-time caps ([ADR-0008](docs/adr/0008-autonomous-armed-ladders.md)). A
 phone-accessible web cockpit live-renders the work via Supabase realtime.
 Standalone repo, own Vercel deploy. Lives deliberately OUTSIDE the iamrossi
 autonomous system.
 
-> ## ⚠ STATUS — LIVE (updated 2026-06-29)
-> **`TRADING_MODE=live`** (local `.env.local` AND production), `HL_NETWORK=mainnet` —
-> real orders fire. **Armed Ladders are live + autonomous:** `LADDER_LIVE_ENABLED` and
+> ## ⚠ STATUS: LIVE (updated 2026-10-24)
+> This banner is the canonical status statement; other docs point here.
+> **Production runs `TRADING_MODE=live`**, `HL_NETWORK=mainnet`: real orders fire.
+> Local `.env.local` has no `TRADING_MODE`, so local runs resolve to `paper` unless you
+> set it. **Auto-exit is LIVE in production** (since 2026-09-05; see
+> [LIVE_AUTO_EXIT.md](docs/LIVE_AUTO_EXIT.md)). **Armed Ladders are live + autonomous:** `LADDER_LIVE_ENABLED` and
 > `LADDER_AUTOFIRE_ENABLED` are **ON in production**, and the watcher has already fired
 > real money (first live ladder fire 2026-06-29). This is NOT paper trading.
 >
@@ -21,7 +26,7 @@ autonomous system.
 >   create a real ladder with **`mode: 'live'`** — a `mode: 'paper'` ladder will NOT fire
 >   on the live production watcher (mode-mismatch skip) and no paper watcher is running,
 >   so it would just sit there. `LADDER_LIVE_ENABLED`/`LADDER_AUTOFIRE_ENABLED` are not in
->   local `.env.local`; they gate *production* firing. See
+>   local `.env.local`; they gate *production* firing. Switches, watcher and env:
 >   [LADDER_OPERATOR_RUNBOOK.md](docs/LADDER_OPERATOR_RUNBOOK.md).
 
 Read `docs/CONTEXT.md` for the domain language and `docs/adr/` for the locked
@@ -37,6 +42,13 @@ Supabase (Postgres + realtime) · recharts + lightweight-charts · viem +
 
 - **Validate (full)**: `pnpm validate` — type-check + tests + lint + build. **Run before every commit.**
 - `pnpm type:check` · `pnpm test` · `pnpm test:lib` · `pnpm test:ui` · `pnpm lint` · `pnpm build`
+- **CI**: `.github/workflows/validate.yml` runs `pnpm validate` on every push and PR. It
+  reports only; Vercel still deploys on push (gating steps: `docs/OPERATOR_MANUAL.md` §3).
+- **`pnpm check:migrations`**: checks that every table and function in
+  `supabase/migrations/` exists in Supabase. It is NOT in `validate` or CI. Run it before
+  pushing code that depends on a new migration, and apply the migration first.
+- **`pnpm verify:lanes`**: real-browser check of the cockpit Lanes view. Run it for Lanes
+  view changes (contract: `docs/LANE_PERFORMANCE_CONTRACT.md`).
 
 ### Client-side smoke — REQUIRED before pushing UI changes
 
@@ -60,8 +72,10 @@ Before pushing any change touching the cockpit client, hooks, or realtime:
 The hard requirement: flip paper→live by changing `TRADING_MODE` and nothing
 else. Enforced by ONE rule:
 
-- `src/lib/trading/fill-source.ts::executeIntent` is the **only** place that
-  branches on mode. `paperFill` and `liveFill` both return a `CanonicalFill`
+- `src/lib/trading/fill-source.ts::executeIntent` is the **only** place that chooses
+  the paper or live FILL source. Other services (stops, leverage, margin, the ladder
+  fire path, routes) do call `getTradingMode()`/`isLiveMode()` for their own exchange
+  side effects; the invariant is about fills. `paperFill` and `liveFill` both return a `CanonicalFill`
   (`src/types/fill.ts`); everything downstream (position tracker, P&L, UI)
   consumes only that and **must never branch on `fill.source`** (audit-only).
 - `TRADING_MODE` is read in exactly one module: `src/lib/env/mode.ts` (fail-safe
@@ -81,7 +95,7 @@ else. Enforced by ONE rule:
 
 ## Engineering conventions
 
-- **Small single-purpose files, < 600 lines** (eslint `max-lines` enforces it;
+- **Small single-purpose files, < 600 lines** (eslint `max-lines` is an ERROR at 600;
   a few vendored strategy files are exempted). Split **pure `*-business-logic.ts`
   from I/O** — pure logic is fixture-tested with no mocks.
 - **Unit-test every pure module.** Vendored modules arrive with their tests.
@@ -108,16 +122,22 @@ src/lib/auto-exit/ + src/lib/risk/                   # Layer-1 auto-exit + accou
 src/lib/ladder/                                      # Armed Ladders — autonomous multi-rung exec (LIVE) ⚠ read src/lib/ladder/CLAUDE.md
 src/lib/trader-watch/ + src/lib/watch/               # leader-position feed daemon + crash-safe position watcher
 src/lib/backtest/                                    # PURE regime-core replay + significance (scripts/backtest*.ts)
+src/lib/performance/                                 # lane performance report/forecast (perf:*, the Lanes tab)
+src/lib/household/                                   # household cross-system exposure (desk-review stacking)
 src/lib/ws/                                          # HL websocket client + reducer + REST fallback (market data)
 src/hooks/                                           # realtime hooks (useRealtime{Channel,Table} + resubscribe guard)
-src/app/cockpit/{page,CockpitClient}.tsx + components/  # PIN-gated cockpit shell + panels (4 tabs)
+src/app/cockpit/{page,CockpitClient}.tsx + components/  # PIN-gated cockpit shell + panels (6 tabs:
+                                                     #   cockpit, traders, ladders, performance, lanes, scout)
 src/lib/cockpit/{supabase-server,supabase-browser}.ts
 src/lib/infrastructure/{auth,logging,config}/        # vendored admin-PIN + stubs
-supabase/migrations/0001_init.sql … 0036_*.sql       # migrations (RLS + realtime publication; idempotent; 0023 = ladders)
+supabase/migrations/0001_init.sql … 0048_*.sql       # migrations (RLS + realtime publication; idempotent; 0023 = ladders)
+.github/workflows/validate.yml                       # CI: pnpm validate on push + PR (reports, does not gate deploys)
 data/{backups/wallet-rating/rated-wallets.json,auto-exit/}  # vendored dataset + versioned auto-exit thresholds
 docs/{CONTEXT.md, CODE_ORGANIZATION.md, adr/, scout/, LIVE_*.md, OPERATOR_MANUAL.md,
       ARMED_LADDER_ARCHITECTURE.md, LADDER_OPERATOR_RUNBOOK.md,
-      LADDER_DESK_PLAYBOOK.md, DESK_PROFITABILITY.md}  # what-runs-where manual + ladder design/runbook/methodology + the profitability ledger
+      LADDER_DESK_PLAYBOOK.md, LADDER_BUILDER_GUIDE.md, DESK_PROFITABILITY.md,
+      PROFIT_REVIEW_2026-10-24.md, LANE_PERFORMANCE_CONTRACT.md}  # what-runs-where manual + ladder
+                                                     #   design/runbook/methodology + profitability ledger/review + Lanes contract
 ```
 
 ## Vendored from iamrossi
@@ -146,7 +166,8 @@ the comments at the top of each vendored stub module.
   confirmation before `executeIntent`; advisory skills never act. Skill scripts
   run via `pnpm skill:*` (tsx, `tsconfig.scripts.json` stubs `server-only`).
   Validate green. The remaining gate to USE it is the live-readiness checklist
-  (Supabase migration applied + env keys provisioned).
+  (Supabase migration applied + env keys provisioned). The current roster is the
+  Skills section below.
 - **Phase 2 (DONE)**: the non-agent watch daemon (`pnpm watch`, `src/lib/watch/**`)
   — WATCH-ONLY, polls active sessions' open positions, writes health/pnl/alerts,
   survives Claude dying. No-trade guarantee pinned statically.
@@ -173,20 +194,15 @@ the comments at the top of each vendored stub module.
     watch-only, and the paper↔live seam are all preserved + test-pinned.
 - **Phase 3b (live fill) — LIVE (was gated, flipped on)**: `fill-source-live.ts` +
   `hyperliquid-exchange-service.ts` (EIP-712 agent-key signing via
-  `@nktkas/hyperliquid`) + `hyperliquid-order-business-logic.ts` (pure). **`TRADING_MODE=live`
-  is set — real orders fire** (manual approvals + armed-ladder autonomous fires). The
+  `@nktkas/hyperliquid`) + `hyperliquid-order-business-logic.ts` (pure). Live in
+  production (status: the banner above). The
   go-live sequence in `docs/LIVE_EXECUTION_RUNBOOK.md` (two-key model, testnet→mainnet)
   has been completed.
 - **Phase 4 — autonomous PAPER scout (DONE)**: a self-driving paper-only
   opportunity finder + manager (`src/lib/scout/**`, `.claude/skills/scout` +
-  `scout-review`, `docs/scout/`). The inverted loop: a FREE deterministic daemon
-  (`pnpm scout:watch`) writes JSONL triggers → a cheap-model (Sonnet) scout
-  session vets them and makes paper calls → rare Opus escalation. Hard-guarded
-  PAPER-ONLY by `assertScoutPaperMode` — the boundary travels with the intent
-  (`intent.origin === 'scout'` is refused live AT THE SEAM). Learns via
-  `docs/scout/playbook.md` + a resolved-hypothesis track record; weekly
-  `pnpm scout:review` (Opus) curates the playbook against a pre-registered
-  kill/graduation bar. See **ADR-0005**.
+  `scout-review`). Hard-guarded PAPER-ONLY by `assertScoutPaperMode` (`intent.origin
+  === 'scout'` is refused live AT THE SEAM). Architecture: `docs/scout/README.md`;
+  decision: **ADR-0005**; per-lane bars: `data/scout/lane-bars-*.json`.
 - **Phase 5 — deterministic opportunity + risk layers (DONE)**:
   - **Rubric** (`src/lib/rubric/**`, `pnpm rubric`): per-asset×side scoring
     (regime-as-multiplier × leaders/carry/micro pillars, boolean kill-gates,
@@ -194,11 +210,11 @@ the comments at the top of each vendored stub module.
     Advisory only. See **ADR-0006**.
   - **Auto-exit Layer-1** (`src/lib/auto-exit/**` detection + lock,
     `risk-exit-service.ts` the ONE exit-only execution site): a scoped,
-    structurally-exit-only autonomous close on hard risk triggers. BUILT, shipped
-    DISABLED (`AUTO_EXIT_ENABLED=false`). See `docs/LIVE_AUTO_EXIT.md`.
+    structurally-exit-only autonomous close on hard risk triggers. LIVE in
+    production since 2026-09-05. See `docs/LIVE_AUTO_EXIT.md`.
   - **Circuit-breaker** (`src/lib/risk/**`): account-level daily-loss / drawdown
     halt that BLOCKS new entries + recommends (never auto-fires) a flatten.
-    Both risk layers preserve no-auto-fire. See **ADR-0007**.
+    See **ADR-0007**.
   - **Trader-watch** (`pnpm trader-watch`): polls top-N rated leaders, diffs
     positions, writes the central `leader_positions`/`leader_actions` feed
     (stops per-leader HL hammering). Watch-only.
@@ -211,31 +227,41 @@ the comments at the top of each vendored stub module.
   cash + perp, 30d curve, trade ledger, scout track record), live leverage
   adjustment + HL position reconciliation, URL-param tab/timeframe persistence,
   preview-action flow (`review-previews` skill), realtime egress trims.
+- **Lane performance (DONE)**: `src/lib/performance/**` + the cockpit **Lanes** tab +
+  `pnpm perf:report` / `perf:marker` / `perf:forecast` (migration 0046). Agents propose
+  change markers; only an operator-confirmed marker (Lanes tab) splits lane statistics.
+  Contract: `docs/LANE_PERFORMANCE_CONTRACT.md`.
 - **Backtest/research suite** (`src/lib/backtest/**`, `scripts/backtest*.ts`,
   `scripts/analysis/perp-follow-study/**`): PURE regime-core replay with honest
   friction (fills/slippage/funding) for calibration, OOS, exit-policy, HTF, and
   copy-trade-gating studies. Findings in `docs/scout/BACKTEST_FINDINGS.md`.
 
-## Skills (Phase 1d)
+## Skills
 
-Each skill: one `.claude/skills/<name>/SKILL.md` (frontmatter + protocol) + one
-`scripts/<name>.ts` thin entrypoint + (where it has decision logic) a tested
+This section is the canonical skill roster; other docs point here. Each skill: one
+`.claude/skills/<name>/SKILL.md` (frontmatter + protocol) + (usually) a thin
+`scripts/*.ts` entrypoint + (where it has decision logic) a tested
 `src/lib/skills/<name>-business-logic.ts`. **The user decides and confirms every
-HUMAN-LANE ACTION.** The roster (12):
+HUMAN-LANE ACTION.** The roster (14):
 
 - **Advisory** (never trade): `analyze-traders`, `analyze-market-timeframes`,
   `assess-trade-health`, `review-previews`, `report-context-budget`,
   `review-ladder` (pro-desk 0/10 RISK + UPSIDE scorecard for open/draft ladders +
   a build rubric; thesis pillar auto-scores from the rubric — never arms),
   `ladder-expectancy` (the outcome LEDGER + weekly per-setup expectancy review:
-  KILL / HOLD / SIZE-UP / COLLECT against a pre-registered bar — never trades).
+  KILL / HOLD / SIZE-UP / COLLECT against a pre-registered bar; never trades),
+  `desk-review` (whole-desk book + market read; never opens, arms or fires, but MAY
+  disarm a decayed ladder), `desk-retro` (the weekly Monday retro bundle: perf report,
+  scout review, shadow replay, ladder expectancy, discard vet; the canonical weekly
+  procedure).
 - **Human action** (require an explicit `yes` / `--confirm yes` before
   `executeIntent`; never auto-fire): `open-position`, `advise-exit`.
 - **Orchestration**: `run-session` — the PICK→APPROVE active loop (entry popup,
   auto-monitor on fill, armed Safe-Exit); every entry/exit is still gated on an
   explicit approval.
-- **Autonomous PAPER lane** (the ONE exception to the popup — auto-executes
-  paper fills, hard-guarded against live): `scout`; `scout-review` (weekly,
+- **Autonomous PAPER lane** (auto-executes paper fills without the popup,
+  hard-guarded against live; armed live ladders are the other recorded exception,
+  ADR-0008): `scout`; `scout-review` (weekly,
   Opus, curates the playbook — NEVER trades). See ADR-0005.
 
 `analyze-traders` enforces the **INSUFFICIENT_HISTORY gate**: a thin/page-capped

@@ -57,7 +57,7 @@ For each **armed ladder**: judge it with a **clear, unsentimental, objective** e
 does the current tape still support it?** If the premise decayed (the trend that justified a
 fade is gone, the flow that justified a long reversed, the rubric no longer scores it) —
 **DISARM it.** desk-review IS permitted to disarm (see the discipline note; disarm is
-risk-REDUCING — it cancels resting orders, moves no money, opens nothing). Flag expiry, OCO,
+risk-REDUCING: it stops future fires, moves no money, opens nothing; it does NOT cancel resting orders, so stops stay on the position). Flag expiry, OCO,
 drift. For a graded scorecard defer to `review-ladder` — name it, don't reproduce it. When
 there's no market edge anywhere and a ladder's thesis has decayed, the objective position is
 FLAT; hold a resting bet only while its premise is still true.
@@ -142,7 +142,7 @@ Deliver a tight read, not a data dump:
   something because we have it; the market doesn't care what we're already in.
 - **Never OPEN, arm, or fire — but desk-review MAY DISARM.** Opening/arming/executing new risk
   stays a separate operator-confirmed step. Disarming is the one write allowed here because it
-  only REDUCES risk (cancels resting orders, moves no money) — so when a ladder's thesis has
+  only REDUCES risk (stops future fires, moves no money; resting stops stay on the position), so when a ladder's thesis has
   objectively decayed, disarm it in the review rather than just recommending it.
 - **Stand-down is a valid, common answer.** "No edge, stand down" beats a forced setup.
   Detection surface is not the bottleneck — proven edge is.

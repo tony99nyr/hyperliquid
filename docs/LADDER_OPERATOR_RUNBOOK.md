@@ -2,7 +2,10 @@
 
 How to author, arm, monitor, and stop armed ladders, and what to expect when one fires.
 For the design see [ARMED_LADDER_ARCHITECTURE.md](./ARMED_LADDER_ARCHITECTURE.md); for the
-code rules see [src/lib/ladder/CLAUDE.md](../src/lib/ladder/CLAUDE.md).
+code rules and the fire guard stack see [src/lib/ladder/CLAUDE.md](../src/lib/ladder/CLAUDE.md).
+Live/paper status: the banner in the root [CLAUDE.md](../CLAUDE.md). The decision that an
+arm pre-authorises autonomous live fires is [ADR-0008](./adr/0008-autonomous-armed-ladders.md).
+This runbook is the canonical home for the switches, the watcher and the ladder env.
 
 ## What it is, in one breath
 You author a multi-rung plan (each rung = *deterministic trigger → pre-authorized order:
@@ -48,7 +51,7 @@ the same engine blockers (and now shows *why* it's disabled). See the desk metho
 ## The three switches (independent; all ON in production)
 | Env flag | Controls | Default |
 |---|---|---|
-| `TRADING_MODE=live` | Whether *manual* cockpit actions sign real money (global paper↔live). | — |
+| `TRADING_MODE=live` | Whether the deployment signs real money (global paper↔live). A ladder fires only where its `mode` matches. | `paper` (fail-safe); local `.env.local` does not set it |
 | `LADDER_LIVE_ENABLED` | Whether a **live**-mode ladder may be **armed**. | OFF |
 | `LADDER_AUTOFIRE_ENABLED` | Whether the watcher may **autonomously fire** an armed rung. | OFF |
 
@@ -102,15 +105,16 @@ GET /api/cockpit/stops?coin=ETH          → the resting stop (oid, triggerPx, s
 GET /api/cockpit/ladder/<id>             → rung status = fired, ladder status
 ```
 
-## Multi-rung adds (built, NOT yet live-proven — handle with care)
+## Multi-rung adds (live-proven since 2026-08-19)
 A ladder can scale into a winner: rung 1 `open`, rung 2+ `add`. Two guardrails are
 enforced:
 - **Decreasing size + tightening stop** (rejected at arm if violated) — keeps the average
   entry near the first rung; the opposite of averaging-down.
 - **Add-coverage gate (runtime):** an `add` fires **only if its worst-case loss is fully
   covered by the open position's current unrealized profit.** A flat/losing position →
-  the add is **skipped**, not fired. This anti-martingale rule has not yet run against the
-  live exchange; treat the first multi-rung live ladder as a deliberate test.
+  the add is **skipped**, not fired. Live ladder `8c9573f2` filled two `add` rungs on
+  2026-08-19 (`ladder_fires.status='filled'`). Take-profit brackets (`targetPx`) have
+  still never filled live.
 
 ## Troubleshooting — "my rung didn't fire"
 | Symptom | Likely cause |
@@ -128,23 +132,29 @@ enforced:
 | Ladder expired with a position still open, or the residual cannot be verified | Check the live HL position and latest resting stop. The exchange stop stays in place, including a stop moved before expiry. Trailing, adds, and reduces have stopped. Decide whether to manage or close the position manually. The residual alert pages once per ladder. |
 
 ## Emergency stop
-1. **All autonomous firing:** `LADDER_AUTOFIRE_ENABLED=false` on Vercel (re-deploy or the
-   route picks it up). Armed ladders stay armed but nothing fires.
-2. **A live position:** manage it from Open Positions / the safe-exit path — it's a normal
-   HL position with a resting stop, independent of ladder status.
-3. **A specific ladder:** disarm it (instant; the row/panel Disarm button).
+`LADDER_AUTOFIRE_ENABLED=false` on Vercel stops all autonomous firing. The full card is
+[OPERATOR_MANUAL.md §5](./OPERATOR_MANUAL.md#5-emergency-card).
 
 ## Env: LADDER_BOOK_HEAT_MAX_FRAC
 
-Fire-time book-heat ceiling (fraction of live equity; default 0.10). Every LIVE open/add
-is skipped while the slip-aware worst case of the whole book + the firing rung exceeds
-it. NaN-proof: a malformed value falls back to 0.10 (never disables the gate).
+Fire-time book-heat ceiling (fraction of live equity). Every LIVE open/add is skipped
+(`book-heat-exceeded`) while the slip-aware worst case of the whole book + the firing
+rung exceeds it. The **code default is 0.10** (`ladder-fire-service.ts`). **Production
+sets its own value in Vercel env**; read it there (`vercel env ls`) rather than trusting a
+figure copied into another doc. NaN-proof: a malformed or out-of-range value falls back to
+0.10 (never disables the gate). This is the canonical home for the heat cap; other docs
+point here.
+
+Desk policy for the production value (recorded in LADDER_DESK_PLAYBOOK on 2026-10-03):
+0.15 standing, 0.35 only inside a scheduled event window, reverted after. The repo cannot
+confirm what Vercel holds today, so check the env before relying on either figure.
 
 ## stop_move ratchet ladders (0035)
 
-A `stop_move` rung moves the RESTING stop to `triggerMeta.moveTo` (price or `'breakeven'`)
-when its price trigger prints. Risk-reducing only; new stop is placed BEFORE the old is
-canceled.
+A `stop_move` rung moves the RESTING stop to `triggerMeta.moveTo` (a price, `'breakeven'`,
+or `'trail'` with `trailDistancePx`) when its price trigger prints. A `'trail'` rung
+ratchets once per candle. Risk-reducing only; new stop is placed BEFORE the old is
+cancelled. Breakeven moves fired live from 2026-07-17 and trailing moves from 2026-08-19.
 
 **Arm ratchet ladders only AFTER the position exists.** The arm-time precondition
 snapshot records the coin's live state; a ratchet armed while the coin is FLAT will

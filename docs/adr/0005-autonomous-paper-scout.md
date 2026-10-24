@@ -35,7 +35,8 @@ That autonomy is allowed for `source: 'paper'` fills ONLY:
   mode (`fill-source.ts`) — defense in depth beyond the `scout-trade` caller-side
   guard. So no matter who calls the seam, a scout intent can never fill live.
 - Pinned by a unit test — this IS the no-auto-fire-for-real-money guarantee for
-  the autonomous lane. Real-money trades the scout would propose go to the human
+  the scout lane. (Armed live ladders are a separate, operator-armed exception:
+  ADR-0008.) Real-money trades the scout would propose go to the human
   via the existing `requireApproval` popup (Tier-1), never this path.
 
 ### 2. The inverted loop + cheap-model cascade (cost discipline)
@@ -70,8 +71,8 @@ Running Opus in a poll loop would be wasteful. Instead:
 - Open paper positions are covered by three independent layers: the scout
   reviews every open position each wake (risk before opportunity), the crash-safe
   `pnpm watch` daemon writes health/alerts even if the scout session dies, and
-  the manual Safe-Exit button. The mode-agnostic auto-exit Layer-1 (ADR-0007)
-  can additionally guard paper positions when enabled.
+  the manual Safe-Exit button. (The auto-exit Layer-1, ADR-0007, scans LIVE
+  sessions only, so it does not guard paper positions.)
 - Graduating to live is NOT automatic: it requires clearing the bar AND the
   separate live gates (ADR-0001 `TRADING_MODE=live` + per-coin allowlist + human
   approval per trade). The scout never flips itself live.
@@ -85,3 +86,12 @@ JSONL retained as the offline fallback adapter), with `consumed_at` as the consu
 The consumer is schedulable headlessly (`scout:cycle --json` → `claude -p` → `scout:trade
 --from-json`, strict-validated by `parseScoutDecision`) and writes its own heartbeat row.
 The inverted-loop design and the paper-only guard are unchanged.
+
+## As-built note (2026-10-24)
+
+The current architecture lives in `docs/scout/README.md`; this ADR stays the decision
+record. Since the addendum: the consumer runs EMBEDDED in `scout:watch` (every
+`SCOUT_CONSUMER_INTERVAL_MIN`, default 30), so the interactive Monitor-driven session in
+§2 is no longer the main path. Run one consumer only. Bars are per lane
+(`data/scout/lane-bars-*.json` + `docs/scout/PREREGISTRATION_*.md`), and the killed lanes
+are listed in `KILLED_LANES` (`src/lib/scout/scout-execution-guard.ts`).
