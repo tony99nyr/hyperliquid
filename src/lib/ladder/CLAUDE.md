@@ -65,10 +65,12 @@ auto-disarms. **Do not reorder, weaken, or short-circuit these.**
      BOOK-HEAT ceiling (`bookHeatUsd` of all open positions + this rung ≤
      `LADDER_BOOK_HEAT_MAX_FRAC`(0.10) × live equity → skip `book-heat-exceeded`).
      Both fail CLOSED on unreadable state (`cannot-verify-*`) and sit BEFORE the claim.
-6. **Atomic claim** via `claimRungFire` (`ladder_fires.dedupe_key` unique). `claimed=false` → skip `already-fired`. **TRAIL stop_move rungs claim PER COMPLETED CANDLE** (`:${15m-bucket}` suffix) — the only non-one-shot rung class; they stay `pending` and re-fire as price advances (only-tighten makes repeats idempotent).
+6. **Atomic claim** via `claimRungFire` (`ladder_fires.dedupe_key` unique). `claimed=false` → skip `already-fired`. **OCO `open` rungs claim their whole group** through the `claim_oco_ladder_fire` RPC (migration 0045), so concurrent ticks can never fire both straddle legs. A **no-fill** open releases the group claim (`releaseOcoClaim`; failure → critical alert naming the dead straddle); a fill keeps it. **TRAIL stop_move rungs claim PER COMPLETED CANDLE** (`:${15m-bucket}` suffix) — the only non-one-shot rung class; they stay `pending` and re-fire as price advances (only-tighten makes repeats idempotent).
 7. Execute: `fireReduce` (reduce/close) or `fireOpenOrAdd` (open/add).
    - **Add gate (§2):** an `add` fires only if `addRiskCoveredByProfit(worstCaseLoss, unrealizedProfit)` — a flat/losing position can't cover an add → `skipped` (anti-martingale; the single most important multi-rung check).
-   - **Atomic bracket:** open/add bracket the fill (`placeBracketOnHl`/`placeStopOnHl`); any post-fill throw OR bracket reject → `flattenAfterFault` (the "filled-but-unstopped" hard fault). `loadEffectivePosition` THROWS fail-closed if the live position is unreadable — never falls back to the ledger.
+   - **Opposite-side gate:** a live `add` refuses an opposite-side live position.
+   - **Atomic bracket:** open/add bracket the fill (`placeBracketOnHl`/`placeStopOnHl`). The fill counts as `filled` only once the stop is CONFIRMED resting (`pushed` + an oid). Any post-fill throw, bracket reject, or unconfirmed stop → `flattenAfterFault` (the "filled-but-unstopped" hard fault). `loadEffectivePosition` THROWS fail-closed if the live position is unreadable — never falls back to the ledger; a stale or errored read never counts as flat (report unflattened + critical alert, no blind close).
+   - **Disarm never cancels resting orders.** The protective stop belongs to the POSITION, not the ladder, and must survive a disarm (pinned by `tests/lib/api/ladder-disarm-route.test.ts`).
 8. On success: `markFireOutcome('filled')` + `setRungStatus('fired')`, then **if every rung is now terminal → `markLadderDone`** (armed-guarded, `.catch`'d, runs AFTER the fill+bracket — can't harm the position).
 
 ## Invariants you must not break

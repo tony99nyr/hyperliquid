@@ -14,6 +14,7 @@ const setRungStatus = vi.fn();
 const markLadderDone = vi.fn();
 const disarmOcoSiblings = vi.fn();
 const disarmLadder = vi.fn();
+const releaseOcoClaim = vi.fn();
 const getActiveSession = vi.fn();
 const openSession = vi.fn();
 const fetchAllMids = vi.fn();
@@ -46,6 +47,7 @@ vi.mock('@/lib/ladder/ladder-service', () => ({
   markLadderDone: (...a: unknown[]) => markLadderDone(...a),
   disarmOcoSiblings: (...a: unknown[]) => disarmOcoSiblings(...a),
   disarmLadder: (...a: unknown[]) => disarmLadder(...a),
+  releaseOcoClaim: (...a: unknown[]) => releaseOcoClaim(...a),
 }));
 vi.mock('@/lib/cockpit/session-service', () => ({ getActiveSession: (...a: unknown[]) => getActiveSession(...a), openSession: (...a: unknown[]) => openSession(...a) }));
 vi.mock('@/lib/hyperliquid/hyperliquid-info-service', () => ({ fetchAllMids: (...a: unknown[]) => fetchAllMids(...a), fetchClearinghouseState: (...a: unknown[]) => fetchClearinghouseState(...a) }));
@@ -283,6 +285,26 @@ describe('performLadderRungFire — execution', () => {
     expect(res.skipped).toBe('no-fill');
     expect(placeStopOnHl).not.toHaveBeenCalled();
     expect(markFireOutcome).toHaveBeenCalledWith('f1', 'failed', 'no-fill');
+    expect(releaseOcoClaim).not.toHaveBeenCalled(); // not an OCO ladder
+  });
+
+  it('OCO no-fill releases the group claim so the sibling leg stays live', async () => {
+    getLadderWithRungs.mockResolvedValue(ladder({ ocoGroupId: 'grp-1' }));
+    executeIntent.mockResolvedValue({ sz: 0, avgPx: 0 });
+    releaseOcoClaim.mockResolvedValue(undefined);
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toBe('no-fill');
+    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1');
+    expect(disarmOcoSiblings).not.toHaveBeenCalled();
+  });
+
+  it('OCO no-fill whose release fails sends a critical alert naming the dead straddle', async () => {
+    getLadderWithRungs.mockResolvedValue(ladder({ ocoGroupId: 'grp-1' }));
+    executeIntent.mockResolvedValue({ sz: 0, avgPx: 0 });
+    releaseOcoClaim.mockRejectedValue(new Error('db down'));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toBe('no-fill');
+    expect(writeAnalysisLog).toHaveBeenCalledWith(expect.objectContaining({ severity: 'danger', message: expect.stringContaining('could not release its OCO group') }));
   });
 
   it('MODE-MISMATCH: a PAPER ladder on a LIVE deployment is skipped WITHOUT claiming', async () => {

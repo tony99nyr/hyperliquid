@@ -1,4 +1,28 @@
-/** Autonomous ladder execution. Recheck persisted authority and live risk before the atomic claim. */
+/**
+ * performLadderRungFire — the ONE autonomous money-moving site for armed ladders.
+ *
+ * The watcher's PURE evaluator says "rung R's condition is met"; this re-validates
+ * EVERYTHING server-side from the persisted row (never the request) and only then
+ * executes the pre-authorized order through the same executeIntent seam every trade
+ * rides. The kill-switch (LADDER_AUTOFIRE_ENABLED) is checked by the CALLER (the route)
+ * before reaching here. Generalizes performRiskExit (exit-only → open/add/reduce/close).
+ *
+ * Guard stack, in order (each fail-closed; on doubt, SKIP — never fire):
+ *   1. ladder exists, status='armed', not expired (else disarm-on-expiry)
+ *   2. author='operator' (a scout ladder can NEVER fire — defense-in-depth w/ DB CHECK)
+ *   3. rung exists + status='pending'
+ *   4. precondition snapshot still matches (§3.7) — any live-state drift → auto-disarm
+ *   5. ATOMIC claim via ladder_fires.dedupe_key — a double-fire gets claimed=false.
+ *      An OCO 'open' rung claims its whole group atomically (claim_oco_ladder_fire,
+ *      migration 0045), so concurrent ticks can never fire both straddle legs. A
+ *      no-fill open releases the group claim (no exposure); a fill keeps it.
+ *   6. EXPOSURE gates: an 'add' refuses an opposite-side live position, and fires only
+ *      if its worst-case loss is covered by the position's current unrealized profit
+ *   7. execute → for open/add, ATOMICALLY bracket the fill. The fill counts as 'filled'
+ *      only once the stop is CONFIRMED resting (pushed + oid); a reject or unconfirmed
+ *      stop FLATTENS (the "filled-but-unstopped" hard fault). A stale or errored
+ *      position read never counts as flat: report unflattened + critical alert.
+ */
 
 import { randomUUID } from 'node:crypto';
 import {
@@ -9,6 +33,7 @@ import {
   markLadderDone,
   disarmOcoSiblings,
   disarmLadder,
+  releaseOcoClaim,
 } from './ladder-service';
 import { isLadderAutofireEnabled, isLadderLiveEnabled } from './ladder-flags';
 import {
@@ -338,6 +363,12 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
   if (!(fill.sz > 0)) {
     await markFireOutcome(fireId, 'failed', 'no-fill');
     await setRungStatus(rung.id, 'failed');
+    // No exposure opened: free the OCO group so one transient no-fill cannot kill both legs.
+    if (rung.action === 'open' && ladder.ocoGroupId) {
+      await releaseOcoClaim(ladder.ocoGroupId, ladder.id).catch(async (err) => {
+        await alert(sessionId, `CRITICAL: ladder ${ladder.id.slice(0, 8)} no-fill could not release its OCO group; the sibling straddle leg cannot fire. Re-prep the straddle. ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
     return skip('no-fill');
   }
   filledSize = fill.sz;

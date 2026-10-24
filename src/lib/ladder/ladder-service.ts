@@ -258,6 +258,17 @@ export async function armLadder(
  * DO NOTHING. Returns claimed=true ONLY for the caller that inserted the row; a
  * concurrent/retried fire of the same rung gets claimed=false and must NOT execute.
  */
+/**
+ * Release an OCO group claim after a NO-FILL open (no exposure was opened). The failed
+ * rung's own dedupe row still blocks it, so no double-fire window reopens, and the
+ * sibling leg stays eligible. Never call this after a fill: money moved, keep the claim.
+ */
+export async function releaseOcoClaim(ocoGroupId: string, ladderId: string): Promise<void> {
+  const db = getServiceRoleClient();
+  const { error } = await db.from('ladder_oco_claims').delete().eq('group_id', ocoGroupId).eq('ladder_id', ladderId);
+  if (error) throw new Error(`releaseOcoClaim failed: ${error.message}`);
+}
+
 export async function claimRungFire(ladderId: string, rungId: string, dedupeSuffix?: string, ocoGroupId?: string | null): Promise<{ claimed: boolean; fireId: string | null }> {
   const db = getServiceRoleClient();
   // TRAIL rungs pass a per-candle suffix: one claim per completed candle instead of
