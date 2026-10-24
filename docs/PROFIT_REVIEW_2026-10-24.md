@@ -369,8 +369,8 @@ No study crossed a bar, so no live change follows.
   - Read: no all-coin edge after 2023. The forward bar has about a 1% pass chance.
 - **dvol, oi, funding-veto:** insufficient evidence (n=6, n=10 and n=0 against
   bars of 15, 20 and a filled archive).
-  - funding-veto needs captures: run `pnpm study:funding-veto -- --capture` daily
-    at 23:55 UTC.
+  - funding-veto needs captures: the NAS tick (`scripts/nas-watch.sh`) runs
+    `pnpm study:funding-veto -- --capture` at 07:55, 15:55 and 23:55 UTC.
 - **regime split (descriptive):** most cells have fewer than 5 observations.
   - Scout `reversion` in bearish regimes: -0.80R (n=6, 2 episodes).
   - Scout `htf-trend` in bullish regimes: +1.11R (n=7, 3 episodes).
