@@ -11,8 +11,42 @@
  */
 
 import type { LadderWithRungs } from '@/lib/ladder/ladder-types';
-import type { HlFill } from '@/lib/hyperliquid/hyperliquid-info-service';
 import type { OwnerLedger } from '@/lib/ladder/ladder-outcome-business-logic';
+import type { HlFill } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { isEventStraddle, type LadderInput } from '@/lib/performance/lane-performance-business-logic';
+
+export interface ReportRung { id: string; ladderId: string; action: string; riskUsd: number | null; stopPx: number | null; side: 'long' | 'short'; coin: string }
+export interface ReportFire { ladderId: string; rungId: string; status: string; firedAt: number; detail: string | null }
+export interface GapPastStop { r: number | null; bps: number | null; reason: string | null }
+
+/** Report-time nominal R and stop overshoot. Missing or ambiguous evidence stays explicit. */
+export function reportRiskMetrics(row: LadderOutcomeRow, rungs: ReportRung[], fires: ReportFire[], fills: HlFill[]): { nominalR: number | null; gap: GapPastStop } {
+  const open = rungs.filter((r) => r.ladderId === row.ladderId && r.action === 'open');
+  const risk = open.reduce((sum, rung) => sum + (rung.riskUsd != null && Number.isFinite(rung.riskUsd) ? rung.riskUsd : 0), 0);
+  const nominalR = risk > 0 && row.realizedPnlUsd != null ? row.realizedPnlUsd / risk : null;
+  if (open.length !== 1) return { nominalR, gap: { r: null, bps: null, reason: open.length ? 'multiple open rungs' : 'open rung missing' } };
+  const rung = open[0];
+  const fire = fires.find((item) => item.ladderId === row.ladderId && item.rungId === rung.id && item.status === 'filled');
+  const stop = rung.stopPx;
+  if (!fire || stop == null || stop <= 0) return { nominalR, gap: { r: null, bps: null, reason: !fire ? 'filled fire missing' : 'planned stop missing' } };
+  const side = rung.side === 'long' ? 'sell' : 'buy';
+  const closes = fills.filter((fill) => fill.coin.toUpperCase() === rung.coin.toUpperCase() && fill.side === side && fill.time >= fire.firedAt);
+  if (!closes.length) return { nominalR, gap: { r: null, bps: null, reason: 'closing fill missing' } };
+  const fill = closes[closes.length - 1];
+  const beyond = rung.side === 'long' ? Math.max(0, stop - fill.px) : Math.max(0, fill.px - stop);
+  const entry = fills.find((item) => item.coin.toUpperCase() === rung.coin.toUpperCase() && item.side !== side && item.time >= fire.firedAt);
+  const denominator = rung.riskUsd;
+  const gapR = entry && entry.sz > 0 && denominator != null && denominator > 0 ? beyond * entry.sz / denominator : null;
+  return { nominalR, gap: { r: gapR, bps: beyond / stop * 10_000,
+    reason: gapR == null ? 'entry size or nominal rung risk unavailable' : null } };
+}
+
+export function classifyReportSetup(row: LadderOutcomeRow, ladders: LadderInput[]): string {
+  const groups = new Map<string, number>();
+  for (const ladder of ladders) if (ladder.oco_group_id) groups.set(ladder.oco_group_id, (groups.get(ladder.oco_group_id) ?? 0) + 1);
+  const ladder = ladders.find((item) => item.id === row.ladderId);
+  return ladder && isEventStraddle(ladder, groups) ? 'event-straddle' : row.setupType;
+}
 
 export type LadderOutcomeClass = 'never_filled' | 'open' | 'won' | 'lost' | 'scratch';
 

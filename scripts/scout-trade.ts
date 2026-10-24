@@ -29,8 +29,10 @@ import {
   SCOUT_MAX_RISK_USD,
   SCOUT_MIN_STOP_FRAC,
   EVENT_POST_PRINT_BUFFER_HOURS,
+  ScoutEventBlackoutError,
 } from '@/lib/scout/scout-execution-guard';
 import { nearestBlackoutEvent } from '@/lib/skills/event-calendar-business-logic';
+import { ECONOMIC_EVENTS } from '@/lib/skills/economic-events';
 import { parseScoutDecision } from '@/lib/scout/scout-cycle-business-logic';
 import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
 import { buildOpenProposal } from '@/lib/skills/open-position-business-logic';
@@ -122,8 +124,42 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   // never pass through here. FAIL-OPEN on an exhausted calendar — but loudly: the
   // snapshot carries calendarExhausted so a stale economic-events.ts pages via review.
   {
-    const next = nearestBlackoutEvent(Date.now(), EVENT_POST_PRINT_BUFFER_HOURS * 3_600_000);
-    assertEventClear(lane, next?.name ?? null, next?.msOut ?? null);
+    const now = Date.now();
+    const next = nearestBlackoutEvent(now, EVENT_POST_PRINT_BUFFER_HOURS * 3_600_000);
+    try {
+      assertEventClear(lane, next?.name ?? null, next?.msOut ?? null);
+    } catch (error) {
+      if (error instanceof ScoutEventBlackoutError && next) {
+        const event = ECONOMIC_EVENTS.find((candidate) => candidate.name === next.name);
+        const stopFrac = optionalNumber(args, 'stop-frac', NaN);
+        const stopPx = Number.isFinite(entryPx) && Number.isFinite(stopFrac)
+          ? side === 'buy' ? entryPx * (1 - stopFrac) : entryPx * (1 + stopFrac)
+          : null;
+        const detail = {
+          side: side === 'buy' ? 'long' : 'short',
+          signalPrice: Number.isFinite(entryPx) ? entryPx : null,
+          stopPx,
+          stopFrac: Number.isFinite(stopFrac) ? stopFrac : null,
+          riskUsd: Number.isFinite(riskUsd) ? riskUsd : null,
+          exitRule: lane === 'htf-trend' ? '10-day opposite-channel daily close or hard stop' :
+            lane === 'compression-straddle' ? '4h close through Bollinger mid or hard stop' : 'hard stop, otherwise 7-day horizon',
+          eventId: event ? `${event.name}@${event.atIso}` : next.name,
+          eventAt: event?.atIso ?? null,
+          capturedAt: new Date(now).toISOString(),
+        };
+        try {
+          const { error: writeError } = await getServiceRoleClient().from('scout_decisions').insert({
+            kind: 'blackout-ghost', coin, lane,
+            reasoning: `Refused by event blackout: ${next.name}`,
+            detail,
+          });
+          if (writeError) console.warn(`[scout-ghost] recording failed: ${writeError.message}`);
+        } catch (writeError) {
+          console.warn(`[scout-ghost] recording failed: ${writeError instanceof Error ? writeError.message : String(writeError)}`);
+        }
+      }
+      throw error;
+    }
   }
   // PORTFOLIO BETA CAP (Tier-1, 08-20): the correlated majors move as ONE bet — max
   // 2 same-direction directional positions (the scout stacked 4 longs on 08-19).

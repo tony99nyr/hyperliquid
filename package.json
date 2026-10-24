@@ -68,7 +68,14 @@
     "backtest:funding": "tsx --tsconfig tsconfig.scripts.json scripts/backtest-funding.ts",
     "backtest:htf": "tsx --tsconfig tsconfig.scripts.json scripts/backtest-htf.ts",
     "backtest:significance": "tsx --tsconfig tsconfig.scripts.json scripts/backtest-significance.ts",
-    "backtest:htf-replay": "tsx --tsconfig tsconfig.scripts.json scripts/backtest-htf-replay.ts"
+    "backtest:htf-replay": "tsx --tsconfig tsconfig.scripts.json scripts/backtest-htf-replay.ts",
+    "scout:ghosts": "tsx --tsconfig tsconfig.scripts.json scripts/scout-ghosts.ts",
+    "straddle:shadow-exits": "tsx --tsconfig tsconfig.scripts.json scripts/shadow-straddle-exits.ts",
+    "runaway:shadow-entries": "tsx --tsconfig tsconfig.scripts.json scripts/shadow-runaway-entries.ts",
+    "study:dvol": "tsx --tsconfig tsconfig.scripts.json scripts/dvol-straddle-filter.ts",
+    "study:oi": "tsx --tsconfig tsconfig.scripts.json scripts/oi-direction-filter.ts",
+    "study:funding-veto": "tsx --tsconfig tsconfig.scripts.json scripts/cross-venue-funding-veto.ts",
+    "study:regime": "tsx --tsconfig tsconfig.scripts.json scripts/regime-split-expectancy.ts"
   },
   "dependencies": {
     "@nktkas/hyperliquid": "^0.32.2",

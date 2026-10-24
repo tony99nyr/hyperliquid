@@ -18,7 +18,7 @@ import { parseArgs, header, line, run } from './_skill-runtime';
 import { listLaddersWithRungs, getLadderWithRungs } from '@/lib/ladder/ladder-service';
 import { upsertLadderOutcome, listLadderOutcomes, outcomeFires } from '@/lib/ladder/ladder-outcome-service';
 import { attributeLadderFills, attributionInvariantFailures } from '@/lib/ladder/ladder-outcome-business-logic';
-import { resolveLadderOutcome, buildExpectancyReport, DEFAULT_EXPECTANCY_BAR } from '@/lib/skills/ladder-expectancy-business-logic';
+import { resolveLadderOutcome, buildExpectancyReport, DEFAULT_EXPECTANCY_BAR, classifyReportSetup, reportRiskMetrics, type ReportRung, type ReportFire } from '@/lib/skills/ladder-expectancy-business-logic';
 import { resolveArmRung } from '@/lib/ladder/ladder-arm-business-logic';
 import { computeLadderRisk } from '@/lib/ladder/ladder-risk-business-logic';
 import { fetchAllFills, fetchClearinghouseState, type HlFill } from '@/lib/hyperliquid/hyperliquid-info-service';
@@ -124,13 +124,40 @@ run(async () => {
   const outcomes = await listLadderOutcomes();
   if (outcomes.length === 0) { line('\nLedger empty — outcomes appear as ladders reach a terminal state.'); return; }
 
-  const report = buildExpectancyReport(outcomes, DEFAULT_EXPECTANCY_BAR);
+  const db = (await import('@/lib/cockpit/supabase-server')).getServiceRoleClient();
+  const ids = outcomes.map((row) => row.ladderId);
+  const [ladderRes, rungRes, fireRes] = await Promise.all([
+    db.from('ladders').select('id,title,oco_group_id,mode').in('id', ids),
+    db.from('ladder_rungs').select('id,ladder_id,action,risk_usd,stop_px,side,coin').in('ladder_id', ids),
+    db.from('ladder_fires').select('ladder_id,rung_id,status,fired_at,detail').in('ladder_id', ids),
+  ]);
+  if (ladderRes.error || rungRes.error || fireRes.error) throw new Error('Could not load report-time ladder context.');
+  const ladders = (ladderRes.data ?? []).map((row) => ({ id: String(row.id), title: String(row.title), oco_group_id: row.oco_group_id as string | null, mode: String(row.mode) }));
+  const rungs: ReportRung[] = (rungRes.data ?? []).map((row) => ({ id: String(row.id), ladderId: String(row.ladder_id), action: String(row.action), riskUsd: typeof row.risk_usd === 'number' ? row.risk_usd : null,
+    stopPx: typeof row.stop_px === 'number' ? row.stop_px : null, side: row.side === 'short' ? 'short' : 'long', coin: String(row.coin) }));
+  const fires: ReportFire[] = (fireRes.data ?? []).map((row) => ({ ladderId: String(row.ladder_id), rungId: String(row.rung_id), status: String(row.status), firedAt: Date.parse(String(row.fired_at)), detail: typeof row.detail === 'string' ? row.detail : null }));
+  let reportFills: HlFill[] = [];
+  const reportAddress = getHlAccountAddress();
+  if (reportAddress) {
+    const fillResult = await fetchAllFills(reportAddress, { sinceMs: 0, maxFills: 100_000 });
+    if (!fillResult.error && !fillResult.truncated) reportFills = fillResult.fills;
+  }
+  const metrics = new Map(outcomes.map((row) => [row.ladderId, reportRiskMetrics(row, rungs, fires, reportFills)]));
+  const reportRows = outcomes.map((row) => ({ ...row, setupType: classifyReportSetup(row, ladders), nominalR: metrics.get(row.ladderId)?.nominalR ?? null }));
+
+  const report = buildExpectancyReport(reportRows, DEFAULT_EXPECTANCY_BAR);
   header(`Expectancy report — ${report.totals.closedTrades} closed, net $${report.totals.totalPnlUsd}, expectancy ${fmtR(report.totals.expectancyR)}`);
   line(`(pre-registered bar: ${DEFAULT_EXPECTANCY_BAR.minTrades} closed trades min · kill ≤ ${DEFAULT_EXPECTANCY_BAR.killExpectancyR}R · size-up ≥ +${DEFAULT_EXPECTANCY_BAR.sizeUpExpectancyR}R)`);
   for (const s of report.perSetup) {
     line(`\n  ${s.setupType} — ${s.verdict}`);
     line(`    closed ${s.closedTrades} (W${s.wins}/L${s.losses}/S${s.scratches}) · never-filled ${s.neverFilled} · open ${s.open}`);
     line(`    winRate ${s.winRate == null ? '—' : `${(s.winRate * 100).toFixed(0)}%`} · avgWin ${fmtR(s.avgWinR)} · avgLoss ${fmtR(s.avgLossR)} · expectancy ${fmtR(s.expectancyR)} · net $${s.totalPnlUsd}`);
+    const familyRows = reportRows.filter((row) => row.setupType === s.setupType && ['won', 'lost', 'scratch'].includes(row.outcome));
+    const nominal = familyRows.map((row) => row.nominalR).filter((value): value is number => value != null);
+    const gaps = familyRows.map((row) => metrics.get(row.ladderId)?.gap).filter((gap) => gap != null);
+    const gapR = gaps.map((gap) => gap.r).filter((value): value is number => value != null);
+    const gapBps = gaps.map((gap) => gap.bps).filter((value): value is number => value != null);
+    line(`    nominal mean ${nominal.length ? fmtR(nominal.reduce((a, b) => a + b, 0) / nominal.length) : '—'} (n=${nominal.length}) · gap-past-stop ${gapR.length ? fmtR(gapR.reduce((a, b) => a + b, 0) / gapR.length) : '—'} / ${gapBps.length ? `${(gapBps.reduce((a, b) => a + b, 0) / gapBps.length).toFixed(1)} bps` : '—'} (n=${gapR.length})`);
     line(`    ${s.reason}`);
   }
 

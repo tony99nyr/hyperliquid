@@ -68,7 +68,7 @@ const finite = (value: number | null | undefined): value is number => value != n
 const sum = (values: number[]): number => values.reduce((a, b) => a + b, 0);
 
 /** The prep script names both legs "straddle" and gives them one OCO group. */
-export function isEventStraddle(ladder: LadderInput, groupCounts: Map<string, number>): boolean {
+export function isEventStraddle(ladder: LadderInput, groupCounts: ReadonlyMap<string, number>): boolean {
   return ladder.mode === 'live' && /straddle/i.test(ladder.title) &&
     ladder.oco_group_id != null && (groupCounts.get(ladder.oco_group_id) ?? 0) >= 2;
 }

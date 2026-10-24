@@ -4,6 +4,8 @@ import {
   resolveLadderOutcome,
   buildExpectancyReport,
   DEFAULT_EXPECTANCY_BAR,
+  classifyReportSetup,
+  reportRiskMetrics,
   type LadderOutcomeRow,
 } from '@/lib/skills/ladder-expectancy-business-logic';
 import type { LadderRung, LadderWithRungs } from '@/lib/ladder/ladder-types';
@@ -40,6 +42,19 @@ const fill = (over: Partial<HlFill>): HlFill => ({
 });
 
 describe('deriveSetupType', () => {
+  it('groups paired event-straddle legs and reports nominal and gap R', () => {
+    const l = ladder([rung({})], { ocoGroupId: 'g', title: 'ETH event straddle long' });
+    const other = ladder([rung({ side: 'short' })], { id: 'b', ocoGroupId: 'g', title: 'ETH event straddle short' });
+    const row: LadderOutcomeRow = { ladderId: l.id, title: l.title, coin: 'ETH', side: 'long', mode: 'live', setupType: 'breakout-long-single', signalScore: null,
+      timingScore: null, plannedRiskUsd: 15, realizedPnlUsd: -10, feesUsd: 0, realizedR: -0.67, outcome: 'lost', windowStartMs: 0, windowEndMs: 3, notes: null };
+    expect(classifyReportSetup(row, [l, other].map((x) => ({ id: x.id, title: x.title, mode: x.mode, oco_group_id: x.ocoGroupId })))).toBe('event-straddle');
+    const metrics = reportRiskMetrics(row, [{ id: 'r', ladderId: l.id, action: 'open', riskUsd: 10, stopPx: 90, side: 'long', coin: 'ETH' }],
+      [{ ladderId: l.id, rungId: 'r', status: 'filled', firedAt: 1, detail: null }],
+      [fill({ coin: 'ETH', side: 'buy', px: 100, sz: 1, time: 2 }), fill({ coin: 'ETH', side: 'sell', px: 89, sz: 1, time: 3 })]);
+    expect(metrics.nominalR).toBe(-1);
+    expect(metrics.gap.r).toBeCloseTo(0.1);
+    expect(metrics.gap.bps).toBeCloseTo(111.111);
+  });
   it('tags a long price_above pyramid', () => {
     const l = ladder([rung({ action: 'open' }), rung({ seq: 2, action: 'add' })]);
     expect(deriveSetupType(l)).toBe('breakout-long-pyramid');
