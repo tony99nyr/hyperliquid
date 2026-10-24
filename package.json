@@ -35,6 +35,7 @@
     "smoke": "tsx --tsconfig tsconfig.scripts.json scripts/_smoke-cockpit.ts",
     "check:migrations": "tsx --tsconfig tsconfig.scripts.json scripts/_check-migrations.ts",
     "verify:design": "tsx --tsconfig tsconfig.scripts.json scripts/_verify-design.ts",
+    "verify:lanes": "tsx --tsconfig tsconfig.scripts.json scripts/_verify-lanes-view.ts",
     "smoke:data": "tsx --tsconfig tsconfig.scripts.json scripts/_smoke.ts",
     "watch": "tsx --tsconfig tsconfig.scripts.json scripts/watch.ts",
     "trader-watch": "tsx --tsconfig tsconfig.scripts.json scripts/trader-watch.ts",

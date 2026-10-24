@@ -13,7 +13,7 @@ import { css } from '@styled-system/css';
 import type { TradingMode } from '@/types/fill';
 import { TERM, fmtUsd } from '../panel-styles';
 
-export type CockpitView = 'cockpit' | 'traders' | 'ladders' | 'performance' | 'scout';
+export type CockpitView = 'cockpit' | 'traders' | 'ladders' | 'performance' | 'lanes' | 'scout';
 
 export interface TopBarProps {
   view: CockpitView;
@@ -36,6 +36,7 @@ const NAV: { key: CockpitView; label: string }[] = [
   { key: 'traders', label: 'Traders' },
   { key: 'ladders', label: 'Ladders' },
   { key: 'performance', label: 'Performance' },
+  { key: 'lanes', label: 'Lanes' },
   { key: 'scout', label: 'Scout' }, // PAPER — autonomous scout, kept separate from the LIVE cockpit
 ];
 
@@ -97,10 +98,10 @@ export default function TopBar({ view, onViewChange, mode, equityUsd, equityBrea
               style={{ background: active ? TERM.navActive : 'transparent', color: active ? '#e8ebf2' : '#9aa4b5' }}
               className={css({
                 fontFamily: 'sans',
-                fontSize: '12px',
+                fontSize: '11px',
                 fontWeight: active ? 'semibold' : 'medium',
-                paddingX: '14px',
-                paddingY: '6px',
+                paddingX: '8px',
+                minHeight: '44px',
                 borderRadius: '6px',
                 border: 'none',
                 cursor: 'pointer',

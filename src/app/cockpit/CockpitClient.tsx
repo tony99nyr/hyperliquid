@@ -43,6 +43,7 @@ import BottomStatusBar from './components/shell/BottomStatusBar';
 import BottomTabBar from './components/shell/BottomTabBar';
 import CockpitView from './components/CockpitView';
 import PerformanceView from './components/performance/PerformanceView';
+import LanePerformanceView from './components/lanes-performance/LanePerformanceView';
 import TradersTable from './components/left-rail/TradersTable';
 import LaddersView from './components/ladders/LaddersView';
 import ScoutPanel from './components/ScoutPanel';
@@ -50,7 +51,7 @@ import type { RatingsFreshness } from './components/left-rail/ratings-freshness-
 import ApprovalPopup from './components/ApprovalPopup';
 
 /** The selectable surfaces — the allow-list for the `?tab=` URL param (junk → 'cockpit'). */
-const TAB_KEYS: readonly ViewKey[] = ['cockpit', 'traders', 'ladders', 'performance', 'scout'];
+const TAB_KEYS: readonly ViewKey[] = ['cockpit', 'traders', 'ladders', 'performance', 'lanes', 'scout'];
 
 export interface CockpitClientProps {
   mode: TradingMode;
@@ -199,6 +200,8 @@ export default function CockpitClient({
         </section>
       ) : surface === 'performance' ? (
         <PerformanceView sessionId={sessionId} />
+      ) : surface === 'lanes' ? (
+        <LanePerformanceView />
       ) : surface === 'traders' ? (
         // Traders surface (desktop nav + mobile tab) — the Top Traders rail, now a
         // dedicated tab instead of the cockpit's left rail. Centered column so it

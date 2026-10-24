@@ -13,7 +13,7 @@
 
 import { css } from '@styled-system/css';
 
-export type MobileTab = 'cockpit' | 'traders' | 'ladders' | 'performance' | 'scout';
+export type MobileTab = 'cockpit' | 'traders' | 'ladders' | 'performance' | 'lanes' | 'scout';
 
 export interface BottomTabBarProps {
   tab: MobileTab;
@@ -25,6 +25,7 @@ const TABS: { key: MobileTab; label: string; icon: React.ReactNode }[] = [
   { key: 'traders', label: 'Traders', icon: <ListIcon /> },
   { key: 'ladders', label: 'Ladders', icon: <LadderIcon /> },
   { key: 'performance', label: 'Performance', icon: <TrendIcon /> },
+  { key: 'lanes', label: 'Lanes', icon: <TrendIcon /> },
   { key: 'scout', label: 'Scout', icon: <BotIcon /> },
 ];
 
@@ -74,6 +75,7 @@ export default function BottomTabBar({ tab, onTabChange }: BottomTabBarProps) {
             style={{ color: active ? '#5b8cff' : '#9aa4b5' }}
             className={css({
               flex: 1,
+              minWidth: 0,
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
@@ -83,7 +85,7 @@ export default function BottomTabBar({ tab, onTabChange }: BottomTabBarProps) {
               border: 'none',
               cursor: 'pointer',
               fontFamily: 'sans',
-              fontSize: '10px',
+              fontSize: '11px',
               fontWeight: active ? 'semibold' : 'medium',
               letterSpacing: '0.02em',
             })}

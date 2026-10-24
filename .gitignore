@@ -41,6 +41,7 @@ pnpm-debug.log*
 
 # Local verification artifacts (screenshots, recordings)
 proofshot-artifacts/
+/.verify-lanes/
 
 # Wallet-rating pipeline scratch — regenerated from HL's public API by the weekly
 # re-rank (NEVER committed; ~5.6 GB of fills + study data). The OUTPUT
