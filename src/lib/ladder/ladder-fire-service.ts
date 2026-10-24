@@ -1,23 +1,4 @@
-/**
- * performLadderRungFire — the ONE autonomous money-moving site for armed ladders.
- *
- * The watcher's PURE evaluator says "rung R's condition is met"; this re-validates
- * EVERYTHING server-side from the persisted row (never the request) and only then
- * executes the pre-authorized order through the same executeIntent seam every trade
- * rides. The kill-switch (LADDER_AUTOFIRE_ENABLED) is checked by the CALLER (the route)
- * before reaching here. Generalizes performRiskExit (exit-only → open/add/reduce/close).
- *
- * Guard stack, in order (each fail-closed; on doubt, SKIP — never fire):
- *   1. ladder exists, status='armed', not expired (else disarm-on-expiry)
- *   2. author='operator' (a scout ladder can NEVER fire — defense-in-depth w/ DB CHECK)
- *   3. rung exists + status='pending'
- *   4. precondition snapshot still matches (§3.7) — any live-state drift → auto-disarm
- *   5. ATOMIC claim via ladder_fires.dedupe_key — a double-fire gets claimed=false
- *   6. RUNTIME pyramiding guard (§2): an 'add' fires only if its worst-case loss is
- *      covered by the position's current unrealized profit
- *   7. execute → for open/add, ATOMICALLY bracket the fill; a bracket reject FLATTENS
- *      (the "filled-but-unstopped" hard fault)
- */
+/** Autonomous ladder execution. Recheck persisted authority and live risk before the atomic claim. */
 
 import { randomUUID } from 'node:crypto';
 import {
@@ -249,7 +230,10 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
   // stop_move rungs claim PER COMPLETED CANDLE (they re-fire as price advances);
   // everything else stays strictly one-shot.
   const isTrail = rung.action === 'stop_move' && rung.triggerMeta?.moveTo === 'trail';
-  const claim = await claimRungFire(ladder.id, rung.id, isTrail ? String(Math.floor(now / WATCH_CANDLE_MS)) : undefined);
+  const suffix = isTrail ? String(Math.floor(now / WATCH_CANDLE_MS)) : undefined;
+  const claim = rung.action === 'open' && ladder.ocoGroupId
+    ? await claimRungFire(ladder.id, rung.id, suffix, ladder.ocoGroupId)
+    : await claimRungFire(ladder.id, rung.id, suffix);
   if (!claim.claimed || !claim.fireId) return skip('already-fired');
   const fireId = claim.fireId;
 
@@ -320,7 +304,15 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
     // LIVE account's same-coin position — it uses its own paper position (lane consistency).
     if (!forcePaper) {
       const address = getHlAccountAddress();
-      if (address) hlPos = (await fetchClearinghouseState(address, { uncached: true })).positions.find((p) => p.coin.toUpperCase() === coin) ?? null;
+      if (!address) throw new Error('cannot verify live add position: no account address');
+      const ch = await fetchClearinghouseState(address, { uncached: true });
+      if (ch.stale || ch.error) throw new Error('cannot verify live add position: clearinghouse unreadable');
+      hlPos = ch.positions.find((p) => p.coin.toUpperCase() === coin) ?? null;
+      if (!hlPos || hlPos.side !== side || !(hlPos.size > 0)) {
+        await markFireOutcome(fireId, 'failed', 'add-opposite-side-position');
+        await setRungStatus(rung.id, 'skipped');
+        return skip('add-opposite-side-position');
+      }
     }
     const profit = pos ? unrealizedProfitUsd(pos.side, pos.avgEntryPx, pos.sz, markPx, hlPos) : (hlPos?.unrealizedPnl ?? 0);
     const addRisk = rungWorstCaseLoss({ side, action: 'add', entryPx: markPx, sizeCoins: proposal.intent.sz, stopPx: proposal.stopPx });
@@ -349,23 +341,30 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
     return skip('no-fill');
   }
   filledSize = fill.sz;
-
+  const orderDetail = { entryOid: fill.hlOrderId == null ? null : Number(fill.hlOrderId), stopOid: null as number | null, tpOid: null as number | null };
   // (3) Bracket the fill ATOMICALLY (invariant §3.3) — but ONLY a live fill. A PAPER
   // ladder places NO real exchange orders (placeBracket/placeStop gate on the GLOBAL
   // TRADING_MODE, so without this guard a paper ladder on a live deployment would rest a
   // REAL stop/TP). A bracket reject → FLATTEN (filled-but-unstopped fault).
   if (!forcePaper) {
     try {
-      if (rung.targetPx != null && rung.targetPx > 0) await placeBracketOnHl(coin, proposal.stopPx, rung.targetPx, filledSize, side);
-      else await placeStopOnHl(coin, proposal.stopPx, filledSize, side);
+      if (rung.targetPx != null && rung.targetPx > 0) {
+        const bracket = await placeBracketOnHl(coin, proposal.stopPx, rung.targetPx, filledSize, side);
+        if (!bracket.pushed || bracket.stopOid == null) throw new Error('bracket stop not confirmed resting');
+        orderDetail.stopOid = bracket.stopOid;
+        orderDetail.tpOid = bracket.tpOid;
+      } else {
+        const stop = await placeStopOnHl(coin, proposal.stopPx, filledSize, side);
+        if (!stop.pushed || stop.oid == null) throw new Error('stop not confirmed resting');
+        orderDetail.stopOid = stop.oid;
+      }
     } catch (err) {
       return await flattenAfterFault(ladder, rung, sessionId, coin, fireId, forcePaper, filledSize, `bracket-reject: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-
   // (4) SUCCESS telemetry — OUTSIDE any flatten-guarded try. The fill is in and (if live)
   // stopped; a transient telemetry/Supabase failure here must NOT flatten a good position.
-  await markFireOutcome(fireId, 'filled').catch(() => {});
+  await markFireOutcome(fireId, 'filled', JSON.stringify(orderDetail)).catch(() => {});
   await setRungStatus(rung.id, 'fired').catch(() => {});
   // OCO one-cancels-other: this leg committed → auto-disarm its straddle sibling(s) so a
   // whipsaw can't also fire the opposite side (which would net against this fill on HL).
@@ -398,20 +397,24 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
  */
 async function flattenAfterFault(ladder: LadderWithRungs, rung: LadderRung, sessionId: string, coin: string, fireId: string, forcePaper: boolean, reduceSize: number, detail: string): Promise<LadderFireResult> {
   let flattenOk = false;
+  let flattenOid: number | null = null;
   try {
     const pos = await loadEffectivePosition(sessionId, coin, forcePaper);
     if (pos && pos.side !== 'flat' && pos.sz > 0) {
       const fraction = reduceSize > 0 ? Math.min(1, reduceSize / pos.sz) : 1; // close just this rung's add; base keeps its own stop
       const closeIntent = buildMarketReduceOnlyClose(pos, { sessionId, clientIntentId: randomUUID(), now: Date.now(), fraction });
-      if (closeIntent) { await executeIntent(closeIntent, { forcePaper }); flattenOk = true; }
-      else flattenOk = true;
+      if (closeIntent) {
+        const closeFill = await executeIntent(closeIntent, { forcePaper });
+        flattenOid = closeFill.hlOrderId == null ? null : Number(closeFill.hlOrderId);
+        flattenOk = true;
+      } else flattenOk = true;
     } else {
       flattenOk = true; // nothing open to flatten (rejected pre-fill / already flat)
     }
   } catch { flattenOk = false; }
   await setRungStatus(rung.id, 'failed');
   if (flattenOk) {
-    await markFireOutcome(fireId, 'flattened', `fault-flattened: ${detail}`);
+    await markFireOutcome(fireId, 'flattened', JSON.stringify({ reduceOid: flattenOid, reason: `fault-flattened: ${detail}` }));
     await alert(sessionId, `Ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: fault after fill — FLATTENED (filled-but-unstopped fault). ${detail}`);
     return { fired: false, skipped: 'fault-flattened', flattened: true };
   }
@@ -431,6 +434,7 @@ async function loadEffectivePosition(sessionId: string, coin: string, forcePaper
   const address = getHlAccountAddress();
   if (!address) throw new Error('cannot read live position: no HL account address');
   const ch = await fetchClearinghouseState(address, { uncached: true }); // throws on feed error → caller fails closed
+  if (ch.stale || ch.error) throw new Error(`cannot read live position: ${ch.error ?? 'stale clearinghouse feed'}`);
   const hl = ch.positions.find((p) => p.coin.toUpperCase() === coin.toUpperCase());
   if (!hl || !(hl.size > 0)) return null; // read succeeded, genuinely flat
   return { coin: coin.toUpperCase(), side: hl.side, sz: hl.size, avgEntryPx: hl.entryPx ?? 0, realizedPnlUsd: 0, feesPaidUsd: 0 };
@@ -517,11 +521,12 @@ async function fireStopMove(ladder: LadderWithRungs, rung: LadderRung, sessionId
       return skip('not-risk-reducing');
     }
   }
-
   // Place the NEW stop first (full current size), THEN cancel the old — never unstopped.
+  let newStopOid: number | null = null;
   try {
     const placed = await placeStopOnHl(coin, newStop, pos.sz, pos.side);
     if (!placed.pushed) throw new Error('placeStopOnHl not pushed');
+    newStopOid = placed.oid;
   } catch (e) {
     await markFireOutcome(fireId, 'failed', `stop-place-failed: ${e instanceof Error ? e.message : String(e)}`);
     await setRungStatus(rung.id, 'failed');
@@ -537,7 +542,7 @@ async function fireStopMove(ladder: LadderWithRungs, rung: LadderRung, sessionId
       await alert(sessionId, `Ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: new ${coin} stop @ ${newStop} placed but the OLD stop (oid ${oldStop.oid}) failed to cancel — cancel it manually; the tighter stop governs.`);
     }
   }
-  await markFireOutcome(fireId, 'filled', `stop→${newStop}${oldPx != null ? ` (from ${oldPx})` : ' (no prior stop)'}${isTrail ? ' (trail)' : ''}`).catch(() => {});
+  await markFireOutcome(fireId, 'filled', JSON.stringify({ stopOid: newStopOid, stopPx: newStop, oldStopOid: oldStop?.oid ?? null })).catch(() => {});
   if (!isTrail) {
     await setRungStatus(rung.id, 'fired').catch(() => {});
     const TERMINAL_RUNG = new Set(['fired', 'skipped', 'failed', 'cancelled']);
@@ -581,7 +586,7 @@ async function fireReduce(ladder: LadderWithRungs, rung: LadderRung, sessionId: 
     return skip('no-close-intent');
   }
   const fill = await executeIntent(intent, { forcePaper });
-  await markFireOutcome(fireId, 'filled');
+  await markFireOutcome(fireId, 'filled', JSON.stringify({ reduceOid: fill.hlOrderId == null ? null : Number(fill.hlOrderId) }));
   await setRungStatus(rung.id, 'fired');
   await writeAnalysisLog({ sessionId, source: 'ladder-fire', severity: 'info', message: `FIRED ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: ${rung.action} ${coin} (frac ${fraction.toFixed(2)}, ${ladder.mode}${forcePaper ? ' · paper' : ''}).` }).catch(() => {});
   await sendDiscord(

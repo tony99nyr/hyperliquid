@@ -258,11 +258,16 @@ export async function armLadder(
  * DO NOTHING. Returns claimed=true ONLY for the caller that inserted the row; a
  * concurrent/retried fire of the same rung gets claimed=false and must NOT execute.
  */
-export async function claimRungFire(ladderId: string, rungId: string, dedupeSuffix?: string): Promise<{ claimed: boolean; fireId: string | null }> {
+export async function claimRungFire(ladderId: string, rungId: string, dedupeSuffix?: string, ocoGroupId?: string | null): Promise<{ claimed: boolean; fireId: string | null }> {
   const db = getServiceRoleClient();
   // TRAIL rungs pass a per-candle suffix: one claim per completed candle instead of
   // one-shot (the trail re-fires as price advances; every OTHER rung stays one-shot).
   const key = dedupeSuffix ? `${ladderId}:${rungId}:${dedupeSuffix}` : `${ladderId}:${rungId}`;
+  if (ocoGroupId) {
+    const { data, error } = await db.rpc('claim_oco_ladder_fire', { p_ladder_id: ladderId, p_rung_id: rungId, p_dedupe_key: key });
+    if (error) throw new Error(`claimRungFire failed: ${error.message}`);
+    return { claimed: data != null, fireId: data as string | null };
+  }
   const { data, error } = await db
     .from('ladder_fires')
     .upsert(

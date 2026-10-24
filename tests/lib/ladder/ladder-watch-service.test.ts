@@ -9,11 +9,21 @@ import { snapshotFromCandleResult } from '@/lib/ladder/ladder-watch-business-log
 import type { PriceCandle } from '@/types/trading-core';
 import type { LadderWithRungs, LadderRung } from '@/lib/ladder/ladder-types';
 
-function candle(close: number, ts = 0): PriceCandle {
+function candle(close: number, ts = -15 * 60 * 1000): PriceCandle {
   return { timestamp: ts, open: close, high: close, low: close, close, volume: 100 };
 }
 
 describe('snapshotFromCandleResult — completed candle only, fail-closed', () => {
+  it('snapshotRejectsUnclosedOrFutureJitteredBar', () => {
+    const boundary = 1_700_000_100_000;
+    const bar = 15 * 60 * 1000;
+    const before = snapshotFromCandleResult('ETH', [candle(2050, boundary - bar), candle(9999, boundary)], false, { now: boundary - 1, maxAgeMs: bar });
+    expect(before.stale).toBe(true);
+    const after = snapshotFromCandleResult('ETH', [candle(2050, boundary - bar), candle(9999, boundary)], false, { now: boundary + 1, maxAgeMs: bar });
+    expect(after).toMatchObject({ completedClose: 2050, stale: false });
+    const future = snapshotFromCandleResult('ETH', [candle(2050, boundary), candle(9999, boundary + bar)], false, { now: boundary + 1, maxAgeMs: bar });
+    expect(future.stale).toBe(true);
+  });
   it('uses the LAST COMPLETED candle (second-to-last), not the in-progress bar', () => {
     const s = snapshotFromCandleResult('ETH', [candle(1900), candle(2050), candle(9999)], false);
     expect(s.completedClose).toBe(2050); // [-2], not the 9999 in-progress bar

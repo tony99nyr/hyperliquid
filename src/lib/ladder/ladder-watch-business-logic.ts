@@ -5,6 +5,7 @@
 
 import type { PriceCandle } from '@/types/trading-core';
 import type { RungMarketSnapshot } from './ladder-trigger-evaluator';
+import { WATCH_CANDLE_MS } from './ladder-types';
 
 /**
  * Build a market snapshot from a coin's candle series. The LAST element is the
@@ -30,7 +31,7 @@ export function snapshotFromCandleResult(
     return { coin: c, completedClose: 0, stale: true };
   }
   const completed = candles[candles.length - 2]; // [-1] is the in-progress bar
-  if (!completed || !(completed.close > 0)) {
+  if (!completed || !(completed.close > 0) || (opts && (newest.timestamp > opts.now || completed.timestamp + WATCH_CANDLE_MS > opts.now))) {
     return { coin: c, completedClose: 0, stale: true };
   }
   return { coin: c, completedClose: completed.close, completedVolume: completed.volume, stale: false };

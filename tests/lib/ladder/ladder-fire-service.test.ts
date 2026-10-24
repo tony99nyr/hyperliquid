@@ -232,7 +232,7 @@ describe('performLadderRungFire — execution', () => {
     // CRIT: a paper ladder must NOT write a real stop/bracket to the exchange.
     expect(placeStopOnHl).not.toHaveBeenCalled();
     expect(placeBracketOnHl).not.toHaveBeenCalled();
-    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'filled');
+    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'filled', JSON.stringify({ entryOid: null, stopOid: null, tpOid: null }));
     expect(setRungStatus).toHaveBeenCalledWith('r1', 'fired');
     // Single-rung ladder fully executed → marked done so the UI shows completion.
     expect(markLadderDone).toHaveBeenCalledWith('L1');
@@ -245,6 +245,36 @@ describe('performLadderRungFire — execution', () => {
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(res.fired).toBe(true);
     expect(disarmOcoSiblings).toHaveBeenCalledWith('grp-1', 'L1', expect.stringContaining('oco'));
+  });
+
+  it('concurrentOcoFires_executeOnlyOneLeg', async () => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc');
+    const group = '00000000-0000-4000-8000-000000000001';
+    const first = ladder({ id: 'L1', mode: 'live', ocoGroupId: group });
+    const secondRung = openRung({ id: 'r2', ladderId: 'L2', side: 'short', cloid: 'L2:r2' });
+    const second = ladder({ id: 'L2', mode: 'live', ocoGroupId: group }, [secondRung]);
+    getLadderWithRungs.mockImplementation(async (id: string) => id === 'L1' ? first : second);
+    placeStopOnHl.mockResolvedValue({ pushed: true, oid: 501 });
+    let arrivals = 0;
+    let release: (() => void) | undefined;
+    const bothAtClaim = new Promise<void>((resolve) => { release = resolve; });
+    const claimed = new Set<string>();
+    claimRungFire.mockImplementation(async (ladderId: string, rungId: string, _suffix?: string, ocoGroupId?: string) => {
+      arrivals += 1;
+      if (arrivals === 2) release?.();
+      await bothAtClaim;
+      const key = ocoGroupId ?? `${ladderId}:${rungId}`;
+      if (claimed.has(key)) return { claimed: false, fireId: null };
+      claimed.add(key);
+      return { claimed: true, fireId: `f-${ladderId}` };
+    });
+    const results = await Promise.all([
+      performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW }),
+      performLadderRungFire({ ladderId: 'L2', rungId: 'r2', now: NOW }),
+    ]);
+    expect(results.filter((result) => result.fired)).toHaveLength(1);
+    expect(executeIntent).toHaveBeenCalledTimes(1);
   });
 
   it('zero-fill (IOC did not cross) → no-fill skip, no bracket (HIGH-1)', async () => {
@@ -296,6 +326,38 @@ describe('performLadderRungFire — execution', () => {
     expect(placeBracketOnHl).toHaveBeenCalledWith('ETH', expect.closeTo(1920, 1), 2200, 0.625, 'long');
   });
 
+  it('liveOpen_requiresConfirmedRestingStop', async () => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc');
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }));
+    fetchClearinghouseState.mockResolvedValue({ stale: false, positions: [{ coin: 'ETH', side: 'long', size: 0.4, entryPx: 2000, unrealizedPnl: '0' }] });
+    for (const response of [{ pushed: false, oid: 501 }, { pushed: true, oid: null }]) {
+      vi.clearAllMocks();
+      executeIntent.mockResolvedValueOnce({ sz: 0.4, avgPx: 2000, partial: true, hlOrderId: '101' })
+        .mockResolvedValueOnce({ sz: 0.4, avgPx: 2000, hlOrderId: '102' });
+      placeStopOnHl.mockResolvedValue(response);
+      const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+      expect(res).toMatchObject({ fired: false, flattened: true });
+      expect(executeIntent).toHaveBeenCalledTimes(2);
+      expect(markFireOutcome).not.toHaveBeenCalledWith('f1', 'filled', expect.anything());
+    }
+  });
+
+  it('postFillFault_withStaleClearinghouse_reportsUnstopped', async () => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc');
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }));
+    executeIntent.mockResolvedValue({ sz: 0.4, avgPx: 2000, partial: true, hlOrderId: '101' });
+    placeStopOnHl.mockRejectedValue(new Error('stop rejected'));
+    fetchClearinghouseState.mockResolvedValueOnce({ stale: false, positions: [] })
+      .mockResolvedValueOnce({ stale: true, positions: [] });
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res).toMatchObject({ fired: false, flattened: false, skipped: 'fault-flatten-failed' });
+    expect(executeIntent).toHaveBeenCalledTimes(1);
+    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'failed', expect.stringContaining('UNSTOPPED'));
+    expect(writeAnalysisLog).toHaveBeenCalledWith(expect.objectContaining({ severity: 'danger', message: expect.stringContaining('UNSTOPPED') }));
+  });
+
   it('FLATTENS a LIVE fill on a bracket reject (filled-but-unstopped hard fault)', async () => {
     getTradingMode.mockReturnValue('live');
     getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }));
@@ -338,6 +400,7 @@ describe('performLadderRungFire — execution', () => {
   it('a LIVE add that is profit-COVERED fires + places a real bracket', async () => {
     getTradingMode.mockReturnValue('live');
     getHlAccountAddress.mockReturnValue('0xabc');
+    placeStopOnHl.mockResolvedValue({ pushed: true, oid: 501 });
     const addRung = openRung({ action: 'add' });
     // arm-time precondition hash must match the live ETH position at fire (add depends on it).
     const liveState = [{ coin: 'ETH', side: 'long' as const, leverage: 5 }];
@@ -350,7 +413,23 @@ describe('performLadderRungFire — execution', () => {
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(res.fired).toBe(true);
     expect(placeStopOnHl).toHaveBeenCalled(); // live → a real protective stop rests
-    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'filled');
+    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'filled', JSON.stringify({ entryOid: null, stopOid: 501, tpOid: null }));
+  });
+
+  it('liveAdd_refusesOppositeSidePosition', async () => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc');
+    const opener = openRung();
+    const add = openRung({ id: 'r2', seq: 2, action: 'add', cloid: 'L1:r2' });
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }, [opener, add]));
+    fetchClearinghouseState.mockResolvedValue({ stale: false, positions: [
+      { coin: 'ETH', side: 'short', size: 0.2, entryPx: 4000, leverage: 5, unrealizedPnl: '400' },
+    ] });
+    loadPosition.mockResolvedValue({ coin: 'ETH', side: 'long', sz: 1, avgEntryPx: 1800 });
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r2', now: NOW });
+    expect(res.fired).toBe(false);
+    expect(res.skipped).toBe('add-opposite-side-position');
+    expect(executeIntent).not.toHaveBeenCalled();
   });
 
   it('REFUSES an add whose risk is not covered by unrealized profit (no martingale)', async () => {

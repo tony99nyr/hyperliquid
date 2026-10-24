@@ -18,6 +18,27 @@ import { liveFill } from './fill-source-live';
 import { applyFillToPosition } from './position-tracker';
 import { persistFillRow } from '@/lib/cockpit/fill-persistence-service';
 
+// Keep a confirmed live fill across a failed ledger write in this process.
+// The promise also prevents concurrent same-intent submissions here.
+const liveSubmissions = new Map<string, { intent: string; fill: Promise<CanonicalFill> }>();
+
+function submitLiveOnce(intent: TradeIntent): Promise<CanonicalFill> {
+  const key = intent.clientIntentId;
+  const signature = JSON.stringify(intent);
+  const existing = liveSubmissions.get(key);
+  if (existing) {
+    if (existing.intent !== signature) throw new Error(`Conflicting live intent for ${key}`);
+    return existing.fill;
+  }
+  const fill = Promise.resolve().then(() => liveFill(intent));
+  liveSubmissions.set(key, { intent: signature, fill });
+  void fill.then(
+    (result) => { if (result.sz <= 0) liveSubmissions.delete(key); },
+    () => { liveSubmissions.delete(key); },
+  );
+  return fill;
+}
+
 /**
  * Persist a canonical fill as a Supabase `fills` row. Idempotent on
  * client_intent_id (a duplicate is silently a no-op), so re-running
@@ -51,7 +72,7 @@ export async function executeIntent(intent: TradeIntent, opts?: { forcePaper?: b
   // by the armed-ladder fire path so a PAPER ladder never fills with real money on a
   // live deployment (live happens only when the ladder is live AND the deployment is).
   const live = !opts?.forcePaper && getTradingMode() === 'live';
-  const fill = live ? await liveFill(intent) : await paperFill(intent);
+  const fill = live ? await submitLiveOnce(intent) : await paperFill(intent);
   if (fill.sz <= 0) return fill; // nothing filled — do not record (retry stays possible)
   await persistFill(fill);
   // Leverage is intent METADATA (not derived from the fill, so the fold stays

@@ -116,7 +116,12 @@ export async function computeLiveEquityBreakdown(
   ]);
   if (spot == null) throw new Error('live equity: spot balance unreadable');
   if (ch.stale || ch.error) throw new Error(`live equity: clearinghouse unreadable (${ch.error ?? 'stale'})`);
-  const upnl = ch.positions.reduce((a, p) => a + (Number(p.unrealizedPnl) || 0), 0);
+  const upnl = ch.positions.reduce((sum, position) => {
+    const raw: unknown = position.unrealizedPnl;
+    const value = typeof raw === 'number' || (typeof raw === 'string' && raw.trim() !== '') ? Number(raw) : NaN;
+    if (!Number.isFinite(value)) throw new Error(`live equity: invalid unrealised P&L for ${position.coin}`);
+    return sum + value;
+  }, 0);
   return { totalUsd: spot + upnl, spotUsd: spot, upnlUsd: upnl };
 }
 

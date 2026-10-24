@@ -15,6 +15,10 @@ import type { CanonicalFill, TradeIntent } from '@/types/fill';
 vi.mock('@/lib/hyperliquid/hyperliquid-info-service', () => ({
   fetchL2Book: vi.fn(),
 }));
+vi.mock('@/lib/hyperliquid/hyperliquid-exchange-service', () => ({
+  submitOrder: vi.fn(),
+  submitUpdateLeverage: vi.fn(),
+}));
 
 // Mock the Supabase persistence service (the DB I/O boundary). The default
 // service-role client requires env that isn't present in tests; mocking the
@@ -26,10 +30,13 @@ vi.mock('@/lib/cockpit/fill-persistence-service', () => ({
 }));
 
 import { fetchL2Book } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { submitOrder, submitUpdateLeverage } from '@/lib/hyperliquid/hyperliquid-exchange-service';
 import { persistFillRow, applyFillToPositionRows } from '@/lib/cockpit/fill-persistence-service';
 import { executeIntent } from '@/lib/trading/fill-source';
 
 const mockedFetchL2Book = vi.mocked(fetchL2Book);
+const mockedSubmitOrder = vi.mocked(submitOrder);
+const mockedSubmitUpdateLeverage = vi.mocked(submitUpdateLeverage);
 const mockedPersist = vi.mocked(persistFillRow);
 const mockedApply = vi.mocked(applyFillToPositionRows);
 
@@ -51,6 +58,46 @@ const intent = (over: Partial<TradeIntent> = {}): TradeIntent => ({
   reduceOnly: false,
   createdAt: 1_700_000_000_000,
   ...over,
+});
+
+describe('executeIntent (live retry after persistence failure)', () => {
+  beforeEach(() => {
+    process.env.TRADING_MODE = 'live';
+    mockedSubmitOrder.mockReset();
+    mockedSubmitUpdateLeverage.mockReset();
+    mockedSubmitUpdateLeverage.mockResolvedValue(undefined);
+    mockedPersist.mockReset();
+    mockedApply.mockReset();
+    mockedApply.mockResolvedValue({
+      coin: 'ETH', side: 'long', sz: 0.4, avgEntryPx: 2001,
+      realizedPnlUsd: 0, feesPaidUsd: 0.4,
+    });
+  });
+
+  it('liveRetryAfterPersistenceFailure_submitsOnce', async () => {
+    const trade = intent({ clientIntentId: 'live-retry-partial-1', sz: 1.5, leverage: 5 });
+    mockedSubmitOrder.mockResolvedValue({
+      avgPx: 2001, filledSz: 0.4, partial: true, feeUsd: 0.4,
+      hlOrderId: 'oid-partial-1', raw: { status: 'filled', totalSz: '0.4' },
+    });
+    mockedPersist.mockRejectedValueOnce(new Error('database unavailable')).mockResolvedValueOnce(true);
+
+    await expect(executeIntent(trade)).rejects.toThrow('database unavailable');
+    expect(mockedSubmitOrder).toHaveBeenCalledTimes(1);
+    expect(mockedApply).not.toHaveBeenCalled();
+
+    const fill = await executeIntent(trade);
+    expect(fill).toMatchObject({
+      clientIntentId: trade.clientIntentId, sz: 0.4, partial: true,
+      px: 2001, hlOrderId: 'oid-partial-1', source: 'live',
+    });
+    expect(mockedSubmitOrder).toHaveBeenCalledTimes(1);
+    expect(mockedSubmitUpdateLeverage).toHaveBeenCalledTimes(1);
+    expect(mockedPersist).toHaveBeenCalledTimes(2);
+    expect(mockedPersist.mock.calls[1][0]).toEqual(mockedPersist.mock.calls[0][0]);
+    expect(mockedApply).toHaveBeenCalledTimes(1);
+    expect(mockedApply.mock.calls[0][0]).toEqual(fill);
+  });
 });
 
 describe('executeIntent (paper end-to-end)', () => {
