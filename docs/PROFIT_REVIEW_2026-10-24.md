@@ -338,3 +338,26 @@ ACCEPT. Its additions:
 - Item 4 waits until after the 2026-10-28 FOMC.
 - Item 1's re-scores run inside the Monday retro.
 - The live-state section above was added.
+
+## Shipped and follow-ups (updated 2026-10-24)
+
+Shipped to main (e6bfabc, then the polish loop to 3a9441b): items 0, 1, 1b and 2,
+the validation gates, seven live-path fixes, migration 0045 (applied before the
+push), the ladder_outcomes backfill (75 rows, backup in ~/hl-backups/), and three
+polish-loop iterations (2 High and 1 Critical caught before deploy, plus 20
+Medium).
+
+Deferred Low items (fix in a later session, not in the loop):
+
+- `releaseOcoClaim`: the check and the delete are separate statements; a ladder
+  with several open rungs could race. Straddle legs have one open rung.
+- `submitLiveOnce` never evicts successful fills in a long-lived process.
+- `snapshotFromCandleResult` hardcodes `WATCH_CANDLE_MS` (15m).
+- The add-opposite-side path marks the fire failed but the rung skipped.
+- `flattenAfterFault` could cancel the just-placed stop and TP oids it knows.
+- `ladder-service.ts` (680 lines) and its test file need a split.
+- `.claude/skills/desk-review` says disarm "cancels resting orders"; it does not.
+- Performance view: label the closed-only KPIs ("realised"), and rename
+  `openUnrealized`, which is now fee-net.
+- Account scorecard: show "all-history funding" in the visible label.
+- CI: pin actions by SHA; use 127.0.0.1 for dummy URLs.
