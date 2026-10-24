@@ -16,7 +16,7 @@ function strictClient(tables: Record<'positions' | 'fills' | 'hypotheses', unkno
       const checked = (column: string, ids: string[]) => {
         expect(column).toBe('session_id');
         expect(ids).toEqual(['session-1']);
-        return Promise.resolve(result);
+        return { range: () => Promise.resolve(result) };
       };
       return { select: () => ({
         in: checked,

@@ -101,6 +101,10 @@ export function resolveLadderOutcome(input: ResolveOutcomeInput): LadderOutcomeR
     windowStartMs,
   };
 
+  if (input.fireStatuses.some((s) => s === 'filled') && input.ownerLedger && input.ownerLedger.entrySize <= 0) {
+    return { ...base, realizedPnlUsd: null, feesUsd: null, realizedR: null, outcome: 'open', windowEndMs: null, notes: 'Entry fire is FILLED, but no matching entry fill was attributed — recheck attribution.' };
+  }
+
   if (!anyFilled) {
     return { ...base, realizedPnlUsd: 0, feesUsd: 0, realizedR: 0, outcome: 'never_filled', windowEndMs: ladder.disarmedAt ? Date.parse(ladder.disarmedAt) : now, notes: 'No entry rung ever filled — costless pass (selectivity, not a loss).' };
   }

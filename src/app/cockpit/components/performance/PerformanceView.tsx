@@ -130,7 +130,7 @@ function buildKpis(summary: PerformanceSummary): KpiSpec[] {
       label: 'Profit factor',
       value: fmtProfitFactor(k.profitFactor),
       color: profitFactorColor(k.profitFactor),
-      sub: 'gross win / loss',
+      sub: 'net win / loss',
     },
     {
       slug: 'today',

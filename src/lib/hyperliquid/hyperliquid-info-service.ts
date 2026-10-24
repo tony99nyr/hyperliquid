@@ -60,6 +60,8 @@ export interface HlPosition {
   entryPx: number | null;
   positionValue: number;
   unrealizedPnl: number;
+  /** False when HL sent a malformed unrealizedPnl (then coerced to 0). Live risk gates must refuse it. */
+  unrealizedPnlValid?: boolean;
   returnOnEquity: number | null;
   leverage: number | null;
   leverageType: string | null;
@@ -145,13 +147,9 @@ export interface HlDeepFillsResult extends HlFillsResult {
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
-export function isValidHlAddress(addr: string): boolean {
-  return ADDRESS_RE.test(addr.trim());
-}
+export function isValidHlAddress(addr: string): boolean { return ADDRESS_RE.test(addr.trim()); }
 
-export function normalizeHlAddress(addr: string): string {
-  return addr.trim().toLowerCase();
-}
+export function normalizeHlAddress(addr: string): string { return addr.trim().toLowerCase(); }
 
 // --- Tiny in-process caches (per server instance) ---
 
@@ -228,9 +226,14 @@ function num(v: unknown): number {
 }
 
 function numOrNull(v: unknown): number | null {
-  if (v === null || v === undefined || v === '') return null;
   const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : NaN;
   return Number.isFinite(n) ? n : null;
+}
+
+/** Strict decimal parse: a malformed value reads as 0 but is flagged invalid for live risk gates. */
+function parsedUpnl(v: unknown): { unrealizedPnl: number; unrealizedPnlValid: boolean } {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(v.trim()) ? Number(v) : NaN;
+  return Number.isFinite(n) ? { unrealizedPnl: n, unrealizedPnlValid: true } : { unrealizedPnl: 0, unrealizedPnlValid: false };
 }
 
 interface RawAssetPosition {
@@ -272,7 +275,7 @@ function parseClearinghouseState(address: string, raw: RawClearinghouseState): H
       size: Math.abs(szi),
       entryPx: numOrNull(pos.entryPx),
       positionValue: num(pos.positionValue),
-      unrealizedPnl: num(pos.unrealizedPnl),
+      ...parsedUpnl(pos.unrealizedPnl),
       returnOnEquity: numOrNull(pos.returnOnEquity),
       leverage: numOrNull(pos.leverage?.value),
       leverageType: pos.leverage?.type ?? null,

@@ -12,13 +12,14 @@
  *   2. author='operator' (a scout ladder can NEVER fire — defense-in-depth w/ DB CHECK)
  *   3. rung exists + status='pending'
  *   4. precondition snapshot still matches (§3.7) — any live-state drift → auto-disarm
- *   5. ATOMIC claim via ladder_fires.dedupe_key — a double-fire gets claimed=false.
+ *   5. fresh mark and live exposure reads before the claim; bad data stays retryable.
+ *   6. ATOMIC claim via ladder_fires.dedupe_key — a double-fire gets claimed=false.
  *      An OCO 'open' rung claims its whole group atomically (claim_oco_ladder_fire,
  *      migration 0045), so concurrent ticks can never fire both straddle legs. A
  *      no-fill open releases the group claim (no exposure); a fill keeps it.
- *   6. EXPOSURE gates: an 'add' refuses an opposite-side live position, and fires only
+ *   7. ADD gates: an 'add' refuses an opposite-side live position, and fires only
  *      if its worst-case loss is covered by the position's current unrealized profit
- *   7. execute → for open/add, ATOMICALLY bracket the fill. The fill counts as 'filled'
+ *   8. execute → for open/add, ATOMICALLY bracket the fill. The fill counts as 'filled'
  *      only once the stop is CONFIRMED resting (pushed + oid); a reject or unconfirmed
  *      stop FLATTENS (the "filled-but-unstopped" hard fault). A stale or errored
  *      position read never counts as flat: report unflattened + critical alert.
@@ -105,7 +106,7 @@ async function liveStateForLadder(ladder: LadderWithRungs): Promise<LivePosition
 /** Unrealized profit (USD) for the add-guard: the live HL truth when available, else a
  *  paper estimate from the ledger position + current mark. */
 function unrealizedProfitUsd(posSide: string, avgEntryPx: number, sz: number, markPx: number, hlPos: HlPosition | null): number {
-  if (hlPos) return hlPos.unrealizedPnl;
+  if (hlPos) return hlPos.unrealizedPnl ?? 0;
   if (posSide === 'flat' || !(markPx > 0) || !(avgEntryPx > 0) || !(sz > 0)) return 0;
   const dir = posSide === 'long' ? 1 : -1;
   return (markPx - avgEntryPx) * dir * sz;
@@ -182,6 +183,8 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
   const markPx = mids[coin];
   if (!Number.isFinite(markPx) || markPx <= 0) return skip('bad-mark');
 
+  let liveAddPosition: HlPosition | null = null;
+
   // 5b) EXPOSURE GATES (live opens/adds only; risk-reducing rungs are NEVER blocked).
   // Both fail CLOSED on unreadable state and sit BEFORE the claim (skip = retryable).
   if ((rung.action === 'open' || rung.action === 'add') && ladder.mode === 'live' && getTradingMode() === 'live') {
@@ -222,6 +225,17 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
       }
     } catch (e) {
       return skip(`cannot-verify-heat: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    if (rung.action === 'add') {
+      try {
+        const address = getHlAccountAddress();
+        if (!address) return skip('cannot-verify-add: no account address');
+        const ch = await fetchClearinghouseState(address, { uncached: true });
+        if (ch.stale || ch.error) return skip('cannot-verify-add: clearinghouse unreadable');
+        liveAddPosition = ch.positions.find((p) => p.coin.toUpperCase() === coin) ?? null;
+      } catch (e) {
+        return skip(`cannot-verify-add: ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
   }
 
@@ -283,7 +297,7 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
       await setRungStatus(rung.id, 'failed');
       return skip('indicator triggers are exit-only — refusing open/add');
     }
-    return await fireOpenOrAdd(ladder, rung, session.id, coin, markPx, fireId, forcePaper);
+    return await fireOpenOrAdd(ladder, rung, session.id, coin, markPx, fireId, forcePaper, liveAddPosition);
   } catch (e) {
     await markFireOutcome(fireId, 'failed', e instanceof Error ? e.message : String(e));
     await setRungStatus(rung.id, 'failed');
@@ -293,7 +307,7 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
 
 /** OPEN / ADD — increases exposure. ADD is gated by the runtime risk-covered-by-profit
  *  rule; both atomically bracket the fill (stop[+target]); a bracket reject FLATTENS. */
-async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionId: string, coin: string, markPx: number, fireId: string, forcePaper: boolean): Promise<LadderFireResult> {
+async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionId: string, coin: string, markPx: number, fireId: string, forcePaper: boolean, liveAddPosition: HlPosition | null): Promise<LadderFireResult> {
   const side = rung.side;
   // Size + stop come from the rung's risk inputs, computed at the CURRENT mark.
   const stopFrac = rung.stopFrac ?? (rung.stopPx != null && rung.stopPx > 0 ? Math.abs(markPx - rung.stopPx) / markPx : null);
@@ -328,11 +342,7 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
     // a live deployment). A paper ladder must never source its add-coverage profit from the
     // LIVE account's same-coin position — it uses its own paper position (lane consistency).
     if (!forcePaper) {
-      const address = getHlAccountAddress();
-      if (!address) throw new Error('cannot verify live add position: no account address');
-      const ch = await fetchClearinghouseState(address, { uncached: true });
-      if (ch.stale || ch.error) throw new Error('cannot verify live add position: clearinghouse unreadable');
-      hlPos = ch.positions.find((p) => p.coin.toUpperCase() === coin) ?? null;
+      hlPos = liveAddPosition;
       if (!hlPos || hlPos.side !== side || !(hlPos.size > 0)) {
         await markFireOutcome(fireId, 'failed', 'add-opposite-side-position');
         await setRungStatus(rung.id, 'skipped');
@@ -356,19 +366,28 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
   try {
     fill = await executeIntent(proposal.intent, { forcePaper });
   } catch (err) {
-    return await flattenAfterFault(ladder, rung, sessionId, coin, fireId, forcePaper, filledSize, `open-threw: ${err instanceof Error ? err.message : String(err)}`);
+    const reason = `open-threw: ${err instanceof Error ? err.message : String(err)}`;
+    let pos: Position | null;
+    try {
+      pos = await loadEffectivePosition(sessionId, coin, forcePaper);
+    } catch {
+      return await flattenAfterFault(ladder, rung, sessionId, coin, fireId, forcePaper, filledSize, reason);
+    }
+    if (!pos || pos.side === 'flat' || !(pos.sz > 0)) {
+      await releaseNoFillOcoClaim(ladder, rung, sessionId, 'rejected open');
+      await markFireOutcome(fireId, 'failed', reason);
+      await setRungStatus(rung.id, 'failed');
+      await alert(sessionId, `Ladder ${ladder.id.slice(0, 8)} rung ${rung.seq}: open rejected with no fill. ${reason}`);
+      return skip('open-rejected');
+    }
+    return await flattenAfterFault(ladder, rung, sessionId, coin, fireId, forcePaper, filledSize, reason);
   }
 
   // (2) Zero-fill (IOC didn't cross): no exposure opened — nothing to bracket or fire.
   if (!(fill.sz > 0)) {
+    await releaseNoFillOcoClaim(ladder, rung, sessionId, 'no-fill');
     await markFireOutcome(fireId, 'failed', 'no-fill');
     await setRungStatus(rung.id, 'failed');
-    // No exposure opened: free the OCO group so one transient no-fill cannot kill both legs.
-    if (rung.action === 'open' && ladder.ocoGroupId) {
-      await releaseOcoClaim(ladder.ocoGroupId, ladder.id).catch(async (err) => {
-        await alert(sessionId, `CRITICAL: ladder ${ladder.id.slice(0, 8)} no-fill could not release its OCO group; the sibling straddle leg cannot fire. Re-prep the straddle. ${err instanceof Error ? err.message : String(err)}`);
-      });
-    }
     return skip('no-fill');
   }
   filledSize = fill.sz;
@@ -418,6 +437,13 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
     'HL Ladder Watch',
   ).catch(() => {});
   return { fired: true, skipped: null, fill };
+}
+
+async function releaseNoFillOcoClaim(ladder: LadderWithRungs, rung: LadderRung, sessionId: string, reason: string): Promise<void> {
+  if (rung.action !== 'open' || !ladder.ocoGroupId) return;
+  await releaseOcoClaim(ladder.ocoGroupId, ladder.id).catch(async (err) => {
+    await alert(sessionId, `CRITICAL: ladder ${ladder.id.slice(0, 8)} ${reason} could not release its OCO group; the sibling straddle leg cannot fire. Re-prep the straddle. ${err instanceof Error ? err.message : String(err)}`);
+  });
 }
 
 /**

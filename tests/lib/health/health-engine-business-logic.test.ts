@@ -129,8 +129,8 @@ describe('computeHealth (PURE composer)', () => {
     const result = computeHealth({}, longPos, WEIGHTS);
     expect(result.score).toBeGreaterThanOrEqual(0);
     expect(result.score).toBeLessThanOrEqual(100);
-    // No data → every TF weight 0 → neutral baseline score.
-    expect(result.score).toBe(WEIGHTS.score.neutralBaseline);
+    expect(result.score).toBe(0);
+    expect(result.alerts).toContain('no-data');
     expect(result.timeframeReads.every((r) => r.weight === 0)).toBe(true);
   });
 

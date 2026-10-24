@@ -261,6 +261,7 @@ export function buildLaneScorecards(args: {
   periodDays: number;
   periodDaysFor?: (lane: string) => number;
   minExpectancyRFor?: (lane: string) => number | null;
+  tradeCountFor?: (lane: string, laneCount: number) => number;
   /** Optional per-lane config override (e.g. a lower bar for the passive vault lane). */
   configFor?: (lane: string) => ScorecardConfig;
 }): LaneScorecard[] {
@@ -309,7 +310,7 @@ export function buildLaneScorecards(args: {
       realizedGrossUsd: realized.get(lane) ?? 0,
       slippageHaircutUsd: 0, // slippage is embedded in the fill price (paper-fill-realism)
       fundingHaircutUsd: fundingByLane.get(lane) ?? 0,
-      tradeCount: closed.get(lane) ?? 0,
+      tradeCount: args.tradeCountFor?.(lane, closed.get(lane) ?? 0) ?? closed.get(lane) ?? 0,
       wins: wins.get(lane) ?? 0,
       losses: losses.get(lane) ?? 0,
       periodDays: args.periodDaysFor?.(lane) ?? args.periodDays,

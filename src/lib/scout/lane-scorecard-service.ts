@@ -35,6 +35,18 @@ export type { LaneCard, LaneKind } from '@/types/scout';
 
 const env = (k: string, d: number) => Number(process.env[k]) || d;
 const CARRY_ROUNDTRIP_FRAC = 0.003; // ~30bps to put on + take off a delta-neutral pair
+const PAGE_SIZE = 1000;
+
+async function readPaged(query: { range: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: unknown }> }): Promise<unknown[]> {
+  const rows: unknown[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await query.range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    const page = data ?? [];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) return rows;
+  }
+}
 
 export interface ScoutLaneResult {
   account: LaneCard;
@@ -56,14 +68,12 @@ export async function computeScoutLaneCards(
   const sessionIds = await scoutSessionIds(client);
   const queryIds = sessionIds.length > 0 ? sessionIds : ['00000000-0000-0000-0000-000000000000'];
 
-  const { data: positions, error: positionsError } = await client
-    .from('positions').select('session_id, coin, side, lane, realized_pnl_usd, fees_paid_usd').in('session_id', queryIds);
-  if (positionsError) throw positionsError;
+  const positions = await readPaged(client.from('positions').select('session_id, coin, side, lane, realized_pnl_usd, fees_paid_usd, opened_at, updated_at').in('session_id', queryIds) as never) as Record<string, unknown>[];
   let realizedGrossUsd = 0;
   let openCount = 0;
   let feesPaidUsd = 0;
   let grossWinsUsd = 0;
-  for (const p of positions ?? []) {
+  for (const p of positions) {
     const r = p as { side: string; realized_pnl_usd: number; fees_paid_usd: number };
     if (r.side !== 'flat') openCount++;
     realizedGrossUsd += (Number(r.realized_pnl_usd) || 0) - (Number(r.fees_paid_usd) || 0);
@@ -72,17 +82,15 @@ export async function computeScoutLaneCards(
     grossWinsUsd += Math.max(0, Number(r.realized_pnl_usd) || 0);
   }
 
-  const { data: fills, error: fillsError } = await client
-    .from('fills').select('session_id, coin, side, sz, px, filled_at').in('session_id', queryIds);
-  if (fillsError) throw fillsError;
-  const scoutFills = (fills ?? []) as ScoutFill[];
+  const fills = await readPaged(client.from('fills').select('session_id, coin, side, sz, px, filled_at').in('session_id', queryIds) as never) as ScoutFill[];
+  const scoutFills = fills;
   const earliestFillMs = Math.min(...scoutFills.map((fill) => Date.parse(fill.filled_at)).filter(Number.isFinite));
   const coins = [...new Set(scoutFills.map((fill) => fill.coin.toUpperCase()))];
   const history = await Promise.all(coins.map(async (coin) => ({
     coin, points: await fetchFundingHistory(coin, earliestFillMs, now).catch(() => []),
   })));
   const laneBySessionCoin: Record<string, string> = {};
-  for (const p of positions ?? []) {
+  for (const p of positions) {
     const row = p as { session_id: string; coin: string; lane: string | null };
     laneBySessionCoin[`${row.session_id}\u0000${row.coin.toUpperCase()}`] = row.lane || 'directional';
   }
@@ -91,14 +99,13 @@ export async function computeScoutLaneCards(
   const { totalUsd: fundingHaircutUsd, earliestMs } = funding;
   const periodDays = Number.isFinite(earliestMs) ? Math.max(1, (now - earliestMs) / 86_400_000) : 1;
 
-  const { data: hyps, error: hypothesesError } = await client
+  const hyps = await readPaged(client
     .from('hypotheses')
-    .select('status, lane, realized_r')
+    .select('status, lane, realized_r, created_at')
     .eq('excluded', false) // janitorial/reaped rows are NOT trades (Jul-16 quarantine)
-    .in('session_id', queryIds);
-  if (hypothesesError) throw hypothesesError;
+    .in('session_id', queryIds) as never) as Record<string, unknown>[];
   let wins = 0, losses = 0, closed = 0;
-  for (const h of hyps ?? []) {
+  for (const h of hyps) {
     const st = (h as { status: string }).status;
     if (st === 'confirmed') { wins++; closed++; }
     else if (st === 'invalidated') { losses++; closed++; }
@@ -120,19 +127,26 @@ export async function computeScoutLaneCards(
   const lanes: LaneCard[] = [];
 
   // Directional / position lanes.
-  const lanePositions: LanePositionRow[] = (positions ?? []).map((p) => {
-    const r = p as { coin: string; side: string; lane: string | null; realized_pnl_usd: number; fees_paid_usd: number };
+  const lanePositions: LanePositionRow[] = positions.map((p) => {
+    const r = p as { coin: string; side: string; lane: string | null; realized_pnl_usd: number; fees_paid_usd: number; opened_at: string | null; updated_at: string };
+    const registeredAt = registeredLaneBar(r.lane ?? 'directional')?.registeredAt;
+    if (registeredAt && Date.parse(r.opened_at ?? r.updated_at) < Date.parse(`${registeredAt}T00:00:00Z`)) return null;
     return { lane: r.lane ?? null, coin: r.coin, side: r.side, realizedPnlUsd: Number(r.realized_pnl_usd) || 0, feesPaidUsd: Number(r.fees_paid_usd) || 0 };
-  });
-  const laneHyps: LaneHypothesisRow[] = (hyps ?? []).map((h) => {
-    const r = h as { status: string; lane: string | null; realized_r: number | null };
+  }).filter((row): row is LanePositionRow => row !== null);
+  const laneHyps = hyps.map((h): LaneHypothesisRow | null => {
+    const r = h as { status: string; lane: string | null; realized_r: number | null; created_at: string };
+    const registeredAt = registeredLaneBar(r.lane ?? 'directional')?.registeredAt;
+    if (registeredAt && Date.parse(r.created_at) < Date.parse(`${registeredAt}T00:00:00Z`)) return null;
     return { lane: r.lane ?? null, status: r.status, realizedR: r.realized_r };
-  });
+  }).filter((row): row is LaneHypothesisRow => row !== null);
   for (const { lane, openCount: lo, card: c } of buildLaneScorecards({
     positions: lanePositions, hypotheses: laneHyps, fundingByLane: funding.byLane, periodDays,
     periodDaysFor: (lane) => lanePeriodDays(lane, now, periodDays),
     configFor: (lane) => registeredLaneBar(lane)?.config ?? DEFAULT_SCORECARD_CONFIG,
     minExpectancyRFor: (lane) => registeredLaneBar(lane)?.minExpectancyR ?? null,
+    tradeCountFor: (lane, count) => ['breakdown-short', 'reclaim-long'].includes(lane)
+      ? laneHyps.filter((h) => ['breakdown-short', 'reclaim-long'].includes(h.lane ?? 'directional') && ['confirmed', 'invalidated', 'resolved'].includes(h.status)).length
+      : count,
   })) {
     const laneDays = lanePeriodDays(lane, now, periodDays);
     const missingHours = funding.missingHoursByLane[lane] ?? 0;

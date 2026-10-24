@@ -212,7 +212,7 @@ export async function getPerformanceSummary(sessionId: string): Promise<Performa
   const ledger = buildLedger(fills, marks, now, leverageByCoin, operatorTz());
   const realized = ledger
     .filter((t) => t.status !== 'open')
-    .reduce((s, t) => s + t.pnlUsd - t.feesUsd, 0);
+    .reduce((s, t) => s + t.pnlUsd, 0);
   const openUnrealized = ledger
     .filter((t) => t.status === 'open')
     .reduce((s, t) => s + t.pnlUsd, 0);
@@ -313,7 +313,7 @@ export async function getAccountPerformanceSummary(mode: TradingMode): Promise<P
   }
 
   const ledger = buildLedger(fills, marks, now, leverageByCoin, operatorTz());
-  const realized = ledger.filter((t) => t.status !== 'open').reduce((s, t) => s + t.pnlUsd - t.feesUsd, 0);
+  const realized = ledger.filter((t) => t.status !== 'open').reduce((s, t) => s + t.pnlUsd, 0);
   const openUnrealized = ledger.filter((t) => t.status === 'open').reduce((s, t) => s + t.pnlUsd, 0);
   const netPnlUsd = realized + openUnrealized;
   // Anchor the 30d curve at the REAL live equity (perp + spot) when known, so the
@@ -390,7 +390,7 @@ export async function getScoutPerformanceSummary(): Promise<PerformanceSummary> 
   }
 
   const ledger = buildLedger(fills, marks, now, leverageByCoin, operatorTz());
-  const realized = ledger.filter((t) => t.status !== 'open').reduce((s, t) => s + t.pnlUsd - t.feesUsd, 0);
+  const realized = ledger.filter((t) => t.status !== 'open').reduce((s, t) => s + t.pnlUsd, 0);
   const openUnrealized = ledger.filter((t) => t.status === 'open').reduce((s, t) => s + t.pnlUsd, 0);
   const netPnlUsd = realized + openUnrealized;
   // Paper: cumulative-P&L curve anchored at 0 (no real account). The curve shows

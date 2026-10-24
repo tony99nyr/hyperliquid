@@ -62,6 +62,7 @@ export interface TimeframeRegimeRead {
 
 /** Discrete alert codes the engine can emit. */
 export type HealthAlert =
+  | 'no-data'
   | 'bearish-divergence-1h'
   | 'stop-within-1-ATR'
   | 'regime-flip-8h'

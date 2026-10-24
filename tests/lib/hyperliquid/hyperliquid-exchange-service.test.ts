@@ -21,7 +21,7 @@ vi.mock('@/lib/hyperliquid/hyperliquid-info-service', () => ({
   fetchAllMids: h.fetchAllMids,
 }));
 
-import { submitOrder } from '@/lib/hyperliquid/hyperliquid-exchange-service';
+import { submitOrder, submitBracket } from '@/lib/hyperliquid/hyperliquid-exchange-service';
 
 const intent = (over: Partial<TradeIntent> = {}): TradeIntent => ({
   clientIntentId: 'i1',
@@ -113,5 +113,49 @@ describe('submitOrder', () => {
     await submitOrder(intent());
     expect((fetchMock.mock.calls[0] as [string])[0]).toContain('hyperliquid-testnet.xyz');
     expect(h.signL1Action.mock.calls[0][0].isTestnet).toBe(true);
+  });
+});
+
+describe('submitBracket', () => {
+  const bracket = () => submitBracket('ETH', 1900, 2200, 1.5, false);
+
+  it('accepts grouped TP/SL waiting string statuses for read-back confirmation', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'ok', response: { data: { statuses: ['waitingForTrigger', 'waitingForFill'] } } }),
+    });
+    await expect(bracket()).resolves.toEqual({ stopOid: null, tpOid: null });
+  });
+
+  it('returns the resting stop and take-profit order IDs', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'ok', response: { data: { statuses: [{ resting: { oid: 71 } }, { resting: { oid: 72 } }] } } }),
+    });
+    await expect(bracket()).resolves.toEqual({ stopOid: 71, tpOid: 72 });
+  });
+
+  it('does not count an immediately filled stop as resting', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'ok', response: { data: { statuses: [{ filled: { oid: 71, totalSz: '0.5' } }, { resting: { oid: 72 } }] } } }),
+    });
+    await expect(bracket()).resolves.toEqual({ stopOid: null, tpOid: 72 });
+  });
+
+  it('rejects a bracket when either leg reports an error', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'ok', response: { data: { statuses: [{ resting: { oid: 71 } }, { error: 'margin reject' }] } } }),
+    });
+    await expect(bracket()).rejects.toThrow('HL bracket leg rejected: margin reject');
+  });
+
+  it('rejects an unknown leg status instead of treating it as accepted', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'ok', response: { data: { statuses: ['queued', 'waitingForTrigger'] } } }),
+    });
+    await expect(bracket()).rejects.toThrow('HL bracket: unknown order status');
   });
 });

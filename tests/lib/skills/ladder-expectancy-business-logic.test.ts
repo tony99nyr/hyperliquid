@@ -60,6 +60,17 @@ describe('deriveSetupType', () => {
   });
 });
 
+describe('unmatched filled entry', () => {
+  it('keeps a filled fire open when attribution matched no entry size', () => {
+    const l = ladder([rung({})]);
+    const result = resolveLadderOutcome({ ladder: l, fireStatuses: ['filled'], hlFills: [],
+      ownerLedger: { owner: l.id, coin: 'HYPE', entrySize: 0, openSize: 0, closedPnl: 0, fees: 0, lastCloseMs: null },
+      plannedRiskUsd: 10, positionStillOpen: false, now: NOW });
+    expect(result.outcome).toBe('open');
+    expect(result.notes).toMatch(/no matching entry fill/);
+  });
+});
+
 describe('position inventory attribution', () => {
   const eth = (id: string, side: 'long' | 'short' = 'long', action: LadderRung['action'] = 'open') =>
     ladder([rung({ id: `${id}-r`, ladderId: id, coin: 'ETH', side, action })], { id, title: `ETH ${id}` });

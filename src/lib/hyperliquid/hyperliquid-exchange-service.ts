@@ -311,20 +311,22 @@ export async function submitBracket(coin: string, stopPx: number, tpPx: number, 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, nonce, signature }),
   });
-  const json = (await res.json().catch(() => ({}))) as { status?: string; response?: { data?: { statuses?: Array<Record<string, unknown>> } } };
+  const json = (await res.json().catch(() => ({}))) as { status?: string; response?: { data?: { statuses?: unknown[] } } };
   if (!res.ok) throw new Error(`HL bracket HTTP ${res.status}: ${JSON.stringify(json)}`);
   if (json.status !== 'ok') throw new Error(`HL exchange rejected bracket: ${JSON.stringify(json.status ? json : json)}`);
   const statuses = json.response?.data?.statuses;
   if (!Array.isArray(statuses) || statuses.length < 2) throw new Error(`HL bracket: expected 2 order statuses, got ${JSON.stringify(json)}`);
-  // Fail-closed: if EITHER leg errored, the bracket is half-placed — surface it.
-  for (const s of statuses) { const e = (s as { error?: unknown }).error; if (e) throw new Error(`HL bracket leg rejected: ${String(e)}`); }
-  const oidOf = (s: Record<string, unknown>): number | null => {
-    const resting = (s as { resting?: { oid?: number } }).resting?.oid;
-    const filled = (s as { filled?: { oid?: number } }).filled?.oid;
-    return resting ?? filled ?? null;
+  const oidOf = (s: unknown, isStop: boolean): number | null => {
+    if (s === 'waitingForTrigger' || s === 'waitingForFill') return null;
+    if (typeof s !== 'object' || s === null) throw new Error(`HL bracket: unknown order status ${JSON.stringify(s)}`);
+    const status = s as { error?: unknown; resting?: { oid?: number }; filled?: { oid?: number } };
+    if (status.error) throw new Error(`HL bracket leg rejected: ${String(status.error)}`);
+    const oid = status.resting?.oid ?? status.filled?.oid;
+    if (typeof oid !== 'number' || !Number.isFinite(oid)) throw new Error(`HL bracket: unknown order status ${JSON.stringify(s)}`);
+    return isStop && !status.resting ? null : oid;
   };
   // Leg order matches buildBracketAction: [0] = stop ('sl'), [1] = take-profit ('tp').
-  return { stopOid: oidOf(statuses[0]), tpOid: oidOf(statuses[1]) };
+  return { stopOid: oidOf(statuses[0], true), tpOid: oidOf(statuses[1], false) };
 }
 
 /**

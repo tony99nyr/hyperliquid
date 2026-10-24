@@ -298,6 +298,40 @@ describe('performLadderRungFire — execution', () => {
     expect(disarmOcoSiblings).not.toHaveBeenCalled();
   });
 
+  it('releases an OCO no-fill before telemetry can throw', async () => {
+    getLadderWithRungs.mockResolvedValue(ladder({ ocoGroupId: 'grp-1' }));
+    executeIntent.mockResolvedValue({ sz: 0 });
+    markFireOutcome.mockRejectedValue(new Error('telemetry down'));
+    await expect(performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW })).rejects.toThrow('telemetry down');
+    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1');
+    expect(releaseOcoClaim.mock.invocationCallOrder[0]).toBeLessThan(markFireOutcome.mock.invocationCallOrder[0]);
+  });
+
+  it('a rejected live OCO open with a verified flat position releases its claim and reports the reject', async () => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc');
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live', ocoGroupId: 'grp-1' }));
+    fetchClearinghouseState.mockResolvedValue({ stale: false, positions: [] });
+    executeIntent.mockRejectedValue(new Error('HL margin reject'));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res).toMatchObject({ fired: false, skipped: 'open-rejected' });
+    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1');
+    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'failed', expect.stringContaining('HL margin reject'));
+    expect(writeAnalysisLog).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('HL margin reject') }));
+    expect(writeAnalysisLog).not.toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('fault after fill') }));
+  });
+
+  it('a rejected live open keeps the OCO claim when the position read finds a fill', async () => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc');
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live', ocoGroupId: 'grp-1' }));
+    fetchClearinghouseState.mockResolvedValue({ stale: false, positions: [{ coin: 'ETH', side: 'long', size: 0.625, entryPx: 2000 }] });
+    executeIntent.mockRejectedValueOnce(new Error('persist failed')).mockResolvedValue({ sz: 0.625, hlOrderId: '102' });
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toBe('fault-flattened');
+    expect(releaseOcoClaim).not.toHaveBeenCalled();
+  });
+
   it('OCO no-fill whose release fails sends a critical alert naming the dead straddle', async () => {
     getLadderWithRungs.mockResolvedValue(ladder({ ocoGroupId: 'grp-1' }));
     executeIntent.mockResolvedValue({ sz: 0, avgPx: 0 });
@@ -346,6 +380,17 @@ describe('performLadderRungFire — execution', () => {
     getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }, [openRung({ targetPx: 2200 })]));
     await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(placeBracketOnHl).toHaveBeenCalledWith('ETH', expect.closeTo(1920, 1), 2200, 0.625, 'long');
+  });
+
+  it('accepts a grouped bracket after the stop service reads back its resting oid', async () => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc');
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }, [openRung({ targetPx: 2200 })]));
+    placeBracketOnHl.mockResolvedValue({ pushed: true, stopOid: 501, tpOid: null });
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.fired).toBe(true);
+    expect(findOpenStop).not.toHaveBeenCalled();
+    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'filled', JSON.stringify({ entryOid: null, stopOid: 501, tpOid: null }));
   });
 
   it('liveOpen_requiresConfirmedRestingStop', async () => {
@@ -436,6 +481,21 @@ describe('performLadderRungFire — execution', () => {
     expect(res.fired).toBe(true);
     expect(placeStopOnHl).toHaveBeenCalled(); // live → a real protective stop rests
     expect(markFireOutcome).toHaveBeenCalledWith('f1', 'filled', JSON.stringify({ entryOid: null, stopOid: 501, tpOid: null }));
+  });
+
+  it('a stale live-add read skips before the claim and leaves the rung pending', async () => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc');
+    const add = openRung({ action: 'add' });
+    const liveState = [{ coin: 'ETH', side: 'long' as const, leverage: 5 }];
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live', preconditionHash: hashPreconditionSnapshot(buildPreconditionSnapshot([add], liveState)) }, [add]));
+    fetchClearinghouseState.mockResolvedValueOnce({ stale: false, positions: [{ coin: 'ETH', side: 'long', size: 1, leverage: 5 }] })
+      .mockResolvedValueOnce({ stale: false, positions: [] })
+      .mockResolvedValueOnce({ stale: true, positions: [] });
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toContain('cannot-verify-add');
+    expect(claimRungFire).not.toHaveBeenCalled();
+    expect(setRungStatus).not.toHaveBeenCalled();
   });
 
   it('liveAdd_refusesOppositeSidePosition', async () => {

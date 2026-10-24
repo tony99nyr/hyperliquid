@@ -12,8 +12,9 @@ import 'server-only';
 import { getTradingMode } from '@/lib/env/mode';
 import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
 import { validateEnv } from '@/lib/env/env';
-import { fetchOpenOrders, type HlOpenOrder } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { fetchOpenOrders, fetchPerpMeta, type HlOpenOrder } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { submitStopOrder, submitBracket, submitCancel } from '@/lib/hyperliquid/hyperliquid-exchange-service';
+import { formatHlPrice, formatHlSize } from '@/lib/hyperliquid/hyperliquid-order-business-logic';
 
 /** A reduce-only Stop trigger order (vs a take-profit or a plain limit). */
 function isStopOrder(o: HlOpenOrder): boolean {
@@ -21,12 +22,16 @@ function isStopOrder(o: HlOpenOrder): boolean {
 }
 
 /** The resting protective stop for `coin`, or null. Reads the live account orders. */
-export async function findOpenStop(coin: string): Promise<HlOpenOrder | null> {
+async function findOpenStops(coin: string): Promise<HlOpenOrder[]> {
   const address = getHlAccountAddress();
-  if (!address) return null;
+  if (!address) return [];
   const orders = await fetchOpenOrders(address, validateEnv().HL_NETWORK);
   const c = coin.trim().toUpperCase();
-  return orders.find((o) => o.coin === c && isStopOrder(o)) ?? null;
+  return orders.filter((o) => o.coin === c && isStopOrder(o));
+}
+
+export async function findOpenStop(coin: string): Promise<HlOpenOrder | null> {
+  return (await findOpenStops(coin))[0] ?? null;
 }
 
 /** A resting protective stop, trimmed to what the UI needs. */
@@ -113,6 +118,17 @@ export const cancelTpOnHl = cancelStopOnHl;
  */
 export async function placeBracketOnHl(coin: string, stopPx: number, tpPx: number, size: number, side: 'long' | 'short'): Promise<{ pushed: boolean; stopOid: number | null; tpOid: number | null }> {
   if (getTradingMode() !== 'live') return { pushed: false, stopOid: null, tpOid: null };
+  if (!getHlAccountAddress()) throw new Error('cannot verify bracket stop: no HL account address');
+  const priorOids = new Set((await findOpenStops(coin)).map((stop) => stop.oid));
+  const universe = await fetchPerpMeta(validateEnv().HL_NETWORK);
+  const asset = universe.find((item) => item.name.toUpperCase() === coin.trim().toUpperCase());
+  if (!asset) throw new Error(`cannot verify bracket stop: unknown asset ${coin}`);
   const { stopOid, tpOid } = await submitBracket(coin, stopPx, tpPx, size, side === 'short'); // long bracket SELLS, short BUYS
-  return { pushed: true, stopOid, tpOid };
+  const expectedPx = Number(formatHlPrice(stopPx, asset.szDecimals));
+  const expectedSize = Number(formatHlSize(size, asset.szDecimals));
+  const expectedSide = side === 'long' ? 'A' : 'B';
+  const confirmedStopOid = stopOid ?? (await findOpenStops(coin)).find((stop) =>
+    !priorOids.has(stop.oid) && stop.side === expectedSide && stop.triggerPx === expectedPx && stop.sz === expectedSize,
+  )?.oid ?? null;
+  return { pushed: true, stopOid: confirmedStopOid, tpOid };
 }

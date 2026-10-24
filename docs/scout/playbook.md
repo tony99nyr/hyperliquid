@@ -396,3 +396,9 @@ legacy graveyard (killed lanes −$168 of it). The LIVE experiment set reads dif
 - **Steward:** unchanged (5 helped / 11 hurt) — near-zero authority stands.
 - No frozen-rule changes. `docs/DESK_PROFITABILITY.md` untouched: no lever
   verdict moved (htf-trend checkpoint still pends ~9 closes; 2 are open now).
+# 2026-10-24 retro note: kill rule measure
+
+The pre-registered wording says to kill a lane when net expectancy is below zero.
+The current scorecard applies the kill bar to net realised dollars. Keep this
+behaviour during the active sample. At the next retro, decide whether to align
+the implementation with expectancy or amend the registered rule.

@@ -22,10 +22,16 @@ beforeEach(() => {
 });
 
 describe('live equity validation', () => {
+  it('rejects a null P&L before a live entry can pass the breaker', async () => {
+    fetchClearinghouseState.mockResolvedValue({ stale: false, positions: [{ coin: 'ETH', unrealizedPnl: null }] });
+    await expect(computeLiveEquityBreakdown()).rejects.toThrow('invalid unrealised P&L for ETH');
+    await expect(checkCircuitBreaker('live')).rejects.toThrow('invalid unrealised P&L for ETH');
+  });
+
   it('computeLiveEquityBreakdown_rejectsInvalidUpnl', async () => {
     fetchClearinghouseState.mockResolvedValueOnce({ stale: false, positions: [
-      { coin: 'ETH', size: '0.4', unrealizedPnl: '-120.5' },
-      { coin: 'BTC', size: '0.1', unrealizedPnl: '20.25' },
+      { coin: 'ETH', size: 0.4, unrealizedPnl: -120.5 },
+      { coin: 'BTC', size: 0.1, unrealizedPnl: 20.25 },
     ] });
     await expect(computeLiveEquityBreakdown()).resolves.toEqual({ spotUsd: 1000, upnlUsd: -100.25, totalUsd: 899.75 });
     fetchClearinghouseState.mockResolvedValue({ stale: false, positions: [{ coin: 'ETH', size: '0.4', unrealizedPnl: 'NaN' }] });

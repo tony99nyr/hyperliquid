@@ -165,6 +165,10 @@ export function computeHealth(
     readTimeframe(tf, candles[tf], weights.timeframeWeights[tf]),
   );
 
+  if (reads.every((read) => read.weight === 0)) {
+    return { score: 0, pContinuation: 0, pAdverse: 0, alerts: ['no-data'], timeframeReads: reads };
+  }
+
   // 2. Weighted directional score in [-1, 1] (bull positive, bear negative).
   const totalWeight = reads.reduce((sum, r) => sum + r.weight, 0);
   const weightedSigned =

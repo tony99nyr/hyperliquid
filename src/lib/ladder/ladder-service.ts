@@ -265,6 +265,13 @@ export async function armLadder(
  */
 export async function releaseOcoClaim(ocoGroupId: string, ladderId: string): Promise<void> {
   const db = getServiceRoleClient();
+  const { data: opens, error: rungError } = await db.from('ladder_rungs').select('id,status').eq('ladder_id', ladderId).eq('action', 'open');
+  if (rungError || !opens) throw new Error(`releaseOcoClaim cannot verify open rungs: ${rungError?.message ?? 'no data'}`);
+  if (opens.length === 0) throw new Error('releaseOcoClaim cannot verify open rungs: none found');
+  if (opens.some((r) => r.status === 'fired')) return;
+  const { data: fills, error: fireError } = await db.from('ladder_fires').select('id').in('rung_id', opens.map((r) => r.id)).eq('status', 'filled').limit(1);
+  if (fireError || !fills) throw new Error(`releaseOcoClaim cannot verify fills: ${fireError?.message ?? 'no data'}`);
+  if (fills.length > 0) return;
   const { error } = await db.from('ladder_oco_claims').delete().eq('group_id', ocoGroupId).eq('ladder_id', ladderId);
   if (error) throw new Error(`releaseOcoClaim failed: ${error.message}`);
 }

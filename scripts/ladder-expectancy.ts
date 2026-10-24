@@ -17,11 +17,11 @@
 import { parseArgs, header, line, run } from './_skill-runtime';
 import { listLaddersWithRungs, getLadderWithRungs } from '@/lib/ladder/ladder-service';
 import { upsertLadderOutcome, listLadderOutcomes, outcomeFires } from '@/lib/ladder/ladder-outcome-service';
-import { attributeLadderFills } from '@/lib/ladder/ladder-outcome-business-logic';
+import { attributeLadderFills, attributionInvariantFailures } from '@/lib/ladder/ladder-outcome-business-logic';
 import { resolveLadderOutcome, buildExpectancyReport, DEFAULT_EXPECTANCY_BAR } from '@/lib/skills/ladder-expectancy-business-logic';
 import { resolveArmRung } from '@/lib/ladder/ladder-arm-business-logic';
 import { computeLadderRisk } from '@/lib/ladder/ladder-risk-business-logic';
-import { fetchAllFills, type HlFill } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { fetchAllFills, fetchClearinghouseState, type HlFill } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 
@@ -60,15 +60,27 @@ run(async () => {
     } else {
       const address = getHlAccountAddress();
       let hlFills: HlFill[] | null = null;
+      let invariantFailures: string[] = [];
+      let attribution: ReturnType<typeof attributeLadderFills> | null = null;
       if (address) {
-        const fillsRes = await fetchAllFills(address, { sinceMs: 0, maxFills: 100_000 });
-        hlFills = fillsRes.error || fillsRes.truncated ? null : fillsRes.fills;
+        try {
+          const state = await fetchClearinghouseState(address, { uncached: true });
+          if (state.error || state.stale) throw new Error(`Account state unavailable: ${state.error ?? 'stale'}`);
+          const fillsRes = await fetchAllFills(address, { sinceMs: 0, maxFills: 100_000 });
+          if (fillsRes.error || fillsRes.truncated) throw new Error(`Incomplete HL fill history: ${fillsRes.error ?? 'truncated'}`);
+          hlFills = fillsRes.fills;
+          const fires = await outcomeFires(all.map((l) => l.id));
+          attribution = attributeLadderFills(all, fires, hlFills, { finalPositions: new Map(state.positions.map((position) => [position.coin.toUpperCase(), position.szi])) });
+          invariantFailures = attributionInvariantFailures(attribution);
+        } catch (error) {
+          line(`(live attribution unavailable: ${error instanceof Error ? error.message : String(error)}; outcomes stay open)`);
+        }
       } else {
         line('(no HL_ACCOUNT_ADDRESS — only never_filled outcomes resolve fully)');
       }
 
       const fires = await outcomeFires(all.map((l) => l.id));
-      const attribution = hlFills ? attributeLadderFills(all, fires, hlFills) : null;
+      if (invariantFailures.length) line(`(attribution invariants failed: ${invariantFailures.join('; ')}; outcomes stay open)`);
       // Persisted thesis scores (review-ladder writes them; migration 0030) — priority:
       // explicit --ladder annotation > persisted-on-ladder > previously-recorded outcome.
       const thesisById = new Map<string, { s: number | null; t: number | null }>();
@@ -81,7 +93,10 @@ run(async () => {
         const plannedRisk = computeLadderRisk(l.rungs.map(resolveArmRung), { maxTotalNotionalUsd: l.maxTotalNotionalUsd, maxTotalLossUsd: l.maxTotalLossUsd }).worstCaseLossWithFundingUsd;
         const nominalRisk = l.rungs.filter((rung) => rung.action === 'open' || rung.action === 'add')
           .reduce((sum, rung) => sum + (rung.riskUsd ?? 0), 0);
-        const outcome = resolveLadderOutcome({
+        const outcome = !attribution || invariantFailures.length ? resolveLadderOutcome({
+          ladder: l, fireStatuses: ['filled'], hlFills: null, plannedRiskUsd: plannedRisk,
+          nominalRiskUsd: nominalRisk, positionStillOpen: false, now,
+        }) : resolveLadderOutcome({
           ladder: l,
           fireStatuses: fires.filter((fire) => fire.ladderId === l.id && l.rungs.some((rung) => rung.id === fire.rungId && rung.action === 'open')).map((fire) => fire.status),
           hlFills,
@@ -93,7 +108,7 @@ run(async () => {
           timingScore: annotateId && l.id.startsWith(annotateId) ? timing : (thesisById.get(l.id)?.t ?? existing.get(l.id)?.timingScore ?? null),
           now,
         });
-        await upsertLadderOutcome(outcome);
+        if (attribution && !invariantFailures.length) await upsertLadderOutcome(outcome);
         line(`resolved ${l.id.slice(0, 8)} "${l.title.slice(0, 40)}" → ${outcome.outcome.toUpperCase()} ${fmtR(outcome.realizedR)} (planned $${plannedRisk.toFixed(0)})`);
       }
     }
