@@ -71,7 +71,6 @@ vi.mock('@/lib/env/env', () => ({ validateEnv: () => ({ HL_NETWORK: 'mainnet' })
 vi.mock('@/lib/cockpit/analysis-log-service', () => ({ writeAnalysisLog: (...a: unknown[]) => writeAnalysisLog(...a) }));
 
 import { performLadderRungFire } from '@/lib/ladder/ladder-fire-service';
-import { PreSubmitError } from '@/lib/trading/pre-submit-error';
 import { buildPreconditionSnapshot, hashPreconditionSnapshot } from '@/lib/ladder/ladder-risk-business-logic';
 
 const NOW = 1_700_000_000_000;
