@@ -129,7 +129,7 @@ describe('buildScorecard — GRADUATE gating', () => {
 });
 
 describe('buildLaneScorecards — per-lane grouping', () => {
-  it('groups realized + wins by lane; NULL lane folds into directional; funding attributed via coin→lane', () => {
+  it('groups realised results and attributed funding by lane', () => {
     const cards = buildLaneScorecards({
       positions: [
         { lane: 'vault', coin: 'HLP', side: 'long', realizedPnlUsd: 50, feesPaidUsd: 0 },
@@ -141,7 +141,7 @@ describe('buildLaneScorecards — per-lane grouping', () => {
         { lane: 'carry', status: 'invalidated' },
         { lane: null, status: 'confirmed' }, // → directional
       ],
-      fundingByCoin: { ETH: -8, BTC: 3 }, // ETH carry earned (−), BTC cost (+)
+      fundingByLane: { carry: -8, directional: 3 },
       periodDays: 10,
     });
     const by = Object.fromEntries(cards.map((c) => [c.lane, c]));
@@ -168,7 +168,7 @@ describe('buildLaneScorecards — per-lane grouping', () => {
     const cards = buildLaneScorecards({
       positions: [{ lane: 'vault', coin: 'HLP', side: 'long', realizedPnlUsd: 200, feesPaidUsd: 0 }],
       hypotheses: [],
-      fundingByCoin: {},
+      fundingByLane: {},
       periodDays: 90,
       configFor: (lane) => (lane === 'vault' ? { ...DEFAULT_SCORECARD_CONFIG, monthlyBarUsd: 100 } : DEFAULT_SCORECARD_CONFIG),
     });

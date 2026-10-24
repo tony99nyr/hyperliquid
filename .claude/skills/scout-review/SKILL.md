@@ -37,7 +37,9 @@ the fee-drag ceiling in code), the Opus review MUST apply these judgment checks:
 
 ## Steps
 
-1. **Score (deterministic).** Run `pnpm scout:review`. It prints the scorecard:
+1. **Score (deterministic).** Run `pnpm scout:review -- --write` to record the
+   verdict in `scout_reviews`. Without `--write`, the command only reads and
+   prints the scorecard. It prints:
    trades, win-rate, realized (net of fees), the slippage + funding haircuts, the
    honest NET, the monthly run-rate vs the $1000/mo bar, and a verdict
    (KILL / CONTINUE / GRADUATE). The scoring is deterministic — don't second-guess

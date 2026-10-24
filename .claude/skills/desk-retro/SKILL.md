@@ -15,7 +15,7 @@ The weekly cadence IS the multiplicity guard: do not run the bundle sub-weekly.
 
 ### 1. Scout scorecard + playbook curation
 
-Run the `scout-review` skill (it wraps `pnpm scout:review`). Follow THAT skill's
+Run the `scout-review` skill (it wraps `pnpm scout:review -- --write`). Follow THAT skill's
 judgment rules — multiplicity, regime coverage, survivorship, janitorial rows. The
 scorecard verdicts are deterministic: interpret them, never re-derive or soften
 them. Output: a dated entry appended to `docs/scout/playbook.md` (curate, don't

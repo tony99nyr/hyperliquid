@@ -15,9 +15,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import { scoutSessionIds } from './scout-session-service';
-import { fetchMetaAndAssetCtxs, fetchVaultDetails, HLP_VAULT_ADDRESS } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { fetchVaultDetails, HLP_VAULT_ADDRESS } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { fetchFundingHistory } from '@/lib/hyperliquid/candle-service';
-import { fundingCostUsd } from '@/lib/trading/paper-funding-business-logic';
+import { estimateScoutFunding, type ScoutFill } from './scout-funding-business-logic';
+import { lanePeriodDays, registeredLaneBar } from './scout-lane-bars-business-logic';
 import {
   buildScorecard,
   buildLaneScorecards,
@@ -31,62 +32,6 @@ import { fundingCarryBenchmark } from './funding-carry-business-logic';
 import type { LaneCard, LaneKind } from '@/types/scout';
 
 export type { LaneCard, LaneKind } from '@/types/scout';
-
-interface FillRow {
-  coin: string;
-  side: string;
-  notional_usd: number;
-  reduce_only: boolean;
-  filled_at: string;
-}
-
-/** Pair fills per coin into round-trips and accrue SIGNED funding (carry → negative cost). */
-function estimateFromFills(
-  fills: FillRow[],
-  fundingByCoin: Record<string, number>,
-): { fundingHaircutUsd: number; earliestMs: number; fundingHaircutByCoin: Record<string, number> } {
-  let fundingHaircutUsd = 0;
-  let earliestMs = Number.POSITIVE_INFINITY;
-  const fundingHaircutByCoin: Record<string, number> = {};
-  const byCoin = new Map<string, FillRow[]>();
-  for (const f of fills) {
-    const t = new Date(f.filled_at).getTime();
-    if (Number.isFinite(t)) earliestMs = Math.min(earliestMs, t);
-    const arr = byCoin.get(f.coin.toUpperCase()) ?? [];
-    arr.push(f);
-    byCoin.set(f.coin.toUpperCase(), arr);
-  }
-  for (const [coin, rows] of byCoin) {
-    rows.sort((a, b) => new Date(a.filled_at).getTime() - new Date(b.filled_at).getTime());
-    const fundingRate = fundingByCoin[coin] ?? 0;
-    let dir = 0;
-    let notional = 0;
-    let openAtMs = 0;
-    const accrue = (side: 'long' | 'short', closed: number, t: number) => {
-      const holdingHours = Math.max(0, (t - openAtMs) / 3_600_000);
-      const cost = fundingCostUsd({ side, notionalUsd: closed, fundingRateHourly: fundingRate, holdingHours });
-      fundingHaircutUsd += cost;
-      fundingHaircutByCoin[coin] = (fundingHaircutByCoin[coin] ?? 0) + cost;
-    };
-    for (const f of rows) {
-      const t = new Date(f.filled_at).getTime();
-      const fdir = f.side === 'buy' ? 1 : -1;
-      if (dir === 0) { dir = fdir; notional = f.notional_usd; openAtMs = t; }
-      else if (fdir === dir) { notional += f.notional_usd; }
-      else {
-        const closed = Math.min(notional, f.notional_usd);
-        accrue(dir === 1 ? 'long' : 'short', closed, t);
-        notional -= closed;
-        if (notional <= 1e-9) {
-          const remainder = f.notional_usd - closed;
-          if (remainder > 1e-9) { dir = fdir; notional = remainder; openAtMs = t; }
-          else { dir = 0; notional = 0; }
-        }
-      }
-    }
-  }
-  return { fundingHaircutUsd, earliestMs, fundingHaircutByCoin };
-}
 
 const env = (k: string, d: number) => Number(process.env[k]) || d;
 const CARRY_ROUNDTRIP_FRAC = 0.003; // ~30bps to put on + take off a delta-neutral pair
@@ -112,7 +57,7 @@ export async function computeScoutLaneCards(
   const queryIds = sessionIds.length > 0 ? sessionIds : ['00000000-0000-0000-0000-000000000000'];
 
   const { data: positions } = await client
-    .from('positions').select('coin, side, lane, realized_pnl_usd, fees_paid_usd').in('session_id', queryIds);
+    .from('positions').select('session_id, coin, side, lane, realized_pnl_usd, fees_paid_usd').in('session_id', queryIds);
   let realizedGrossUsd = 0;
   let openCount = 0;
   let feesPaidUsd = 0;
@@ -126,18 +71,27 @@ export async function computeScoutLaneCards(
     grossWinsUsd += Math.max(0, Number(r.realized_pnl_usd) || 0);
   }
 
-  const ctxs = await fetchMetaAndAssetCtxs().catch(() => ({}) as Record<string, { fundingHourly: number }>);
-  const fundingByCoin: Record<string, number> = {};
-  for (const [coin, c] of Object.entries(ctxs)) fundingByCoin[coin] = Number(c.fundingHourly) || 0;
-
   const { data: fills } = await client
-    .from('fills').select('coin, side, notional_usd, reduce_only, filled_at').in('session_id', queryIds);
-  const { fundingHaircutUsd, earliestMs, fundingHaircutByCoin } = estimateFromFills((fills ?? []) as FillRow[], fundingByCoin);
+    .from('fills').select('session_id, coin, side, sz, px, filled_at').in('session_id', queryIds);
+  const scoutFills = (fills ?? []) as ScoutFill[];
+  const earliestFillMs = Math.min(...scoutFills.map((fill) => Date.parse(fill.filled_at)).filter(Number.isFinite));
+  const coins = [...new Set(scoutFills.map((fill) => fill.coin.toUpperCase()))];
+  const history = await Promise.all(coins.map(async (coin) => ({
+    coin, points: await fetchFundingHistory(coin, earliestFillMs, now).catch(() => []),
+  })));
+  const laneBySessionCoin: Record<string, string> = {};
+  for (const p of positions ?? []) {
+    const row = p as { session_id: string; coin: string; lane: string | null };
+    laneBySessionCoin[`${row.session_id}\u0000${row.coin.toUpperCase()}`] = row.lane || 'directional';
+  }
+  const funding = estimateScoutFunding(scoutFills, laneBySessionCoin,
+    Object.fromEntries(history.map(({ coin, points }) => [coin, points])), now);
+  const { totalUsd: fundingHaircutUsd, earliestMs } = funding;
   const periodDays = Number.isFinite(earliestMs) ? Math.max(1, (now - earliestMs) / 86_400_000) : 1;
 
   const { data: hyps } = await client
     .from('hypotheses')
-    .select('status, lane')
+    .select('status, lane, realized_r')
     .eq('excluded', false) // janitorial/reaped rows are NOT trades (Jul-16 quarantine)
     .in('session_id', queryIds);
   let wins = 0, losses = 0, closed = 0;
@@ -151,10 +105,13 @@ export async function computeScoutLaneCards(
   // Account-level (ALL lanes) — the bar the circuit breaker + graduation gate on.
   const accountInput: ScorecardInput = { realizedGrossUsd, slippageHaircutUsd: 0, fundingHaircutUsd, tradeCount: closed, wins, losses, periodDays, feesPaidUsd, grossWinsUsd };
   const acc = buildScorecard(accountInput);
+  const fundingMissingHours = Object.values(funding.missingHoursByLane).reduce((a, b) => a + b, 0);
   const account: LaneCard = {
     lane: 'ALL', kind: 'account', netUsd: acc.netUsd, realizedUsd: acc.realizedGrossUsd, fundingUsd: acc.fundingHaircutUsd,
     unrealizedUsd: 0, tradeCount: acc.tradeCount, winRate: acc.winRate, monthlyRunRateUsd: acc.monthlyRunRateUsd,
-    periodDays, verdict: acc.verdict, label: acc.reason, openCount, detail: { vsBarUsd: acc.vsBarUsd },
+    periodDays, verdict: acc.verdict,
+    label: `${acc.reason}${fundingMissingHours ? ` Funding estimate misses ${fundingMissingHours} historical hours.` : ''}`,
+    openCount, detail: { vsBarUsd: acc.vsBarUsd, fundingMissingHours },
   };
 
   const lanes: LaneCard[] = [];
@@ -165,16 +122,23 @@ export async function computeScoutLaneCards(
     return { lane: r.lane ?? null, coin: r.coin, side: r.side, realizedPnlUsd: Number(r.realized_pnl_usd) || 0, feesPaidUsd: Number(r.fees_paid_usd) || 0 };
   });
   const laneHyps: LaneHypothesisRow[] = (hyps ?? []).map((h) => {
-    const r = h as { status: string; lane: string | null };
-    return { lane: r.lane ?? null, status: r.status };
+    const r = h as { status: string; lane: string | null; realized_r: number | null };
+    return { lane: r.lane ?? null, status: r.status, realizedR: r.realized_r };
   });
-  for (const { lane, openCount: lo, card: c } of buildLaneScorecards({ positions: lanePositions, hypotheses: laneHyps, fundingByCoin: fundingHaircutByCoin, periodDays })) {
+  for (const { lane, openCount: lo, card: c } of buildLaneScorecards({
+    positions: lanePositions, hypotheses: laneHyps, fundingByLane: funding.byLane, periodDays,
+    periodDaysFor: (lane) => lanePeriodDays(lane, now, periodDays),
+    configFor: (lane) => registeredLaneBar(lane)?.config ?? DEFAULT_SCORECARD_CONFIG,
+    minExpectancyRFor: (lane) => registeredLaneBar(lane)?.minExpectancyR ?? null,
+  })) {
+    const laneDays = lanePeriodDays(lane, now, periodDays);
+    const missingHours = funding.missingHoursByLane[lane] ?? 0;
     lanes.push({
       lane, kind: 'positions', netUsd: c.netUsd, realizedUsd: c.realizedGrossUsd, fundingUsd: c.fundingHaircutUsd,
       unrealizedUsd: 0, tradeCount: c.tradeCount, winRate: c.winRate, monthlyRunRateUsd: c.monthlyRunRateUsd,
-      periodDays, verdict: c.verdict, openCount: lo,
-      label: `net $${c.netUsd.toFixed(2)} · ${c.tradeCount} trades · win ${(c.winRate * 100).toFixed(0)}%`,
-      detail: {},
+      periodDays: laneDays, verdict: c.verdict, openCount: lo,
+      label: `net $${c.netUsd.toFixed(2)} · ${c.tradeCount} trades · win ${(c.winRate * 100).toFixed(0)}%${missingHours ? ` · funding estimate missing ${missingHours}h` : ''}`,
+      detail: { fundingMissingHours: missingHours, barVersion: registeredLaneBar(lane)?.version ?? null, reason: c.reason },
     });
   }
 

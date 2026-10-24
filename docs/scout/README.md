@@ -152,6 +152,6 @@ margin that survives the estimated 40–70% paper→real edge haircut.
   the hypothesis with the outcome. That + `fills`/`pnl` is the track record.
 - Each cycle the scout reads its recent track record + `docs/scout/playbook.md`
   and applies the playbook's rules.
-- `pnpm scout:review` (the `scout-review` skill, weekly / on-demand, Opus) scores
+- `pnpm scout:review -- --write` (the `scout-review` skill, weekly / on-demand, Opus) scores
   the record and **curates the playbook** — the deliberate, non-recency-biased
   update step.

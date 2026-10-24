@@ -1,0 +1,9 @@
+{
+  "trend-follow": { "registeredAt": "2026-07-28", "killAfterTrades": 15, "slowBleedDays": 21, "slowBleedMinTrades": 3, "minTradesToGraduate": 30, "minExpectancyR": 0.15 },
+  "reversion": { "registeredAt": "2026-07-20", "killAfterTrades": 15, "slowBleedDays": 21, "slowBleedMinTrades": 3, "minTradesToGraduate": 30, "minExpectancyR": 0.15 },
+  "breakdown-short": { "registeredAt": "2026-07-28", "killAfterTrades": 15, "slowBleedDays": 21, "slowBleedMinTrades": 3, "minTradesToGraduate": 30, "minExpectancyR": 0.15 },
+  "reclaim-long": { "registeredAt": "2026-07-28", "killAfterTrades": 15, "slowBleedDays": 21, "slowBleedMinTrades": 3, "minTradesToGraduate": 30, "minExpectancyR": 0.15 },
+  "htf-trend": { "registeredAt": "2026-08-01", "killAfterTrades": 12, "slowBleedDays": 120, "slowBleedMinTrades": 6, "minTradesToGraduate": 20, "minExpectancyR": 0.25 },
+  "compression-straddle": { "registeredAt": "2026-08-13", "killAfterTrades": 15, "slowBleedDays": 45, "slowBleedMinTrades": 6, "minTradesToGraduate": 20, "minExpectancyR": 0.25 },
+  "leader-follow": { "registeredAt": "2026-08-15", "killAfterTrades": 15, "slowBleedDays": 30, "slowBleedMinTrades": 5, "minTradesToGraduate": 20, "minExpectancyR": 0.20 }
+}

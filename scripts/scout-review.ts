@@ -3,7 +3,7 @@
  *
  * NEVER trades + NEVER edits the playbook. Thin printer over the shared
  * `lane-scorecard-service` (the SINGLE compute point, so this terminal output and
- * the persisted cockpit snapshot show identical numbers). It prints the
+ * the cockpit snapshot show identical numbers). It prints the
  * account-level NET + verdict (the pre-registered bar) and the per-lane breakdown
  * (directional + vault/carry BENCHMARKS). The `scout-review` SKILL then has Opus
  * read this + the resolved hypotheses and curate docs/scout/playbook.md.
@@ -13,6 +13,7 @@ import { header, line, run } from './_skill-runtime';
 import { computeScoutLaneCards } from '@/lib/scout/lane-scorecard-service';
 
 run(async () => {
+  const writeReview = process.argv.includes('--write');
   header('scout:review — paper scorecard (deterministic; never trades)');
   const { account, lanes, hasSessions } = await computeScoutLaneCards();
 
@@ -76,8 +77,12 @@ run(async () => {
     else line(`resolved ${sc.resolved} (scorable ${sc.scorable}) · helped ${sc.helpedCount} / hurt ${sc.hurtCount} · net if-followed $${sc.netHelpedUsd.toFixed(2)}`);
   } catch { /* advisory display only */ }
 
-  // Persist the run (Jul-16 review: the judge had NEVER run and left no evidence
-  // when it did — now every run writes a scout_reviews row). Best-effort.
+  if (!writeReview) {
+    line('Read-only run. Pass --write to persist this review to scout_reviews.');
+    return;
+  }
+
+  // Persist only when the operator explicitly passes --write.
   try {
     const { getServiceRoleClient } = await import('@/lib/cockpit/supabase-server');
     const report = [

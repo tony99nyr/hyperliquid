@@ -253,7 +253,7 @@ async function main(): Promise<void> {
 function printChecklist(): void {
   console.log(
     '\n=== The rest of the weekly retro bundle (each has its own entrypoint) ===\n' +
-      '  1. pnpm scout:review            # deterministic scorecard → curate docs/scout/playbook.md\n' +
+      '  1. pnpm scout:review -- --write # record scorecard, then curate docs/scout/playbook.md\n' +
       '  2. pnpm scout:shadow-replay     # lane sample loss; attribute misses via scout_decisions\n' +
       '  3. ladder-expectancy skill      # ladder/manual fires vs their pre-registered bars\n' +
       'Synthesis is the SKILL’s job: .claude/skills/desk-retro/SKILL.md',

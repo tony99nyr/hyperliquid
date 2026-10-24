@@ -59,6 +59,7 @@ export interface ScorecardConfig {
   graduationDays: number; // min track-record length before "graduate" (e.g. 90)
   feeDragMaxFrac: number; // graduation gate: fees/grossWins must stay below this (overtrading kill)
   liveDecayHaircut: number; // expected paper→live decay; graduation demands bar/(1−haircut)
+  requireDrawdown?: boolean;
 }
 
 export const DEFAULT_SCORECARD_CONFIG: ScorecardConfig = {
@@ -133,15 +134,15 @@ export function buildScorecard(input: ScorecardInput, cfg: ScorecardConfig = DEF
     verdict = 'kill';
     reason = `net $${netUsd.toFixed(0)} over ${periodDays.toFixed(0)}d (${input.tradeCount} trades) — slow bleed past ${cfg.slowBleedDays}d; kill the lane.`;
   } else if (
+    netUsd > 0 &&
     monthlyRunRateUsd >= effectiveBarUsd &&
     periodDays >= cfg.graduationDays &&
     input.tradeCount >= cfg.minTradesToGraduate &&
-    ddPct != null &&
-    ddPct < cfg.maxDrawdownPct &&
+    (cfg.requireDrawdown === false || (ddPct != null && ddPct < cfg.maxDrawdownPct)) &&
     feeDragFrac <= cfg.feeDragMaxFrac
   ) {
     verdict = 'graduate';
-    reason = `run-rate $${monthlyRunRateUsd.toFixed(0)}/mo ≥ decay-adjusted bar $${effectiveBarUsd.toFixed(0)}/mo over ${periodDays.toFixed(0)}d, ${input.tradeCount} trades, DD ${(ddPct * 100).toFixed(1)}% < ${(cfg.maxDrawdownPct * 100).toFixed(0)}%, fee drag ${(feeDragFrac * 100).toFixed(0)}% ≤ ${(cfg.feeDragMaxFrac * 100).toFixed(0)}% — clears the bar; regime coverage still needs a HUMAN check (≥1 full bull-bear cycle or explicit regime gating) before the live seam.`;
+    reason = `run-rate $${monthlyRunRateUsd.toFixed(0)}/mo ≥ decay-adjusted bar $${effectiveBarUsd.toFixed(0)}/mo over ${periodDays.toFixed(0)}d, ${input.tradeCount} trades, DD ${ddPct == null ? 'not required' : `${(ddPct * 100).toFixed(1)}%`}, fee drag ${(feeDragFrac * 100).toFixed(0)}% ≤ ${(cfg.feeDragMaxFrac * 100).toFixed(0)}% — clears the bar; regime coverage still needs a HUMAN check before the live seam.`;
   } else {
     verdict = 'continue';
     const gates: string[] = [];
@@ -230,6 +231,7 @@ export interface LanePositionRow {
 export interface LaneHypothesisRow {
   lane: string | null;
   status: string; // 'open' | 'confirmed' | 'invalidated' | 'resolved'
+  realizedR?: number | null;
 }
 
 export interface LaneScorecard {
@@ -244,13 +246,8 @@ const normLane = (l: string | null | undefined): string =>
 /**
  * Build ONE scorecard per lane from the scout's lane-tagged ledger. PURE.
  *
- * Realized P&L + open counts group by `positions.lane`; win/loss by
- * `hypotheses.lane`; funding is attributed per lane via a coin→lane map derived
- * from the positions (each coin's signed funding haircut is charged to the lane
- * that holds it). ASSUMPTION (documented): a coin is traded in at most ONE lane
- * at a time — true for the early multi-lane setup (lanes trade distinct
- * instruments; the vault lane does no perp fills at all). If a coin ever spans
- * lanes, its funding lands in whichever lane the coin→lane map resolves last.
+ * Realised P&L and open counts group by positions.lane. Funding arrives already
+ * attributed to the lane that held each session's position at each hour.
  *
  * The account-level verdict (the pre-registered bar + circuit breaker) stays a
  * SEPARATE aggregate scorecard — these per-lane cards are the breakdown the
@@ -259,16 +256,18 @@ const normLane = (l: string | null | undefined): string =>
 export function buildLaneScorecards(args: {
   positions: LanePositionRow[];
   hypotheses: LaneHypothesisRow[];
-  /** Signed funding haircut per coin (+ = cost, − = carry earned). */
-  fundingByCoin: Record<string, number>;
+  /** Signed historical funding by holding lane (+ = cost, − = carry earned). */
+  fundingByLane: Record<string, number>;
   periodDays: number;
+  periodDaysFor?: (lane: string) => number;
+  minExpectancyRFor?: (lane: string) => number | null;
   /** Optional per-lane config override (e.g. a lower bar for the passive vault lane). */
   configFor?: (lane: string) => ScorecardConfig;
 }): LaneScorecard[] {
   const lanes = new Set<string>();
   const realized = new Map<string, number>();
   const openCount = new Map<string, number>();
-  const coinToLane = new Map<string, string>();
+  const realisedRs = new Map<string, number[]>();
   const wins = new Map<string, number>();
   const losses = new Map<string, number>();
   const closed = new Map<string, number>();
@@ -280,13 +279,10 @@ export function buildLaneScorecards(args: {
     lanes.add(lane);
     bump(realized, lane, (Number(p.realizedPnlUsd) || 0) - (Number(p.feesPaidUsd) || 0));
     if (p.side !== 'flat') bump(openCount, lane);
-    if (p.coin) coinToLane.set(p.coin.toUpperCase(), lane);
   }
 
-  // Attribute each coin's signed funding to the lane that holds it.
   const fundingByLane = new Map<string, number>();
-  for (const [coin, amt] of Object.entries(args.fundingByCoin)) {
-    const lane = coinToLane.get(coin.toUpperCase()) ?? DEFAULT_LANE;
+  for (const [lane, amt] of Object.entries(args.fundingByLane)) {
     lanes.add(lane);
     bump(fundingByLane, lane, Number(amt) || 0);
   }
@@ -297,6 +293,11 @@ export function buildLaneScorecards(args: {
     if (h.status === 'confirmed') { bump(wins, lane); bump(closed, lane); }
     else if (h.status === 'invalidated') { bump(losses, lane); bump(closed, lane); }
     else if (h.status === 'resolved') bump(closed, lane);
+    if (h.realizedR != null && Number.isFinite(h.realizedR) && h.status !== 'open') {
+      const values = realisedRs.get(lane) ?? [];
+      values.push(h.realizedR);
+      realisedRs.set(lane, values);
+    }
   }
 
   return [...lanes].sort().map((lane) => {
@@ -307,9 +308,19 @@ export function buildLaneScorecards(args: {
       tradeCount: closed.get(lane) ?? 0,
       wins: wins.get(lane) ?? 0,
       losses: losses.get(lane) ?? 0,
-      periodDays: args.periodDays,
+      periodDays: args.periodDaysFor?.(lane) ?? args.periodDays,
     };
     const cfg = args.configFor?.(lane) ?? DEFAULT_SCORECARD_CONFIG;
-    return { lane, openCount: openCount.get(lane) ?? 0, card: buildScorecard(input, cfg) };
+    const card = buildScorecard(input, cfg);
+    const minimum = args.minExpectancyRFor?.(lane);
+    if (minimum != null && card.verdict === 'graduate') {
+      const values = realisedRs.get(lane) ?? [];
+      const mean = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+      if (mean == null || mean < minimum) {
+        card.verdict = 'continue';
+        card.reason = `expectancy ${mean?.toFixed(2) ?? 'unknown'}R below registered +${minimum.toFixed(2)}R bar`;
+      }
+    }
+    return { lane, openCount: openCount.get(lane) ?? 0, card };
   });
 }

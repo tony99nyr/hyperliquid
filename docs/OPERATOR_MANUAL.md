@@ -81,7 +81,7 @@ Nothing on the desktop needs to stay running. Two kinds of work:
 | `pnpm skill:ladder-expectancy` | **Weekly + after any ladder closes** — resolve outcomes, get KILL/HOLD/SIZE-UP verdicts. |
 | `pnpm rubric` | Refresh `rubric_scores` (feeds the review-ladder thesis pillar). |
 | `pnpm skill:assess-health / advise-exit / open-position / run-session` | Position management lane (all confirm-gated). |
-| `pnpm scout:review` | Weekly scout playbook curation (Opus-tier). Has NEVER run as of 2026-07-02 — the playbook is still the empty seed. |
+| `pnpm scout:review -- --write` | Weekly scout playbook curation (Opus-tier), with the verdict recorded in `scout_reviews`. Omit `--write` for a read-only scorecard. |
 | `pnpm env:pull` | Refresh `.env.local` from Vercel (after env changes). |
 
 **Dev loop:** `pnpm validate` before every commit; `pnpm smoke` before pushing UI changes;
@@ -97,7 +97,7 @@ is iamrossi.com, not this app.
 |---|---|
 | **Before any new ladder** | `analyze-market` → (if copy) `analyze-traders` → author draft (playbook §2) → `review-ladder` until RISK ≥ ~7, no blockers → arm in the cockpit (typed phrase). Tag copy trades with `leader_address`. |
 | **Daily-ish (2 min)** | Cockpit glance: armed ladders' distance-to-trigger, open positions' health, any Discord alerts (leader-exit disarm / expiry page / time-stop). |
-| **Weekly (15 min)** | `pnpm skill:ladder-expectancy` → act on verdicts (a KILL is a standing stop-trading-it; a SIZE-UP earns ONE tier step). `pnpm scout:review` for the paper lane. Confirm healthchecks green. |
+| **Weekly (15 min)** | `pnpm skill:ladder-expectancy` → act on verdicts (a KILL is a standing stop-trading-it; a SIZE-UP earns ONE tier step). `pnpm scout:review -- --write` for the paper lane. Confirm healthchecks green. |
 | **Monthly** | Spot-check the cloud row (§1). Rotate secrets if due (update cron-job.org header when rotating `LADDER_CRON_SECRET`). |
 
 ## 5. Emergency card

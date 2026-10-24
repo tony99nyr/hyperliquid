@@ -1,0 +1,5 @@
+{
+  "description": "Frozen scout lane decision bars from docs/scout/PREREGISTRATION_*.md.",
+  "active": "1.0.0",
+  "versions": { "1.0.0": "lane-bars-v1.0.0.json" }
+}
