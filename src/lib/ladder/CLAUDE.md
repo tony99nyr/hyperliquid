@@ -120,6 +120,5 @@ auto-disarms. **Do not reorder, weaken, or short-circuit these.**
 
 ## Validate
 `pnpm type:check && pnpm vitest run tests/lib/ladder/ && pnpm lint`. For UI changes also
-proofshot (`scripts/_proof-ladder-detail.ts`) and `pnpm smoke` (note: the cockpit never
-reaches networkidle, so the smoke harness's networkidle wait is a known false-fail — the
-proofshots are the real visual gate).
+proofshot (`scripts/_proof-ladder-detail.ts`) and `pnpm smoke`. The smoke harness waits
+for the cockpit heading instead of networkidle because realtime connections stay open.

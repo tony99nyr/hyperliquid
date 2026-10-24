@@ -1,0 +1,29 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      TRADING_MODE: paper
+      HL_SUPABASE_URL: https://example.supabase.co
+      HL_SUPABASE_SERVICE_ROLE_KEY: ci-dummy-service-role-key
+      NEXT_PUBLIC_HL_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_HL_SUPABASE_ANON_KEY: ci-dummy-anon-key
+      ADMIN_PIN: ci-dummy-pin
+      ADMIN_SECRET: ci-dummy-secret
+      HL_NETWORK: testnet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm validate

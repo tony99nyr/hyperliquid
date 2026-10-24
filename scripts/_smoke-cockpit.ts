@@ -34,6 +34,12 @@ try {
 }
 
 const ADMIN_PIN = process.env.ADMIN_PIN;
+const strict = process.argv.includes('--strict') || process.env.SMOKE_STRICT === '1';
+
+function skip(message: string): never {
+  console.log(`SKIP  ${message}`);
+  process.exit(strict ? 1 : 0);
+}
 
 async function getFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -68,8 +74,7 @@ async function waitForServer(baseUrl: string, timeoutMs: number): Promise<boolea
 
 async function main(): Promise<void> {
   if (!ADMIN_PIN) {
-    console.log('SKIP  ADMIN_PIN not set (need it to authenticate /cockpit) — set it in .env.local');
-    process.exit(0);
+    skip('ADMIN_PIN not set (need it to authenticate /cockpit) — set it in .env.local');
   }
 
   // Resolve a launchable browser; SKIP (not FAIL) if none is installed.
@@ -77,8 +82,7 @@ async function main(): Promise<void> {
   try {
     ({ chromium } = await import('@playwright/test'));
   } catch {
-    console.log('SKIP  @playwright/test not installed — run `pnpm add -D @playwright/test`');
-    process.exit(0);
+    skip('@playwright/test not installed — run `pnpm add -D @playwright/test`');
   }
 
   const launchOpts: { headless: boolean; channel?: string } = { headless: true, channel: 'chrome' };
@@ -89,11 +93,10 @@ async function main(): Promise<void> {
     try {
       browser = await chromium.launch({ headless: true });
     } catch (err) {
-      console.log(
-        `SKIP  no Chrome/Chromium available for Playwright (${String(err).split('\n')[0]}). ` +
+      skip(
+        `no Chrome/Chromium available for Playwright (${String(err).split('\n')[0]}). ` +
           'Install via `pnpm exec playwright install chromium` where a browser is supported.',
       );
-      process.exit(0);
     }
   }
 
@@ -165,16 +168,17 @@ async function main(): Promise<void> {
       errors.push(`console.error: ${text}`);
     });
 
-    await page.goto(`${baseUrl}/cockpit`, { waitUntil: 'networkidle', timeout: 30_000 });
+    await page.goto(`${baseUrl}/cockpit`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.getByTestId('cockpit-view').waitFor({ state: 'visible', timeout: 30_000 });
     // Give realtime hooks time to subscribe AND for any session re-bind (the
     // production trigger for the crash) to fire its effects.
     await delay(4_000);
 
-    // Sanity: the cockpit chrome must be present (proves we passed the PIN gate
+    // Sanity: the cockpit view must be present (proves we passed the PIN gate
     // and the client tree rendered rather than white-screening on a crash).
-    const heading = await page.locator('text=HL Cockpit').count();
-    if (heading === 0) {
-      errors.push('render: "HL Cockpit" heading not found (page may have crashed/white-screened)');
+    const cockpitView = await page.getByTestId('cockpit-view').count();
+    if (cockpitView === 0) {
+      errors.push('render: cockpit view not found (page may have crashed/white-screened)');
     }
 
     await context.close();

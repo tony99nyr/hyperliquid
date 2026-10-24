@@ -87,6 +87,8 @@ Nothing on the desktop needs to stay running. Two kinds of work:
 **Dev loop:** `pnpm validate` before every commit; `pnpm smoke` before pushing UI changes;
 deploy = push to `main` (Vercel auto-deploys).
 
+To make production wait for GitHub validation, configure Vercel's **Ignored Build Step** to skip deployment unless the `Validate` workflow check passes, or make the `Validate / validate` check required on `main` before Vercel deploys.
+
 **Remember (dev gotchas):** local `.env.local` has NO signing key and NO ladder flags — you
 can author/review ladders from the desktop but arming/firing is prod-only. `localhost:3000`
 is iamrossi.com, not this app.

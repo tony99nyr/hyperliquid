@@ -29,7 +29,7 @@ export default defineConfig({
           environment: 'jsdom',
           globals: true,
           setupFiles: ['./tests/setup.ts'],
-          include: ['tests/ui/**/*.test.tsx'],
+          include: ['tests/ui/**/*.test.{ts,tsx}'],
           pool: 'threads',
           // Match the lib project's worker count so vitest's project grouping
           // (which requires identical maxWorkers OR a distinct groupOrder)

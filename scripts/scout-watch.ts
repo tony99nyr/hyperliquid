@@ -20,6 +20,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs, optionalNumber, header, line, run } from './_skill-runtime';
@@ -33,6 +34,7 @@ import {
   writeScoutHeartbeat,
 } from '@/lib/scout/scout-watch-service';
 import { hasActTrigger, DEFAULT_SCOUT_TRIGGER_CONFIG, type ScoutState, type ScoutTriggerConfig } from '@/lib/scout/scout-trigger-business-logic';
+import { acquirePidLock } from './_pid-lock';
 
 // 120s baseline (was 60s): the 60s cadence was sized for the fast 15m reversion lane,
 // now RETIRED. Every remaining lane is daily/slow (htf-trend = daily Donchian; rubric-
@@ -266,6 +268,11 @@ async function oneCycle(state: ScoutState): Promise<ScoutState> {
 }
 
 run(async () => {
+  const releaseLock = await acquirePidLock(path.join(process.cwd(), '.scout-watch.pid'));
+  try {
+  const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const dirty = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim().length > 0;
+  line(`Provenance: commit=${commit} dirty=${dirty}`);
   const args = parseArgs(process.argv.slice(2));
   const once = args['once'] === true || args['once'] === 'true';
   const interval = Math.max(MIN_INTERVAL_SECONDS, optionalNumber(args, 'interval', DEFAULT_INTERVAL_SECONDS));
@@ -313,4 +320,7 @@ run(async () => {
     while (!stopping && Date.now() < wakeAt) await sleep(Math.min(250, wakeAt - Date.now()));
   }
   line('scout-watch stopped cleanly.');
+  } finally {
+    await releaseLock();
+  }
 });
