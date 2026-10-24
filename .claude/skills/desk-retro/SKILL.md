@@ -13,6 +13,28 @@ The weekly cadence IS the multiplicity guard: do not run the bundle sub-weekly.
 
 ## Protocol (run all four, in this order)
 
+### 0. Performance report, markers and forecast
+
+Run this first, before the other retro steps:
+
+```
+pnpm perf:report --since last-retro --md
+```
+
+Quote the report verbatim in the retro. Do not recalculate or paraphrase its
+figures. Then list the proposed change markers for the operator to review.
+Only an operator-confirmed marker can split lane statistics; do not treat a
+proposal as confirmed or confirm it on the operator's behalf.
+
+On the first retro of each month, freeze that month's forecast:
+
+```
+pnpm perf:forecast --freeze --write
+```
+
+Report the saved forecast snapshot with its inputs hash and P5-P95. Do not run
+the freeze command on later retros in the same month.
+
 ### 1. Scout scorecard + playbook curation
 
 Run the `scout-review` skill (it wraps `pnpm scout:review -- --write`). Follow THAT skill's
