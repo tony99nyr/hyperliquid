@@ -163,3 +163,28 @@ export async function hlFirstFunding(coin: string): Promise<number | null> {
   const time = Array.isArray(raw) && raw.length ? raw[0].time : undefined;
   return typeof time === 'number' ? Math.round(time / 3_600_000) * 3_600_000 : null;
 }
+
+export interface HlFundingObservation { coin: string; time: number; hlHourly: number }
+
+/**
+ * Parse an HL `predictedFundings` response into hourly HL rates.
+ * Shape: [[coin, [[venue, {fundingRate, fundingIntervalHours, ...}] | null, ...]], ...].
+ * Rows without a valid HlPerp entry are skipped.
+ */
+export function parseHlPredictedFundings(payload: unknown, time: number): HlFundingObservation[] {
+  if (!Array.isArray(payload)) throw new Error('Unexpected predictedFundings response');
+  const out: HlFundingObservation[] = [];
+  for (const item of payload) {
+    if (!Array.isArray(item) || typeof item[0] !== 'string' || !Array.isArray(item[1])) continue;
+    const venue = (item[1] as unknown[]).find((v) => Array.isArray(v) && v[0] === 'HlPerp') as
+      | [string, { fundingRate?: unknown; fundingIntervalHours?: unknown } | null]
+      | undefined;
+    const quote = venue?.[1];
+    if (!quote) continue;
+    const rate = Number(quote.fundingRate);
+    const interval = Number(quote.fundingIntervalHours);
+    if (!Number.isFinite(rate) || !Number.isFinite(interval) || interval <= 0) continue;
+    out.push({ coin: item[0].toUpperCase(), time, hlHourly: rate / interval });
+  }
+  return out;
+}

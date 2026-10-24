@@ -10,7 +10,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { loadStudyEnv, politeFetch, STUDY_CACHE_ROOT, supabaseSelect, cachedJson } from './_study-io';
+import { loadStudyEnv, politeFetch, STUDY_CACHE_ROOT, supabaseSelect, cachedJson, parseHlPredictedFundings } from './_study-io';
 import { assessFundingVeto, type FundingQuote, type FundingStudyTrade } from '@/lib/backtest/cross-venue-funding-veto-business-logic';
 import { replayHtfPortfolio, type ReplayInput } from '@/lib/backtest/htf-replay-business-logic';
 
@@ -63,19 +63,8 @@ async function captureForwardQuotes(): Promise<void> {
     body: JSON.stringify({ type: 'predictedFundings' }),
   });
   if (!response.ok) throw new Error(`HL predictedFundings failed: ${response.status}`);
-  const payload = await response.json() as unknown;
-  if (!Array.isArray(payload)) throw new Error('Unexpected predictedFundings response');
-  const time = Date.now();
-  const current: HlObservation[] = [];
-  for (const item of payload) {
-    if (!Array.isArray(item) || typeof item[0] !== 'string' || !Array.isArray(item[1])) continue;
-    const hl = item[1].map(record).find((row) => row.venue === 'HlPerp');
-    if (!hl) continue;
-    const interval = number(hl.fundingIntervalHours);
-    if (interval <= 0) throw new Error('Invalid HL funding interval');
-    current.push({ coin: item[0].toUpperCase(), time,
-      hlHourly: number(hl.fundingRate) / interval });
-  }
+  const current = parseHlPredictedFundings(await response.json() as unknown, Date.now());
+  const time = current[0]?.time ?? Date.now();
   if (!current.length) throw new Error('No HlPerp funding rows in predictedFundings response');
   await mkdir(CACHE, { recursive: true });
   const file = path.join(CACHE, 'hl-observations.json');

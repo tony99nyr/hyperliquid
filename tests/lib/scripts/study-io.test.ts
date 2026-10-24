@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { backoffDelay, isFresh } from '../../../scripts/_study-io';
+import { backoffDelay, isFresh, parseHlPredictedFundings } from '../../../scripts/_study-io';
 import { firstDailyGap, mergeWindows, snapFunding } from '../../../scripts/_htf-replay-data';
 
 const DAY = 86_400_000;
@@ -29,5 +29,27 @@ describe('study I/O helpers', () => {
     expect(firstDailyGap([bar(0), bar(DAY), bar(2 * DAY)])).toBe(-1);
     expect(firstDailyGap([bar(0), bar(DAY), bar(3 * DAY)])).toBe(2);
     expect(mergeWindows([[0, 2 * DAY], [3 * DAY, 4 * DAY], [20 * DAY, 21 * DAY]])).toEqual([[0, 4 * DAY], [20 * DAY, 21 * DAY]]);
+  });
+});
+
+describe('parseHlPredictedFundings', () => {
+  it('reads the HlPerp venue tuple and converts to an hourly rate', () => {
+    const payload = [
+      ['0G', [
+        ['BinPerp', { fundingRate: '0.00005', fundingIntervalHours: 4 }],
+        ['HlPerp', { fundingRate: '0.0000125', fundingIntervalHours: 1 }],
+      ]],
+      ['btc', [['HlPerp', { fundingRate: '0.00008', fundingIntervalHours: 8 }]]],
+      ['NOHL', [['BybitPerp', { fundingRate: '0.0001', fundingIntervalHours: 8 }], null]],
+      ['BAD', [['HlPerp', { fundingRate: 'x', fundingIntervalHours: 1 }]]],
+    ];
+    expect(parseHlPredictedFundings(payload, 42)).toEqual([
+      { coin: '0G', time: 42, hlHourly: 0.0000125 },
+      { coin: 'BTC', time: 42, hlHourly: 0.00001 },
+    ]);
+  });
+
+  it('throws on a non-array response', () => {
+    expect(() => parseHlPredictedFundings({}, 1)).toThrow();
   });
 });

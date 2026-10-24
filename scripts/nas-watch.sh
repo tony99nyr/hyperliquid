@@ -118,6 +118,16 @@ run_step "vault watch (pnpm vault-watch --once)" "$PNPM" vault-watch --once
 # benchmarks -> lane_scorecards). Read-only HL + Supabase-write; NEVER trades.
 run_step "scout lanes (pnpm scout:lanes)" "$PNPM" scout:lanes
 
+# Funding-veto study archive: snapshot HL predictedFundings on the last tick before
+# each 8h funding boundary (07:55, 15:55, 23:55 UTC). Appends to a gitignored file
+# under data/backups/hyperliquid-study/ (kept across update.sh pulls). Read-only HL.
+UTC_H="$(date -u +%H)"; UTC_M="$(date -u +%M)"
+case "$UTC_H" in 07|15|23)
+  if [ "$UTC_M" -ge 55 ]; then
+    run_step "funding-veto capture (pnpm study:funding-veto --capture)" "$PNPM" study:funding-veto -- --capture
+  fi ;;
+esac
+
 # --- Vercel pokes (same CRON_SECRET, kept OUT of git) ---
 SECRET="${AUTO_EXIT_CRON_SECRET:-}"
 [ -z "$SECRET" ] && [ -f "$REPO/.auto-exit-secret" ] && SECRET="$(cat "$REPO/.auto-exit-secret" 2>/dev/null | tr -d '\r\n')"
