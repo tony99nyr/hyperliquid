@@ -108,6 +108,18 @@ describe('executeIntent (live retry after persistence failure)', () => {
     expect(mockedApply).toHaveBeenCalledTimes(1);
     expect(mockedApply.mock.calls[0][0]).toEqual(fill);
   });
+
+  it('evicts a successful live submission after persistence', async () => {
+    const trade = intent({ clientIntentId: 'live-evict-1' });
+    mockedSubmitOrder.mockResolvedValue({
+      avgPx: 2001, filledSz: 1, partial: false, feeUsd: 0.4,
+      hlOrderId: 'oid-evict-1', raw: { status: 'filled' },
+    });
+    mockedPersist.mockResolvedValue(true);
+    await executeIntent(trade);
+    await executeIntent(trade);
+    expect(mockedSubmitOrder).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('executeIntent (paper end-to-end)', () => {

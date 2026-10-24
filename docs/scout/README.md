@@ -85,6 +85,15 @@ Start `scout:watch` under its supervisor (`services/scout-watch/README.md`). It 
 producer, the embedded consumer and the prod-cron poker. Paper mode is pinned by the
 start script and the systemd unit, not by `.env.local`.
 
+The optional `SCOUT_HTF_DETERMINISTIC=true` switch moves `htf-trend` entries to
+the daemon. It defaults off. The daemon scans completed daily candles every 15
+minutes and calls the existing paper-only `scout:trade` executor. The headless
+model cannot open this lane while the switch is on. Set
+`SCOUT_HTF_VETO_ENABLED=true` to ask the model for a veto before each entry.
+The veto needs a concrete reason, which the daemon logs in `scout_decisions`.
+The `hypotheses.rule_version` field separates daemon entries from earlier
+model entries. Apply migration 0051 before enabling the switch.
+
 For a manual session instead, open a Claude Code session on Sonnet and say "run the
 scout" (the `scout` skill). Do not leave a manual session running beside the embedded
 consumer.

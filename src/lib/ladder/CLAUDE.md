@@ -38,7 +38,8 @@ sits, so a real ladder MUST be created `mode: 'live'`. The still-paper subsystem
 | `ladder-arm-business-logic.ts` | **PURE** arm-readiness: `validateLadderForArm` (pyramiding guardrails), `resolveArmRung` (the canonical sizing), `ladderArmConfirmPhrase`. |
 | `ladder-reanchor-business-logic.ts` | **PURE** draft re-price: `reanchorLadderRungs` scales every price level by (live mark / `ladders.anchor_px`, 0043) so a stale drafter draft arms instead of dying to the instant-fire guard. DRAFT-ONLY (`applyDraftReanchor` in the service refuses non-drafts and fail-closed-disarms on an arm race); a manual draft (null anchor) is refused — its levels are structural. Route: `api/cockpit/ladder/reanchor`. |
 | `ladder-projection-business-logic.ts` | **PURE** display math: `projectRung`, `rungProximity`, `buildLadderChartLines`. UI-only — see the parity rule below. |
-| `ladder-service.ts` | Service-role CRUD (server-only). `armLadder` (race-safe), `claimRungFire` (atomic dedupe), `setRungStatus`, `markLadderDone`, `disarmLadder`. |
+| `ladder-crud-service.ts` | Service-role draft creation and ladder reads (server-only). |
+| `ladder-service.ts` | Stable public exports and state transitions: `armLadder` (race-safe), `claimRungFire` (atomic dedupe), `setRungStatus`, `markLadderDone`, `disarmLadder`. |
 | `ladder-fire-service.ts` | **The one money-moving site.** `performLadderRungFire` = the guard stack below. |
 | `ladder-watch-service.ts` + `ladder-watch-business-logic.ts` | The tick: load armed → build completed-candle snapshots → evaluate → fire met rungs. |
 | `ladder-flags.ts` | The two kill-switches, the drafter alert flags (reversion, trend, runaway) + the cron secret resolver. |

@@ -97,4 +97,23 @@ export const ECONOMIC_EVENTS: EconEvent[] = [
     straddleCoin: 'BTC',
     prepLeadMinutes: 30,
   },
+  // BLS Employment Situation normally prints on the first Friday at 08:30 ET.
+  // Standard Time applies to these four dates, so 08:30 ET = 13:30 UTC.
+  { name: 'NFP (Oct data)', atIso: '2026-11-06T13:30:00Z', note: 'BLS Employment Situation, 08:30 ET.', straddleCoin: 'BTC' },
+  { name: 'NFP (Nov data)', atIso: '2026-12-04T13:30:00Z', note: 'BLS Employment Situation, 08:30 ET.', straddleCoin: 'BTC' },
+  // TODO: Confirm the January 2027 BLS Employment Situation release date.
+  // The first Friday is New Year's Day; do not schedule an unverified replacement.
+  { name: 'NFP (Jan data)', atIso: '2027-02-05T13:30:00Z', note: 'BLS Employment Situation, 08:30 ET.', straddleCoin: 'BTC' },
+  { name: 'NFP (Feb data)', atIso: '2027-03-05T13:30:00Z', note: 'BLS Employment Situation, 08:30 ET.', straddleCoin: 'BTC' },
+  // PCE dates from bea.gov/news/schedule (checked 2026-10-24). 2027 dates not yet published.
+  { name: 'PCE (Oct data)', atIso: '2026-11-25T13:30:00Z', note: 'BEA Personal Income and Outlays, 08:30 ET.', straddleCoin: 'BTC' },
+  { name: 'PCE (Nov data)', atIso: '2026-12-23T13:30:00Z', note: 'BEA Personal Income and Outlays, 08:30 ET.', straddleCoin: 'BTC' },
+  // TODO: add 2027 PCE dates once BEA publishes them.
+  // PPI dates from the BLS PPI release schedule (checked 2026-10-24).
+  { name: 'PPI (Nov data)', atIso: '2026-12-15T13:30:00Z', note: 'BLS Producer Price Index, 08:30 ET.', straddleCoin: 'BTC' },
+  { name: 'PPI (Dec data)', atIso: '2027-01-14T13:30:00Z', note: 'BLS Producer Price Index, 08:30 ET.', straddleCoin: 'BTC' },
+  { name: 'PPI (Jan data)', atIso: '2027-02-12T13:30:00Z', note: 'BLS Producer Price Index, 08:30 ET.', straddleCoin: 'BTC' },
+  { name: 'PPI (Feb data)', atIso: '2027-03-12T13:30:00Z', note: 'BLS Producer Price Index, 08:30 ET.', straddleCoin: 'BTC' },
+  // TODO: the November 2026 PPI (Oct data) date was not confirmed; add it from bls.gov/schedule.
+  // Neither agency's dates can be inferred safely from the monthly 08:30 ET time.
 ];

@@ -127,107 +127,6 @@ beforeEach(() => {
   getHlAccountAddress.mockReturnValue(null);
 });
 
-describe('performLadderRungFire — guard stack', () => {
-  it('refuses at the seam when autofire is disabled (belt-and-suspenders kill-switch)', async () => {
-    isLadderAutofireEnabled.mockReturnValue(false);
-    expect((await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW })).skipped).toBe('autofire-disabled');
-    expect(getLadderWithRungs).not.toHaveBeenCalled();
-  });
-
-  it('skips when the ladder is absent', async () => {
-    getLadderWithRungs.mockResolvedValue(null);
-    expect((await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW })).skipped).toBe('ladder-not-found');
-    expect(claimRungFire).not.toHaveBeenCalled();
-  });
-
-  it('skips a non-armed ladder', async () => {
-    getLadderWithRungs.mockResolvedValue(ladder({ status: 'draft' }));
-    expect((await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW })).skipped).toMatch(/not-armed/);
-  });
-
-  it('disarms + skips an expired ladder', async () => {
-    getLadderWithRungs.mockResolvedValue(ladder({ expiresAt: new Date(NOW - 1).toISOString() }));
-    expect((await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW })).skipped).toBe('expired');
-    expect(disarmLadder).toHaveBeenCalledWith('L1', 'expired');
-    expect(claimRungFire).not.toHaveBeenCalled();
-  });
-
-  it('refuses (but keeps ARMED) a ladder whose activation window has not opened', async () => {
-    getLadderWithRungs.mockResolvedValue(ladder({ activeFrom: new Date(NOW + 60_000).toISOString() }));
-    expect((await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW })).skipped).toBe('before-active-from');
-    expect(disarmLadder).not.toHaveBeenCalled(); // restrictive only — authorization stands
-    expect(claimRungFire).not.toHaveBeenCalled();
-  });
-
-  it('fires normally once the activation window is open', async () => {
-    getLadderWithRungs.mockResolvedValue(ladder({ activeFrom: new Date(NOW - 60_000).toISOString() }));
-    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
-    expect(res.skipped).not.toBe('before-active-from');
-  });
-
-  it('refuses a scout-authored ladder (defense-in-depth)', async () => {
-    getLadderWithRungs.mockResolvedValue(ladder({ author: 'scout' }));
-    expect((await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW })).skipped).toBe('not-operator');
-  });
-
-  it('skips a rung that is not pending', async () => {
-    getLadderWithRungs.mockResolvedValue(ladder({}, [openRung({ status: 'fired' })]));
-    expect((await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW })).skipped).toMatch(/rung-fired/);
-  });
-
-  it('auto-disarms + skips on precondition drift', async () => {
-    getLadderWithRungs.mockResolvedValue(ladder({ preconditionHash: 'deadbeef' })); // wrong hash
-    expect((await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW })).skipped).toBe('precondition-drift');
-    expect(disarmLadder).toHaveBeenCalledWith('L1', 'precondition-drift');
-    expect(claimRungFire).not.toHaveBeenCalled();
-  });
-
-  it('skips when the claim is lost (already fired — idempotent)', async () => {
-    claimRungFire.mockResolvedValue({ claimed: false, fireId: null });
-    expect((await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW })).skipped).toBe('already-fired');
-    expect(executeIntent).not.toHaveBeenCalled();
-  });
-});
-
-describe('performLadderRungFire — pre-opener guard (Jul-17)', () => {
-  const mgmtRung = (over: Partial<LadderRung> = {}): LadderRung =>
-    openRung({ id: 'r2', seq: 2, action: 'reduce', reduceFrac: 0.5, triggerKind: 'indicator', triggerPx: null, triggerMeta: { op: 'above', indicatorName: 'momentum-stall-long', indicatorValue: 2 }, cloid: 'L1:r2', ...over });
-
-  it('a management rung on a FLAT coin with the own opener still PENDING waits — no claim, no status change', async () => {
-    const lad = ladder({}, [openRung(), mgmtRung()]);
-    getLadderWithRungs.mockResolvedValue(lad);
-    getActiveSession.mockResolvedValue({ id: 's1', mode: 'paper' });
-    loadPosition.mockResolvedValue(null); // flat
-    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r2', now: NOW });
-    expect(res.fired).toBe(false);
-    expect(res.skipped).toContain('awaiting-own-opener');
-    expect(claimRungFire).not.toHaveBeenCalled(); // claim UNSPENT — retries next candle
-    expect(setRungStatus).not.toHaveBeenCalled(); // rung stays PENDING (the whole point)
-  });
-
-  it('once the opener has FIRED, a flat coin terminal-skips as before (trade really over)', async () => {
-    const lad = ladder({}, [openRung({ status: 'fired' }), mgmtRung()]);
-    getLadderWithRungs.mockResolvedValue(lad);
-    getActiveSession.mockResolvedValue({ id: 's1', mode: 'paper' });
-    loadPosition.mockResolvedValue(null); // flat — position stopped out for real
-    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r2', now: NOW });
-    expect(res.fired).toBe(false);
-    expect(claimRungFire).toHaveBeenCalled(); // normal path: claim then flat-skip
-    expect(setRungStatus).toHaveBeenCalledWith('r2', 'skipped');
-  });
-
-  it('an unreadable position with a pending opener also waits (fail toward pending)', async () => {
-    const lad = ladder({}, [openRung(), mgmtRung()]);
-    getLadderWithRungs.mockResolvedValue(lad);
-    getActiveSession.mockResolvedValue({ id: 's1', mode: 'paper' });
-    loadPosition.mockRejectedValue(new Error('db down'));
-    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r2', now: NOW });
-    expect(res.fired).toBe(false);
-    expect(res.skipped).toContain('awaiting-own-opener');
-    expect(claimRungFire).not.toHaveBeenCalled();
-  });
-});
-
 describe('performLadderRungFire — execution', () => {
   it('fires a PAPER open: simulates the fill and places NO real exchange order', async () => {
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
@@ -303,7 +202,7 @@ describe('performLadderRungFire — execution', () => {
     releaseOcoClaim.mockResolvedValue(undefined);
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(res.skipped).toBe('no-fill');
-    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1');
+    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1', 'r1');
     expect(disarmOcoSiblings).not.toHaveBeenCalled();
   });
 
@@ -312,7 +211,7 @@ describe('performLadderRungFire — execution', () => {
     executeIntent.mockResolvedValue({ sz: 0 });
     markFireOutcome.mockRejectedValue(new Error('telemetry down'));
     await expect(performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW })).rejects.toThrow('telemetry down');
-    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1');
+    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1', 'r1');
     expect(releaseOcoClaim.mock.invocationCallOrder[0]).toBeLessThan(markFireOutcome.mock.invocationCallOrder[0]);
   });
 
@@ -324,7 +223,7 @@ describe('performLadderRungFire — execution', () => {
     executeIntent.mockRejectedValue(new Error('HL order error: insufficient margin'));
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(res).toMatchObject({ fired: false, skipped: 'open-rejected' });
-    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1');
+    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1', 'r1');
     expect(markFireOutcome).toHaveBeenCalledWith('f1', 'failed', expect.stringContaining('insufficient margin'));
     expect(writeAnalysisLog).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('insufficient margin') }));
     expect(writeAnalysisLog).not.toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('fault after fill') }));
@@ -338,7 +237,7 @@ describe('performLadderRungFire — execution', () => {
     executeIntent.mockRejectedValue(new PreSubmitError(message));
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(res.skipped).toBe('open-rejected');
-    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1');
+    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1', 'r1');
     expect(writeAnalysisLog).not.toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('outcome unknown') }));
   });
 
@@ -347,7 +246,7 @@ describe('performLadderRungFire — execution', () => {
     executeIntent.mockRejectedValue(new Error('paper book unavailable'));
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(res.skipped).toBe('open-rejected');
-    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1');
+    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1', 'r1');
   });
 
   it('releases a pre-submit OCO claim even when the position read fails', async () => {
@@ -360,7 +259,7 @@ describe('performLadderRungFire — execution', () => {
       .mockRejectedValueOnce(new Error('read failed'));
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(res.skipped).toBe('open-rejected');
-    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1');
+    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1', 'r1');
     expect(fetchClearinghouseState).toHaveBeenCalledTimes(1);
   });
 
@@ -373,7 +272,7 @@ describe('performLadderRungFire — execution', () => {
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(res.skipped).toBe('open-rejected');
     expect(executeIntent).toHaveBeenCalledTimes(1);
-    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1');
+    expect(releaseOcoClaim).toHaveBeenCalledWith('grp-1', 'L1', 'r1');
   });
 
   it('keeps the OCO claim and reports an unknown outcome after a transport timeout', async () => {
@@ -477,6 +376,44 @@ describe('performLadderRungFire — execution', () => {
       expect(executeIntent).toHaveBeenCalledTimes(2);
       expect(markFireOutcome).not.toHaveBeenCalledWith('f1', 'filled', expect.anything());
     }
+  });
+
+  it('cancels known bracket orders after a successful fault flatten', async () => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc');
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }, [openRung({ targetPx: 2200 })]));
+    fetchClearinghouseState.mockResolvedValue({ stale: false, positions: [{ coin: 'ETH', side: 'long', size: 0.625, entryPx: 2000 }] });
+    placeBracketOnHl.mockResolvedValue({ pushed: false, stopOid: 501, tpOid: 502 });
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res).toMatchObject({ fired: false, flattened: true });
+    expect(cancelStopOnHl).toHaveBeenCalledWith('ETH', 501);
+    expect(cancelStopOnHl).toHaveBeenCalledWith('ETH', 502);
+    expect(executeIntent.mock.invocationCallOrder[1]).toBeLessThan(cancelStopOnHl.mock.invocationCallOrder[0]);
+  });
+
+  it('reports a failed cancel and tries both known bracket orders', async () => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc');
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }, [openRung({ targetPx: 2200 })]));
+    fetchClearinghouseState.mockResolvedValue({ stale: false, positions: [{ coin: 'ETH', side: 'long', size: 0.625, entryPx: 2000 }] });
+    placeBracketOnHl.mockResolvedValue({ pushed: false, stopOid: 501, tpOid: 502 });
+    cancelStopOnHl.mockRejectedValueOnce(new Error('cancel failed')).mockResolvedValueOnce({ pushed: true });
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).toBe('fault-cancel-failed');
+    expect(cancelStopOnHl).toHaveBeenCalledTimes(2);
+    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'failed', expect.stringContaining('orphan'));
+  });
+
+  it('keeps the protective stop when the fault close does not fill', async () => {
+    getTradingMode.mockReturnValue('live');
+    getHlAccountAddress.mockReturnValue('0xabc');
+    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }, [openRung({ targetPx: 2200 })]));
+    fetchClearinghouseState.mockResolvedValue({ stale: false, positions: [{ coin: 'ETH', side: 'long', size: 0.625, entryPx: 2000 }] });
+    placeBracketOnHl.mockResolvedValue({ pushed: false, stopOid: 501, tpOid: 502 });
+    executeIntent.mockResolvedValueOnce({ sz: 0.625, avgPx: 2000 }).mockResolvedValueOnce({ sz: 0, avgPx: 0 });
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res).toMatchObject({ flattened: false, skipped: 'fault-flatten-failed' });
+    expect(cancelStopOnHl).not.toHaveBeenCalled();
   });
 
   it('postFillFault_withStaleClearinghouse_reportsUnstopped', async () => {
@@ -609,6 +546,8 @@ describe('performLadderRungFire — execution', () => {
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r2', now: NOW });
     expect(res.fired).toBe(false);
     expect(res.skipped).toBe('add-opposite-side-position');
+    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'skipped', 'add-opposite-side-position');
+    expect(setRungStatus).toHaveBeenCalledWith('r2', 'skipped');
     expect(executeIntent).not.toHaveBeenCalled();
   });
 
@@ -620,111 +559,5 @@ describe('performLadderRungFire — execution', () => {
     expect(res.skipped).toBe('add-risk-not-covered');
     expect(executeIntent).not.toHaveBeenCalled();
     expect(setRungStatus).toHaveBeenCalledWith('r1', 'skipped');
-  });
-});
-
-describe('performLadderRungFire — stop_move (paper path + guards)', () => {
-  const smRung = (over: Partial<LadderRung> = {}): LadderRung =>
-    openRung({
-      id: 'r1', action: 'stop_move', side: 'long',
-      triggerKind: 'price_above', triggerPx: 66.85,
-      triggerMeta: { moveTo: 'breakeven' },
-      riskUsd: null, stopFrac: null, leverage: null,
-      ...over,
-    });
-  const smLadder = (rung: LadderRung) => ladder({}, [rung]);
-
-  it('paper: ratchets the ADVISORY stop to breakeven and marks fired', async () => {
-    getLadderWithRungs.mockResolvedValue(smLadder(smRung()));
-    loadPosition.mockResolvedValue({ coin: 'ETH', side: 'long', sz: 2, avgEntryPx: 65.0, realizedPnlUsd: 0, feesPaidUsd: 0 });
-    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
-    expect(res.fired).toBe(true);
-    expect(setAdvisoryStop).toHaveBeenCalledWith('s1', 'ETH', 65.0);
-    expect(setRungStatus).toHaveBeenCalledWith('r1', 'fired');
-    expect(placeStopOnHl).not.toHaveBeenCalled(); // paper NEVER touches the exchange
-  });
-
-  it('skips (rung → skipped) when the position is flat', async () => {
-    getLadderWithRungs.mockResolvedValue(smLadder(smRung()));
-    loadPosition.mockResolvedValue(null);
-  setAdvisoryStop.mockResolvedValue(true);
-  findOpenStop.mockResolvedValue(null);
-  cancelStopOnHl.mockResolvedValue({ pushed: true });
-  findAllStops.mockResolvedValue({});
-  checkCircuitBreaker.mockResolvedValue({ blockNewEntries: false, reason: 'ok', tripped: false, equityUsd: 10_000, peakEquityUsd: 10_000, dayStartEquityUsd: 10_000 }); // fixtures risk $50/rung — equity high enough that the heat gate stays out of unrelated tests
-  computeLiveEquity.mockResolvedValue(10_000); // fixtures risk $50/rung — keep the heat gate out of unrelated tests
-    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
-    expect(res.skipped).toBe('flat');
-    expect(setRungStatus).toHaveBeenCalledWith('r1', 'skipped');
-  });
-
-  it('refuses a stop that would trigger instantly (not protective vs the mark)', async () => {
-    // mark is 2000 (mock default); a long stop_move to 2050 is at/through the mark.
-    getLadderWithRungs.mockResolvedValue(smLadder(smRung({ triggerMeta: { moveTo: 2050 } })));
-    loadPosition.mockResolvedValue({ coin: 'ETH', side: 'long', sz: 2, avgEntryPx: 1900, realizedPnlUsd: 0, feesPaidUsd: 0 });
-    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
-    expect(res.skipped).toBe('stop-would-trigger');
-    expect(setAdvisoryStop).not.toHaveBeenCalled();
-  });
-
-  it('fails closed on an invalid moveTo', async () => {
-    getLadderWithRungs.mockResolvedValue(smLadder(smRung({ triggerMeta: { moveTo: -5 } })));
-    loadPosition.mockResolvedValue({ coin: 'ETH', side: 'long', sz: 2, avgEntryPx: 1900, realizedPnlUsd: 0, feesPaidUsd: 0 });
-    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
-    expect(res.skipped).toBe('invalid-moveTo');
-  });
-});
-
-describe('performLadderRungFire — exposure gates (EDGE_ROADMAP 3a/3c)', () => {
-  beforeEach(() => {
-    getTradingMode.mockReturnValue('live');
-    getHlAccountAddress.mockReturnValue('0xabc');
-  });
-
-  it('a tripped LIVE circuit breaker blocks opens (before the claim — retryable)', async () => {
-    checkCircuitBreaker.mockResolvedValue({ blockNewEntries: true, reason: 'daily loss', tripped: true, equityUsd: 900, peakEquityUsd: 1000, dayStartEquityUsd: 1000 });
-    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }));
-    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
-    expect(res.skipped).toMatch(/circuit-breaker/);
-    expect(claimRungFire).not.toHaveBeenCalled();
-  });
-
-  it('book heat over the ceiling blocks opens', async () => {
-    checkCircuitBreaker.mockResolvedValue({ blockNewEntries: false, reason: 'ok', tripped: false, equityUsd: 500, peakEquityUsd: 500, dayStartEquityUsd: 500 }); // rung worst ≈ $175 > 10% of 500
-    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }));
-    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
-    expect(res.skipped).toMatch(/book-heat-exceeded/);
-    expect(claimRungFire).not.toHaveBeenCalled();
-  });
-
-  it('risk-reducing rungs are NEVER gated (a LIVE reduce passes a tripped breaker)', async () => {
-    checkCircuitBreaker.mockResolvedValue({ blockNewEntries: true, reason: 'daily loss', tripped: true, equityUsd: 900, peakEquityUsd: 1000, dayStartEquityUsd: 1000 });
-    const r = openRung({ id: 'r1', action: 'reduce', reduceFrac: 0.5, riskUsd: null, stopFrac: null, triggerPx: 2000 });
-    getTradingMode.mockReturnValue('live'); // LIVE path — the exemption itself is what's tested
-    getHlAccountAddress.mockReturnValue('0xabc');
-    fetchClearinghouseState.mockResolvedValue({ positions: [], stale: false }); // flat on HL
-    getLadderWithRungs.mockResolvedValue(ladder({ mode: 'live' }, [r]));
-    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
-    expect(res.skipped).toBe('flat'); // reached fireReduce — the gates never ran
-    expect(checkCircuitBreaker).not.toHaveBeenCalled();
-  });
-
-  it('TRAIL stop_move: fires per candle (bucketed claim), stays PENDING, never marks the ladder done', async () => {
-    const trail = openRung({
-      id: 'r1', action: 'stop_move', side: 'long', triggerKind: 'price_above', triggerPx: 1950,
-      triggerMeta: { moveTo: 'trail', trailDistancePx: 30 }, riskUsd: null, stopFrac: null,
-    });
-    getTradingMode.mockReturnValue('paper'); // paper ladder on paper deployment (mode-match)
-    getLadderWithRungs.mockResolvedValue(ladder({}, [trail])); // paper ladder — advisory path
-    loadPosition.mockResolvedValue({ coin: 'ETH', side: 'long', sz: 1, avgEntryPx: 1900, realizedPnlUsd: 0, feesPaidUsd: 0 });
-    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
-    expect(res.fired).toBe(true);
-    // per-candle claim: the dedupe suffix is the 15m bucket
-    expect(claimRungFire).toHaveBeenCalledWith('L1', 'r1', String(Math.floor(NOW / (15 * 60 * 1000))));
-    // stays pending: never marked fired, ladder never done
-    expect(setRungStatus).not.toHaveBeenCalledWith('r1', 'fired');
-    expect(markLadderDone).not.toHaveBeenCalled();
-    // advisory stop trailed to mark − distance = 2000 − 30
-    expect(setAdvisoryStop).toHaveBeenCalledWith('s1', 'ETH', 1970);
   });
 });

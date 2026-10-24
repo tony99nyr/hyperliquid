@@ -14,14 +14,20 @@ function candle(close: number, ts = -15 * 60 * 1000): PriceCandle {
 }
 
 describe('snapshotFromCandleResult — completed candle only, fail-closed', () => {
+  it('uses the caller candle interval for completion', () => {
+    const now = 3_600_000;
+    const bars = [candle(2050, now - 3_600_000), candle(9999, now - 60_000)];
+    expect(snapshotFromCandleResult('ETH', bars, false, { now, maxAgeMs: 1_800_000, candleMs: 3_600_000 }).stale).toBe(false);
+    expect(snapshotFromCandleResult('ETH', bars, false, { now: now - 1, maxAgeMs: 1_800_000, candleMs: 3_600_000 }).stale).toBe(true);
+  });
   it('snapshotRejectsUnclosedOrFutureJitteredBar', () => {
     const boundary = 1_700_000_100_000;
     const bar = 15 * 60 * 1000;
-    const before = snapshotFromCandleResult('ETH', [candle(2050, boundary - bar), candle(9999, boundary)], false, { now: boundary - 1, maxAgeMs: bar });
+    const before = snapshotFromCandleResult('ETH', [candle(2050, boundary - bar), candle(9999, boundary)], false, { now: boundary - 1, maxAgeMs: bar, candleMs: bar });
     expect(before.stale).toBe(true);
-    const after = snapshotFromCandleResult('ETH', [candle(2050, boundary - bar), candle(9999, boundary)], false, { now: boundary + 1, maxAgeMs: bar });
+    const after = snapshotFromCandleResult('ETH', [candle(2050, boundary - bar), candle(9999, boundary)], false, { now: boundary + 1, maxAgeMs: bar, candleMs: bar });
     expect(after).toMatchObject({ completedClose: 2050, stale: false });
-    const future = snapshotFromCandleResult('ETH', [candle(2050, boundary), candle(9999, boundary + bar)], false, { now: boundary + 1, maxAgeMs: bar });
+    const future = snapshotFromCandleResult('ETH', [candle(2050, boundary), candle(9999, boundary + bar)], false, { now: boundary + 1, maxAgeMs: bar, candleMs: bar });
     expect(future.stale).toBe(true);
   });
   it('uses the LAST COMPLETED candle (second-to-last), not the in-progress bar', () => {
@@ -42,10 +48,10 @@ describe('snapshotFromCandleResult — completed candle only, fail-closed', () =
   it('fails closed when the newest bar is older than maxAge (lagging feed)', () => {
     const now = 10_000_000;
     // newest bar is 1h old, maxAge 30m → stale even though there are 2+ candles.
-    const fresh = snapshotFromCandleResult('ETH', [candle(1900, now - 7_200_000), candle(2050, now - 3_600_000)], false, { now, maxAgeMs: 1_800_000 });
+    const fresh = snapshotFromCandleResult('ETH', [candle(1900, now - 7_200_000), candle(2050, now - 3_600_000)], false, { now, maxAgeMs: 1_800_000, candleMs: 900_000 });
     expect(fresh.stale).toBe(true);
     // within maxAge → not stale.
-    const ok = snapshotFromCandleResult('ETH', [candle(1900, now - 1_800_000), candle(2050, now - 60_000)], false, { now, maxAgeMs: 1_800_000 });
+    const ok = snapshotFromCandleResult('ETH', [candle(1900, now - 1_800_000), candle(2050, now - 60_000)], false, { now, maxAgeMs: 1_800_000, candleMs: 900_000 });
     expect(ok.stale).toBe(false);
     expect(ok.completedClose).toBe(1900); // [-2]
   });

@@ -8,7 +8,9 @@
  * model tokens — a model is only invoked downstream when a trigger fires (the
  * inverted loop that keeps Opus/Sonnet usage rationed).
  *
- * NEVER trades. Mirrors the watch daemon's resilience: SIGINT-safe, fail-soft
+ * With SCOUT_HTF_DETERMINISTIC=true, the daemon also opens frozen-rule HTF
+ * entries through the paper-only scout executor. The default remains trigger-only.
+ * Mirrors the watch daemon's resilience: SIGINT-safe, fail-soft
  * per cycle, heartbeat each tick. Trigger state PERSISTS to disk and reloads on
  * boot, so a restart resumes from the latest baseline instead of re-baselining
  * blind (which would miss a breakout during the first post-restart cycle).
@@ -173,6 +175,19 @@ async function preflight(): Promise<void> {
 // exits (htf 10d channel / compression BB-mid) run on this subcadence.
 const EXIT_LANE_SCAN_INTERVAL_MS = 15 * 60_000;
 let lastExitLaneScanAt = 0;
+let lastHtfEntryScanAt = 0;
+
+async function enforceHtfEntries(ts: string): Promise<void> {
+  if (process.env.SCOUT_HTF_DETERMINISTIC !== 'true') return;
+  if (Date.now() - lastHtfEntryScanAt < EXIT_LANE_SCAN_INTERVAL_MS) return;
+  lastHtfEntryScanAt = Date.now();
+  try {
+    const { runConfiguredDeterministicHtfEntries } = await import('@/lib/scout/htf-deterministic-entry-runtime');
+    await runConfiguredDeterministicHtfEntries(Date.now(), (message) => line(`[${ts}] ${message}`));
+  } catch (error) {
+    line(`[${ts}] WARN HTF deterministic entry scan failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 
 async function enforceExits(ts: string): Promise<void> {
   try {
@@ -233,6 +248,7 @@ async function pokeProdCrons(ts: string): Promise<void> {
 async function oneCycle(state: ScoutState): Promise<ScoutState> {
   const ts = new Date().toISOString();
   await enforceExits(ts);
+  await enforceHtfEntries(ts);
   await pokeProdCrons(ts);
   try {
     const { triggers, state: next, degraded, degradedReason, sink, reversionCoverage } = await runScoutWatchCycle(state, WATCH_CFG);
@@ -285,14 +301,14 @@ run(async () => {
 
   if (once) {
     header('scout-watch — single cycle (--once)');
-    line('NEVER trades. Running one trigger cycle…');
+    line('Running one scout cycle (HTF entries only if SCOUT_HTF_DETERMINISTIC=true)…');
     await oneCycle(state);
     line('Done (--once).');
     return;
   }
 
   header(`scout-watch — loop every ${interval}s (Ctrl-C to stop)`);
-  line('NEVER trades. Watching for material triggers…');
+  line('Watching for material triggers and enabled paper-only HTF entries…');
   let stopping = false;
   const requestStop = (sig: string) => {
     if (stopping) return;

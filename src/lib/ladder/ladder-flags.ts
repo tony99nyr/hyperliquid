@@ -42,6 +42,10 @@ export function isRunawayAlertEnabled(): boolean {
   return validateEnv().RUNAWAY_ALERT_ENABLED;
 }
 
+export function isEventPrepCronEnabled(): boolean {
+  return validateEnv().EVENT_PREP_CRON_ENABLED;
+}
+
 /** The bearer the NAS watcher uses to call /ladder/fire-rung. Dedicated token (the
  *  watcher never holds ADMIN_SECRET); falls back to Vercel's native CRON_SECRET. */
 export function getLadderCronSecret(): string | undefined {

@@ -76,6 +76,7 @@ export async function executeIntent(intent: TradeIntent, opts?: { forcePaper?: b
   const fill = live ? await submitLiveOnce(intent) : await paperFill(intent);
   if (fill.sz <= 0) return fill; // nothing filled — do not record (retry stays possible)
   await persistFill(fill);
+  if (live) liveSubmissions.delete(intent.clientIntentId);
   // Leverage is intent METADATA (not derived from the fill, so the fold stays
   // leverage-agnostic — ADR-0001). Carry it through to the positions upsert so the
   // UI can derive ROE. Reduce-only exits leave it undefined → stored value kept.

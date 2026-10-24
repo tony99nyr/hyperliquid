@@ -50,6 +50,7 @@ import { setAdvisoryStop, setAdvisoryTarget, writeScoutHeartbeat } from '@/lib/s
 import { sendDiscord } from '@/lib/infrastructure/notify/discord-notify';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import type { OrderSide } from '@/types/fill';
+import { assertHtfEntryAuthority, HTF_DETERMINISTIC_RULE_VERSION } from '@/lib/scout/htf-deterministic-entry-service';
 
 const SCOUT_TITLE = 'scout';
 
@@ -108,11 +109,23 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   // used to pass the allowlist but dodge the cooldown's .eq() and fragment the per-lane
   // scorecard (review 08-20 M1).
   const lane = typeof args['lane'] === 'string' ? args['lane'].trim().toLowerCase() : '';
+  assertHtfEntryAuthority(lane, process.env.SCOUT_HTF_DETERMINISTIC === 'true', args['deterministic-htf'] === true);
   if (lane === '') {
     throw new Error(
       "--lane is required for an open (the legacy default 'directional' is KILLED). " +
         "Live lanes: 'htf-trend', 'compression-straddle', 'breakdown-short', 'reclaim-long', 'leader-follow', 'vault', 'carry'.",
     );
+  }
+  if (lane === 'htf-trend') {
+    const { data: held, error: heldErr } = await getServiceRoleClient()
+      .from('positions')
+      .select('coin, sessions!inner(mode)')
+      .eq('sessions.mode', 'paper')
+      .eq('coin', coin)
+      .gt('sz', 0)
+      .limit(1);
+    if (heldErr) throw new Error(`htf-trend one-per-coin read failed (${heldErr.message}) — refusing open`);
+    if ((held?.length ?? 0) > 0) throw new Error(`htf-trend one-per-coin rule: ${coin} already has an open paper position`);
   }
   // DETERMINISTIC kill-bar enforcement (08-13 review): a killed lane can NEVER open —
   // prose/context-only sections were not enough (42 trades churned past a fired bar).
@@ -321,6 +334,8 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
       riskUsd: Number.isFinite(riskUsd) ? riskUsd : undefined,
       setupType: typeof args['setup-type'] === 'string' ? String(args['setup-type']) : undefined,
       regime: typeof args['regime'] === 'string' ? String(args['regime']) : undefined,
+      ruleVersion: args['deterministic-htf'] === true && lane === 'htf-trend'
+        ? HTF_DETERMINISTIC_RULE_VERSION : undefined,
       realizedAtOpenUsd,
       feesAtOpenUsd,
     });

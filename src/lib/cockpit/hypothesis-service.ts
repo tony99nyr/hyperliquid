@@ -45,6 +45,7 @@ export async function writeHypothesis(
     riskUsd?: number;
     setupType?: string;
     regime?: string;
+    ruleVersion?: string;
     coin?: string;
     /** Cumulative positions.realized_pnl_usd / fees_paid_usd on this (session,coin)
      *  row JUST BEFORE this trip's open fill folds (migration 0041). The close
@@ -61,6 +62,7 @@ export async function writeHypothesis(
     ...(input.riskUsd !== undefined && Number.isFinite(input.riskUsd) ? { risk_usd: input.riskUsd } : {}),
     ...(input.setupType ? { setup_type: input.setupType.slice(0, 40) } : {}),
     ...(input.regime ? { regime: input.regime.slice(0, 40) } : {}),
+    ...(input.ruleVersion ? { rule_version: input.ruleVersion.slice(0, 80) } : {}),
     ...(input.realizedAtOpenUsd !== undefined && Number.isFinite(input.realizedAtOpenUsd) ? { realized_at_open_usd: input.realizedAtOpenUsd } : {}),
     ...(input.feesAtOpenUsd !== undefined && Number.isFinite(input.feesAtOpenUsd) ? { fees_at_open_usd: input.feesAtOpenUsd } : {}),
   };

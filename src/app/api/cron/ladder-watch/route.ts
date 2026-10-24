@@ -14,10 +14,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyCronBearer } from '@/lib/infrastructure/auth/auth';
-import { getLadderCronSecret, isReversionAlertEnabled, isTrendAlertEnabled, isRunawayAlertEnabled } from '@/lib/ladder/ladder-flags';
+import { getLadderCronSecret, isReversionAlertEnabled, isTrendAlertEnabled, isRunawayAlertEnabled, isEventPrepCronEnabled } from '@/lib/ladder/ladder-flags';
 import { runRunawayAlertCycle } from '@/lib/ladder/runaway-alert-service';
 import { runReversionAlertCycle } from '@/lib/ladder/reversion-alert-service';
-import { runEventPrepAlert } from '@/lib/ladder/event-prep-alert-service';
+import { runEventPrepCron } from '@/lib/ladder/event-prep-cron-service';
 import { runTrendAlertCycle } from '@/lib/ladder/trend-alert-service';
 import { runTrendFlipGuard } from '@/lib/ladder/trend-flip-guard-service';
 import { runLadderWatchTick } from '@/lib/ladder/ladder-watch-service';
@@ -103,10 +103,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const runawayAlert = fullTick && isRunawayAlertEnabled()
       ? await runRunawayAlertCycle(undefined, Date.now()).catch((e) => ({ error: extractErrorMessage(e) }))
       : { skipped: fullTick ? 'disabled' : 'throttled' };
-    //  - event-prep alert: 🚨 one deduped ping when a calendar macro event enters its
-    //    prep window. 10-min granularity still lands ≥2 checks inside the 30-min lead.
+    //  - event prep: default OFF gives the existing reminder. ON atomically drafts
+    //    the pair at T-30 and alerts the operator. Arming remains manual.
     const eventPrepAlert = fullTick
-      ? await runEventPrepAlert(Date.now()).catch((e) => ({ pinged: null, error: extractErrorMessage(e) }))
+      ? await runEventPrepCron(Date.now(), isEventPrepCronEnabled()).catch((e) => ({ pinged: null, error: extractErrorMessage(e) }))
       : throttled;
     return NextResponse.json({ ok: true, ...summary, fullTick, leaderGuard, expiryAlerts, priceAlerts, scoutHeartbeats, stewardProposals, reversionAlert, trendAlert, runawayAlert, trendFlipGuard, eventPrepAlert });
   } catch (e) {

@@ -100,7 +100,7 @@ export async function runLadderWatchTick(args: { now: number }): Promise<LadderW
         // starves it and the exit would silently never reach 2-of-3 (review F1).
         const lookback = indicatorCoins.has(coin) ? INDICATOR_LOOKBACK_MS : LOOKBACK_MS;
         const res = await fetchCandles(coin, WATCH_INTERVAL, args.now - lookback, args.now);
-        snapshots[coin] = snapshotFromCandleResult(coin, res.candles, res.stale, { now: args.now, maxAgeMs: MAX_CANDLE_AGE_MS });
+        snapshots[coin] = snapshotFromCandleResult(coin, res.candles, res.stale, { now: args.now, maxAgeMs: MAX_CANDLE_AGE_MS, candleMs: WATCH_CANDLE_MS });
         if (indicatorCoins.has(coin) && !snapshots[coin].stale) {
           // Fail-soft: null leaves snapshot.indicators undefined → indicator rungs
           // fail closed this tick (never a phantom exit on missing data).
