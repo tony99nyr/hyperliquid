@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { expiryAlertVerdict, EXPIRY_ALERT_WINDOW_MS } from '@/lib/ladder/ladder-expiry-alert-business-logic';
+import { expiryAlertVerdict, residualExpiryAlertVerdict, EXPIRY_ALERT_WINDOW_MS } from '@/lib/ladder/ladder-expiry-alert-business-logic';
 import type { LadderRung } from '@/lib/ladder/ladder-types';
 
 const NOW = 1_700_000_000_000;
@@ -15,7 +15,7 @@ function rung(over: Partial<LadderRung>): LadderRung {
 
 function subject(over: Partial<Parameters<typeof expiryAlertVerdict>[0]> = {}) {
   return {
-    id: 'aaaa1111-2222', title: 'HYPE long', status: 'armed' as const,
+    id: 'aaaa1111-2222', title: 'HYPE long', mode: 'live' as const, status: 'armed' as const,
     expiresAt: new Date(NOW + 6 * 3_600_000).toISOString(), // 6h out — inside the window
     expiryAlertAt: null, rungs: [rung({})], ...over,
   };
@@ -72,5 +72,33 @@ describe('expiryAlertVerdict', () => {
       expiresAt: new Date(NOW + 12 * 3_600_000).toISOString(),   // 12h left < min(12h, 24h)
     }), NOW);
     expect(v.shouldAlert).toBe(true);
+  });
+});
+
+describe('residualExpiryAlertVerdict', () => {
+  const expired = () => subject({ status: 'expired', rungs: [rung({ status: 'fired', side: 'short' }), rung({ action: 'stop_move', status: 'fired', side: 'short' })] });
+
+  it('names the residual position and latest moved resting stop', () => {
+    const verdict = residualExpiryAlertVerdict(expired(), { kind: 'readable', positions: [{ coin: 'HYPE', side: 'short', size: 1.25 }], stops: { HYPE: { triggerPx: 62 } } });
+    expect(verdict.shouldAlert).toBe(true);
+    expect(verdict.message).toMatch(/HYPE short 1\.25/);
+    expect(verdict.message).toMatch(/resting stop.*62/);
+    expect(verdict.message).toMatch(/trailing.*management.*stopped/i);
+  });
+
+  it('does not alert for a flat or opposite-side position', () => {
+    expect(residualExpiryAlertVerdict(expired(), { kind: 'readable', positions: [], stops: {} }).shouldAlert).toBe(false);
+    expect(residualExpiryAlertVerdict(expired(), { kind: 'readable', positions: [{ coin: 'HYPE', side: 'long', size: 1 }], stops: {} }).shouldAlert).toBe(false);
+  });
+
+  it('warns when the live position cannot be verified', () => {
+    const verdict = residualExpiryAlertVerdict(expired(), { kind: 'unreadable' });
+    expect(verdict.shouldAlert).toBe(true);
+    expect(verdict.message).toMatch(/could not verify residual/i);
+  });
+
+  it('warns when the reported position size is invalid', () => {
+    const verdict = residualExpiryAlertVerdict(expired(), { kind: 'readable', positions: [{ coin: 'HYPE', side: 'short', size: Number.NaN }], stops: {} });
+    expect(verdict.message).toMatch(/Could not verify residual position size/);
   });
 });

@@ -102,6 +102,19 @@ describe('runLadderWatchTick', () => {
     expect(performLadderRungFire).not.toHaveBeenCalled();
   });
 
+  it('leaves a previously moved exchange stop untouched when the ladder expires', async () => {
+    const now = 1_700_000_000_000;
+    const restingStop = { coin: 'ETH', oid: 42, triggerPx: 2025 };
+    const exchangeOrders = [restingStop];
+    listLadders.mockResolvedValue([{ id: 'L1', mode: 'live', expiresAt: new Date(now - 1).toISOString() }]);
+    await runLadderWatchTick({ now });
+    expect(exchangeOrders).toEqual([restingStop]);
+    expect(restingStop.triggerPx).toBe(2025);
+    expect(markLadderExpired).toHaveBeenCalledOnce();
+    expect(performLadderRungFire).not.toHaveBeenCalled();
+    expect(fetchCandles).not.toHaveBeenCalled();
+  });
+
   it('fires a MET rung (completed close 2050 ≥ trigger 2000)', async () => {
     const s = await runLadderWatchTick({ now: 0 });
     expect(s.rungsMet).toBe(1);

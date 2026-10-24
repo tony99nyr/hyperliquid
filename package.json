@@ -67,7 +67,8 @@
     "backtest:exit": "tsx --tsconfig tsconfig.scripts.json scripts/backtest-exit.ts",
     "backtest:funding": "tsx --tsconfig tsconfig.scripts.json scripts/backtest-funding.ts",
     "backtest:htf": "tsx --tsconfig tsconfig.scripts.json scripts/backtest-htf.ts",
-    "backtest:significance": "tsx --tsconfig tsconfig.scripts.json scripts/backtest-significance.ts"
+    "backtest:significance": "tsx --tsconfig tsconfig.scripts.json scripts/backtest-significance.ts",
+    "backtest:htf-replay": "tsx --tsconfig tsconfig.scripts.json scripts/backtest-htf-replay.ts"
   },
   "dependencies": {
     "@nktkas/hyperliquid": "^0.32.2",

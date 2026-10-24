@@ -95,6 +95,11 @@ auto-disarms. **Do not reorder, weaken, or short-circuit these.**
 - **Completed candle only, fail-closed.** Triggers evaluate on `candles[-2]` (the last
   COMPLETED bar; `[-1]` is in-progress). A stale/lagging/short feed → `stale=true` →
   evaluator never reports met. The in-progress bar must never reach the evaluator.
+- **Expiry leaves the exchange stop alone.** The watcher marks an overdue ladder
+  `expired` and stops evaluating its rungs. The latest resting stop, including a
+  `stop_move` replacement, remains on HL. The expiry side lane alerts once for a
+  live residual position, or when the live position cannot be verified. Trailing,
+  adds, and reduces stop at expiry. The operator decides how to manage the exit.
 - **Server re-reads the persisted row, never the request.** `mode`/`author`/`status`/
   rung params all come from `getLadderWithRungs`, not the POST body.
 - **Two orthogonal kill-switches + TRADING_MODE.** `LADDER_LIVE_ENABLED` = a live ladder

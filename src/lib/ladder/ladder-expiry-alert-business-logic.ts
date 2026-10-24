@@ -56,3 +56,44 @@ export function expiryAlertVerdict(
     message: `⏳ Ladder ${ladder.id.slice(0, 8)} "${ladder.title}" expires in ~${hoursLeft.toFixed(1)}h with ${what}. Re-arm with a longer window / adjusted levels, or let it lapse deliberately.`,
   };
 }
+
+export type ResidualRead =
+  | { kind: 'unreadable' }
+  | {
+      kind: 'readable';
+      positions: Array<{ coin: string; side: 'long' | 'short'; size: number }>;
+      stops: Record<string, { triggerPx: number | null }> | null;
+    };
+
+/** A fired live entry can leave a position after its ladder stops managing it. */
+export function residualExpiryAlertVerdict(
+  ladder: Pick<LadderWithRungs, 'id' | 'title' | 'mode' | 'status' | 'rungs'>,
+  read: ResidualRead,
+): ExpiryAlertVerdict {
+  if (ladder.status !== 'expired' || ladder.mode !== 'live') return { shouldAlert: false, message: null };
+  const entries = ladder.rungs.filter((r) => r.status === 'fired' && (r.action === 'open' || r.action === 'add'));
+  if (entries.length === 0) return { shouldAlert: false, message: null };
+  const heading = `⏳ Ladder ${ladder.id.slice(0, 8)} "${ladder.title}" expired.`;
+  if (read.kind === 'unreadable') {
+    const coins = [...new Set(entries.map((r) => `${r.coin.toUpperCase()} ${r.side}`))].join(', ');
+    return { shouldAlert: true, message: `${heading} Could not verify residual position or resting stop for ${coins}. Trailing and ladder management have stopped. Check HL and decide how to manage the exit.` };
+  }
+  const malformed = entries.some((r) => read.positions.some((p) =>
+    p.coin.toUpperCase() === r.coin.toUpperCase() && p.side === r.side &&
+    (!Number.isFinite(p.size) || p.size < 0)));
+  if (malformed) {
+    return { shouldAlert: true, message: `${heading} Could not verify residual position size. Trailing and ladder management have stopped. Check HL and decide how to manage the exit.` };
+  }
+  const residuals = [...new Set(entries.map((r) => `${r.coin.toUpperCase()}:${r.side}`))]
+    .map((key) => {
+      const [coin, side] = key.split(':') as [string, 'long' | 'short'];
+      const position = read.positions.find((p) => p.coin.toUpperCase() === coin && p.side === side && Number.isFinite(p.size) && p.size > 0);
+      if (!position) return null;
+      const stopPx = read.stops?.[coin]?.triggerPx;
+      const stop = stopPx != null && Number.isFinite(stopPx) && stopPx > 0
+        ? `resting stop ${stopPx}` : 'resting stop could not be verified';
+      return `${coin} ${side} ${position.size} coins, ${stop}`;
+    }).filter((item): item is string => item !== null);
+  if (residuals.length === 0) return { shouldAlert: false, message: null };
+  return { shouldAlert: true, message: `${heading} Residual open on HL: ${residuals.join('; ')}. Trailing and ladder management have stopped. Decide whether to manage or close the position.` };
+}
