@@ -351,6 +351,8 @@ Deferred Low items (fix in a later session, not in the loop):
 
 - `releaseOcoClaim`: the check and the delete are separate statements; a ladder
   with several open rungs could race. Straddle legs have one open rung.
+- Keep brackets (rungs with a `targetPx`) unexercised through the 2026-10-28
+  FOMC. The read-back excludes pre-submit oids, but the path has never fired live.
 - `submitLiveOnce` never evicts successful fills in a long-lived process.
 - `snapshotFromCandleResult` hardcodes `WATCH_CANDLE_MS` (15m).
 - The add-opposite-side path marks the fire failed but the rung skipped.

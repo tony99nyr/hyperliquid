@@ -123,6 +123,8 @@ enforced:
 | Mark crossed intrabar but no fire | Correct — it fires only if the 15m candle **closes** through, not on an intrabar wick. |
 | Arm rejected with warnings | `validateLadderForArm` failed (missing stop, leverage out of band, adds not decreasing, mixed long/short on one coin, caps breached, non-price trigger). |
 | Arm rejected `INSTANT-FIRE` on a drafter draft | Price ran through an entry gate while the draft waited (three incidents by 2026-10-03). Tap **⚓ Re-anchor levels to the live mark** in the detail modal: every price level scales by live mark ÷ the stored draft anchor (same ratios, same $ risk), the thesis gets an audit note, and you review the fresh numbers and arm. Draft-only; a hand-built draft has no anchor and refuses (its levels are structural — edit or re-draft). A drift beyond ±50% also refuses: that premise is dead, re-draft. |
+| CRITICAL "claim kept, outcome unknown" on a straddle leg | The open's outcome is unknown (e.g. a timeout after send), so the OCO group claim is kept and the sibling leg cannot fire. **Recovery is manual:** check HL for a fill first. If filled, manage the position (its stop is resting). If genuinely unfilled, re-prep the straddle (`pnpm straddle:prep`, fresh group id). Never hand-release the claim without checking the exchange. |
+| Health shows `no-data` | Every candle feed is stale. Health holds at the neutral score by design: during a feed outage the catastrophe net is the exchange-resting stop, which needs no feed from us. Restore the feed; do not act on the neutral score. |
 
 ## Emergency stop
 1. **All autonomous firing:** `LADDER_AUTOFIRE_ENABLED=false` on Vercel (re-deploy or the
