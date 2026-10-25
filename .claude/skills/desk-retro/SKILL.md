@@ -12,7 +12,7 @@ daily retro chases noise and invites p-hacking against the pre-registered bars.
 The weekly cadence IS the multiplicity guard: do not run the bundle sub-weekly.
 Run it on Mondays. This skill is the canonical weekly retro procedure; other docs point here.
 
-## Protocol (run steps 0-4 in this order, then step 5)
+## Protocol (run steps 0-5 in this order, then close the loop in step 6)
 
 ### 0. Performance report, markers and forecast
 
@@ -96,10 +96,36 @@ change a rule on its own.** Its honest limits, all of which apply every run:
 - Overlapping windows (e.g. `--days 14` after a skipped week) can re-vet a
   discard already reviewed — never count the same discard twice.
 
-### 5. Close the loop
+### 5. Calendar curation
+
+`src/lib/skills/economic-events.ts` is the source of truth for the scout event
+blackout, the drafter expiry clamp, the desk-review EVENTS lead and the prod prep
+ping. Curate it every retro:
+
+- Verify every future entry's date and time against the official source (BLS, the
+  Fed, the central bank, company IR) — never from memory. Fix any date that moved.
+  Resolve any entry marked "date unconfirmed" once the official date exists.
+- Top up the horizon: the next CPI / FOMC / NFP class prints must be in, and the
+  calendar must never go structurally exhausted before the NEXT retro
+  (`calendarExhausted` turns the event blackout fail-open).
+- Remove entries that printed before the previous retro. This is safe: the straddle
+  shadow replay matches legs by the print timestamp in each ladder's thesis, not by
+  this list.
+- Conventions: a straddle-class US binary print gets `straddleCoin: 'BTC'` +
+  `prepLeadMinutes: 30`. Everything else juicy enough to gate risk (BoJ-class
+  decisions, bellwether earnings) is awareness-only with `prepLeadMinutes: 0`
+  (feeds the desk read, the blackout and the clamp; never pings).
+- Add sparingly: each entry costs scout dark time ([print−48h, print+4h]) and a
+  drafter dead zone (expiry clamp at print−72h). An event earns its entry by being
+  a genuine binary vol risk, not by existing.
+- The calendar is a TS const compiled into the prod cron bundle — a change reaches
+  production only with the commit + push (step 6 carries it). A calendar code
+  change means the commit needs `pnpm validate`, unlike a markdown-only retro.
+
+### 6. Close the loop
 
 - Append the dated retro entry to `docs/scout/playbook.md` (step 1 usually carries
-  it; fold in anything steps 2-4 changed). Commit + push so the daemons' hosts see it.
+  it; fold in anything steps 2-5 changed). Commit + push so the daemons' hosts see it.
 - If a number moved a LEVER'S VERDICT (graduation, a kill, a cost or capture
   finding), update `docs/DESK_PROFITABILITY.md` with a dated entry — that file is
   the durable answer to "how do we get more profitable" and must never silently
