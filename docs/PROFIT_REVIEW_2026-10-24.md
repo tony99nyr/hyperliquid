@@ -407,7 +407,11 @@ Five follow-ups ran, each pre-registered before data:
    - FOMC moves 0.54%, close to noise.
    - NFP, PCE, PPI and ECB do not clear the bar.
    - Read: do not add NFP, PCE or PPI straddles. Test faster CPI exits in the straddle-exit shadow.
-2. **Entry overshoot.** Event legs average 0.26R overshoot (n=6) against the 0.2R build bar. One 1.23R leg carries the mean; without it, the mean is about 0.07R. A design review of resting entry triggers comes first; nothing merges before FOMC.
+2. **Entry overshoot.** Event legs average 0.26R overshoot (n=6) against the 0.2R build bar. One 1.23R leg carries the mean; without it, the mean is about 0.07R. A design review (Codex Sol, 2026-10-26) says do not build yet. Three reasons:
+   - A resting trigger bypasses the fire-time guards.
+   - Exchange-side OCO is only a cancel race, so both legs can fill.
+   - An atomic stop on a trigger-parent entry is unproven on HL.
+   - Keep the 15m-close path and collect 10 fresh events. A testnet prototype comes first if this is revisited.
 3. **HIP-3 earnings straddles** (`study:hip3-earnings`). FAIL: +0.13R mean (n=38). The top-3-removed mean is -0.35R.
 4. **Spot-perp carry** (`study:spot-perp-carry`, 4h). BTC, ETH and SOL FAIL at 3.7-5.1% APR against the 6% bar. HYPE and the basket are INSUFFICIENT, and the 2026 basket run rate is about 3% APR. A 3x short leg would have needed top-ups in the ETH, SOL and HYPE rallies.
    - Open: `fundingCarryBenchmark` never re-enters after a funding flip, so the scorecard carry control understates the lane.
