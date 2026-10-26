@@ -405,3 +405,51 @@ The pre-registered wording says to kill a lane when net expectancy is below zero
 The current scorecard applies the kill bar to net realised dollars. Keep this
 behaviour during the active sample. At the next retro, decide whether to align
 the implementation with expectancy or amend the registered rule.
+
+### 2026-10-26 review (day 125)
+- **CORRECTION of the 2026-10-19 entry:** "2nd live event-straddle win of 2
+  fired" was wrong. The fire history (ladder_fires ⋈ open rungs) shows **6
+  straddle legs fired: 4W/2L, net +$25.80** (PPI ETH long lost, Retail Sales
+  ETH short won, FOMC-Jul v3 BTC short −$26.87, Jackson Hole BTC short won,
+  CPI-Aug BTC long won, CPI-Sep BTC short +$8.68). The Oct-19 count came from
+  ladder_outcomes resolution coverage, not fire history — resolution coverage
+  is NOT the population. The event-lane evidence base is 6 legs, not 2.
+- **compression-straddle: KILL recorded** (fixed scorecard, `scout:review
+  --write`): net **−$12.39 over 7 closes, win 29%** (the pre-fix scorecard's
+  +$34.51 double-counted overlapping windows). The pre-registered bar fired;
+  the lane stops. This is an operational stopping rule at n=7, not proof of
+  negative expectancy. The LIVE event-straddle setup (above) is a separate,
+  operator-armed lane and is unaffected.
+- **Kill-bar measure decided (the 2026-10-24 note):** for compression-straddle
+  both readings agree (net dollars −$12.39, setup expectancy −0.19R), so the
+  KILL is unambiguous. Going forward the scorecard's realised-dollars
+  implementation IS the operative bar for currently-registered lanes — the code
+  thresholds are the pre-registration; the prose word "expectancy" was drift.
+  Any move to an R-based bar is a change for the NEXT lane registration, never
+  retroactive.
+- **htf-trend: CONTINUE** (12 closed, 67% win, net +$100.45, run-rate +$35/mo).
+  Honesty caveat for the n=20 checkpoint: the profit-review cluster test shows
+  removing the single largest 5-day cluster flips mean R from +0.66 to −0.08
+  (n=8) — the edge is cluster-concentrated, exactly why the registered
+  checkpoint demands the cluster-robust test + 0.7 haircut before any verdict.
+- **Perf report (step 0, first run):** htf-trend 12/20 to bar, mean +0.17R per
+  trade; live fade-short-pyramid +$1.54 (n=1). Forecast P50 $0.00 / P95 $1.54,
+  P(net>0) 29% — quoted with the caveat that whole-episode resampling makes the
+  downside optimistic. Four change markers proposed (scorecard fix fc64b05,
+  lot attribution 530b0b5, live-path fixes 3e325a9, compression KILL) —
+  pending OPERATOR confirmation in the Lanes tab; none treated as confirmed.
+- **Shadow replay: 23 misses (19 htf-trend, 4 compression-straddle now moot),
+  all 19 attributed, 0 unexplained:** 8 position-blocks · 7 logged stand-downs
+  · 3 event blackouts (FOMC-Sep, CPI-Sep ×2) · 1 daemon gap (the known
+  2026-09-21). Infrastructure loss still ~1 episode; no capture work justified.
+- **Ladder ledger (backfilled, lot-based):** 25 closed, +0.03R, net +$53.49;
+  every family COLLECT (all under the 10-close bar). Event-straddle is the
+  deepest family at 6 closes. Discard vet (7d): 2 never-triggered runaway
+  drafts, nothing missed, nothing dodged — clean.
+- **Calendar curated (new step 5):** pruned the 4 printed events; verified
+  entries through FOMC-Dec (Oct 24-25 source checks); NVIDIA stays
+  "date unconfirmed". Week ahead: **FOMC Wed 2026-10-28 18:00Z** — straddle
+  BTC at the T−30 ping; scout blackout covers Oct 26 18:00Z → Oct 30 07:00Z
+  (FOMC + ECB + earnings cluster + BoJ); misses there are discipline, not loss.
+- **Steward:** 27 resolved, 5 helped / 11 hurt, net if-followed −$17.74 —
+  near-zero authority stands.

@@ -26,36 +26,6 @@ export interface EconEvent {
 
 export const ECONOMIC_EVENTS: EconEvent[] = [
   {
-    name: 'Jackson Hole — Warsh keynote',
-    atIso: '2026-08-28T14:00:00Z',
-    note:
-      "Kevin Warsh's FIRST keynote as Fed chair (symposium Aug 27-29, theme: financial innovation/payments). " +
-      'A new chair debuting policy tone = outsized headline risk vs a routine JH speech. Keynote ~10:00 ET.',
-    straddleCoin: 'BTC',
-    prepLeadMinutes: 30,
-  },
-  {
-    name: 'CPI (Aug data)',
-    atIso: '2026-09-11T12:30:00Z',
-    note: 'BLS CPI 08:30 ET. Inflation print into the Sep FOMC — binary macro.',
-    straddleCoin: 'BTC',
-    prepLeadMinutes: 30,
-  },
-  {
-    name: 'FOMC',
-    atIso: '2026-09-16T18:00:00Z',
-    note: 'Rate decision 18:00 UTC + press conference 18:30. First decision of the Warsh Fed — binary macro, straddle it.',
-    straddleCoin: 'BTC',
-    prepLeadMinutes: 30,
-  },
-  {
-    name: 'CPI (Sep data)',
-    atIso: '2026-10-14T12:30:00Z',
-    note: 'BLS CPI 08:30 ET (verified BLS schedule). Binary macro — straddle it.',
-    straddleCoin: 'BTC',
-    prepLeadMinutes: 30,
-  },
-  {
     name: 'FOMC (Oct)',
     atIso: '2026-10-28T18:00:00Z',
     note:
@@ -111,9 +81,10 @@ export const ECONOMIC_EVENTS: EconEvent[] = [
   },
   {
     name: 'NVIDIA earnings (date unconfirmed)',
-    atIso: '2026-11-17T21:20:00Z',
+    atIso: '2026-11-18T21:20:00Z',
     note:
-      'Q3 FY27 after the US close (~16:20 ET). DATE UNCONFIRMED — NVIDIA confirms ~3-4 weeks ahead; verify on ' +
+      'Q3 FY27 after the US close (~16:20 ET). DATE UNCONFIRMED (Nov 18 inferred; retro-checked 2026-10-26) — ' +
+      'NVIDIA confirms ~3-4 weeks ahead; verify on ' +
       'investor relations before relying on it. The AI-capex bellwether trades like scheduled macro for the whole ' +
       'risk complex, BTC included. Awareness only.',
     prepLeadMinutes: 0,

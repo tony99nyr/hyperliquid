@@ -68,6 +68,54 @@ More 15m mechanical lanes · funding fades (killed) · leader copying (killed at
 its bar) · trend-follow at 15m/4h (killed) · daily retro tinkering · wide
 conditional-ladder lattices · sizing up to "make it back".
 
+## 2026-10-26 review
+
+### The account's arc (live round trips, net of fees)
+
+Recomputed from the audited bundle (`pnpm analysis:profit-review`); it agrees
+with the 2026-10-13 fills-based table within ~$1, so that arc stands.
+
+| Month | Round trips | Net (incl. fees) |
+|---|---|---|
+| 2026-06 | 22 | −$204.78 |
+| 2026-07 | 12 | −$34.42 |
+| 2026-08 | 3 | +$41.06 |
+| 2026-09 | 5 | +$38.17 |
+| 2026-10 (to 26th) | 4 | +$8.09 |
+
+Lifetime: 46 round trips, **−$151.87** all-in (fees $40.29). Since August:
+12 round trips, **+$87.32**, 58% win, payoff 3.9. The post-discipline regime
+keeps paying; the lifetime hole is still June-July.
+
+### Lever 2 (the event lane) — verdict MOVED
+
+**compression-straddle (scout) KILLED at its pre-registered bar.** The fixed
+scorecard (fc64b05) reads **−$12.39 over 7 closes, win 29%**; the +$34.51 that
+survived the 6th-close bar was a window double-count. Recorded with
+`scout:review --write` at the 2026-10-26 retro. Stopping rule at n=7, not proof
+of negative expectancy. The lane's framing shifts: **the live, operator-armed
+event-straddle IS the event lane** — 6 legs fired lifetime, 4W/2L, net
+**+$25.80**, +0.03R slip-aware, COLLECT at 6/10 closes. Keep straddling the
+calendar prints by the book; no scout compression variant without a NEW
+pre-registration.
+
+### Lever 1 (finish the bars) — sharpened, verdict unchanged
+
+The lot-based `ladder_outcomes` backfill (530b0b5) splits the ledger honestly:
+**ladder-attributed fills +$53.49 over 25 closed (+0.03R); manual fills
+−$204.37 lifetime.** The automation side is positive; the manual side carries
+the June-July bleed. htf-trend is at 12/20 closes (67% win, net +$100.45), but
+the cluster test is sobering: removing the single largest 5-day cluster flips
+mean R from +0.66 to −0.08 (n=8). The n=20 verdict MUST be the registered
+cluster-robust test with the 0.7 haircut — nothing is graduated on the raw mean.
+
+### Markers
+
+Four change markers proposed (scorecard fix fc64b05 · lot attribution 530b0b5 ·
+live-path fixes 3e325a9 · compression-straddle KILL) — **pending operator
+confirmation** in the cockpit Lanes tab Change log. Lane statistics split only
+on a confirmed marker.
+
 ## How to reproduce the numbers
 
 - **Core numbers:** run `pnpm analysis:profit-review` (`scripts/analysis/profit-review/`).
