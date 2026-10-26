@@ -1,0 +1,356 @@
+{
+ "name": "hip3-earnings-straddle",
+ "compiled": "2026-10-26",
+ "notes": [
+  "Public data only. Dates from alphaquery.com earnings-history unless a primary source is listed.",
+  "AMC = after the US close, set to 20:05 UTC (20:20 for NVDA). BMO = before the open, set to 11:30 UTC. All dates fall in US daylight time (UTC-4).",
+  "Sub-hour print minutes do not matter: the replay uses 1h candles, so the print falls in one hourly candle.",
+  "Timing for aggregator-only rows is the company's usual practice, not individually verified.",
+  "MSTR 2026-07-30: a MarketBeat page said 31 July; the company press release and 8-K say 30 July after the close. 30 July used.",
+  "Events after 2026-10-24 are not listed (no post-print candles)."
+ ],
+ "events": [
+  {
+   "coin": "xyz:TSLA",
+   "ticker": "TSLA",
+   "printAtUtc": "2026-04-22T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-04-22",
+   "source": "https://www.alphaquery.com/stock/TSLA/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:TSLA",
+   "ticker": "TSLA",
+   "printAtUtc": "2026-07-22T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-07-22",
+   "source": "https://electrek.co/2026/07/21/tesla-tsla-q2-2026-earnings-preview/",
+   "sourceKind": "company or primary"
+  },
+  {
+   "coin": "xyz:TSLA",
+   "ticker": "TSLA",
+   "printAtUtc": "2026-10-21T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-10-21",
+   "source": "https://www.alphaquery.com/stock/TSLA/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:META",
+   "ticker": "META",
+   "printAtUtc": "2026-04-29T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-04-29",
+   "source": "https://www.alphaquery.com/stock/META/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:META",
+   "ticker": "META",
+   "printAtUtc": "2026-07-29T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-07-29",
+   "source": "https://www.alphaquery.com/stock/META/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:META",
+   "ticker": "META",
+   "printAtUtc": "2026-10-21T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-10-21",
+   "source": "https://investor.atmeta.com/investor-news/press-release-details/2026/Meta-to-Announce-Third-Quarter-2026-Results/default.aspx",
+   "sourceKind": "company or primary"
+  },
+  {
+   "coin": "xyz:GOOGL",
+   "ticker": "GOOGL",
+   "printAtUtc": "2026-04-29T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-04-29",
+   "source": "https://www.alphaquery.com/stock/GOOGL/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:GOOGL",
+   "ticker": "GOOGL",
+   "printAtUtc": "2026-07-22T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-07-22",
+   "source": "https://abc.xyz/investor/news/news-details/2026/Alphabet-Announces-Date-of-Second-Quarter-2026-Financial-Results-Conference-Call-2026-2h_R0kzZHY/default.aspx",
+   "sourceKind": "company or primary"
+  },
+  {
+   "coin": "xyz:AAPL",
+   "ticker": "AAPL",
+   "printAtUtc": "2026-04-30T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-04-30",
+   "source": "https://www.alphaquery.com/stock/AAPL/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:AAPL",
+   "ticker": "AAPL",
+   "printAtUtc": "2026-07-30T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-07-30",
+   "source": "https://www.alphaquery.com/stock/AAPL/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:AMZN",
+   "ticker": "AMZN",
+   "printAtUtc": "2026-04-29T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-04-29",
+   "source": "https://www.alphaquery.com/stock/AMZN/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:AMZN",
+   "ticker": "AMZN",
+   "printAtUtc": "2026-07-30T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-07-30",
+   "source": "https://www.alphaquery.com/stock/AMZN/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:MSFT",
+   "ticker": "MSFT",
+   "printAtUtc": "2026-04-29T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-04-29",
+   "source": "https://www.alphaquery.com/stock/MSFT/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:MSFT",
+   "ticker": "MSFT",
+   "printAtUtc": "2026-07-29T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-07-29",
+   "source": "https://www.alphaquery.com/stock/MSFT/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:AMD",
+   "ticker": "AMD",
+   "printAtUtc": "2026-05-05T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-05-05",
+   "source": "https://www.alphaquery.com/stock/AMD/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:AMD",
+   "ticker": "AMD",
+   "printAtUtc": "2026-08-04T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-08-04",
+   "source": "https://www.alphaquery.com/stock/AMD/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:PLTR",
+   "ticker": "PLTR",
+   "printAtUtc": "2026-05-04T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-05-04",
+   "source": "https://www.alphaquery.com/stock/PLTR/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:PLTR",
+   "ticker": "PLTR",
+   "printAtUtc": "2026-08-03T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-08-03",
+   "source": "https://www.alphaquery.com/stock/PLTR/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:INTC",
+   "ticker": "INTC",
+   "printAtUtc": "2026-04-23T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-04-23",
+   "source": "https://www.alphaquery.com/stock/INTC/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:INTC",
+   "ticker": "INTC",
+   "printAtUtc": "2026-07-23T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-07-23",
+   "source": "https://www.alphaquery.com/stock/INTC/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:NVDA",
+   "ticker": "NVDA",
+   "printAtUtc": "2026-05-20T20:20:00Z",
+   "timing": "AMC",
+   "date": "2026-05-20",
+   "source": "https://investor.nvidia.com/financial-info/financial-results/",
+   "sourceKind": "company or primary"
+  },
+  {
+   "coin": "xyz:NVDA",
+   "ticker": "NVDA",
+   "printAtUtc": "2026-08-26T20:20:00Z",
+   "timing": "AMC",
+   "date": "2026-08-26",
+   "source": "https://www.alphaquery.com/stock/NVDA/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:MU",
+   "ticker": "MU",
+   "printAtUtc": "2026-06-24T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-06-24",
+   "source": "https://www.alphaquery.com/stock/MU/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:MU",
+   "ticker": "MU",
+   "printAtUtc": "2026-09-30T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-09-30",
+   "source": "https://www.alphaquery.com/stock/MU/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:SNDK",
+   "ticker": "SNDK",
+   "printAtUtc": "2026-04-30T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-04-30",
+   "source": "https://www.sec.gov/Archives/edgar/data/0002023554/000162828026028879/sndkq3-26ex991xpressrelease.htm",
+   "sourceKind": "company or primary"
+  },
+  {
+   "coin": "xyz:SNDK",
+   "ticker": "SNDK",
+   "printAtUtc": "2026-08-05T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-08-05",
+   "source": "https://www.alphaquery.com/stock/SNDK/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:CRWV",
+   "ticker": "CRWV",
+   "printAtUtc": "2026-05-07T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-05-07",
+   "source": "https://www.alphaquery.com/stock/CRWV/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:CRWV",
+   "ticker": "CRWV",
+   "printAtUtc": "2026-08-11T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-08-11",
+   "source": "https://www.alphaquery.com/stock/CRWV/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:ORCL",
+   "ticker": "ORCL",
+   "printAtUtc": "2026-06-10T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-06-10",
+   "source": "https://www.alphaquery.com/stock/ORCL/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:ORCL",
+   "ticker": "ORCL",
+   "printAtUtc": "2026-09-10T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-09-10",
+   "source": "https://www.alphaquery.com/stock/ORCL/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:CRCL",
+   "ticker": "CRCL",
+   "printAtUtc": "2026-05-11T11:30:00Z",
+   "timing": "BMO",
+   "date": "2026-05-11",
+   "source": "https://www.alphaquery.com/stock/CRCL/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:CRCL",
+   "ticker": "CRCL",
+   "printAtUtc": "2026-08-05T11:30:00Z",
+   "timing": "BMO",
+   "date": "2026-08-05",
+   "source": "https://www.opencapital.sh/stocks/crcl/earnings/q2-2026",
+   "sourceKind": "company or primary"
+  },
+  {
+   "coin": "xyz:MSTR",
+   "ticker": "MSTR",
+   "printAtUtc": "2026-05-05T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-05-05",
+   "source": "https://www.alphaquery.com/stock/MSTR/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:MSTR",
+   "ticker": "MSTR",
+   "printAtUtc": "2026-07-30T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-07-30",
+   "source": "https://www.strategy.com/press/strategy-announces-earnings-release-date-and-live-video-webinar-for-second-quarter-2026-financial-results_07-09-2026",
+   "sourceKind": "company or primary"
+  },
+  {
+   "coin": "xyz:MRVL",
+   "ticker": "MRVL",
+   "printAtUtc": "2026-05-27T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-05-27",
+   "source": "https://investor.marvell.com/news-events/press-releases/detail/1023",
+   "sourceKind": "company or primary"
+  },
+  {
+   "coin": "xyz:MRVL",
+   "ticker": "MRVL",
+   "printAtUtc": "2026-08-27T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-08-27",
+   "source": "https://www.alphaquery.com/stock/MRVL/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  },
+  {
+   "coin": "xyz:CBRS",
+   "ticker": "CBRS",
+   "printAtUtc": "2026-06-23T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-06-23",
+   "source": "https://investors.cerebras.ai/news-releases/news-release-details/cerebras-systems-sets-date-first-quarter-2026-financial-results",
+   "sourceKind": "company or primary"
+  },
+  {
+   "coin": "xyz:CBRS",
+   "ticker": "CBRS",
+   "printAtUtc": "2026-08-12T20:05:00Z",
+   "timing": "AMC",
+   "date": "2026-08-12",
+   "source": "https://www.alphaquery.com/stock/CBRS/earnings-history",
+   "sourceKind": "aggregator date; timing from company habit"
+  }
+ ]
+}

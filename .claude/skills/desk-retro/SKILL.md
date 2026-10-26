@@ -36,6 +36,11 @@ pnpm perf:forecast --freeze --write
 Report the saved forecast snapshot with its inputs hash and P5-P95. Do not run
 the freeze command on later retros in the same month.
 
+On that same first retro, score the previous month (`pnpm perf:forecast --score --write`)
+and update the capital-rule count in
+[PREREGISTRATION_capital-rule.md](../../../docs/scout/PREREGISTRATION_capital-rule.md):
+qualifying, neutral or reset, with the reason.
+
 ### 1. Scout scorecard + playbook curation
 
 Run the `scout-review` skill (it wraps `pnpm scout:review -- --write`). Follow THAT skill's

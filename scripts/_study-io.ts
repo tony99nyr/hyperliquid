@@ -14,7 +14,7 @@ import type { PriceCandle } from '@/types/trading-core';
 export const STUDY_CACHE_ROOT = path.resolve('data/backups/hyperliquid-study');
 const HL_INFO_URL = 'https://api.hyperliquid.xyz/info';
 /** Info request types this module may send. Anything else is refused. */
-const READ_ONLY_HL_TYPES = new Set(['meta', 'candleSnapshot', 'fundingHistory', 'predictedFundings']);
+const READ_ONLY_HL_TYPES = new Set(['meta', 'spotMeta', 'metaAndAssetCtxs', 'perpDexs', 'candleSnapshot', 'fundingHistory', 'predictedFundings']);
 
 export const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 

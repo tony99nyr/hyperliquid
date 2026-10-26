@@ -75,7 +75,10 @@
     "study:dvol": "tsx --tsconfig tsconfig.scripts.json scripts/dvol-straddle-filter.ts",
     "study:oi": "tsx --tsconfig tsconfig.scripts.json scripts/oi-direction-filter.ts",
     "study:funding-veto": "tsx --tsconfig tsconfig.scripts.json scripts/cross-venue-funding-veto.ts",
-    "study:regime": "tsx --tsconfig tsconfig.scripts.json scripts/regime-split-expectancy.ts"
+    "study:spot-perp-carry": "tsx --tsconfig tsconfig.scripts.json scripts/spot-perp-carry.ts",
+    "study:catalyst-classes": "tsx --tsconfig tsconfig.scripts.json scripts/catalyst-classes.ts",
+    "study:regime": "tsx --tsconfig tsconfig.scripts.json scripts/regime-split-expectancy.ts",
+    "study:hip3-earnings": "tsx --tsconfig tsconfig.scripts.json scripts/hip3-earnings-straddle.ts"
   },
   "dependencies": {
     "@nktkas/hyperliquid": "^0.32.2",
