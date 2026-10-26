@@ -22,19 +22,37 @@ describe('fundingCarryBenchmark', () => {
     expect(b.carryReturnFrac).toBeCloseTo(0.00005 * 8, 9); // positive carry on the long side
   });
 
-  it('negative-funding guard: exits at the flip, keeping only the favorable intervals', () => {
-    // series(0.0002,5) = 6 points (hrs 0–5, all +); then hrs 6,7 negative. The +rate at
-    // hr5 governs the [5,6] interval (favorable), so 6 intervals accrue; the flip is
-    // detected at hr6 → exit. Carry = 0.0002 × 6.
+  it('a brief flip inside the trailing window: stays in and pays the adverse hour', () => {
+    // 6 points at +0.0002 then 2 at -0.0002. The 24-point trailing mean stays positive,
+    // so the position holds and the [6,7] interval costs 0.0002.
     const flip = [
       ...series(0.0002, 5),
       { time: T0 + 6 * H, fundingHourly: -0.0002 },
       { time: T0 + 7 * H, fundingHourly: -0.0002 },
     ];
     const b = fundingCarryBenchmark(flip);
+    expect(b.exitedEarly).toBe(false);
+    expect(b.entries).toBe(1);
+    expect(b.carryReturnFrac).toBeCloseTo(0.0002 * 6 - 0.0002, 9);
+    expect(b.heldHours).toBeCloseTo(7, 6);
+    expect(b.spanHours).toBeCloseTo(7, 6);
+  });
+
+  it('a sustained flip exits, then re-enters when funding recovers (the old benchmark never re-entered)', () => {
+    // 10h at +0.0001, 30h at -0.0001, 40h at +0.0001 (hourly points).
+    const pts = Array.from({ length: 81 }, (_, i) => ({
+      time: T0 + i * H,
+      fundingHourly: i < 10 ? 0.0001 : i < 40 ? -0.0001 : 0.0001,
+    }));
+    const b = fundingCarryBenchmark(pts);
+    expect(b.side).toBe('short');
     expect(b.exitedEarly).toBe(true);
-    expect(b.carryReturnFrac).toBeCloseTo(0.0002 * 6, 9);
-    expect(b.heldHours).toBeCloseTo(6, 6);
+    expect(b.entries).toBe(2);
+    expect(b.spanHours).toBeCloseTo(80, 6);
+    expect(b.heldHours).toBeLessThan(80);
+    // Second entry is after the trailing mean turns positive again, so the late
+    // positive stretch adds carry after the exit.
+    expect(b.carryReturnFrac).toBeGreaterThan(0);
   });
 
   it('thin / flat series → zero carry, no side', () => {

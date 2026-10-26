@@ -414,5 +414,5 @@ Five follow-ups ran, each pre-registered before data:
    - Keep the 15m-close path and collect 10 fresh events. A testnet prototype comes first if this is revisited.
 3. **HIP-3 earnings straddles** (`study:hip3-earnings`). FAIL: +0.13R mean (n=38). The top-3-removed mean is -0.35R.
 4. **Spot-perp carry** (`study:spot-perp-carry`, 4h). BTC, ETH and SOL FAIL at 3.7-5.1% APR against the 6% bar. HYPE and the basket are INSUFFICIENT, and the 2026 basket run rate is about 3% APR. A 3x short leg would have needed top-ups in the ETH, SOL and HYPE rallies.
-   - Open: `fundingCarryBenchmark` never re-enters after a funding flip, so the scorecard carry control understates the lane.
+   - Fixed 2026-10-26: `fundingCarryBenchmark` now exits and re-enters on a 24h trailing funding mean, charges the round-trip cost per entry, and the scorecard run rate uses the whole window.
 5. **Capital rule** registered in `docs/scout/PREREGISTRATION_capital-rule.md`. The first count is the November freeze (2026-11-02 retro).

@@ -205,16 +205,20 @@ export async function computeScoutLaneCards(
     const benches = await Promise.all(
       ['ETH', 'BTC', 'SOL', 'HYPE'].map(async (coin) => ({ coin, b: fundingCarryBenchmark(await fetchFundingHistory(coin, since).catch(() => [])) })),
     );
-    const best = benches.filter((x) => x.b.heldHours > 0).sort((a, b) => b.b.carryReturnFrac - a.b.carryReturnFrac)[0];
+    // Rank by carry NET of a round-trip cost per entry, so a coin that re-enters often
+    // is not picked on gross carry alone.
+    const netOf = (b: { carryReturnFrac: number; entries: number }) => b.carryReturnFrac - CARRY_ROUNDTRIP_FRAC * Math.max(1, b.entries);
+    const best = benches.filter((x) => x.b.heldHours > 0).sort((a, b) => netOf(b.b) - netOf(a.b))[0];
     if (best) {
-      const netFrac = best.b.carryReturnFrac - CARRY_ROUNDTRIP_FRAC;
-      const days = Math.max(1, best.b.heldHours / 24);
+      const costFrac = CARRY_ROUNDTRIP_FRAC * Math.max(1, best.b.entries);
+      const netFrac = best.b.carryReturnFrac - costFrac;
+      const days = Math.max(1, best.b.spanHours / 24);
       const c = buildScorecard({ realizedGrossUsd: 0, slippageHaircutUsd: 0, fundingHaircutUsd: 0, unrealizedPnlUsd: notional * netFrac, tradeCount: 0, wins: 0, losses: 0, periodDays: days }, { ...DEFAULT_SCORECARD_CONFIG, monthlyBarUsd: bar });
       lanes.push({
         lane: 'carry', kind: 'carry', netUsd: c.netUsd, realizedUsd: 0, fundingUsd: 0, unrealizedUsd: notional * netFrac,
         tradeCount: 0, winRate: 0, monthlyRunRateUsd: c.monthlyRunRateUsd, periodDays: days, verdict: c.verdict, openCount: 0,
-        label: `${best.b.side} ${best.coin} $${notional} Δ-neutral → ${(best.b.carryReturnFrac * 100).toFixed(2)}% − ${(CARRY_ROUNDTRIP_FRAC * 100).toFixed(1)}% cost over ${days.toFixed(0)}d${best.b.exitedEarly ? ' [flipped→exit]' : ''}`,
-        detail: { coin: best.coin, side: best.b.side, carryFrac: best.b.carryReturnFrac, costFrac: CARRY_ROUNDTRIP_FRAC, exitedEarly: best.b.exitedEarly, notional, bar },
+        label: `${best.b.side} ${best.coin} $${notional} Δ-neutral → ${(best.b.carryReturnFrac * 100).toFixed(2)}% − ${(costFrac * 100).toFixed(1)}% cost (${best.b.entries} entr${best.b.entries === 1 ? 'y' : 'ies'}) over ${days.toFixed(0)}d`,
+        detail: { coin: best.coin, side: best.b.side, carryFrac: best.b.carryReturnFrac, costFrac, entries: best.b.entries, heldHours: best.b.heldHours, exitedEarly: best.b.exitedEarly, notional, bar },
       });
     }
   } catch { /* carry lane unavailable this cycle */ }
