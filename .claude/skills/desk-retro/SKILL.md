@@ -12,7 +12,7 @@ daily retro chases noise and invites p-hacking against the pre-registered bars.
 The weekly cadence IS the multiplicity guard: do not run the bundle sub-weekly.
 Run it on Mondays. This skill is the canonical weekly retro procedure; other docs point here.
 
-## Protocol (run steps 0-5 in this order, then close the loop in step 6)
+## Protocol (run steps 0-5 in this order, with 4b after 4, then close the loop in step 6)
 
 ### 0. Performance report, markers and forecast
 
@@ -40,6 +40,11 @@ On that same first retro, score the previous month (`pnpm perf:forecast --score 
 and update the capital-rule count in
 [PREREGISTRATION_capital-rule.md](../../../docs/scout/PREREGISTRATION_capital-rule.md):
 qualifying, neutral or reset, with the reason.
+
+Then read the benchmark cards on the cockpit Scout tab (`lane_scorecards`, kind
+`benchmark`, written by `pnpm scout:lanes` on the NAS tick). The funding-carry card is
+a yardstick, not a lane: quote its net beside the lanes, and treat a card older than
+one hour as a stale NAS feed (flag the operator, do not run it locally).
 
 ### 1. Scout scorecard + playbook curation
 
@@ -101,6 +106,24 @@ change a rule on its own.** Its honest limits, all of which apply every run:
 - Overlapping windows (e.g. `--days 14` after a skipped week) can re-vet a
   discard already reviewed — never count the same discard twice.
 
+### 4b. Open pre-registrations: is each count still moving?
+
+A pre-registered test only reaches its decision if its evidence keeps arriving. List
+each open `docs/scout/PREREGISTRATION_*.md` (verdict not yet final) in one table: the
+test, its count toward the bar, the change since the last retro, and the next decision
+date. Flag any count that did not move when it should have. Examples:
+
+- event-straddle: new event episodes toward the 10-episode review.
+- Entry overshoot (catalyst-classes): intrabar gate touches against completed-close
+  outcomes, one row per new event leg.
+- cross-venue funding-veto: rows in the capture archive
+  (`data/backups/hyperliquid-study/cross-venue-funding/hl-observations.json` on the
+  NAS, written at 07:55, 15:55 and 23:55 UTC by `nas-watch.sh`).
+- capital-rule: the monthly count (first retro of the month only).
+
+A count that stalls is an outage, not a result. Find the cause before the next retro.
+Do not change a bar here: a redesign is a new pre-registration.
+
 ### 5. Calendar curation
 
 `src/lib/skills/economic-events.ts` is the source of truth for the scout event
@@ -110,16 +133,21 @@ ping. Curate it every retro:
 - Verify every future entry's date and time against the official source (BLS, the
   Fed, the central bank, company IR) — never from memory. Fix any date that moved.
   Resolve any entry marked "date unconfirmed" once the official date exists.
-- Top up the horizon: the next CPI / FOMC / NFP class prints must be in, and the
-  calendar must never go structurally exhausted before the NEXT retro
-  (`calendarExhausted` turns the event blackout fail-open).
+- Top up the horizon: the next CPI and FOMC prints must be in, and the calendar must
+  never go structurally exhausted before the NEXT retro (`calendarExhausted` turns the
+  event blackout fail-open). NFP, PCE and PPI go in as awareness-only entries.
 - Remove entries that printed before the previous retro. This is safe: the straddle
   shadow replay matches legs by the print timestamp in each ladder's thesis, not by
   this list.
-- Conventions: a straddle-class US binary print gets `straddleCoin: 'BTC'` +
-  `prepLeadMinutes: 30`. Everything else juicy enough to gate risk (BoJ-class
-  decisions, bellwether earnings) is awareness-only with `prepLeadMinutes: 0`
-  (feeds the desk read, the blackout and the clamp; never pings).
+- Conventions: only FOMC and CPI are straddle classes. They get `straddleCoin: 'BTC'`
+  + `prepLeadMinutes: 30`. The 2026-10-26 catalyst-class study rejected NFP, PCE and
+  PPI, and the HIP-3 earnings study failed
+  ([PREREGISTRATION_catalyst-classes.md](../../../docs/scout/PREREGISTRATION_catalyst-classes.md),
+  [PREREGISTRATION_hip3-earnings-straddle.md](../../../docs/scout/PREREGISTRATION_hip3-earnings-straddle.md)).
+  Everything else that can gate risk (NFP/PCE/PPI, BoJ-class decisions, bellwether
+  earnings) is awareness-only with `prepLeadMinutes: 0` and no `straddleCoin` (it
+  feeds the desk read, the blackout and the clamp, and never pings). Add a new
+  straddle class only through a new pre-registration that passes.
 - Add sparingly: each entry costs scout dark time ([print−48h, print+4h]) and a
   drafter dead zone (expiry clamp at print−72h). An event earns its entry by being
   a genuine binary vol risk, not by existing.
@@ -135,8 +163,10 @@ ping. Curate it every retro:
   finding), update `docs/DESK_PROFITABILITY.md` with a dated entry — that file is
   the durable answer to "how do we get more profitable" and must never silently
   drift from the ledger.
-- Re-arm the next Monday reminder (session reminders do not persist — schedule the
-  next one-shot BEFORE finishing the retro).
+- The durable reminder is the systemd user timer `desk-retro-reminder.timer` on the
+  operator's PC (`ops/systemd/`, Mondays 12:57 local, a Discord ping). Check that it is
+  active: `systemctl --user list-timers desk-retro-reminder.timer`. A session reminder
+  (CronCreate) is optional on top: it is lost when the session or the machine restarts.
 - Report to the operator in a few lines: verdicts, playbook changes, discard-vet
   summary, and anything that changes next week's desk behaviour.
 

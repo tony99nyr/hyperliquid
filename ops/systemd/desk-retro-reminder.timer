@@ -1,0 +1,10 @@
+# Mondays 12:57 local time. Persistent: a missed run (machine off) fires at the next boot.
+[Unit]
+Description=Weekly desk-retro reminder
+
+[Timer]
+OnCalendar=Mon *-*-* 12:57:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -34,7 +34,10 @@ This assembles, READ-ONLY:
 - **EVENTS** — scheduled macro events (FOMC/CPI/…) in the next ~10 days from the calendar
   (`src/lib/skills/economic-events.ts`), with time-to-print. **Lead with this** — a binary
   event within a couple days dominates everything below it (don't hold naked directional
-  risk through the print; the straddle is the play). Edit that file to add/remove events.
+  risk through the print). The straddle is the play only for FOMC and CPI, the entries with
+  a `straddleCoin`. NFP, PCE, PPI and earnings are awareness-only: the 2026-10-26
+  catalyst-class and HIP-3 earnings studies rejected them as straddle classes. Do not
+  propose a straddle for them. Edit that file to add/remove events.
 - **THE BOOK** — live positions (size, entry, uPnL, ROE, leverage, liq), armed ladders,
   draft ladders, open previews (with review status).
 - **THE MARKET** — per coin: mark, 24h change, **short- vs long-term trend** (LT = 1d/8h,
@@ -79,7 +82,10 @@ go / no-go and what's owed before arming.
   it changes whether a setup is "with" or "against" the structure.
 - **Carry**: extreme funding (e.g. SOL −16% APR = crowded shorts paying) is CONTEXT, not a
   signal — funding-extreme reversion was tested and KILLED (`docs/scout/BACKTEST_FINDINGS.md`).
-  Don't propose fading funding directionally.
+  Don't propose fading funding directionally. Spot-perp carry also failed its
+  pre-registered bar (BTC/ETH/SOL 3.7-5.1% APR, `docs/scout/PREREGISTRATION_spot-perp-carry.md`),
+  so do not propose a carry position as a new idea. The Scout tab's funding-carry card is
+  a benchmark, not a trade.
 
 ### 3b. Proactive conditional entries — the "make opportunity" layer
 
@@ -125,7 +131,7 @@ Deliver a tight read, not a data dump:
 
 0. **The event, if any** — if a macro event is within ~a few days, it's the FIRST line and it
    reframes the rest: is the book carrying naked directional risk into the print (tighten/flatten
-   before it), and is the straddle prepped? The event-prep alert pings when it's prep time; the
+   before it), and, for FOMC or CPI only, is the straddle prepped? The event-prep alert pings when it's prep time; the
    straddle is prepped ~T−30min off a fresh reference (never hours early), on a coin you're NOT
    already directional in.
 1. **The book in one line** — flat / what's held / what's queued, and any position that needs a decision.

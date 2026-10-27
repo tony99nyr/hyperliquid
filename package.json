@@ -78,7 +78,8 @@
     "study:spot-perp-carry": "tsx --tsconfig tsconfig.scripts.json scripts/spot-perp-carry.ts",
     "study:catalyst-classes": "tsx --tsconfig tsconfig.scripts.json scripts/catalyst-classes.ts",
     "study:regime": "tsx --tsconfig tsconfig.scripts.json scripts/regime-split-expectancy.ts",
-    "study:hip3-earnings": "tsx --tsconfig tsconfig.scripts.json scripts/hip3-earnings-straddle.ts"
+    "study:hip3-earnings": "tsx --tsconfig tsconfig.scripts.json scripts/hip3-earnings-straddle.ts",
+    "retro:remind": "tsx --tsconfig tsconfig.scripts.json scripts/desk-retro-reminder.ts"
   },
   "dependencies": {
     "@nktkas/hyperliquid": "^0.32.2",

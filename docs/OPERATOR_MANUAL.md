@@ -88,6 +88,10 @@ A cron is only for a box that runs the consumer without the daemon. Consumer liv
 the `scout_heartbeat` row `source='scout-cycle'`. The office box runs scout-watch only;
 the other loops are NAS-owned.
 
+**Timers:** `desk-retro-reminder.timer` sends a Discord ping on Mondays at 12:57 local
+that the weekly retro is due (`ops/systemd/desk-retro-reminder.service` has the install
+steps). Per-event straddle prep timers (`<event>-prep.timer`) are installed per event.
+
 **Ad-hoc skills (run in a Claude session or a terminal).** The full roster is the Skills
 section of the root [CLAUDE.md](../CLAUDE.md). The commands you run most:
 

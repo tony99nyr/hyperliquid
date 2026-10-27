@@ -68,9 +68,8 @@ export const ECONOMIC_EVENTS: EconEvent[] = [
   {
     name: 'NFP (Oct jobs)',
     atIso: '2026-11-06T13:30:00Z',
-    note: 'BLS Employment Situation 08:30 ET / 13:30 UTC (EST from Nov 1; verified BLS schedule). Binary US macro — straddle it.',
-    straddleCoin: 'BTC',
-    prepLeadMinutes: 30,
+    note: 'BLS Employment Situation 08:30 ET / 13:30 UTC (EST from Nov 1; verified BLS schedule). Awareness only: the 2026-10-26 catalyst-class study rejected NFP as a straddle class (PREREGISTRATION_catalyst-classes.md).',
+    prepLeadMinutes: 0,
   },
   {
     name: 'CPI (Oct data)',

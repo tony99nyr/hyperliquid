@@ -1,0 +1,16 @@
+# desk-retro-reminder: Discord ping that the Monday desk retro is due.
+# Fired by desk-retro-reminder.timer. Session reminders do not survive a restart; this does.
+#
+# INSTALL (once):
+#   cp ops/systemd/desk-retro-reminder.{service,timer} ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now desk-retro-reminder.timer
+# TEST:  systemctl --user start desk-retro-reminder.service
+[Unit]
+Description=HL desk-retro weekly reminder (Discord ping)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/tony/gitrepos/hyperliquid
+Environment=PATH=/home/tony/.local/share/pnpm:/home/tony/.nvm/versions/node/v24.11.1/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/tony/.local/share/pnpm/pnpm retro:remind
