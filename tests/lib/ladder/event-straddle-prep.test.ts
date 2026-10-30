@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildEventStraddle, prepEventStraddle, type EventStraddlePrepDeps } from '@/lib/ladder/event-straddle-prep-service';
 import { runEventPrepCron } from '@/lib/ladder/event-prep-cron-service';
+import type { UpcomingEvent } from '@/lib/skills/event-calendar-business-logic';
 
 const event = { name: 'NFP (Oct data)', atIso: '2026-11-06T13:30:00Z', straddleCoin: 'BTC' };
 const at = (iso: string) => Date.parse(iso);
@@ -52,10 +53,22 @@ describe('event straddle preparation', () => {
     expect(d.createPair).not.toHaveBeenCalled();
   });
 
+  // Injected `due` keeps these hermetic: the real calendar's entries get pruned at
+  // retros, so a cron test pinned to a live calendar date is a time-bomb.
+  const dueEvent = (now: number): UpcomingEvent => ({
+    ...event,
+    atMs: at(event.atIso),
+    msOut: at(event.atIso) - now,
+    daysOut: 0,
+    hoursOut: 0,
+    prepLeadMs: 30 * 60_000,
+    prepDue: true,
+  });
+
   it('keeps flag-off cron behaviour as ping only', async () => {
     const ping = vi.fn().mockResolvedValue({ pinged: event.name });
     const prep = vi.fn();
-    await runEventPrepCron(at('2026-11-06T13:05:00Z'), false, { ping, prep });
+    await runEventPrepCron(at('2026-11-06T13:05:00Z'), false, { ping, prep, due: dueEvent });
     expect(ping).toHaveBeenCalledOnce();
     expect(prep).not.toHaveBeenCalled();
   });
@@ -63,9 +76,9 @@ describe('event straddle preparation', () => {
   it('prepares only inside the due window when the flag is on', async () => {
     const ping = vi.fn();
     const prep = vi.fn().mockResolvedValue({ created: true, ids: ['a', 'b'] });
-    await runEventPrepCron(at('2026-11-06T12:59:59Z'), true, { ping, prep });
+    await runEventPrepCron(at('2026-11-06T12:59:59Z'), true, { ping, prep, due: () => null });
     expect(prep).not.toHaveBeenCalled();
-    await runEventPrepCron(at('2026-11-06T13:05:00Z'), true, { ping, prep });
+    await runEventPrepCron(at('2026-11-06T13:05:00Z'), true, { ping, prep, due: dueEvent });
     expect(prep).toHaveBeenCalledOnce();
     expect(ping).not.toHaveBeenCalled();
   });

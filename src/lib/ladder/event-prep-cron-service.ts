@@ -8,6 +8,8 @@ import { eventStraddlePrepDeps } from './event-straddle-prep-io';
 interface CronDeps {
   ping(now: number): Promise<{ pinged: string | null; skipped?: string }>;
   prep(input: { event: EconEvent; now: number }): Promise<{ created: boolean; ids: [string, string] } | { dry: true }>;
+  /** The calendar lookup; injectable so tests do not depend on the live calendar. */
+  due?: typeof prepDueEvent;
 }
 
 const defaultDeps: CronDeps = {
@@ -17,7 +19,7 @@ const defaultDeps: CronDeps = {
 
 export async function runEventPrepCron(now: number, enabled: boolean, deps: CronDeps = defaultDeps) {
   if (!enabled) return deps.ping(now);
-  const event = prepDueEvent(now);
+  const event = (deps.due ?? prepDueEvent)(now);
   if (!event) return { created: false, skipped: 'no-event-in-prep-window' };
   const result = await deps.prep({ event, now });
   return { event: event.name, ...result };
