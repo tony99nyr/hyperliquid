@@ -453,3 +453,56 @@ the implementation with expectancy or amend the registered rule.
   (FOMC + ECB + earnings cluster + BoJ); misses there are discipline, not loss.
 - **Steward:** 27 resolved, 5 helped / 11 hurt, net if-followed −$17.74 —
   near-zero authority stands.
+
+### 2026-11-02 review (day 132, first retro of November)
+
+- **Scorecard:** 109 trades, win 18%, NET −$94.71, run-rate −$21/mo → account
+  verdict KILL (the dead legacy lanes dominate; they are already stopped).
+  **htf-trend: CONTINUE** — 14 closed, win 64%, net +$101.61, run-rate +$33/mo,
+  expectancy +0.58R (donchian-20-10). 14/20 to the checkpoint; 3 positions open
+  (SOL short, ETH short, HYPE long, all opened 2026-10-30 after the BoJ
+  blackout lifted). The cluster-concentration caveat from 2026-10-26 stands.
+- **Week's resolutions (3):** HYPE breakdown-short (rubric-crossing) stopped
+  −1.27R — the lane's first close, CONTINUE at n=1; two htf-trend closes into
+  the FOMC blackout (ETH −0.13R, SOL +0.32R) — the 24h-to-print close rule
+  working as registered.
+- **FOMC Oct 28 straddle resolved:** long leg fired at 20:01Z on the MSFT/GOOGL
+  earnings pop (NOT the print), stall-exit + stop, −1.0R (−$11.76 planned ≈
+  realised). Ledger: event-straddle 7 closed, 4W/3L, net +$14.04. Post-
+  registration count: 1/10 episodes. **Proposal (operator decision, a NEW
+  pre-registration amendment, not an edit):** an open-gate entry deadline at
+  print+2-3h while expiry stays print+24h — the gate outlived its catalyst and
+  caught the next one. Applies to the migration-0050 template too.
+- **Shadow replay:** htf-trend 38 episodes, 13 matched, 25 missed (66%);
+  compression 26/7/19 (moot, KILLed). New misses this week: BTC short Oct 29
+  (2-per-direction cap; ETH+SOL shorts open) and SOL short Oct 31 (same-coin
+  position already open) — discipline, not outage. The BoJ blackout ghost-
+  refused the SOL entry 10 cycles, then it opened at 07:09Z: correct order.
+- **Discard vet (3):** archived duplicate FOMC long leg would have fired and
+  lost −1.00R (dodged-stop — archiving the duplicate pair saved a second 1R);
+  2 never-triggered. 0 missed targets. Clean week.
+- **Ledger expectancy:** 26 closed, +0.03R, net +$41.73; every family COLLECT
+  (all under the 10-close bar). **Gap-past-stop is n=0 on every family** — the
+  capital rule fails check 4 on missing gap evidence, so November cannot
+  qualify unless gap recording starts. Flagged to the operator.
+- **First-of-month:** November forecast FROZEN (snapshot 7b63676d, hash
+  3a9b4727): P5 $0 / P50 $17 / P95 $49.09, expected $22.33/mo, P(net>0) 0.86.
+  October: no result (pre-rule, nothing frozen). Capital-rule count: 0.
+- **Benchmarks:** HLP buy-hold −$0.79/mo; funding-carry **−$1.79/mo** on the
+  scorecard card after the funding-flip fix (5379ac2) while scout:review's 30d
+  window shows +$4/mo — windows differ; both are noise against the $50 bar.
+  Wording question for the operator stands.
+- **Cross-venue funding-veto capture is MISSING:** hl-observations.json was
+  never written (registered 2026-10-24; nas-watch.sh should write 3 rows/day).
+  Count did not move when it should — NAS-side fix needed, flagged to the
+  operator (local box does not rescue NAS jobs).
+- **Calendar curated:** NVIDIA CONFIRMED **Tue 2026-11-17** 21:20Z (announced
+  Oct 28 — the Nov 18 inference was wrong, fixed). Added CPI (Nov data)
+  Dec 10 (straddle), PPI (Oct data) Nov 13, NFP (Dec data) Jan 8 2027,
+  PCE (Jan 2027 data) Feb 25 2027 — all verified against BLS/BEA 2026-11-02.
+  Printed Oct 28-30 events (FOMC, ECB, earnings cluster, BoJ) prune next retro.
+  Week ahead: BoE Thu Nov 5, NFP Fri Nov 6 (both awareness-only),
+  **CPI Tue Nov 10 13:30Z — straddle BTC at the T−30 ping.**
+- **Steward:** no new counterfactual shift; near-zero authority stands.
+- **Markers:** 7 proposed rows (4 distinct changes) still pending OPERATOR
+  confirmation in the Lanes tab; none treated as confirmed.

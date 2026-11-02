@@ -79,14 +79,20 @@ export const ECONOMIC_EVENTS: EconEvent[] = [
     prepLeadMinutes: 30,
   },
   {
-    name: 'NVIDIA earnings (date unconfirmed)',
-    atIso: '2026-11-18T21:20:00Z',
+    name: 'NVIDIA earnings',
+    atIso: '2026-11-17T21:20:00Z',
     note:
-      'Q3 FY27 after the US close (~16:20 ET). DATE UNCONFIRMED (Nov 18 inferred; retro-checked 2026-10-26) — ' +
-      'NVIDIA confirms ~3-4 weeks ahead; verify on ' +
-      'investor relations before relying on it. The AI-capex bellwether trades like scheduled macro for the whole ' +
-      'risk complex, BTC included. Awareness only.',
+      'Q3 FY27 results ~13:20 PT / 21:20 UTC, call 14:00 PT / 22:00 UTC. CONFIRMED Tue Nov 17 ' +
+      '(NVIDIA announced 2026-10-28; retro-verified 2026-11-02 — the earlier Nov 18 inference was wrong). ' +
+      'The AI-capex bellwether trades like scheduled macro for the whole risk complex, BTC included. Awareness only.',
     prepLeadMinutes: 0,
+  },
+  {
+    name: 'CPI (Nov data)',
+    atIso: '2026-12-10T13:30:00Z',
+    note: 'BLS CPI 08:30 ET / 13:30 UTC (EST; verified BLS schedule 2026-11-02). Binary macro — straddle it.',
+    straddleCoin: 'BTC',
+    prepLeadMinutes: 30,
   },
   {
     name: 'FOMC (Dec)',
@@ -103,19 +109,21 @@ export const ECONOMIC_EVENTS: EconEvent[] = [
   // Standard Time applies to these dates, so 08:30 ET = 13:30 UTC.
   // (NFP Oct data = the 'NFP (Oct jobs)' entry above.)
   { name: 'NFP (Nov data)', atIso: '2026-12-04T13:30:00Z', note: 'BLS Employment Situation, 08:30 ET. Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
-  // TODO: Confirm the January 2027 BLS Employment Situation release date.
-  // The first Friday is New Year's Day; do not schedule an unverified replacement.
+  // NFP Dec data slips a week (the first Friday is New Year's Day): BLS schedules it Jan 8.
+  { name: 'NFP (Dec data)', atIso: '2027-01-08T13:30:00Z', note: 'BLS Employment Situation, 08:30 ET (verified BLS schedule 2026-11-02). Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
+  // Jan-data date verified against the BLS 2027 schedule 2026-11-02; it carries the annual benchmark revision.
   { name: 'NFP (Jan data)', atIso: '2027-02-05T13:30:00Z', note: 'BLS Employment Situation, 08:30 ET. Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
   { name: 'NFP (Feb data)', atIso: '2027-03-05T13:30:00Z', note: 'BLS Employment Situation, 08:30 ET. Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
-  // PCE dates from bea.gov/news/schedule (checked 2026-10-24). 2027 dates not yet published.
+  // PCE dates from bea.gov/news/schedule (2026 checked 2026-10-24; 2027 Feb-Dec published, checked 2026-11-02).
   { name: 'PCE (Oct data)', atIso: '2026-11-25T13:30:00Z', note: 'BEA Personal Income and Outlays, 08:30 ET. Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
   { name: 'PCE (Nov data)', atIso: '2026-12-23T13:30:00Z', note: 'BEA Personal Income and Outlays, 08:30 ET. Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
-  // TODO: add 2027 PCE dates once BEA publishes them.
-  // PPI dates from the BLS PPI release schedule (checked 2026-10-24).
+  // TODO: the PCE (Dec data) release (late Jan 2027) is not yet on the BEA schedule; add it when published.
+  { name: 'PCE (Jan 2027 data)', atIso: '2027-02-25T13:30:00Z', note: 'BEA Personal Income and Outlays, 08:30 ET (verified BEA schedule 2026-11-02). Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
+  // PPI dates from the BLS PPI release schedule (checked 2026-10-24; Oct-data date added 2026-11-02).
+  { name: 'PPI (Oct data)', atIso: '2026-11-13T13:30:00Z', note: 'BLS Producer Price Index, 08:30 ET (verified BLS schedule 2026-11-02). Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
   { name: 'PPI (Nov data)', atIso: '2026-12-15T13:30:00Z', note: 'BLS Producer Price Index, 08:30 ET. Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
   { name: 'PPI (Dec data)', atIso: '2027-01-14T13:30:00Z', note: 'BLS Producer Price Index, 08:30 ET. Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
   { name: 'PPI (Jan data)', atIso: '2027-02-12T13:30:00Z', note: 'BLS Producer Price Index, 08:30 ET. Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
   { name: 'PPI (Feb data)', atIso: '2027-03-12T13:30:00Z', note: 'BLS Producer Price Index, 08:30 ET. Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
-  // TODO: the November 2026 PPI (Oct data) date was not confirmed; add it from bls.gov/schedule.
   // Neither agency's dates can be inferred safely from the monthly 08:30 ET time.
 ];

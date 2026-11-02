@@ -43,4 +43,4 @@ This rule does not authorise a trade, an arm or a transfer. Deposits are an oper
 
 The first retro of each month appends one line here: the month, the result (qualifying, neutral or reset), the reason, and the running count. Do not edit the rule above.
 
-- (no scored months yet)
+- 2026-11-02 (first retro of November): froze the November 2026 forecast (snapshot 7b63676d, inputs hash 3a9b4727, P5 $0 / P50 $17 / P95 $49.09, expected $22.33/mo, P(net>0) 0.86). October records no result: no forecast was frozen for it, so it is pre-rule. Running count: 0. November is the first month that can qualify; it is scored at the first December retro.
