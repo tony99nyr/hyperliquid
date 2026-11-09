@@ -25,40 +25,9 @@ export interface EconEvent {
 }
 
 export const ECONOMIC_EVENTS: EconEvent[] = [
-  {
-    name: 'FOMC (Oct)',
-    atIso: '2026-10-28T18:00:00Z',
-    note:
-      'Rate decision 14:00 ET / 18:00 UTC (Oct 27-28 meeting; EDT still in effect) + presser 18:30. Warsh Fed #2 — ' +
-      'binary macro, straddle it. Opens a 48h catalyst corridor: MSFT+GOOGL earnings ~20:00 UTC the same evening, ' +
-      'ECB + MSTR/COIN/AMZN Thursday, BoJ Friday — manage any straddle residual deliberately through it.',
-    straddleCoin: 'BTC',
-    prepLeadMinutes: 30,
-  },
-  {
-    name: 'ECB',
-    atIso: '2026-10-29T13:15:00Z',
-    note:
-      'Rate decision 14:15 CET / 13:15 UTC + Lagarde presser 14:45 CET. A hold at 2.50% is priced ~93%. ' +
-      'Weak BTC transmission — awareness only, no straddle.',
-    prepLeadMinutes: 0,
-  },
-  {
-    name: 'Earnings cluster (MSTR + COIN + AMZN)',
-    atIso: '2026-10-29T20:00:00Z',
-    note:
-      'After the US close (16:00 ET), calls ~17:00 ET. Strategy and Coinbase are the two listed BTC proxies and ' +
-      'print the same evening as Amazon. Awareness only — context for residual/ladder risk, not a straddle event.',
-    prepLeadMinutes: 0,
-  },
-  {
-    name: 'BoJ',
-    atIso: '2026-10-30T03:00:00Z',
-    note:
-      'Statement floats ~02:30-04:00 UTC (Quarterly Outlook Report; presser 06:30 UTC). A hold at 1.25% is ' +
-      'near-consensus after the Sep 18 hike. A surprise hike = yen-carry unwind = real BTC risk. Awareness only.',
-    prepLeadMinutes: 0,
-  },
+  // (FOMC Oct 28, ECB + earnings cluster Oct 29 and BoJ Oct 30 printed before the
+  // 2026-11-02 retro; pruned at the 2026-11-09 retro. The straddle shadow replay
+  // matches legs by the print timestamp in each ladder's thesis, not this list.)
   {
     name: 'BoE',
     atIso: '2026-11-05T12:00:00Z',

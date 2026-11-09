@@ -506,3 +506,60 @@ the implementation with expectancy or amend the registered rule.
 - **Steward:** no new counterfactual shift; near-zero authority stands.
 - **Markers:** 7 proposed rows (4 distinct changes) still pending OPERATOR
   confirmation in the Lanes tab; none treated as confirmed.
+
+### 2026-11-09 review (day 139, weekly retro)
+
+- **Scorecard (deterministic):** account-level KILL stands (legacy lanes,
+  stopped). **htf-trend CONTINUE**: 18 closed / 61% win / net +$97.70 /
+  run-rate $29/mo; donchian-20-10 expectancy +0.41R. **18/20 — the n=20
+  graduation checkpoint is likely NEXT week**; read it with the shadow-replay
+  sample loss beside it (the ledger is a floor, not the population).
+- **The week's 4 resolutions (all htf-trend, all rule-driven):** HYPE long
+  −1.07R and ETH short −1.03R (Nov 4, daemon auto-exit stop-hits); then the
+  scout closed both remaining shorts inside the CPI 24h window — SOL short
+  **+1.23R** and BTC short +0.17R (Nov 9) — banking the winners rather than
+  holding naked risk through the print. Event discipline worked end-to-end.
+- **Shadow replay:** htf-trend 44 episodes / 13 matched / 31 missed (70%).
+  Every new miss attributed from scout_decisions: the 2-per-direction cap
+  (the BTC short directive was refused ~2 days while ETH+SOL shorts were
+  open), same-coin-open (SOL), and the BoE/NFP/CPI blackouts. The BTC short
+  then opened Nov 6 17:33Z — three minutes after the NFP blackout lifted —
+  and closed +0.17R: refusal then correct entry, same pattern as BoJ last
+  week. Zero unexplained misses; no capture work justified.
+  compression-straddle misses are moot (lane KILLed Oct 26).
+- **Perf report (since last retro):** event-straddle shows 1 episode −$11.76 —
+  that is the FOMC residual whose ledger row landed during the Nov 2 retro
+  itself (window-edge artefact; NO ladder fired this week, the book was flat
+  throughout). htf-trend window −$4.27 across the two stop episodes.
+- **Discard vet (3):** HYPE runaway long (archived Nov 5) dodged −1.00R;
+  2 never triggered; 0 missed targets. Clean week.
+- **Ledger expectancy:** every family COLLECT (all under the 10-close bar);
+  event-straddle 7 closed +$14.04. **Gap-past-stop is STILL n=0 on every
+  family** (second retro running) — November WILL fail capital-rule check 4
+  unless gap recording starts before its episodes resolve.
+- **Open pre-registration counts (4b):** event-straddle 1/10 episodes (no
+  event this week; CPI tomorrow is episode 2's chance). Entry-overshoot: no
+  new event legs, unchanged. Cross-venue funding-veto capture:
+  hl-observations.json STILL missing on the NAS — count stalled a second
+  week; NAS-side fix needed (local box does not rescue NAS jobs).
+  Capital-rule: monthly count 0 (not a first-of-month retro).
+- **Steward counterfactuals:** 22 scorable — helped 5 / hurt 11, net −$17.74
+  if followed. Advisory-only status is earning its keep; no authority change.
+- **Benchmarks (cards fresh 18:05Z):** HLP buy-hold +$11.42 over 27d;
+  funding-carry card +$4.02/30d (now agrees in sign with scout-review's
+  window after the funding-flip fix). Both noise against the $50 bar.
+- **CPI prep (tomorrow 13:30Z):** EVENT_PREP_CRON_ENABLED flipped ON in prod
+  Nov 5 (operator decision: "arm the rec every time" made ping-only
+  pointless), redeploy Ready, endpoint alive. First auto-draft fires ~13:00Z
+  tomorrow: the cron drafts the BTC OCO pair off a fresh reference and pings
+  the draft ids; the operator arms in the cockpit. The entry-deadline
+  amendment (open gate closes print+2-3h) is STILL awaiting the operator —
+  without a yes the +24h window stands for this CPI.
+- **Calendar:** pruned the printed Oct 28-30 events (FOMC, ECB, earnings
+  cluster, BoJ). BoE Nov 5 + NFP Nov 6 printed this window and prune next
+  retro. Horizon safe past Nov 16: CPI Nov 10 (straddle), PPI Nov 13,
+  NVIDIA Nov 17, PCE Nov 25, FOMC Dec 9 + CPI Dec 10 (straddles).
+- **Markers:** 7 proposed rows (4 distinct changes) still pending OPERATOR
+  confirmation in the Lanes tab; none treated as confirmed.
+- **No rule changes.** The record supports the standing rules; nothing added
+  or softened. DESK_PROFITABILITY untouched (no lever's verdict moved).
