@@ -383,6 +383,9 @@ Lessons, both load-bearing:
    `--risk 12` to fit the standing 0.15 heat cap; bold sizing is a separate
    opt-in the night before). The prod T-30 Discord ping is the backup, never the
    plan. October's two events (CPI Oct 14, FOMC Oct 28) shipped this way.
+   Update 2026-11-10: the prod cron (`EVENT_PREP_CRON_ENABLED`) now drafts the pair
+   itself at T-30 and at $12 per leg. It used $4, and the CPI Nov 10 leg ran at $4.
+   The open gate closes at print + 120 min. The ladder still expires at print + 24h.
 2. **Completed-candle gates are the edge, not a latency cost.** The Sep 16
    counterfactual: the T-30 reference would have been taken AFTER the pre-print
    dump, and every 15m candle then CLOSED inside the ±1% band, while two

@@ -15,7 +15,7 @@ import { isLadderAutofireEnabled } from './ladder-flags';
 import { listLadders, getLadderWithRungs, markLadderExpired } from './ladder-service';
 import { evaluateLadderRungs, type RungMarketSnapshot } from './ladder-trigger-evaluator';
 import { snapshotFromCandleResult } from './ladder-watch-business-logic';
-import { ladderWindowState, WATCH_CANDLE_MS } from './ladder-types';
+import { ladderWindowState, entryGateClosed, WATCH_CANDLE_MS } from './ladder-types';
 import { computeMomentumIndicators } from './ladder-momentum-service';
 import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
 import { performLadderRungFire, type LadderFireResult } from './ladder-fire-service';
@@ -117,7 +117,9 @@ export async function runLadderWatchTick(args: { now: number }): Promise<LadderW
   let rungsFired = 0;
   const fires: LadderWatchSummary['fires'] = [];
   for (const l of ladders) {
-    const evals = evaluateLadderRungs(l.rungs, snapshots);
+    // An open/add past its entry deadline is not evaluated (the fire path re-checks).
+    // The ladder stays armed: its management rungs still serve an entry that fired in time.
+    const evals = evaluateLadderRungs(l.rungs.filter((r) => !entryGateClosed(r, args.now)), snapshots);
     for (const e of evals) {
       if (!e.conditionMet) continue;
       rungsMet++;

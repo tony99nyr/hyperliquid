@@ -60,7 +60,7 @@ import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
 import { validateEnv } from '@/lib/env/env';
 import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 import { sendDiscord } from '@/lib/infrastructure/notify/discord-notify';
-import { ladderWindowState, ACTS_ON_LIVE_POSITION, WATCH_CANDLE_MS } from './ladder-types';
+import { ladderWindowState, entryGateClosed, ACTS_ON_LIVE_POSITION, WATCH_CANDLE_MS } from './ladder-types';
 import { bookHeatUsd } from './ladder-risk-business-logic';
 import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
 import { findAllStops } from '@/lib/trading/stop-order-service';
@@ -160,6 +160,9 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
   const rung = ladder.rungs.find((r) => r.id === rungId);
   if (!rung) return skip('rung-not-found');
   if (rung.status !== 'pending') return skip(`rung-${rung.status}`);
+  // 3b) Entry deadline (same predicate as the watcher): an open/add past its
+  // triggerMeta.entryDeadlineMs never enters. Restrictive only; no claim is spent.
+  if (entryGateClosed(rung, now)) return skip('past-entry-deadline');
 
   // 4) Precondition re-check (§3.7): re-derive the snapshot from CURRENT live state and
   // compare. Any drift (side flip, position vanished, leverage change) → auto-disarm.
@@ -417,7 +420,8 @@ async function fireOpenOrAdd(ladder: LadderWithRungs, rung: LadderRung, sessionI
     return skip('no-fill');
   }
   filledSize = fill.sz;
-  const orderDetail = { entryOid: fill.hlOrderId == null ? null : Number(fill.hlOrderId), stopOid: null as number | null, tpOid: null as number | null };
+  // stopPx is audit-only: the planned stop the expectancy report measures gap-past-stop against.
+  const orderDetail = { entryOid: fill.hlOrderId == null ? null : Number(fill.hlOrderId), stopOid: null as number | null, tpOid: null as number | null, stopPx: proposal.stopPx };
   // (3) Bracket the fill ATOMICALLY (invariant §3.3) — but ONLY a live fill. A PAPER
   // ladder places NO real exchange orders (placeBracket/placeStop gate on the GLOBAL
   // TRADING_MODE, so without this guard a paper ladder on a live deployment would rest a

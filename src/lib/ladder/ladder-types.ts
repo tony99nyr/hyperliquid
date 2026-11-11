@@ -130,6 +130,22 @@ export interface RungTriggerMeta {
    *  This is how a momentum exit is prevented from firing before the move has paid
    *  ("exit on stall, but only above X"). Absent = indicator alone decides. */
   floorPx?: number;
+  /** OPEN/ADD rungs (optional): epoch ms after which this rung may no longer ENTER
+   *  (see entryGateClosed). RESTRICTIVE ONLY: it can prevent an entry, never cause one,
+   *  and it never gates an exit. The ladder's expiry is separate, so the management
+   *  rungs of an already-fired entry keep working until expires_at. */
+  entryDeadlineMs?: number;
+}
+
+/** Is this rung's ENTRY gate closed at `now`? ONE predicate for the watcher and the fire
+ *  path. Only open/add rungs carry a deadline. Fail-closed: a deadline that is present
+ *  but not a positive finite number (null included) counts as closed (no entry on a
+ *  malformed limit). Only an absent key means "no deadline". */
+export function entryGateClosed(rung: { action: RungAction; triggerMeta: RungTriggerMeta | null }, now: number): boolean {
+  if (rung.action !== 'open' && rung.action !== 'add') return false;
+  const deadline: unknown = rung.triggerMeta?.entryDeadlineMs;
+  if (deadline === undefined) return false;
+  return !(typeof deadline === 'number' && Number.isFinite(deadline) && deadline > 0) || now >= deadline;
 }
 
 /** The armed plan. */

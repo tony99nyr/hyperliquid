@@ -11,34 +11,95 @@
  */
 
 import type { LadderWithRungs } from '@/lib/ladder/ladder-types';
-import type { OwnerLedger } from '@/lib/ladder/ladder-outcome-business-logic';
+import { EARLY_JITTER_MS, ENTRY_MATCH_WINDOW_MS, entryOid, type OwnerFill, type OwnerLedger } from '@/lib/ladder/ladder-outcome-business-logic';
 import type { HlFill } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { isEventStraddle, type LadderInput } from '@/lib/performance/lane-performance-business-logic';
 
-export interface ReportRung { id: string; ladderId: string; action: string; riskUsd: number | null; stopPx: number | null; side: 'long' | 'short'; coin: string }
+export interface ReportRung { id: string; ladderId: string; action: string; riskUsd: number | null; stopPx: number | null; stopFrac?: number | null; side: 'long' | 'short'; coin: string }
 export interface ReportFire { ladderId: string; rungId: string; status: string; firedAt: number; detail: string | null }
-export interface GapPastStop { r: number | null; bps: number | null; reason: string | null }
+/** `stopSource` says where the planned stop came from: the rung's absolute `stopPx`, the
+ *  fire detail (written by open/add fires from the 2026-11-11 deploy), or DERIVED from the entry
+ *  fill and the rung's `stopFrac` (older fires; approximate, see reportRiskMetrics). */
+export interface GapPastStop { r: number | null; bps: number | null; reason: string | null; stopSource: 'rung' | 'fire' | 'derived' | null }
 
-/** Report-time nominal R and stop overshoot. Missing or ambiguous evidence stays explicit. */
-export function reportRiskMetrics(row: LadderOutcomeRow, rungs: ReportRung[], fires: ReportFire[], fills: HlFill[]): { nominalR: number | null; gap: GapPastStop } {
+/** The planned stop an open/add fire recorded in its detail JSON, when present. */
+function fireStopPx(detail: string | null): number | null {
+  if (!detail) return null;
+  try {
+    const parsed: unknown = JSON.parse(detail);
+    if (typeof parsed !== 'object' || parsed === null || !('stopPx' in parsed)) return null;
+    const raw = parsed.stopPx;
+    return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Report-time nominal R and stop overshoot. Missing or ambiguous evidence stays explicit.
+ *
+ * Gap-past-stop = the loss beyond the ORIGINAL planned stop, summed over the ladder's own
+ * closing fills (each over its own size), in units of the open rung's nominal risk. It is
+ * 0 when every exit was at or better than that stop (a bank, a ratcheted stop, a stall exit).
+ * The fills come from the owner attribution (`attributeLadderFills`), never from a time
+ * window: an outcome row's `windowEndMs` can be the resolution time, and another ladder
+ * can trade the same coin inside any window.
+ * When another owner held the same coin while this ladder closed, first-in first-out can
+ * give this ladder's stop fill to the other owner. The gap is then AMBIGUOUS and stays
+ * unmeasured (an understated gap could pass a bar that reads "below 0.10R").
+ * Risk-sized rungs store `stopFrac`, not `stopPx`, so the stop comes from the fire detail,
+ * or is derived from the open fire's own entry fill (the fire sized its stop off the
+ * execution-time mark, so the derived level is off by the entry slippage: adverse
+ * slippage overstates the gap).
+ */
+export function reportRiskMetrics(row: LadderOutcomeRow, rungs: ReportRung[], fires: ReportFire[],
+  ledger: (Pick<OwnerLedger, 'entryFills' | 'closeFills'> & { sharedInventory?: boolean }) | null | undefined): { nominalR: number | null; gap: GapPastStop } {
   const open = rungs.filter((r) => r.ladderId === row.ladderId && r.action === 'open');
   const risk = open.reduce((sum, rung) => sum + (rung.riskUsd != null && Number.isFinite(rung.riskUsd) ? rung.riskUsd : 0), 0);
   const nominalR = risk > 0 && row.realizedPnlUsd != null ? row.realizedPnlUsd / risk : null;
-  if (open.length !== 1) return { nominalR, gap: { r: null, bps: null, reason: open.length ? 'multiple open rungs' : 'open rung missing' } };
+  const none = (reason: string): { nominalR: number | null; gap: GapPastStop } => ({ nominalR, gap: { r: null, bps: null, reason, stopSource: null } });
+  if (open.length !== 1) return none(open.length ? 'multiple open rungs' : 'open rung missing');
   const rung = open[0];
   const fire = fires.find((item) => item.ladderId === row.ladderId && item.rungId === rung.id && item.status === 'filled');
-  const stop = rung.stopPx;
-  if (!fire || stop == null || stop <= 0) return { nominalR, gap: { r: null, bps: null, reason: !fire ? 'filled fire missing' : 'planned stop missing' } };
-  const side = rung.side === 'long' ? 'sell' : 'buy';
-  const closes = fills.filter((fill) => fill.coin.toUpperCase() === rung.coin.toUpperCase() && fill.side === side && fill.time >= fire.firedAt);
-  if (!closes.length) return { nominalR, gap: { r: null, bps: null, reason: 'closing fill missing' } };
-  const fill = closes[closes.length - 1];
-  const beyond = rung.side === 'long' ? Math.max(0, stop - fill.px) : Math.max(0, fill.px - stop);
-  const entry = fills.find((item) => item.coin.toUpperCase() === rung.coin.toUpperCase() && item.side !== side && item.time >= fire.firedAt);
+  if (!fire) return none('filled fire missing');
+  if (!ledger) return none('fill attribution unavailable');
+  if (ledger.sharedInventory) return none('inventory shared with another owner (ambiguous exit)');
+  const byTime = (a: OwnerFill, b: OwnerFill): number => a.time - b.time;
+  const entries = [...ledger.entryFills].sort(byTime);
+  const closes = [...ledger.closeFills].sort(byTime);
+  // The open rung's entry is the order its fire recorded. An older fire has no order id:
+  // take the first order that filled inside the entry match window of the fire. One order
+  // can fill in several partials: size is their sum, price their average.
+  const oid = entryOid(fire.detail);
+  let entryFills = oid != null ? entries.filter((fill) => fill.oid === oid) : [];
+  if (!entryFills.length) {
+    const near = entries.filter((fill) => fill.time >= fire.firedAt - EARLY_JITTER_MS && fill.time <= fire.firedAt + ENTRY_MATCH_WINDOW_MS);
+    const first = near[0];
+    entryFills = !first ? [] : first.oid != null ? entries.filter((fill) => fill.oid === first.oid) : near.filter((fill) => fill.oid == null);
+  }
+  const entrySz = entryFills.reduce((sum, fill) => sum + fill.sz, 0);
+  const entryPx = entrySz > 0 ? entryFills.reduce((sum, fill) => sum + fill.px * fill.sz, 0) / entrySz : null;
+
+  let stop: number | null = rung.stopPx != null && rung.stopPx > 0 ? rung.stopPx : null;
+  let stopSource: GapPastStop['stopSource'] = stop != null ? 'rung' : null;
+  if (stop == null) {
+    stop = fireStopPx(fire.detail);
+    if (stop != null) stopSource = 'fire';
+  }
+  const frac = rung.stopFrac;
+  if (stop == null && entryPx != null && frac != null && Number.isFinite(frac) && frac > 0 && frac < 1) {
+    stop = entryPx * (rung.side === 'long' ? 1 - frac : 1 + frac);
+    stopSource = 'derived';
+  }
+  if (stop == null) return none(frac != null && entryPx == null ? 'entry fill not identified' : 'planned stop missing');
+  const closedSz = closes.reduce((sum, fill) => sum + fill.sz, 0);
+  if (!(closedSz > 0)) return none('closing fill missing');
+  const planned = stop;
+  const beyondUsd = closes.reduce((sum, fill) => sum + (rung.side === 'long' ? Math.max(0, planned - fill.px) : Math.max(0, fill.px - planned)) * fill.sz, 0);
   const denominator = rung.riskUsd;
-  const gapR = entry && entry.sz > 0 && denominator != null && denominator > 0 ? beyond * entry.sz / denominator : null;
-  return { nominalR, gap: { r: gapR, bps: beyond / stop * 10_000,
-    reason: gapR == null ? 'entry size or nominal rung risk unavailable' : null } };
+  const gapR = denominator != null && denominator > 0 ? beyondUsd / denominator : null;
+  return { nominalR, gap: { r: gapR, bps: beyondUsd / closedSz / planned * 10_000, stopSource,
+    reason: gapR == null ? 'nominal rung risk unavailable' : null } };
 }
 
 export function classifyReportSetup(row: LadderOutcomeRow, ladders: LadderInput[]): string {

@@ -88,6 +88,34 @@ describe('validateLadderForArm — per-rung validity', () => {
   });
 });
 
+describe('validateLadderForArm: entry deadline', () => {
+  const HOUR = 60 * 60 * 1000;
+  const warn = (over: Partial<ValidateLadderInput>) => validateLadderForArm(input({ expiresAtMs: NOW + 24 * HOUR, ...over })).warnings;
+  const withDeadline = (entryDeadlineMs: unknown, over: Partial<ArmRung> = {}) =>
+    rung({ triggerMeta: { entryDeadlineMs } as ArmRung['triggerMeta'], ...over });
+
+  it('accepts a future deadline inside the ladder window', () => {
+    expect(warn({ activeFromMs: NOW + HOUR, rungs: [withDeadline(NOW + 2 * HOUR)] })).toHaveLength(0);
+  });
+  it('refuses to arm once the deadline has passed (the rung could never fire)', () => {
+    expect(warn({ rungs: [withDeadline(NOW)] }).some((w) => /entry deadline has passed/i.test(w))).toBe(true);
+  });
+  it('refuses a malformed deadline', () => {
+    // An explicit null is a present, invalid limit. It must not arm as "no deadline".
+    for (const bad of [null, '2026-12-09', Number.NaN, -1, 0]) {
+      expect(warn({ rungs: [withDeadline(bad)] }).some((w) => /entry deadline/i.test(w))).toBe(true);
+    }
+  });
+  it('refuses a deadline outside the activation window', () => {
+    expect(warn({ activeFromMs: NOW + 2 * HOUR, rungs: [withDeadline(NOW + HOUR)] }).some((w) => /AFTER active_from/.test(w))).toBe(true);
+    expect(warn({ rungs: [withDeadline(NOW + 25 * HOUR)] }).some((w) => /not be after expiry/.test(w))).toBe(true);
+  });
+  it('refuses a deadline on an exit rung', () => {
+    const exit = withDeadline(NOW + HOUR, { seq: 2, action: 'reduce', triggerPx: 2100, stopPx: null });
+    expect(warn({ rungs: [rung(), exit] }).some((w) => /can never gate an exit/.test(w))).toBe(true);
+  });
+});
+
 describe('validateLadderForArm — pyramiding guardrails (§2)', () => {
   const base = rung({ seq: 1, action: 'open', entryPx: 2000, sizeCoins: 1, stopPx: 1900, triggerPx: 2000 });
 

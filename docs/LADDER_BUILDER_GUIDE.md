@@ -227,6 +227,10 @@ grows. Armed only after the position existed.
 **Event straddle template** (graduated 2026-07-14, ledger `event-straddle`): OCO pair,
 gates ±1.0% (majors) / ±1.5% (HYPE/SOL) from the pre-print reference close, stop at the
 reference, 24h time exit, floor $4–5/side, `activeFromMs` = print − 15 min, plain OCO.
+Since 2026-11-10 the open rung carries an entry deadline at print + 120 min
+(`triggerMeta.entryDeadlineMs`): after it the leg can no longer enter, and the ladder only
+manages a leg that already fired. The cron and `straddle:prep` both default to $12 risk per leg
+([PREREGISTRATION_event-straddle-entry-deadline.md](scout/PREREGISTRATION_event-straddle-entry-deadline.md)).
 LESSONS (Jul 15, first live run): build the management rungs INSIDE each leg (a
 single-open leg completes at fill and orphans its position); ratchet triggers belong at
 ~+0.6–0.8R (a +1.2R trigger never armed on a +0.7R move); event fills are fade-prone by

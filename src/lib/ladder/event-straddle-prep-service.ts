@@ -11,8 +11,15 @@ export interface EventStraddlePair {
 export interface EventStraddlePrepDeps {
   getMid(coin: string): Promise<number>;
   createPair(input: { eventId: string; legs: [CreateLadderInput, CreateLadderInput] }): Promise<EventStraddlePair>;
-  alertReady(input: { event: EconEvent; coin: string; ref: number; ids: [string, string]; activeFromMs: number }): Promise<void>;
+  alertReady(input: { event: EconEvent; coin: string; ref: number; ids: [string, string]; activeFromMs: number; entryDeadlineMs: number }): Promise<void>;
 }
+
+/** Risk per leg when the caller gives none (the cron gives none). The operator's standing size. */
+export const EVENT_STRADDLE_DEFAULT_RISK_USD = 12;
+/** The open gate closes this long after the print; the ladder itself still expires at
+ *  print+24h so a fired leg stays managed. Pre-registered 2026-11-10
+ *  (docs/scout/PREREGISTRATION_event-straddle-entry-deadline.md): do not tune it here. */
+export const EVENT_STRADDLE_ENTRY_DEADLINE_MS = 120 * 60_000;
 
 export interface PrepOptions {
   event: EconEvent;
@@ -34,7 +41,7 @@ export function buildEventStraddle(
   options: PrepOptions,
   ref: number,
   ocoGroupId: string,
-): { eventId: string; legs: [CreateLadderInput, CreateLadderInput]; activeFromMs: number } {
+): { eventId: string; legs: [CreateLadderInput, CreateLadderInput]; activeFromMs: number; entryDeadlineMs: number } {
   const { event, now } = options;
   if (!Number.isFinite(ref) || ref <= 0) throw new Error('invalid pre-print reference');
   if (!Number.isFinite(now)) throw new Error('invalid prep time');
@@ -43,11 +50,12 @@ export function buildEventStraddle(
   const coin = (options.coin ?? event.straddleCoin ?? 'BTC').trim().toUpperCase();
   if (!/^[A-Z0-9]+$/.test(coin)) throw new Error('invalid straddle coin');
   const gatePct = options.gatePct ?? (coin === 'HYPE' || coin === 'SOL' ? 0.015 : 0.01);
-  const riskUsd = options.riskUsd ?? 4;
+  const riskUsd = options.riskUsd ?? EVENT_STRADDLE_DEFAULT_RISK_USD;
   if (!Number.isFinite(gatePct) || gatePct <= 0 || gatePct >= 0.1) throw new Error('invalid gate percentage');
   if (!Number.isFinite(riskUsd) || riskUsd <= 0) throw new Error('invalid risk');
   const activeFromMs = printAtMs - 15 * 60_000;
   const expiresAtMs = printAtMs + 24 * 60 * 60_000;
+  const entryDeadlineMs = printAtMs + EVENT_STRADDLE_ENTRY_DEADLINE_MS;
   const pxDp = ref >= 1_000 ? 0 : ref >= 10 ? 2 : 4;
   const legs = (['long', 'short'] as const).map((side): CreateLadderInput => {
     const dir: 1 | -1 = side === 'long' ? 1 : -1;
@@ -57,7 +65,7 @@ export function buildEventStraddle(
     const kind = side === 'long' ? 'price_above' : 'price_below';
     const lvl = (r: number) => nudgeOffRound(gate * (1 + dir * gatePct * r), dir);
     const rungs: NewRung[] = [
-      { seq: 1, coin, side, action: 'open', triggerKind: kind, triggerPx: gate, riskUsd, stopFrac, leverage: 2 },
+      { seq: 1, coin, side, action: 'open', triggerKind: kind, triggerPx: gate, riskUsd, stopFrac, leverage: 2, triggerMeta: { entryDeadlineMs } },
       { seq: 2, coin, side, action: 'stop_move', triggerKind: kind, triggerPx: lvl(0.7), triggerMeta: { moveTo: 'breakeven' } },
       { seq: 3, coin, side, action: 'reduce', triggerKind: kind, triggerPx: lvl(1), reduceFrac: 0.34 },
       { seq: 4, coin, side, action: 'reduce', triggerKind: kind, triggerPx: lvl(2), reduceFrac: 0.5 },
@@ -74,7 +82,9 @@ export function buildEventStraddle(
         `Jul-15 lessons built in: breakeven ratchet at +0.7R, banks +1R/+2R, momentum stall-exit ≥2 with NO floor ` +
         `(event fills are fade-prone — cut the fade even slightly underwater). Plain OCO — first fire disarms the sibling; ` +
         `if the fired side STOPS OUT, re-present the sibling (standing order, ~30% conditional whipsaw). ` +
-        `Window: hot from print−15min, expires print+24h. Remainder after banks is a manual time-exit at the next checkpoint.`,
+        `Window: hot from print−15min; the entry gate closes at print+${EVENT_STRADDLE_ENTRY_DEADLINE_MS / 60_000}min ` +
+        `(${new Date(entryDeadlineMs).toISOString()}), after that the ladder only manages a leg that already fired; ` +
+        `expires print+24h. Remainder after banks is a manual time-exit at the next checkpoint.`,
       author: 'operator', mode: 'live', ocoGroupId, activeFromMs, expiresAtMs,
       maxTotalNotionalUsd: Math.ceil((riskUsd / stopFrac) * 1.15),
       maxTotalLossUsd: Math.ceil(worst * 1.15), rungs,
@@ -82,7 +92,7 @@ export function buildEventStraddle(
   }) as [CreateLadderInput, CreateLadderInput];
   // The print instant is shared by the cron and a manual command, even if their
   // labels differ. One pair per instant also avoids duplicate live OCO plans.
-  return { eventId: new Date(printAtMs).toISOString(), legs, activeFromMs };
+  return { eventId: new Date(printAtMs).toISOString(), legs, activeFromMs, entryDeadlineMs };
 }
 
 export async function prepEventStraddle(options: PrepOptions, deps: EventStraddlePrepDeps): Promise<EventStraddlePair | { dry: true }> {
@@ -96,6 +106,6 @@ export async function prepEventStraddle(options: PrepOptions, deps: EventStraddl
   const pair = buildEventStraddle(options, ref, randomUUID());
   if (options.dry) return { dry: true };
   const result = await deps.createPair(pair);
-  if (result.created) await deps.alertReady({ event: options.event, coin, ref, ids: result.ids, activeFromMs: pair.activeFromMs });
+  if (result.created) await deps.alertReady({ event: options.event, coin, ref, ids: result.ids, activeFromMs: pair.activeFromMs, entryDeadlineMs: pair.entryDeadlineMs });
   return result;
 }

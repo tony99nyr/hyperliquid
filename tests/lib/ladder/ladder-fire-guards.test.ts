@@ -169,6 +169,29 @@ describe('performLadderRungFire — guard stack', () => {
     expect((await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW })).skipped).toBe('not-operator');
   });
 
+  it('refuses an open past its entry deadline: no claim, no order, ladder stays armed', async () => {
+    getLadderWithRungs.mockResolvedValue(ladder({}, [openRung({ triggerMeta: { entryDeadlineMs: NOW } })]));
+    expect((await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW })).skipped).toBe('past-entry-deadline');
+    expect(claimRungFire).not.toHaveBeenCalled();
+    expect(executeIntent).not.toHaveBeenCalled();
+    expect(disarmLadder).not.toHaveBeenCalled();
+    expect(setRungStatus).not.toHaveBeenCalled(); // the rung stays pending
+  });
+
+  it('fails closed on a malformed entry deadline', async () => {
+    const bad = { entryDeadlineMs: 'soon' } as unknown as LadderRung['triggerMeta'];
+    getLadderWithRungs.mockResolvedValue(ladder({}, [openRung({ triggerMeta: bad })]));
+    expect((await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW })).skipped).toBe('past-entry-deadline');
+    expect(claimRungFire).not.toHaveBeenCalled();
+  });
+
+  it('fires an open that is still inside its entry deadline', async () => {
+    getLadderWithRungs.mockResolvedValue(ladder({}, [openRung({ triggerMeta: { entryDeadlineMs: NOW + 1 } })]));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
+    expect(res.skipped).not.toBe('past-entry-deadline');
+    expect(claimRungFire).toHaveBeenCalled();
+  });
+
   it('skips a rung that is not pending', async () => {
     getLadderWithRungs.mockResolvedValue(ladder({}, [openRung({ status: 'fired' })]));
     expect((await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW })).skipped).toMatch(/rung-fired/);

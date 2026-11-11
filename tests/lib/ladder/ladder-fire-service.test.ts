@@ -135,7 +135,7 @@ describe('performLadderRungFire — execution', () => {
     // CRIT: a paper ladder must NOT write a real stop/bracket to the exchange.
     expect(placeStopOnHl).not.toHaveBeenCalled();
     expect(placeBracketOnHl).not.toHaveBeenCalled();
-    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'filled', JSON.stringify({ entryOid: null, stopOid: null, tpOid: null }));
+    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'filled', JSON.stringify({ entryOid: null, stopOid: null, tpOid: null, stopPx: 1920 }));
     expect(setRungStatus).toHaveBeenCalledWith('r1', 'fired');
     // Single-rung ladder fully executed → marked done so the UI shows completion.
     expect(markLadderDone).toHaveBeenCalledWith('L1');
@@ -358,7 +358,7 @@ describe('performLadderRungFire — execution', () => {
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(res.fired).toBe(true);
     expect(findOpenStop).not.toHaveBeenCalled();
-    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'filled', JSON.stringify({ entryOid: null, stopOid: 501, tpOid: null }));
+    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'filled', JSON.stringify({ entryOid: null, stopOid: 501, tpOid: null, stopPx: 1920 }));
   });
 
   it('liveOpen_requiresConfirmedRestingStop', async () => {
@@ -488,7 +488,7 @@ describe('performLadderRungFire — execution', () => {
     const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW });
     expect(res.fired).toBe(true);
     expect(placeStopOnHl).toHaveBeenCalled(); // live → a real protective stop rests
-    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'filled', JSON.stringify({ entryOid: null, stopOid: 501, tpOid: null }));
+    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'filled', JSON.stringify({ entryOid: null, stopOid: 501, tpOid: null, stopPx: 1920 }));
   });
 
   it('does not flatten the healthy base when a live add is rejected', async () => {

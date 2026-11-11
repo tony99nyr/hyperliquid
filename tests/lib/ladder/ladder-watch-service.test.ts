@@ -128,6 +128,24 @@ describe('runLadderWatchTick', () => {
     expect(performLadderRungFire).toHaveBeenCalledWith(expect.objectContaining({ ladderId: 'L1', rungId: 'r1' }));
   });
 
+  it('does not send an open rung past its entry deadline to the fire path, and still fires its management rungs', async () => {
+    const now = 1_700_000_000_000;
+    const bars = [candle(1900, now - 30 * 60_000), candle(2050, now - 15 * 60_000 - 1), candle(9999, now - 1)];
+    fetchCandles.mockResolvedValue({ candles: bars, stale: false });
+    const late = openRung({ triggerMeta: { entryDeadlineMs: now } }); // gate closes AT the deadline
+    const reduce = openRung({ id: 'r2', seq: 2, action: 'reduce', triggerPx: 2040, reduceFrac: 0.5, riskUsd: null, stopFrac: null });
+    getLadderWithRungs.mockResolvedValue(ladder([late, reduce]));
+    const s = await runLadderWatchTick({ now });
+    expect(s.laddersEvaluated).toBe(1);
+    expect(performLadderRungFire).toHaveBeenCalledTimes(1);
+    expect(performLadderRungFire).toHaveBeenCalledWith(expect.objectContaining({ rungId: 'r2' }));
+    // One millisecond before the deadline the entry is still live.
+    performLadderRungFire.mockClear();
+    getLadderWithRungs.mockResolvedValue(ladder([openRung({ triggerMeta: { entryDeadlineMs: now + 1 } })]));
+    await runLadderWatchTick({ now });
+    expect(performLadderRungFire).toHaveBeenCalledWith(expect.objectContaining({ rungId: 'r1' }));
+  });
+
   it('does NOT fire when the completed close is below the trigger', async () => {
     fetchCandles.mockResolvedValue({ candles: [candle(1900), candle(1950), candle(9999)], stale: false });
     const s = await runLadderWatchTick({ now: 0 });

@@ -128,21 +128,33 @@ run(async () => {
   const ids = outcomes.map((row) => row.ladderId);
   const [ladderRes, rungRes, fireRes] = await Promise.all([
     db.from('ladders').select('id,title,oco_group_id,mode').in('id', ids),
-    db.from('ladder_rungs').select('id,ladder_id,action,risk_usd,stop_px,side,coin').in('ladder_id', ids),
+    db.from('ladder_rungs').select('id,ladder_id,action,risk_usd,stop_px,stop_frac,side,coin').in('ladder_id', ids),
     db.from('ladder_fires').select('ladder_id,rung_id,status,fired_at,detail').in('ladder_id', ids),
   ]);
   if (ladderRes.error || rungRes.error || fireRes.error) throw new Error('Could not load report-time ladder context.');
   const ladders = (ladderRes.data ?? []).map((row) => ({ id: String(row.id), title: String(row.title), oco_group_id: row.oco_group_id as string | null, mode: String(row.mode) }));
   const rungs: ReportRung[] = (rungRes.data ?? []).map((row) => ({ id: String(row.id), ladderId: String(row.ladder_id), action: String(row.action), riskUsd: typeof row.risk_usd === 'number' ? row.risk_usd : null,
-    stopPx: typeof row.stop_px === 'number' ? row.stop_px : null, side: row.side === 'short' ? 'short' : 'long', coin: String(row.coin) }));
+    stopPx: typeof row.stop_px === 'number' ? row.stop_px : null, stopFrac: typeof row.stop_frac === 'number' ? row.stop_frac : null, side: row.side === 'short' ? 'short' : 'long', coin: String(row.coin) }));
   const fires: ReportFire[] = (fireRes.data ?? []).map((row) => ({ ladderId: String(row.ladder_id), rungId: String(row.rung_id), status: String(row.status), firedAt: Date.parse(String(row.fired_at)), detail: typeof row.detail === 'string' ? row.detail : null }));
-  let reportFills: HlFill[] = [];
+  // Gap-past-stop reads each ladder's OWN fills from the owner attribution. A time window
+  // is not enough: other ladders trade the same coin inside it.
+  let ledgers: ReturnType<typeof attributeLadderFills>['byLadder'] | null = null;
   const reportAddress = getHlAccountAddress();
   if (reportAddress) {
-    const fillResult = await fetchAllFills(reportAddress, { sinceMs: 0, maxFills: 100_000 });
-    if (!fillResult.error && !fillResult.truncated) reportFills = fillResult.fills;
+    try {
+      const fillResult = await fetchAllFills(reportAddress, { sinceMs: 0, maxFills: 100_000 });
+      if (fillResult.error || fillResult.truncated) throw new Error(`incomplete HL fill history: ${fillResult.error ?? 'truncated'}`);
+      const [active, archived] = await Promise.all([listLaddersWithRungs(), listLaddersWithRungs(undefined, { archived: true })]);
+      const everyLadder = [...active, ...archived];
+      const attribution = attributeLadderFills(everyLadder, await outcomeFires(everyLadder.map((l) => l.id)), fillResult.fills);
+      const failures = attributionInvariantFailures(attribution);
+      if (failures.length) throw new Error(`attribution invariants failed: ${failures.join('; ')}`);
+      ledgers = attribution.byLadder;
+    } catch (error) {
+      line(`(gap-past-stop unavailable: ${error instanceof Error ? error.message : String(error)})`);
+    }
   }
-  const metrics = new Map(outcomes.map((row) => [row.ladderId, reportRiskMetrics(row, rungs, fires, reportFills)]));
+  const metrics = new Map(outcomes.map((row) => [row.ladderId, reportRiskMetrics(row, rungs, fires, ledgers?.get(row.ladderId))]));
   const reportRows = outcomes.map((row) => ({ ...row, setupType: classifyReportSetup(row, ladders), nominalR: metrics.get(row.ladderId)?.nominalR ?? null }));
 
   const report = buildExpectancyReport(reportRows, DEFAULT_EXPECTANCY_BAR);
@@ -157,7 +169,11 @@ run(async () => {
     const gaps = familyRows.map((row) => metrics.get(row.ladderId)?.gap).filter((gap) => gap != null);
     const gapR = gaps.map((gap) => gap.r).filter((value): value is number => value != null);
     const gapBps = gaps.map((gap) => gap.bps).filter((value): value is number => value != null);
-    line(`    nominal mean ${nominal.length ? fmtR(nominal.reduce((a, b) => a + b, 0) / nominal.length) : '—'} (n=${nominal.length}) · gap-past-stop ${gapR.length ? fmtR(gapR.reduce((a, b) => a + b, 0) / gapR.length) : '—'} / ${gapBps.length ? `${(gapBps.reduce((a, b) => a + b, 0) / gapBps.length).toFixed(1)} bps` : '—'} (n=${gapR.length})`);
+    const measured = gaps.filter((gap) => gap.r != null);
+    const derived = measured.filter((gap) => gap.stopSource === 'derived').length;
+    line(`    nominal mean ${nominal.length ? fmtR(nominal.reduce((a, b) => a + b, 0) / nominal.length) : '—'} (n=${nominal.length}) · gap-past-stop ${gapR.length ? fmtR(gapR.reduce((a, b) => a + b, 0) / gapR.length) : '—'} / ${gapBps.length ? `${(gapBps.reduce((a, b) => a + b, 0) / gapBps.length).toFixed(1)} bps` : '—'} (n=${gapR.length} of ${familyRows.length}${derived ? `, ${derived} with a stop derived from the entry fill` : ''})`);
+    const missing = familyRows.flatMap((row) => { const gap = metrics.get(row.ladderId)?.gap; return gap && gap.r == null && gap.reason ? [`${row.ladderId.slice(0, 8)} ${gap.reason}`] : []; });
+    if (missing.length) line(`    gap evidence missing for ${missing.length}: ${missing.join('; ')}`);
     line(`    ${s.reason}`);
   }
 

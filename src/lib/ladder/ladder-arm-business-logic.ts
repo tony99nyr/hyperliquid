@@ -160,6 +160,21 @@ export function validateLadderForArm(input: ValidateLadderInput): ValidateLadder
   for (const r of rungs) {
     const tp = triggerProblem(r);
     if (tp) warnings.push(tp);
+    // Entry deadline (optional, open/add only): a real future instant inside the ladder's
+    // window. An exit must never carry one, and a rung already past it would look armed
+    // but could never fire.
+    const deadline: unknown = r.triggerMeta?.entryDeadlineMs;
+    if (deadline !== undefined) {
+      if (!INCREASES_EXPOSURE(r.action)) {
+        warnings.push(`rung ${r.seq}: entryDeadlineMs is an ENTRY limit (open/add): it can never gate an exit`);
+      } else if (!(typeof deadline === 'number' && Number.isFinite(deadline) && deadline > input.now)) {
+        warnings.push(`rung ${r.seq}: the entry deadline has passed or is not a valid time, so this rung could never fire`);
+      } else if (input.activeFromMs != null && deadline <= input.activeFromMs) {
+        warnings.push(`rung ${r.seq}: the entry deadline must be AFTER active_from (the entry window is empty)`);
+      } else if (input.expiresAtMs != null && deadline > input.expiresAtMs) {
+        warnings.push(`rung ${r.seq}: the entry deadline must not be after expiry`);
+      }
+    }
     // stop_move rungs: price trigger + a valid, risk-reducing destination. The full
     // tighter-than-current check needs the LIVE resting stop, so it lives at fire;
     // arm-time validates shape + the side-relative ordering that IS knowable.

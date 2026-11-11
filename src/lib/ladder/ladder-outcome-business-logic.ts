@@ -9,7 +9,7 @@ import type { LadderWithRungs } from './ladder-types';
  * The window keeps a 3x margin over the slowest fill; -1s absorbs clock skew.
  */
 export const ENTRY_MATCH_WINDOW_MS = 10_000;
-const EARLY_JITTER_MS = 1_000;
+export const EARLY_JITTER_MS = 1_000;
 const SIZE_EPSILON = 1e-9;
 /** HL rounds sizes to szDecimals (at most 5 dp on the coins we trade). */
 const POSITION_EPSILON = 1e-6;
@@ -22,6 +22,9 @@ export interface OutcomeFire {
   firedAt: number;
 }
 
+/** One exchange fill, or the part of it, that belongs to an owner. */
+export interface OwnerFill { time: number; px: number; sz: number; oid: number | null }
+
 export interface OwnerLedger {
   owner: string;
   coin: string;
@@ -30,6 +33,13 @@ export interface OwnerLedger {
   closedPnl: number;
   fees: number;
   lastCloseMs: number | null;
+  /** The owner's entry and closing fills in time order (report-time stop overshoot). */
+  entryFills: OwnerFill[];
+  closeFills: OwnerFill[];
+  /** True when a closing fill arrived while another owner also held lots on the coin.
+   *  First-in first-out then decides whose lot the fill closed, so a per-ladder exit
+   *  price is a convention. P&L conservation holds; the stop overshoot is ambiguous. */
+  sharedInventory: boolean;
 }
 
 export interface CoinConservation {
@@ -92,7 +102,7 @@ function chronological(a: { fill: HlFill; index: number }, b: { fill: HlFill; in
 interface Lot { owner: string; size: number; side: 'buy' | 'sell' }
 interface EntryFire extends OutcomeFire { coin: string; side: 'buy' | 'sell'; entryOid: number | null }
 
-function entryOid(detail: string | null): number | null {
+export function entryOid(detail: string | null): number | null {
   if (!detail) return null;
   try {
     const parsed: unknown = JSON.parse(detail);
@@ -104,7 +114,7 @@ function entryOid(detail: string | null): number | null {
 }
 
 function ledger(owner: string, coin: string): OwnerLedger {
-  return { owner, coin, entrySize: 0, openSize: 0, closedPnl: 0, fees: 0, lastCloseMs: null };
+  return { owner, coin, entrySize: 0, openSize: 0, closedPnl: 0, fees: 0, lastCloseMs: null, entryFills: [], closeFills: [], sharedInventory: false };
 }
 
 /** A closing fill follows the owner of the inventory it reduces, regardless of its oid. */
@@ -180,8 +190,13 @@ export function attributeLadderFills(ladders: LadderWithRungs[], fires: OutcomeF
     let remaining = fill.sz;
     const gross = fill.closedPnl ?? 0;
     const fee = fill.fee ?? 0;
+    const oid = fill.oid == null || !Number.isFinite(Number(fill.oid)) ? null : Number(fill.oid);
     const closingSize = lots.length && lots[0].side !== fill.side
       ? Math.min(fill.sz, lots.reduce((sum, lot) => sum + lot.size, 0)) : 0;
+    if (closingSize > 0) {
+      const owners = new Set(lots.map((lot) => lot.owner));
+      if (owners.size > 1) for (const owner of owners) ownerLedger(owner, coin).sharedInventory = true;
+    }
     while (remaining > SIZE_EPSILON && lots.length && lots[0].side !== fill.side) {
       const lot = lots[0];
       const taken = Math.min(remaining, lot.size);
@@ -190,6 +205,7 @@ export function attributeLadderFills(ladders: LadderWithRungs[], fires: OutcomeF
       row.fees += fee * taken / fill.sz;
       row.openSize -= taken;
       row.lastCloseMs = fill.time;
+      row.closeFills.push({ time: fill.time, px: fill.px, sz: taken, oid });
       lot.size -= taken;
       remaining -= taken;
       if (lot.size <= SIZE_EPSILON) lots.shift();
@@ -201,6 +217,7 @@ export function attributeLadderFills(ladders: LadderWithRungs[], fires: OutcomeF
       row.openSize += remaining;
       if (closingSize === 0) row.closedPnl += gross;
       row.fees += fee * remaining / fill.sz;
+      row.entryFills.push({ time: fill.time, px: fill.px, sz: remaining, oid });
       lots.push({ owner, side: fill.side, size: remaining });
     }
   }
@@ -213,6 +230,9 @@ export function attributeLadderFills(ladders: LadderWithRungs[], fires: OutcomeF
     total.closedPnl += row.closedPnl;
     total.fees += row.fees;
     total.lastCloseMs = Math.max(total.lastCloseMs ?? 0, row.lastCloseMs ?? 0) || null;
+    total.entryFills.push(...row.entryFills);
+    total.closeFills.push(...row.closeFills);
+    total.sharedInventory ||= row.sharedInventory;
   }
   const conservation = [...new Set(fills.map((fill) => fill.coin.toUpperCase()))].sort().map((coin) => {
     const source = fills.filter((fill) => fill.coin.toUpperCase() === coin);

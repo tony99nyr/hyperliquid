@@ -46,11 +46,11 @@ export const eventStraddlePrepDeps: EventStraddlePrepDeps = {
     }
     return { created: row.created, ids: row.ids as [string, string] };
   },
-  async alertReady({ event, coin, ref, ids, activeFromMs }) {
+  async alertReady({ event, coin, ref, ids, activeFromMs, entryDeadlineMs }) {
     await sendDiscord(
       `💡 **${event.name} straddle drafted — ARM DECISION NEEDED**\n` +
       `${coin} ref ${ref}; legs: \`${ids[0].slice(0, 8)}\` (long) + \`${ids[1].slice(0, 8)}\` (short), OCO. ` +
-      `Hot from ${new Date(activeFromMs).toISOString().slice(11, 16)} UTC.\n` +
+      `Hot from ${new Date(activeFromMs).toISOString().slice(11, 16)} UTC; the entry gate closes at ${new Date(entryDeadlineMs).toISOString().slice(11, 16)} UTC.\n` +
       `Arm BOTH in the cockpit if you want the trade. Drafts do nothing on their own.`,
     );
   },

@@ -25,6 +25,33 @@ describe('event straddle preparation', () => {
     expect(first.legs.every((leg) => !('status' in leg))).toBe(true);
   });
 
+  it('sizes each leg at the standing $12 when the caller (the cron) gives no risk', () => {
+    const now = at('2026-11-06T13:00:00Z');
+    const fromCron = buildEventStraddle({ event, now }, 100_000, '00000000-0000-0000-0000-000000000001');
+    expect(fromCron.legs.map((leg) => leg.rungs[0].riskUsd)).toEqual([12, 12]);
+    // Caps scale with the risk: notional = risk / stopFrac, +15% headroom.
+    for (const leg of fromCron.legs) {
+      const open = leg.rungs[0];
+      expect(leg.maxTotalNotionalUsd).toBe(Math.ceil((12 / open.stopFrac!) * 1.15));
+    }
+    const manual = buildEventStraddle({ event, now, riskUsd: 4 }, 100_000, '00000000-0000-0000-0000-000000000002');
+    expect(manual.legs.map((leg) => leg.rungs[0].riskUsd)).toEqual([4, 4]);
+  });
+
+  it('closes the entry gate 120 minutes after the print and keeps the 24h expiry for management', () => {
+    const now = at('2026-11-06T13:00:00Z');
+    const pair = buildEventStraddle({ event, now }, 100_000, '00000000-0000-0000-0000-000000000001');
+    const deadline = at('2026-11-06T15:30:00Z');
+    expect(pair.entryDeadlineMs).toBe(deadline);
+    for (const leg of pair.legs) {
+      expect(leg.expiresAtMs).toBe(at('2026-11-07T13:30:00Z'));
+      expect(leg.rungs[0]).toMatchObject({ action: 'open', triggerMeta: { entryDeadlineMs: deadline } });
+      // Only the entry carries the deadline: an exit must never be gated by it.
+      expect(leg.rungs.slice(1).every((r) => r.triggerMeta?.entryDeadlineMs === undefined)).toBe(true);
+      expect(leg.thesis).toContain('entry gate closes at print+120min (2026-11-06T15:30:00.000Z)');
+    }
+  });
+
   it('creates live, unarmed drafts once per event id and alerts only on creation', async () => {
     const d = deps();
     const first = await prepEventStraddle({ event, now: at('2026-11-06T13:00:00Z') }, d);
@@ -34,6 +61,7 @@ describe('event straddle preparation', () => {
       legs: [expect.objectContaining({ mode: 'live' }), expect.objectContaining({ mode: 'live' })],
     }));
     expect(d.alertReady).toHaveBeenCalledTimes(1);
+    expect(d.alertReady).toHaveBeenCalledWith(expect.objectContaining({ entryDeadlineMs: at('2026-11-06T15:30:00Z') }));
     vi.mocked(d.createPair).mockResolvedValueOnce({ created: false, ids: ['long-id', 'short-id'] });
     const second = await prepEventStraddle({ event, now: at('2026-11-06T13:01:00Z') }, d);
     expect('created' in second && second.created).toBe(false);

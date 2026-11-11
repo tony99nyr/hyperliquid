@@ -563,3 +563,28 @@ the implementation with expectancy or amend the registered rule.
   confirmation in the Lanes tab; none treated as confirmed.
 - **No rule changes.** The record supports the standing rules; nothing added
   or softened. DESK_PROFITABILITY untouched (no lever's verdict moved).
+
+### 2026-11-10 operator decisions (not a retro; no bundle was run)
+
+- **CPI (Oct data) result:** the short leg fired at 15:45Z (print + 136 min)
+  with $4 risk. The stall rung closed half at 16:10Z and the stop filled the
+  rest at 21:02Z. Net −$2.77 (−0.69R, from exchange fills). The long leg
+  disarmed by OCO. The ledger row resolves at the Nov 16 retro.
+- **Draft size:** the cron now drafts each straddle leg at $12 risk. The cron
+  path used $4 for this CPI because it passed no risk value.
+- **Entry deadline:** the open rung may enter only before print + 120 min.
+  The ladder still expires at print + 24h, so a leg that fired in time keeps
+  its management rungs. The 120 minutes are frozen for the test.
+- **New pre-registration:**
+  [PREREGISTRATION_event-straddle-entry-deadline.md](PREREGISTRATION_event-straddle-entry-deadline.md)
+  succeeds the Oct 24 registration from the FOMC of Dec 9. The count restarts
+  at zero. The old registration closes at two losing episodes with no verdict;
+  both stay in the ledger. FOMC stays a straddle class with a descriptive
+  sub-count beside CPI, and no bar of its own.
+- **Gap-past-stop:** each open fire now records its planned stop, and the
+  expectancy report reads each ladder's own fills from the owner attribution.
+  Older fires use a stop derived from the entry fill (marked in the report).
+  A ladder that shared a coin with another owner while it closed has an
+  ambiguous exit; the report counts it as missing evidence.
+- **No scout rule changed.** DESK_PROFITABILITY untouched (no lever's verdict
+  moved).

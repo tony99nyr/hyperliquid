@@ -113,7 +113,9 @@ each open `docs/scout/PREREGISTRATION_*.md` (verdict not yet final) in one table
 test, its count toward the bar, the change since the last retro, and the next decision
 date. Flag any count that did not move when it should have. Examples:
 
-- event-straddle: new event episodes toward the 10-episode review.
+- event-straddle: new event episodes toward the 10-episode review, with the FOMC and CPI
+  sub-counts and the no-fire events beside them. The count restarts with the FOMC of
+  2026-12-09 ([PREREGISTRATION_event-straddle-entry-deadline.md](../../../docs/scout/PREREGISTRATION_event-straddle-entry-deadline.md)).
 - Entry overshoot (catalyst-classes): intrabar gate touches against completed-close
   outcomes, one row per new event leg.
 - cross-venue funding-veto: rows in the capture archive

@@ -14,3 +14,7 @@ One scheduled event is one episode. Both OCO legs from one print count as one ev
 - Size up by one risk tier only after the pass bar and when mean realised gap-past-stop is below **0.10R**. Missing gap evidence blocks size-up.
 
 This is a review bar, not permission to arm or trade. The existing slip-aware verdict remains visible and unchanged.
+
+## Successor
+
+This registration closed on 2026-11-10 at two fresh episodes, with no verdict. [PREREGISTRATION_event-straddle-entry-deadline.md](PREREGISTRATION_event-straddle-entry-deadline.md) succeeds it from the FOMC of 2026-12-09. The text above is unchanged.
