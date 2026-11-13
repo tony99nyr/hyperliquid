@@ -99,6 +99,9 @@ run_step() {
 
 hc "/start"
 log "=== nas-watch tick (repo=$REPO) ==="
+# Read the UTC clock at the START of the tick. The funding-veto capture below runs
+# after four slower steps: a slow tick that starts at 23:55 must still capture.
+UTC_H="$(date -u +%H)"; UTC_M="$(date -u +%M)"
 
 # Health watch: per-coin health/P&L/alerts for open paper positions -> Supabase.
 run_step "health watch (pnpm watch --once)" "$PNPM" watch --once
@@ -121,7 +124,7 @@ run_step "scout lanes (pnpm scout:lanes)" "$PNPM" scout:lanes
 # Funding-veto study archive: snapshot HL predictedFundings on the last tick before
 # each 8h funding boundary (07:55, 15:55, 23:55 UTC). Appends to a gitignored file
 # under data/backups/hyperliquid-study/ (kept across update.sh pulls). Read-only HL.
-UTC_H="$(date -u +%H)"; UTC_M="$(date -u +%M)"
+# Check it on the NAS with scripts/nas-doctor.sh.
 case "$UTC_H" in 07|15|23)
   if [ "$UTC_M" -ge 55 ]; then
     run_step "funding-veto capture (pnpm study:funding-veto --capture)" "$PNPM" study:funding-veto -- --capture
