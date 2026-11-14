@@ -563,6 +563,15 @@ async function fireReduce(ladder: LadderWithRungs, rung: LadderRung, sessionId: 
     await setRungStatus(rung.id, 'skipped');
     return skip('flat');
   }
+  // RESTRICTIVE: a reduce/close manages a position of the RUNG's side. A position on the
+  // other side is not this ladder's (its own entry stopped out, and the operator or another
+  // ladder opened the opposite way), so the rung must not trim or close it. Terminal, same
+  // as flat: the position keeps its own protection.
+  if (pos.side !== rung.side) {
+    await markFireOutcome(fireId, 'failed', 'opposite-side-position');
+    await setRungStatus(rung.id, 'skipped');
+    return skip('opposite-side-position');
+  }
   // 'reduce' trims a fraction of the CURRENT position — reduceFrac (path-independent) is
   // preferred, else the absolute sizeCoins/position, else full; 'close' = full.
   const fraction = reduceFraction({ action: rung.action, reduceFrac: rung.reduceFrac, sizeCoins: rung.sizeCoins, positionSz: pos.sz });

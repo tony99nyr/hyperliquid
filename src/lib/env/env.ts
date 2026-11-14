@@ -142,6 +142,11 @@ const envSchema = z.object({
   // the ladder-watch cron auto-DRAFTS a low-qty LIVE continuation ladder + pings
   // Discord on an outsized 24h move (≥5%). DRAFT only — NEVER arms; default OFF.
   RUNAWAY_ALERT_ENABLED: boolFlag('RUNAWAY_ALERT_ENABLED'),
+  // htf-trend drafter: when 'true', the ladder-watch cron auto-DRAFTS a low-size LIVE
+  // ladder on each new daily 20-day channel breakout (the scout htf-trend lane's live
+  // expression) and pings Discord. DRAFT only, the operator arms. Default OFF. Enabling
+  // it starts the live pre-registration count (docs/scout/PREREGISTRATION_htf-trend-live.md).
+  HTF_TREND_ALERT_ENABLED: boolFlag('HTF_TREND_ALERT_ENABLED'),
   // Cron drafts event straddles at T-30. Drafts stay unarmed; default OFF.
   EVENT_PREP_CRON_ENABLED: boolFlag('EVENT_PREP_CRON_ENABLED'),
   // Dedicated bearer token for the NAS watcher to call /api/cockpit/ladder/fire-rung
@@ -192,6 +197,7 @@ export function validateEnv(source: NodeJS.ProcessEnv = process.env): CockpitEnv
     COCKPIT_BASE_URL: source.COCKPIT_BASE_URL,
     TREND_ALERT_ENABLED: source.TREND_ALERT_ENABLED,
     RUNAWAY_ALERT_ENABLED: source.RUNAWAY_ALERT_ENABLED,
+    HTF_TREND_ALERT_ENABLED: source.HTF_TREND_ALERT_ENABLED,
     EVENT_PREP_CRON_ENABLED: source.EVENT_PREP_CRON_ENABLED,
     IAMROSSI_STANCE_URL: source.IAMROSSI_STANCE_URL,
     IAMROSSI_STANCE_TOKEN: source.IAMROSSI_STANCE_TOKEN,

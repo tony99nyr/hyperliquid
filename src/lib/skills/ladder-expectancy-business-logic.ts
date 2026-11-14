@@ -11,6 +11,7 @@
  */
 
 import type { LadderWithRungs } from '@/lib/ladder/ladder-types';
+import { parseHtfTrendTitle } from '@/lib/ladder/htf-trend-alert-business-logic';
 import { EARLY_JITTER_MS, ENTRY_MATCH_WINDOW_MS, entryOid, type OwnerFill, type OwnerLedger } from '@/lib/ladder/ladder-outcome-business-logic';
 import type { HlFill } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { isEventStraddle, type LadderInput } from '@/lib/performance/lane-performance-business-logic';
@@ -148,6 +149,10 @@ export function deriveSetupType(ladder: Pick<LadderWithRungs, 'rungs' | 'title'>
   // that merely mention a lane.
   if (/^[A-Z0-9]+ trend-follow /.test(ladder.title)) return `trend-follow-8h-${side}`;
   if (/^[A-Z0-9]+ reversion-fade /.test(ladder.title)) return `reversion-fade-${side}`;
+  // The htf-trend drafter ("BTC htf-trend short 2026-11-13 (auto-draft, ...)"): its own
+  // family, so the live pre-registration reads a clean count. The full title must match,
+  // the same test the drafter uses to recognise its own ladders.
+  if (parseHtfTrendTitle(ladder.title)) return `htf-trend-${side}`;
   const kind = opens[0]?.triggerKind ?? 'price_above';
   const dir = side === 'long'
     ? (kind === 'price_above' ? 'breakout' : 'dip')

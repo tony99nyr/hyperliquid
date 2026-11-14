@@ -42,6 +42,14 @@ export function isRunawayAlertEnabled(): boolean {
   return validateEnv().RUNAWAY_ALERT_ENABLED;
 }
 
+/** When ON, the ladder-watch cron auto-DRAFTS a low-size LIVE ladder + pings Discord on
+ *  each new daily 20-day channel breakout (the scout htf-trend lane's live expression).
+ *  The flag gates drafting only: the spent-ladder disarm runs with the flag on or off.
+ *  DRAFT only, never arms. Default OFF. */
+export function isHtfTrendAlertEnabled(): boolean {
+  return validateEnv().HTF_TREND_ALERT_ENABLED;
+}
+
 export function isEventPrepCronEnabled(): boolean {
   return validateEnv().EVENT_PREP_CRON_ENABLED;
 }

@@ -84,6 +84,9 @@ export interface HlClearinghouseState {
   stale: boolean;
   /** Set when the live fetch failed and a cached/empty value was returned. */
   error?: string;
+  /** True when the venue response carried the positions array. A response without it
+   *  parses as flat, so a caller that acts on "flat" must require this to be true. */
+  positionsListed?: boolean;
 }
 
 export interface HlFill {
@@ -294,6 +297,7 @@ function parseClearinghouseState(address: string, raw: RawClearinghouseState): H
     positions,
     fetchedAt: Date.now(),
     stale: false,
+    positionsListed: Array.isArray(raw.assetPositions),
   };
 }
 
@@ -309,10 +313,7 @@ export async function fetchClearinghouseState(rawAddress: string, opts?: { uncac
   if (!isValidHlAddress(address)) {
     return {
       address,
-      accountValueUsd: 0,
-      totalMarginUsed: 0,
-      totalNotionalPosition: 0,
-      withdrawableUsd: 0,
+      accountValueUsd: 0, totalMarginUsed: 0, totalNotionalPosition: 0, withdrawableUsd: 0,
       positions: [],
       fetchedAt: Date.now(),
       stale: false,

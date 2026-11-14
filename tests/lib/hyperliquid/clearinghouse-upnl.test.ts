@@ -31,4 +31,17 @@ describe('clearinghouse unrealised P&L', () => {
     expect(state.positions.map((position) => position.unrealizedPnl)).toEqual([0, -12.5, 0, 0]);
     expect(state.positions.map((position) => position.unrealizedPnlValid)).toEqual([false, true, false, true]);
   });
+
+  it('marks a response without the positions array as not listed', async () => {
+    const respond = (body: unknown) => vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => body } as Response));
+
+    respond({ marginSummary: { accountValue: '1000' } });
+    const partial = await fetchClearinghouseState(ADDRESS, { uncached: true });
+    expect(partial.positions).toEqual([]);
+    expect(partial.positionsListed).toBe(false);
+
+    respond({ marginSummary: { accountValue: '1000' }, assetPositions: [] });
+    const flat = await fetchClearinghouseState(ADDRESS, { uncached: true });
+    expect(flat.positionsListed).toBe(true);
+  });
 });

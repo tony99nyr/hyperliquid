@@ -64,11 +64,13 @@ const getLadderWithRungs = vi.fn();
 const markLadderExpired = vi.fn();
 const fetchCandles = vi.fn();
 const performLadderRungFire = vi.fn();
+const computeHtfExitIndicators = vi.fn();
 
 vi.mock('@/lib/ladder/ladder-flags', () => ({ isLadderAutofireEnabled: (...a: unknown[]) => isLadderAutofireEnabled(...a) }));
 vi.mock('@/lib/ladder/ladder-service', () => ({ listLadders: (...a: unknown[]) => listLadders(...a), getLadderWithRungs: (...a: unknown[]) => getLadderWithRungs(...a), markLadderExpired: (...a: unknown[]) => markLadderExpired(...a) }));
 vi.mock('@/lib/hyperliquid/candle-service', () => ({ fetchCandles: (...a: unknown[]) => fetchCandles(...a) }));
 vi.mock('@/lib/ladder/ladder-fire-service', () => ({ performLadderRungFire: (...a: unknown[]) => performLadderRungFire(...a) }));
+vi.mock('@/lib/ladder/ladder-htf-exit-service', () => ({ computeHtfExitIndicators: (...a: unknown[]) => computeHtfExitIndicators(...a) }));
 
 import { runLadderWatchTick } from '@/lib/ladder/ladder-watch-service';
 
@@ -165,5 +167,64 @@ describe('runLadderWatchTick', () => {
     const s = await runLadderWatchTick({ now: 0 });
     expect(s.rungsMet).toBe(0);
     expect(performLadderRungFire).not.toHaveBeenCalled();
+  });
+});
+
+describe('runLadderWatchTick: daily channel exit rungs (htf-trend)', () => {
+  const exitRung = (over: Partial<LadderRung> = {}): LadderRung =>
+    openRung({
+      id: 'r2', seq: 2, coin: 'BTC', side: 'short', action: 'close', triggerKind: 'indicator', triggerPx: null,
+      triggerMeta: { op: 'above', indicatorName: 'htf-channel-exit-short', indicatorValue: 0.5 },
+      riskUsd: null, stopFrac: null, leverage: null, ...over,
+    });
+
+  beforeEach(() => {
+    getLadderWithRungs.mockResolvedValue(ladder([exitRung()]));
+  });
+
+  it('fires the close rung when the daily read publishes the exit for its side', async () => {
+    computeHtfExitIndicators.mockResolvedValue({ 'htf-channel-exit-long': 0, 'htf-channel-exit-short': 1 });
+    const s = await runLadderWatchTick({ now: 0 });
+    expect(computeHtfExitIndicators).toHaveBeenCalledWith('BTC', 0);
+    expect(s.rungsMet).toBe(1);
+    expect(performLadderRungFire).toHaveBeenCalledWith(expect.objectContaining({ rungId: 'r2' }));
+  });
+
+  it('does not fire while the daily close is inside the channel', async () => {
+    computeHtfExitIndicators.mockResolvedValue({ 'htf-channel-exit-long': 1, 'htf-channel-exit-short': 0 });
+    const s = await runLadderWatchTick({ now: 0 });
+    expect(s.rungsMet).toBe(0);
+    expect(performLadderRungFire).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the daily read is unavailable (no indicator, no fire)', async () => {
+    computeHtfExitIndicators.mockResolvedValue(null);
+    const s = await runLadderWatchTick({ now: 0 });
+    expect(s.rungsMet).toBe(0);
+    expect(performLadderRungFire).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the 15m feed is stale, and does not read the daily bars', async () => {
+    computeHtfExitIndicators.mockResolvedValue({ 'htf-channel-exit-long': 0, 'htf-channel-exit-short': 1 });
+    fetchCandles.mockResolvedValue({ candles: [candle(1900), candle(2050)], stale: true });
+    const s = await runLadderWatchTick({ now: 0 });
+    expect(computeHtfExitIndicators).not.toHaveBeenCalled();
+    expect(s.rungsMet).toBe(0);
+    expect(performLadderRungFire).not.toHaveBeenCalled();
+  });
+
+  it('reads the daily bars only for a coin with a PENDING channel exit rung', async () => {
+    getLadderWithRungs.mockResolvedValue(ladder([openRung(), exitRung({ status: 'fired' })]));
+    await runLadderWatchTick({ now: 0 });
+    expect(computeHtfExitIndicators).not.toHaveBeenCalled();
+  });
+
+  it('the entry rung beside the exit rung still fires on its own price gate', async () => {
+    computeHtfExitIndicators.mockResolvedValue({ 'htf-channel-exit-long': 0, 'htf-channel-exit-short': 0 });
+    const entry = openRung({ coin: 'BTC', side: 'short', triggerKind: 'price_below', triggerPx: 2100 });
+    getLadderWithRungs.mockResolvedValue(ladder([entry, exitRung()]));
+    const s = await runLadderWatchTick({ now: 0 });
+    expect(s.rungsMet).toBe(1);
+    expect(performLadderRungFire).toHaveBeenCalledWith(expect.objectContaining({ rungId: 'r1' }));
   });
 });

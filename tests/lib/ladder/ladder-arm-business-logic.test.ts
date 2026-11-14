@@ -246,6 +246,19 @@ describe('indicator rungs — EXIT-ONLY momentum exits (arm-time rules)', () => 
     expect(res.warnings.filter((w) => w.includes('indicator'))).toEqual([]);
   });
 
+  it('accepts a long close watching the long HTF channel exit without a floor', () => {
+    const res = arm({ action: 'close', triggerMeta: { op: 'above', indicatorName: 'htf-channel-exit-long', indicatorValue: 0.5 } });
+    expect(res.warnings.filter((w) => w.includes('indicator'))).toEqual([]);
+  });
+
+  it('rejects a long exit watching the short HTF channel exit', () => {
+    expect(arm({ action: 'close', triggerMeta: { op: 'above', indicatorName: 'htf-channel-exit-short', indicatorValue: 0.5 } }).warnings.join(' ')).toMatch(/must watch/);
+  });
+
+  it('rejects an open rung watching an HTF channel exit', () => {
+    expect(arm({ action: 'open', triggerMeta: { op: 'above', indicatorName: 'htf-channel-exit-long', indicatorValue: 0.5 } }).warnings.join(' ')).toMatch(/EXIT-ONLY/);
+  });
+
   it('REJECTS indicator triggers on exposure-increasing rungs (open/add)', () => {
     expect(arm({ action: 'open', entryPx: 65, sizeCoins: 1, stopPx: 63 }).warnings.join(' ')).toMatch(/EXIT-ONLY/);
     expect(arm({ action: 'add', entryPx: 66, sizeCoins: 1, stopPx: 64 }).warnings.join(' ')).toMatch(/EXIT-ONLY/);

@@ -250,3 +250,48 @@ describe('performLadderRungFire — pre-opener guard (Jul-17)', () => {
   });
 });
 
+describe('performLadderRungFire: a reduce/close acts only on a position of the rung side', () => {
+  const closeRung = (over: Partial<LadderRung> = {}): LadderRung =>
+    openRung({
+      id: 'r2', seq: 2, action: 'close', triggerKind: 'indicator', triggerPx: null,
+      triggerMeta: { op: 'above', indicatorName: 'htf-channel-exit-long', indicatorValue: 0.5 },
+      riskUsd: null, stopFrac: null, leverage: null, cloid: 'L1:r2', ...over,
+    });
+  const held = (side: 'long' | 'short') => ({ coin: 'ETH', side, sz: 2, avgEntryPx: 1900, realizedPnlUsd: 0, feesPaidUsd: 0 });
+
+  beforeEach(() => {
+    getLadderWithRungs.mockResolvedValue(ladder({}, [openRung({ status: 'fired' }), closeRung()]));
+    getActiveSession.mockResolvedValue({ id: 's1', mode: 'paper' });
+  });
+
+  it('closes a position of the same side (reduce-only, full size)', async () => {
+    loadPosition.mockResolvedValue(held('long'));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r2', now: NOW });
+    expect(res.fired).toBe(true);
+    expect(executeIntent).toHaveBeenCalledTimes(1);
+    expect(executeIntent.mock.calls[0][0]).toMatchObject({ coin: 'ETH', side: 'sell', reduceOnly: true });
+    expect(setRungStatus).toHaveBeenCalledWith('r2', 'fired');
+  });
+
+  it('REFUSES a position on the other side: no order, the rung ends skipped', async () => {
+    loadPosition.mockResolvedValue(held('short'));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r2', now: NOW });
+    expect(res.fired).toBe(false);
+    expect(res.skipped).toBe('opposite-side-position');
+    expect(executeIntent).not.toHaveBeenCalled();
+    expect(markFireOutcome).toHaveBeenCalledWith('f1', 'failed', 'opposite-side-position');
+    expect(setRungStatus).toHaveBeenCalledWith('r2', 'skipped');
+  });
+
+  it('a short rung refuses a long position the same way', async () => {
+    getLadderWithRungs.mockResolvedValue(ladder({}, [
+      openRung({ status: 'fired', side: 'short', triggerKind: 'price_below' }),
+      closeRung({ side: 'short', triggerMeta: { op: 'above', indicatorName: 'htf-channel-exit-short', indicatorValue: 0.5 } }),
+    ]));
+    loadPosition.mockResolvedValue(held('long'));
+    const res = await performLadderRungFire({ ladderId: 'L1', rungId: 'r2', now: NOW });
+    expect(res.skipped).toBe('opposite-side-position');
+    expect(executeIntent).not.toHaveBeenCalled();
+  });
+});
+

@@ -17,7 +17,7 @@
  */
 
 import type { Ladder, LadderRung, LadderSide, RungAction, RungTriggerKind, RungTriggerMeta } from './ladder-types';
-import { SUPPORTED_INDICATOR_NAMES, momentumStallIndicatorName } from './ladder-types';
+import { SUPPORTED_INDICATOR_NAMES, momentumStallIndicatorName, htfChannelExitIndicatorName } from './ladder-types';
 import {
   computeLadderRisk,
   rungEntryPx,
@@ -112,10 +112,11 @@ function triggerProblem(r: ArmRung): string | null {
       if (!SUPPORTED_INDICATOR_NAMES.includes(r.triggerMeta.indicatorName)) {
         return `rung ${r.seq}: unknown indicator '${r.triggerMeta.indicatorName}' (supported: ${SUPPORTED_INDICATOR_NAMES.join(', ')})`;
       }
-      // Side-consistency: a long position stalls via momentum-stall-long, a short via -short.
-      const wanted = momentumStallIndicatorName(r.side);
-      if (r.triggerMeta.indicatorName !== wanted) {
-        return `rung ${r.seq}: ${r.side} exit must watch '${wanted}', not '${r.triggerMeta.indicatorName}'`;
+      // Side-consistency: a long position exits on the -long names, a short on the -short
+      // names (momentum stall, or the daily channel exit of the htf-trend expression).
+      const wanted = [momentumStallIndicatorName(r.side), htfChannelExitIndicatorName(r.side)];
+      if (!wanted.includes(r.triggerMeta.indicatorName)) {
+        return `rung ${r.seq}: ${r.side} exit must watch ${wanted.map((n) => `'${n}'`).join(' or ')}, not '${r.triggerMeta.indicatorName}'`;
       }
       if (r.triggerMeta.floorPx !== undefined && !(Number.isFinite(r.triggerMeta.floorPx) && r.triggerMeta.floorPx > 0)) {
         return `rung ${r.seq}: indicator floorPx must be a positive price when set`;
@@ -208,7 +209,8 @@ export function validateLadderForArm(input: ValidateLadderInput): ValidateLadder
     }
     // The autofire watcher builds price + volume snapshots, and (since the momentum
     // exits landed) computes the SUPPORTED_INDICATOR_NAMES for coins with pending
-    // indicator rungs — so indicator triggers are now armable (validated exit-only,
+    // indicator rungs (the 15m momentum stall, and the daily channel exit from
+    // ladder-htf-exit-service), so indicator triggers are now armable (validated exit-only,
     // supported-name, side-consistent in triggerProblem above). FUNDING triggers are
     // still not published by the watcher — they'd arm but never fire; keep rejecting.
     if (r.triggerKind === 'funding') {

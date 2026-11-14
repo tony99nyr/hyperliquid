@@ -73,6 +73,14 @@ describe('deriveSetupType', () => {
     l.title = 'BTC reversion-fade short — z=2.3 (auto-draft · review+arm)';
     expect(deriveSetupType(l)).toBe('reversion-fade-short');
   });
+  it('tags the htf-trend lane by its complete title shape', () => {
+    const l = ladder([rung({ side: 'short', triggerKind: 'price_below' })], { title: 'BTC htf-trend short 2026-11-13 (auto-draft, review and arm)' });
+    expect(deriveSetupType(l)).toBe('htf-trend-short');
+    l.title = 'Operator notes htf-trend short plan';
+    expect(deriveSetupType(l)).not.toBe('htf-trend-short');
+    l.title = 'BTC htf-trend short notes';
+    expect(deriveSetupType(l)).not.toBe('htf-trend-short');
+  });
 });
 
 describe('reportRiskMetrics: gap-past-stop from owner-attributed fills', () => {

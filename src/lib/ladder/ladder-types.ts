@@ -29,10 +29,27 @@ export type RungTriggerKind = 'price_above' | 'price_below' | 'volume' | 'fundin
 // would fail closed (indicator absent → no fire), so keep them ALL on these exports. ---
 export const MOMENTUM_STALL_LONG = 'momentum-stall-long';
 export const MOMENTUM_STALL_SHORT = 'momentum-stall-short';
-export const SUPPORTED_INDICATOR_NAMES: readonly string[] = [MOMENTUM_STALL_LONG, MOMENTUM_STALL_SHORT];
+// --- HTF channel exit names: the htf-trend live expression's mechanical exit. Value 1 when
+// the latest COMPLETED DAILY close is through the opposite 10-day channel for a position of
+// that side, else 0 (publisher: ladder-htf-exit-service). Same SSOT rule as above. ---
+export const HTF_CHANNEL_EXIT_LONG = 'htf-channel-exit-long';
+export const HTF_CHANNEL_EXIT_SHORT = 'htf-channel-exit-short';
+export const HTF_CHANNEL_EXIT_NAMES: readonly string[] = [HTF_CHANNEL_EXIT_LONG, HTF_CHANNEL_EXIT_SHORT];
+export const SUPPORTED_INDICATOR_NAMES: readonly string[] = [
+  MOMENTUM_STALL_LONG,
+  MOMENTUM_STALL_SHORT,
+  HTF_CHANNEL_EXIT_LONG,
+  HTF_CHANNEL_EXIT_SHORT,
+];
 /** The stall indicator measuring signals AGAINST a position of `side`. */
 export const momentumStallIndicatorName = (side: LadderSide): string =>
   side === 'long' ? MOMENTUM_STALL_LONG : MOMENTUM_STALL_SHORT;
+/** The daily channel exit indicator for a position of `side`. */
+export const htfChannelExitIndicatorName = (side: LadderSide): string =>
+  side === 'long' ? HTF_CHANNEL_EXIT_LONG : HTF_CHANNEL_EXIT_SHORT;
+/** Is this indicator name one of the daily channel exits (not a 15m momentum read)? */
+export const isHtfChannelExitName = (name: string | undefined | null): boolean =>
+  !!name && HTF_CHANNEL_EXIT_NAMES.includes(name);
 
 /** The PREVIOUS-candle variant of an indicator key (sustained confirms). ONE helper —
  *  producer (momentum service) and consumer (evaluator) must never hardcode '@prev'. */

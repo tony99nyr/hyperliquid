@@ -55,6 +55,10 @@ the same engine blockers (and now shows *why* it's disabled). See the desk metho
 | `LADDER_LIVE_ENABLED` | Whether a **live**-mode ladder may be **armed**. | OFF |
 | `LADDER_AUTOFIRE_ENABLED` | Whether the watcher may **autonomously fire** an armed rung. | OFF |
 
+Drafter flag (not a firing switch): `HTF_TREND_ALERT_ENABLED` (default OFF everywhere) turns on
+the htf-trend drafting. Housekeeping of armed htf ladders runs with the flag off too. Only the operator sets it, in the Vercel dashboard, then redeploys. See
+"htf-trend drafts" below.
+
 "Go live for manual trading" does **not** imply autonomous firing — that's the separate
 `LADDER_AUTOFIRE_ENABLED` gate. To **stop all autonomous firing instantly**, flip
 `LADDER_AUTOFIRE_ENABLED=false` on Vercel (the fire path re-checks it every fire). To stop
@@ -130,6 +134,32 @@ enforced:
 | CRITICAL "claim kept, outcome unknown" on a straddle leg | The open's outcome is unknown (e.g. a timeout after send), so the OCO group claim is kept and the sibling leg cannot fire. **Recovery is manual:** check HL for a fill first. If filled, manage the position (its stop is resting). If genuinely unfilled, re-prep the straddle (`pnpm straddle:prep`, fresh group id). Never hand-release the claim without checking the exchange. |
 | Health shows `no-data` | Every candle feed is stale. Health holds at the neutral score by design: during a feed outage the catastrophe net is the exchange-resting stop, which needs no feed from us. Restore the feed; do not act on the neutral score. |
 | Ladder expired with a position still open, or the residual cannot be verified | Check the live HL position and latest resting stop. The exchange stop stays in place, including a stop moved before expiry. Trailing, adds, and reduces have stopped. Decide whether to manage or close the position manually. The residual alert pages once per ladder. |
+
+## htf-trend drafts
+
+The htf-trend drafter turns a new daily 20-day channel breakout (BTC, ETH, SOL, HYPE) into one LIVE low-size draft ladder. It runs on the "full ticks" of the watcher, twice per 10 minutes (minutes x0 and x1). Drafting runs only from 00:01 to 03:00 UTC. Housekeeping runs on every full tick, whether the flag is on or off. The drafter never arms or fires. The terms and bars are in [PREREGISTRATION_htf-trend-live.md](./scout/PREREGISTRATION_htf-trend-live.md). Enable or disable it with `HTF_TREND_ALERT_ENABLED` in the Vercel dashboard (operator only), then redeploy. The cron response field is `htfTrendAlert`.
+
+**The ping.** A Discord message from `HL HTF Trend Desk` announces each draft. The message means a draft exists and nothing has fired. A failed ping appears in the cron response `errors`.
+
+**The deadline.** The daily bar closes at 00:00 UTC. The drafter works from 00:01 to 03:00 UTC. The entry deadline is 04:00 UTC (the window from 00:00 to 04:00 UTC is 19:00 to 23:00 US Eastern on the prior evening in standard time, and 20:00 to 00:00 in daylight time). Arm before it or skip the draft. After the deadline the open rung cannot enter.
+
+**The instant-fire confirmation.** The price is normally already beyond the channel level at draft time. The arm route therefore shows the INSTANT-FIRE confirmation. That is expected for this lane. Confirm it if you want the trade. Do not re-anchor the levels: the rule is frozen.
+
+**What the drafter skips.** It drafts one ladder per coin per signal day. An archived draft still counts, so "not this one" holds for the day. It drafts nothing for a coin with any open position, or with any draft or armed ladder on it (from any drafter, in any entry state; skip reason `vehicle`). At most 2 same-direction coins and 2 drafts per cycle. It drafts nothing from 48 h before a calendar print to 4 h after it. When it cannot read positions fresh, it drafts nothing and touches no ladder. Each refusal shows in the cron response.
+
+**Housekeeping.** The cycle archives its own drafts whose deadline passed, soon after 04:00 UTC. It disarms (reason `htf-trend-spent`) its own armed ladders, 15 minutes after the deadline at the earliest. A ladder that never entered (no `ladder_fires` row of any status on its entry rung) is disarmed at about 04:20 UTC. A ladder that entered (entry rung `fired`, or a fire row of any status, since a `failed` row can hide a late fill) is disarmed only when the account shows no position of its side on the coin and a second account read confirms it. If the second read does not confirm, the cycle reports it and disarms nothing. If the cycle cannot read the fire record, it disarms nothing. A disarm moves no money and leaves the exchange stop in place. Each disarm sends a Discord note from `HL HTF Trend Desk`. The flag gates drafting only. With the flag off, the cycle drafts nothing and reads no draft ladders. It therefore archives no stale draft: archive a leftover draft by hand. It still disarms a spent armed htf ladder (the response shows `skipped: 'drafting-off'`). Turning the flag off therefore stops new drafts and leaves housekeeping running. An account response without the positions list (`positionsListed`) counts as unreadable, for the first read and for the second confirming read. The cycle then drafts nothing and disarms nothing.
+
+**Titles.** Housekeeping recognises its ladders by the exact full title. Do not edit the title of an htf-trend draft. An edited title removes the ladder from housekeeping.
+
+**What to know**
+- After a stop-out the close rung stays pending until the daily exit prints (it then skips `flat`) or housekeeping disarms the ladder (up to about 10 minutes).
+- A manual same-side position on a coin with an ENTERED armed htf ladder shares its close rung. The daily channel exit closes the whole position.
+- Ownership residual: Hyperliquid holds one position per coin, and the close rung closes the whole position of its side. A same-side position added by you or by another ladder, while the htf position is open or in the minutes before housekeeping disarms the ladder, shares the channel exit. Do not open a manual same-side position on a coin with an armed htf-trend ladder unless you want the channel exit to manage it.
+- The channel exit rung cannot fire before 00:01 UTC. The daily read returns nothing in the first 60 seconds after the close, as it does for the drafter.
+- A close rung never acts on an opposite-side position. It skips `opposite-side-position`.
+- When an htf-trend BTC position is open at an FOMC or CPI print, do not arm the BTC event straddle. Record a no-fire with that reason.
+- When the event calendar is exhausted, the drafter reports it in the cron response `errors` and still drafts. The Discord draft ping then carries a warning that the blackout check did not run. Check the calendar before you arm.
+- An arm can refuse on funding. The loss cap allows about 30% APR against the side over 90 days. Skip the draft or raise the cap on purpose.
 
 ## Emergency stop
 `LADDER_AUTOFIRE_ENABLED=false` on Vercel stops all autonomous firing. The full card is

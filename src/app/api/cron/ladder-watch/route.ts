@@ -14,8 +14,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyCronBearer } from '@/lib/infrastructure/auth/auth';
-import { getLadderCronSecret, isReversionAlertEnabled, isTrendAlertEnabled, isRunawayAlertEnabled, isEventPrepCronEnabled } from '@/lib/ladder/ladder-flags';
+import { getLadderCronSecret, isReversionAlertEnabled, isTrendAlertEnabled, isRunawayAlertEnabled, isHtfTrendAlertEnabled, isEventPrepCronEnabled } from '@/lib/ladder/ladder-flags';
 import { runRunawayAlertCycle } from '@/lib/ladder/runaway-alert-service';
+import { runHtfTrendAlertCycle } from '@/lib/ladder/htf-trend-alert-service';
 import { runReversionAlertCycle } from '@/lib/ladder/reversion-alert-service';
 import { runEventPrepCron } from '@/lib/ladder/event-prep-cron-service';
 import { runTrendAlertCycle } from '@/lib/ladder/trend-alert-service';
@@ -103,12 +104,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const runawayAlert = fullTick && isRunawayAlertEnabled()
       ? await runRunawayAlertCycle(undefined, Date.now()).catch((e) => ({ error: extractErrorMessage(e) }))
       : { skipped: fullTick ? 'disabled' : 'throttled' };
+    //  - htf-trend alert: on a new daily 20-day channel breakout, auto-DRAFT a low-size
+    //    LIVE ladder (frozen stop, daily channel exit) and ping the operator. DRAFT only,
+    //    never arms. DRAFTING is flag-gated (default OFF), fail-soft. Its housekeeping runs
+    //    with the flag on or off: it disarms a spent htf-trend ladder (risk-reducing only),
+    //    so a ladder armed before the flag went off is still cleaned up.
+    const htfTrendAlert = fullTick
+      ? await runHtfTrendAlertCycle(Date.now(), { draft: isHtfTrendAlertEnabled() }).catch((e) => ({ error: extractErrorMessage(e) }))
+      : { skipped: 'throttled' };
     //  - event prep: default OFF gives the existing reminder. ON atomically drafts
     //    the pair at T-30 and alerts the operator. Arming remains manual.
     const eventPrepAlert = fullTick
       ? await runEventPrepCron(Date.now(), isEventPrepCronEnabled()).catch((e) => ({ pinged: null, error: extractErrorMessage(e) }))
       : throttled;
-    return NextResponse.json({ ok: true, ...summary, fullTick, leaderGuard, expiryAlerts, priceAlerts, scoutHeartbeats, stewardProposals, reversionAlert, trendAlert, runawayAlert, trendFlipGuard, eventPrepAlert });
+    return NextResponse.json({ ok: true, ...summary, fullTick, leaderGuard, expiryAlerts, priceAlerts, scoutHeartbeats, stewardProposals, reversionAlert, trendAlert, runawayAlert, htfTrendAlert, trendFlipGuard, eventPrepAlert });
   } catch (e) {
     await pingHealthcheck(hcUrl, 'fail');
     return NextResponse.json({ ok: false, error: extractErrorMessage(e) }, { status: 500 });

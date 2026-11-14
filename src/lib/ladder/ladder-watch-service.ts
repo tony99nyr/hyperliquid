@@ -15,8 +15,9 @@ import { isLadderAutofireEnabled } from './ladder-flags';
 import { listLadders, getLadderWithRungs, markLadderExpired } from './ladder-service';
 import { evaluateLadderRungs, type RungMarketSnapshot } from './ladder-trigger-evaluator';
 import { snapshotFromCandleResult } from './ladder-watch-business-logic';
-import { ladderWindowState, entryGateClosed, WATCH_CANDLE_MS } from './ladder-types';
+import { ladderWindowState, entryGateClosed, isHtfChannelExitName, WATCH_CANDLE_MS } from './ladder-types';
 import { computeMomentumIndicators } from './ladder-momentum-service';
+import { computeHtfExitIndicators } from './ladder-htf-exit-service';
 import { checkCircuitBreaker } from '@/lib/risk/circuit-breaker-service';
 import { performLadderRungFire, type LadderFireResult } from './ladder-fire-service';
 import type { LadderWithRungs } from './ladder-types';
@@ -80,15 +81,21 @@ export async function runLadderWatchTick(args: { now: number }): Promise<LadderW
   const ladders = (await Promise.all(live.map((l) => getLadderWithRungs(l.id)))).filter((l): l is LadderWithRungs => !!l);
 
   // Distinct coins across PENDING rungs → one completed-candle snapshot each. Coins
-  // with a pending INDICATOR rung additionally get the momentum indicators computed
-  // (from the same candle fetch + the recorded market_snapshots series).
+  // with a pending momentum INDICATOR rung (or a momentumConfirm entry) additionally get
+  // the momentum indicators computed (from the same candle fetch + the recorded
+  // market_snapshots series). Coins with a pending daily channel exit rung get the htf
+  // exit indicators from the completed DAILY bars (a separate read, merged in below).
   const coins = new Set<string>();
   const indicatorCoins = new Set<string>();
+  const htfExitCoins = new Set<string>();
   for (const l of ladders)
     for (const r of l.rungs)
       if (r.status === 'pending') {
-        coins.add(r.coin.toUpperCase());
-        if (r.triggerKind === 'indicator' || r.triggerMeta?.momentumConfirm) indicatorCoins.add(r.coin.toUpperCase());
+        const coin = r.coin.toUpperCase();
+        coins.add(coin);
+        const htfExit = r.triggerKind === 'indicator' && isHtfChannelExitName(r.triggerMeta?.indicatorName);
+        if (htfExit) htfExitCoins.add(coin);
+        else if (r.triggerKind === 'indicator' || r.triggerMeta?.momentumConfirm) indicatorCoins.add(coin);
       }
 
   const snapshots: Record<string, RungMarketSnapshot> = {};
@@ -106,6 +113,12 @@ export async function runLadderWatchTick(args: { now: number }): Promise<LadderW
           // fail closed this tick (never a phantom exit on missing data).
           const ind = await computeMomentumIndicators(coin, res.candles, args.now);
           if (ind) snapshots[coin].indicators = ind;
+        }
+        if (htfExitCoins.has(coin) && !snapshots[coin].stale) {
+          // Same fail-soft rule: a null daily read publishes nothing, so the channel
+          // exit rung cannot fire this tick. The exchange stop still protects the position.
+          const htf = await computeHtfExitIndicators(coin, args.now);
+          if (htf) snapshots[coin].indicators = { ...snapshots[coin].indicators, ...htf };
         }
       } catch {
         snapshots[coin] = { coin, completedClose: 0, stale: true }; // fail closed

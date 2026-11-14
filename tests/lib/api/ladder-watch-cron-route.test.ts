@@ -26,6 +26,8 @@ vi.mock('@/lib/ladder/ladder-flags', () => ({
   // → TypeError → 500, but ONLY on fullTick minutes (getUTCMinutes()%10<2) — a
   // time-dependent test failure that hid for a day (08-20). Time is pinned below too.
   isRunawayAlertEnabled: () => false,
+  isHtfTrendAlertEnabled: () => false,
+  isEventPrepCronEnabled: () => false,
 }));
 vi.mock('@/lib/ladder/ladder-watch-service', () => ({ runLadderWatchTick: (...a: unknown[]) => runLadderWatchTick(...a) }));
 

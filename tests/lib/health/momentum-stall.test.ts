@@ -6,8 +6,12 @@ import { describe, it, expect } from 'vitest';
 import {
   MOMENTUM_STALL_LONG,
   MOMENTUM_STALL_SHORT,
+  HTF_CHANNEL_EXIT_LONG,
+  HTF_CHANNEL_EXIT_SHORT,
   SUPPORTED_INDICATOR_NAMES,
   momentumStallIndicatorName,
+  htfChannelExitIndicatorName,
+  isHtfChannelExitName,
 } from '@/lib/ladder/ladder-types';
 import {
   momentumStallVerdict,
@@ -138,10 +142,16 @@ describe('indicator-name SSOT (ladder-types) — producer/consumer sync pin', ()
   it('the helper, the constants, and the supported list all agree', () => {
     expect(momentumStallIndicatorName('long')).toBe(MOMENTUM_STALL_LONG);
     expect(momentumStallIndicatorName('short')).toBe(MOMENTUM_STALL_SHORT);
-    expect(SUPPORTED_INDICATOR_NAMES).toEqual([MOMENTUM_STALL_LONG, MOMENTUM_STALL_SHORT]);
+    expect(SUPPORTED_INDICATOR_NAMES).toEqual([MOMENTUM_STALL_LONG, MOMENTUM_STALL_SHORT, HTF_CHANNEL_EXIT_LONG, HTF_CHANNEL_EXIT_SHORT]);
     // The literal wire format is part of the persisted rung contract (triggerMeta
     // .indicatorName in armed ladders) — a rename is a MIGRATION, not a refactor.
     expect(MOMENTUM_STALL_LONG).toBe('momentum-stall-long');
     expect(MOMENTUM_STALL_SHORT).toBe('momentum-stall-short');
+    expect(HTF_CHANNEL_EXIT_LONG).toBe('htf-channel-exit-long');
+    expect(HTF_CHANNEL_EXIT_SHORT).toBe('htf-channel-exit-short');
+    expect(htfChannelExitIndicatorName('long')).toBe(HTF_CHANNEL_EXIT_LONG);
+    expect(htfChannelExitIndicatorName('short')).toBe(HTF_CHANNEL_EXIT_SHORT);
+    expect(isHtfChannelExitName(HTF_CHANNEL_EXIT_LONG)).toBe(true);
+    expect(isHtfChannelExitName(HTF_CHANNEL_EXIT_SHORT)).toBe(true);
   });
 });
