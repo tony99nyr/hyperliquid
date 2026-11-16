@@ -25,27 +25,21 @@ export interface EconEvent {
 }
 
 export const ECONOMIC_EVENTS: EconEvent[] = [
-  // (FOMC Oct 28, ECB + earnings cluster Oct 29 and BoJ Oct 30 printed before the
-  // 2026-11-02 retro; pruned at the 2026-11-09 retro. The straddle shadow replay
-  // matches legs by the print timestamp in each ladder's thesis, not this list.)
-  {
-    name: 'BoE',
-    atIso: '2026-11-05T12:00:00Z',
-    note: 'Bank Rate decision 12:00 London (GMT) + Monetary Policy Report presser. Lowest BTC beta of the majors — awareness only.',
-    prepLeadMinutes: 0,
-  },
-  {
-    name: 'NFP (Oct jobs)',
-    atIso: '2026-11-06T13:30:00Z',
-    note: 'BLS Employment Situation 08:30 ET / 13:30 UTC (EST from Nov 1; verified BLS schedule). Awareness only: the 2026-10-26 catalyst-class study rejected NFP as a straddle class (PREREGISTRATION_catalyst-classes.md).',
-    prepLeadMinutes: 0,
-  },
+  // (BoE Nov 5 and NFP Nov 6 printed before the 2026-11-09 retro; pruned at the
+  // 2026-11-16 retro. The straddle shadow replay matches legs by the print
+  // timestamp in each ladder's thesis, not this list.)
   {
     name: 'CPI (Oct data)',
     atIso: '2026-11-10T13:30:00Z',
     note: 'BLS CPI 08:30 ET / 13:30 UTC (EST; verified BLS schedule). Binary macro — straddle it.',
     straddleCoin: 'BTC',
     prepLeadMinutes: 30,
+  },
+  {
+    name: 'Retail sales (Oct data)',
+    atIso: '2026-11-17T13:30:00Z',
+    note: 'Census Advance Monthly Retail Trade, 08:30 ET / 13:30 UTC (verified Census schedule 2026-11-16). Awareness only: not a straddle class. The print is inside the NVIDIA blackout, so it adds no scout dark time.',
+    prepLeadMinutes: 0,
   },
   {
     name: 'NVIDIA earnings',
@@ -76,8 +70,7 @@ export const ECONOMIC_EVENTS: EconEvent[] = [
   // as straddle classes (PREREGISTRATION_catalyst-classes.md). Only FOMC and CPI straddle.
   // BLS Employment Situation normally prints on the first Friday at 08:30 ET.
   // Standard Time applies to these dates, so 08:30 ET = 13:30 UTC.
-  // (NFP Oct data = the 'NFP (Oct jobs)' entry above.)
-  { name: 'NFP (Nov data)', atIso: '2026-12-04T13:30:00Z', note: 'BLS Employment Situation, 08:30 ET. Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
+  { name: 'NFP (Nov data)', atIso: '2026-12-04T13:30:00Z', note: 'BLS Employment Situation, 08:30 ET (verified BLS schedule 2026-11-16). Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
   // NFP Dec data slips a week (the first Friday is New Year's Day): BLS schedules it Jan 8.
   { name: 'NFP (Dec data)', atIso: '2027-01-08T13:30:00Z', note: 'BLS Employment Situation, 08:30 ET (verified BLS schedule 2026-11-02). Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
   // Jan-data date verified against the BLS 2027 schedule 2026-11-02; it carries the annual benchmark revision.

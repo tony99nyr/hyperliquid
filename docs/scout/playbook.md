@@ -588,3 +588,62 @@ the implementation with expectancy or amend the registered rule.
   ambiguous exit; the report counts it as missing evidence.
 - **No scout rule changed.** DESK_PROFITABILITY untouched (no lever's verdict
   moved).
+
+### 2026-11-16 review (day 146, weekly retro)
+
+- **Scorecard (deterministic):** the account-level KILL stands (legacy lanes,
+  stopped): net −$97.37 over 113 trades. **htf-trend CONTINUE**: 18 closed,
+  61% win, net +$97.67, run-rate $27/mo; donchian-20-10 expectancy +0.41R.
+  **The count did not move: 18/20.** No htf-trend trade closed this week. Two
+  shorts are open (SOL from Nov 11 00:21Z at 83.308, ETH from Nov 11 00:53Z at
+  2052.5). The n=20 graduation checkpoint arrives when both close.
+- **Shadow replay:** htf-trend 46 episodes, 13 matched, 33 missed (72%). Every
+  new miss has a cause in scout_decisions. The four Nov 8 shorts fell inside
+  the CPI blackout. BTC and HYPE shorts (Nov 10 to Nov 14) hit the
+  2-per-direction cap while the SOL and ETH shorts were open. The ETH Nov 12
+  episode hit same-coin-open. Zero unexplained misses. The cap kept the paper
+  lane in 2 of the 4 coins during the Nov 12-14 selloff. That is the frozen
+  rule working, not an outage. compression-straddle misses are moot (KILLed
+  Oct 26).
+- **Perf report (since last retro), quoted:** the Lanes table has no rows,
+  "Per-episode mean R: n/a", "Realised live net/month (last 90d): $0.00",
+  forecast P5 / P50 / P95 "n/a / n/a / n/a" (inputs hash 3e96a6). Cause: the
+  report ran before the ledger resolved the CPI leg, the same window-edge
+  artefact as Nov 9. With the window set to 2026-11-09 the report shows
+  "event-straddle | live | COLLECT | 1 trade | 1 episode | $-2.77 | -0.08
+  r_slip | 1/10". Follow-up: resolve the ledger before the perf report, or the
+  report misses each week's ladder rows.
+- **Ledger expectancy:** 27 closed, net $38.96, expectancy +0.02R. Every family
+  COLLECT. New rows: CPI short leg 37e56328 LOST −0.08R on planned risk (−$2.77,
+  −0.69R nominal), CPI long leg e44f1df3 never filled (OCO), SOL runaway short
+  5bec6dd2 never filled. event-straddle: 8 closed, net +$11.27, expectancy
+  −0.00R, 8/10 toward a verdict. **Gap-past-stop now records**: n=8 of 8 on
+  event-straddle (+0.01R, 0.9 bps) and on every family with a close. The
+  capital-rule check 4 risk from Nov 9 is cleared.
+- **Discard vet (6):** 5 never triggered, 1 dodged stop (HYPE runaway long
+  b9071d0a, archived Nov 14, one path −1.00R), 0 missed targets. Clean week.
+- **Open pre-registration counts (4b):** htf-trend paper 18/20, +0 (two open).
+  event-straddle: the first registration closed at two episodes with no
+  verdict; the entry-deadline registration is at 0 and starts with the FOMC of
+  Dec 9. Entry overshoot: one new event leg (CPI short), row not computed (no
+  entrypoint exists for it). Cross-venue funding-veto capture: NAS-only,
+  baseline 55 captures at Nov 13 15:55Z; the operator's nas-doctor run gives
+  this week's count. Capital-rule: not a first-of-month retro. htf-trend-live:
+  DRAFTED, not in effect; the operator chose on Nov 15 to decide the enable
+  after this retro.
+- **Steward counterfactuals:** 22 scorable, helped 5 / hurt 11, net −$17.74 if
+  followed. Unchanged. Advisory-only status stays.
+- **Benchmarks (cards written 13:35Z, fresh):** HLP buy-hold +$11.37 over 20d;
+  funding-carry card +$4.73 over 30d. Both are noise against the $50 bar.
+- **Calendar:** pruned BoE Nov 5 and NFP Nov 6. Added retail sales Nov 17
+  13:30Z (Census schedule), awareness-only; it sits inside the NVIDIA blackout
+  and adds no dark time. Verified: NVIDIA Nov 17 21:20Z (NVIDIA IR), PCE Nov 25
+  (BEA), NFP Dec 4, CPI Dec 10 and PPI Dec 15 (BLS). FOMC Dec 9 and PCE Dec 23
+  agree across secondary calendars; the official pages were not read this
+  week. CPI Nov 10 and PPI Nov 13 prune next retro.
+- **Markers:** unchanged, 2 confirmed and 2 proposed. The proposals wait for the
+  operator in the Lanes tab.
+- **Feed notes:** one scout cycle on Nov 12 02:36Z stood down on "feed degraded
+  (marks empty)". HL returned 429 on candle reads during this retro; the
+  closed-trade figures do not depend on them.
+- **No rule changes.** DESK_PROFITABILITY untouched (no lever's verdict moved).
