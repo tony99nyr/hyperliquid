@@ -627,8 +627,9 @@ the implementation with expectancy or amend the registered rule.
   verdict; the entry-deadline registration is at 0 and starts with the FOMC of
   Dec 9. Entry overshoot: one new event leg (CPI short), row not computed (no
   entrypoint exists for it). Cross-venue funding-veto capture: NAS-only,
-  baseline 55 captures at Nov 13 15:55Z; the operator's nas-doctor run gives
-  this week's count. Capital-rule: not a first-of-month retro. htf-trend-live:
+  baseline 55 captures at Nov 13 15:55Z. The operator's nas-doctor run later
+  on Nov 16 shows 64 captures (15,033 rows, last Nov 16 15:55Z): +9, which is
+  every scheduled capture, so the count moves on schedule. Capital-rule: not a first-of-month retro. htf-trend-live:
   DRAFTED, not in effect; the operator chose on Nov 15 to decide the enable
   after this retro.
 - **Steward counterfactuals:** 22 scorable, helped 5 / hurt 11, net −$17.74 if
