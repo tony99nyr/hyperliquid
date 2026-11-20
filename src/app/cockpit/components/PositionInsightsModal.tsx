@@ -380,7 +380,8 @@ export default function PositionInsightsModal({
         </div>
 
         {/* A read-only viewer sees the order state, but the disabled fieldset turns off every control below. */}
-        <fieldset disabled={readOnly} data-testid="insights-actions" style={{ display: 'contents' }}>
+        {readOnly && <span data-testid="insights-read-only" className={css({ fontFamily: 'mono', fontSize: '11px', fontWeight: 'semibold', color: '#e3b341' })}>READ-ONLY · the stop, target, margin and size controls below are off.</span>}
+        <fieldset disabled={readOnly} data-testid="insights-actions" style={readOnly ? { display: 'flex', flexDirection: 'column', gap: '14px', border: 0, padding: 0, margin: 0, minWidth: 0, opacity: 0.5, pointerEvents: 'none' } : { display: 'contents' }}>
         {/* Protective stop — ADJUSTABLE: pick a hold-timeframe preset (Position = wide,
             wick-resistant) or type any level off the chart. Server re-validates side +
             distance; a wider stop survives short-term swings instead of force-closing. */}

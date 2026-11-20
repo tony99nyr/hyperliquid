@@ -32,6 +32,7 @@ import {
 import { buildHasTradeablePositionSet } from './top-traders-filter-helpers';
 import { GH, ZONE_COLORS, panelSurface } from '../panel-styles';
 import TraderDetailDrawer from './TraderDetailDrawer';
+import { useReadOnly } from '../../read-only-context';
 import LeaderActionFeed from './LeaderActionFeed';
 import { formatRatingsDate, type RatingsFreshness } from './ratings-freshness-helpers';
 
@@ -116,6 +117,8 @@ export default function TradersTable({ traders, followedAddress, ratings, onCopy
   const followed = followedAddress?.toLowerCase() ?? null;
   const fav = useFavorites();
   const { getEval } = useTraderEvaluations();
+  // Read-only viewer: the star shows the favourite state but cannot change it.
+  const readOnly = useReadOnly();
   const [selected, setSelected] = useState<TopTraderRow | null>(null);
   // The last trader whose drawer was opened — kept after close so the operator can
   // see which row they were just looking at (the "I can't remember which I opened"
@@ -299,9 +302,10 @@ export default function TradersTable({ traders, followedAddress, ratings, onCopy
                         data-testid="favorite-star"
                         aria-label={isFav ? `Unfavorite ${t.short}` : `Favorite ${t.short}`}
                         aria-pressed={isFav}
+                        disabled={readOnly}
                         onClick={(e) => { e.stopPropagation(); void fav.toggle(t.address).catch(() => {}); }}
                         style={{ color: isFav ? '#ffcb47' : GH.textMuted }}
-                        className={css({ cursor: 'pointer', bg: 'transparent', border: 'none', fontSize: '13px', lineHeight: 1, padding: '4px', _hover: { color: '#ffcb47' }, _focusVisible: { outline: '2px solid token(colors.github.link)' } })}
+                        className={css({ cursor: 'pointer', bg: 'transparent', border: 'none', fontSize: '13px', lineHeight: 1, padding: '4px', _hover: { color: '#ffcb47' }, _disabled: { cursor: 'default' }, _focusVisible: { outline: '2px solid token(colors.github.link)' } })}
                       >
                         {isFav ? '★' : '☆'}
                       </button>

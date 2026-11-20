@@ -13,6 +13,7 @@ const fetchCandles = vi.fn();
 
 vi.mock('@/lib/infrastructure/auth/auth', () => ({
   verifyAdminAuth: (...a: unknown[]) => verifyAdminAuth(...a),
+  verifyReadAuth: (...a: unknown[]) => verifyAdminAuth(...a),
   getClientIdentifier: (req: { headers: { get: (k: string) => string | null } }) =>
     req.headers.get('x-forwarded-for') ?? 'test-client',
 }));

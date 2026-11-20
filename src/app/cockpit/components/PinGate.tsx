@@ -66,7 +66,7 @@ export default function PinGate() {
         <h1 className={css({ fontSize: 'lg', fontWeight: 'bold', color: 'github.textBright' })}>
           HL Cockpit
         </h1>
-        <p className={css({ fontSize: 'sm', color: 'github.textMuted' })}>Enter admin PIN to continue.</p>
+        <p className={css({ fontSize: 'sm', color: 'github.textMuted' })}>Enter your PIN to continue.</p>
         <input
           type="password"
           inputMode="numeric"

@@ -141,7 +141,11 @@ cockpit (positions, ladders, performance, lanes, scout, traders) and change noth
 A viewer session gets a "READ-ONLY" banner and no action controls. The server is the real
 control: every mutating route calls `verifyAdminAuth`, which refuses a viewer session.
 `tests/lib/api/viewer-deny-by-default.test.ts` fails if a non-GET route accepts a viewer.
-A viewer does not see the approval popup.
+A viewer may call only 13 cockpit read routes and the two market-data proxies
+(`/api/hl/candles`, `/api/hl/regime`), all GET.
+A viewer does not see the approval popup, so a viewer does not see pending previews. A
+viewer also gets no favourite, follow, copy, stage, mirror or vet controls in the trader
+views.
 
 To give access:
 1. Make a new PIN. Use at least 12 random characters. Do not reuse `ADMIN_PIN` or

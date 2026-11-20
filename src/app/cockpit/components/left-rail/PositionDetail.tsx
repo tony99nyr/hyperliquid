@@ -20,6 +20,7 @@ import {
   type HealthStatus,
 } from '@/lib/cockpit/position-health-business-logic';
 import PositionHistoryChart from './PositionHistoryChart';
+import { useReadOnly } from '../../read-only-context';
 import { TRADEABLE_COINS } from './top-traders-filter-helpers';
 import { GH, ZONE_COLORS, fmtUsd, fmtPx, fmtCompactUsd } from '../panel-styles';
 
@@ -61,6 +62,8 @@ export default function PositionDetail({ leaderAddress, position: p, onBack, onC
   const [following, setFollowing] = useState(override?.following ?? false);
   const [busy, setBusy] = useState(false);
   const [followError, setFollowError] = useState(false);
+  // Read-only viewer: no Copy and no Follow (both start a write). The follow state still shows.
+  const readOnly = useReadOnly();
   const backRef = useRef<HTMLButtonElement>(null);
 
   // Move focus to the back button when this view replaces the drawer body, so
@@ -179,6 +182,11 @@ export default function PositionDetail({ leaderAddress, position: p, onBack, onC
       {/* Two distinct actions: Copy = enter now (pre-filled preview); Follow = track
           it (shows in the cockpit's Following panel + Discord alerts on the leader's
           moves + a keep-matched reduce suggestion on their exits). */}
+      {readOnly ? (
+        <span data-testid="position-follow-state" className={css({ fontFamily: 'mono', fontSize: '10px', color: 'github.textMuted' })}>
+          {following ? '✓ The operator follows this position.' : 'The operator does not follow this position.'}
+        </span>
+      ) : (<>
       <div className={css({ display: 'flex', gap: '8px', flexWrap: 'wrap' })}>
         <button
           type="button"
@@ -212,6 +220,7 @@ export default function PositionDetail({ leaderAddress, position: p, onBack, onC
       <span className={css({ fontFamily: 'mono', fontSize: '9px', color: 'github.textMuted', lineHeight: 1.4 })}>
         Copy opens a pre-filled entry preview ({p.side.toUpperCase()} {coin}) — you set size + stop and Approve. Follow tracks it in the cockpit + alerts you (Discord) when this leader changes the position. Nothing fires automatically.
       </span>
+      </>)}
     </div>
   );
 }

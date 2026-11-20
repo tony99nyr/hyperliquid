@@ -8,8 +8,10 @@
  *      verifyCronBearer.
  *   4. The set of GET handlers that accept a viewer equals READ_ENDPOINTS, so a
  *      new viewer-readable endpoint needs a deliberate edit here.
- *   5. Outside the auth module, the page gate and the login route, no source
- *      file uses a viewer-accepting symbol (no wrapper can smuggle it into a POST).
+ *   5. Outside the auth module, the page gate, the login route and the HL read
+ *      proxy guard, no source file uses a viewer-accepting symbol (no wrapper can
+ *      smuggle it into a POST). guardHlRoute counts as a viewer symbol, so it too
+ *      may appear only inside a GET handler.
  * A behavioural check then calls every non-GET handler with a real viewer
  * session cookie and expects 401.
  */
@@ -31,6 +33,7 @@ const VIEWER_SYMBOLS = [
   'issueViewerSessionToken',
   'roleForCookieToken',
   'getPageAuthRole',
+  'guardHlRoute',
 ];
 
 /** The only GET endpoints a viewer may read. Edit with care. */
@@ -48,6 +51,8 @@ const READ_ENDPOINTS = [
   'cockpit/scout-performance',
   'cockpit/stops',
   'cockpit/trader-positions',
+  'hl/candles',
+  'hl/regime',
 ].sort();
 
 /** Files that may reference viewer symbols outside route GET handlers. */
@@ -56,6 +61,7 @@ const VIEWER_SYMBOL_ALLOWED_FILES = [
   'lib/infrastructure/auth/server-auth.ts',
   'app/cockpit/page.tsx',
   'app/api/auth/login/route.ts',
+  'app/api/hl/_guard.ts',
 ];
 
 const UNAUTHENTICATED_NON_GET = ['auth/login'];
@@ -122,7 +128,7 @@ describe('viewer deny-by-default (static)', () => {
 
   it('the viewer-readable GET endpoints are exactly READ_ENDPOINTS', () => {
     const readable = routeFiles
-      .filter((f) => /\bverifyReadAuth\(/.test(handlerBodies(fs.readFileSync(f, 'utf8')).get('GET') ?? ''))
+      .filter((f) => /\b(verifyReadAuth|guardHlRoute)\(/.test(handlerBodies(fs.readFileSync(f, 'utf8')).get('GET') ?? ''))
       .map(endpointOf)
       .sort();
     expect(readable).toEqual(READ_ENDPOINTS);
@@ -140,7 +146,7 @@ describe('viewer deny-by-default (static)', () => {
 
 describe('viewer deny-by-default (behaviour)', () => {
   // Kill-switches return 403 before auth, so the test turns them on to reach the auth check.
-  const ENV_KEYS = ['VIEWER_PIN', 'AUTO_EXIT_ENABLED', 'LADDER_AUTOFIRE_ENABLED'] as const;
+  const ENV_KEYS = ['VIEWER_PIN', 'AUTO_EXIT_ENABLED', 'LADDER_AUTOFIRE_ENABLED', 'AGENT_ACTIONS_ENABLED'] as const;
   const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
   let viewerCookie = '';
 
@@ -148,6 +154,7 @@ describe('viewer deny-by-default (behaviour)', () => {
     process.env.VIEWER_PIN = 'viewer-test-pin';
     process.env.AUTO_EXIT_ENABLED = 'true';
     process.env.LADDER_AUTOFIRE_ENABLED = 'true';
+    process.env.AGENT_ACTIONS_ENABLED = 'true';
     const token = issueViewerSessionToken(60);
     if (!token) throw new Error('viewer token not issued');
     viewerCookie = `${ADMIN_AUTH_COOKIE_CONFIG.name}=${token}`;

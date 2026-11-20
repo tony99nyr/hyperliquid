@@ -10,6 +10,7 @@
 import { css } from '@styled-system/css';
 import { useTraderEvaluation, type TraderEvaluation } from '@/hooks/useTraderEvaluation';
 import { GH, ZONE_COLORS } from '../panel-styles';
+import { useReadOnly } from '../../read-only-context';
 
 const VERDICT_COLOR: Record<TraderEvaluation['verdict'], string> = {
   follow: ZONE_COLORS.ok, caution: ZONE_COLORS.warn, avoid: ZONE_COLORS.danger,
@@ -33,8 +34,10 @@ function Chip({ label, value, danger }: { label: string; value: string; danger?:
 
 export default function TraderCopyability({ address }: { address: string }) {
   const { evaluation, loading, vetting, error, vet } = useTraderEvaluation(address);
+  // Vetting enqueues a research request (a write), so a read-only viewer gets no button.
+  const readOnly = useReadOnly();
 
-  const vetButton = (label: string) => (
+  const vetButton = (label: string) => readOnly ? null : (
     <button
       type="button"
       data-testid="copyability-vet"

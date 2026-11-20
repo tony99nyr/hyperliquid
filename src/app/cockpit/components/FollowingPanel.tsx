@@ -14,6 +14,7 @@ import { computePositionHealth, markFromPosition, type HealthStatus } from '@/li
 import { TRADEABLE_COINS } from './left-rail/top-traders-filter-helpers';
 import { ZONE_COLORS, GH, fmtUsd, fmtPx } from './panel-styles';
 import { css } from '@styled-system/css';
+import { useReadOnly } from '../read-only-context';
 
 const HEALTH_COLOR: Record<HealthStatus, string> = {
   healthy: ZONE_COLORS.ok, caution: ZONE_COLORS.warn, critical: ZONE_COLORS.danger, unknown: GH.textMuted,
@@ -71,6 +72,7 @@ function FollowingRowCard({
   onCopy?: (coin: string, side: 'long' | 'short') => void;
   onUnfollow: () => void;
 }) {
+  const readOnly = useReadOnly();
   const p = row.position;
   const side = p?.side ?? null;
   const sideColor = side === 'long' ? ZONE_COLORS.ok : side === 'short' ? ZONE_COLORS.danger : GH.textMuted;
@@ -116,7 +118,8 @@ function FollowingRowCard({
         <span data-testid="following-stale" className={css({ fontFamily: 'mono', fontSize: '10px', color: 'cockpit.faint' })}>leader closed it (or we&apos;ve stopped tracking them)</span>
       )}
 
-      <div className={css({ display: 'flex', gap: '6px' })}>
+      {/* Copy and Unfollow both start a write, so a read-only viewer gets neither. */}
+      {!readOnly && <div className={css({ display: 'flex', gap: '6px' })}>
         <button
           type="button"
           data-testid="following-copy"
@@ -138,7 +141,7 @@ function FollowingRowCard({
         >
           Unfollow
         </button>
-      </div>
+      </div>}
     </div>
   );
 }

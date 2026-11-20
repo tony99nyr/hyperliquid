@@ -35,6 +35,7 @@ import { describeFlags, followVerdict, type FlagSeverity } from './trader-flag-h
 import { pickMirrorTarget } from './mirror-command-helpers';
 import PositionDetail from './PositionDetail';
 import TraderCopyability from './TraderCopyability';
+import { useReadOnly } from '../../read-only-context';
 
 export interface TraderDetailDrawerProps {
   trader: TopTraderRow;
@@ -65,6 +66,8 @@ const SEVERITY_COLOR: Record<FlagSeverity, string> = {
 export default function TraderDetailDrawer({ trader, onClose, isFavorite, onToggleFavorite, onCopyPosition, detailOverride }: TraderDetailDrawerProps) {
   const live = useTraderPositions(detailOverride ? null : trader.address);
   const detail = detailOverride ?? live;
+  // Read-only viewer: no favourite toggle and no Mirror preview.
+  const readOnly = useReadOnly();
   // Where the positions came from: 'supabase' (watcher covers this leader — live,
   // zero HL load) vs 'hl' (on-demand fallback). Null for a seeded override.
   const source = detailOverride ? null : live.source;
@@ -202,7 +205,7 @@ export default function TraderDetailDrawer({ trader, onClose, isFavorite, onTogg
             </span>
           </div>
           <div className={css({ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 })}>
-            {onToggleFavorite && (
+            {onToggleFavorite && !readOnly && (
               <button
                 type="button"
                 data-testid="trader-detail-favorite"
@@ -376,8 +379,8 @@ export default function TraderDetailDrawer({ trader, onClose, isFavorite, onTogg
           )}
         </Section>
 
-        {/* MIRROR THIS → */}
-        <MirrorPanel
+        {/* MIRROR THIS → (admin only: it stages an entry preview) */}
+        {!readOnly && <MirrorPanel
           coin={mirrorTarget?.coin ?? null}
           side={mirrorTarget?.side ?? null}
           leaderAddress={trader.address}
@@ -386,7 +389,7 @@ export default function TraderDetailDrawer({ trader, onClose, isFavorite, onTogg
               ? detail.positions.find((p) => p.coin.toUpperCase() === mirrorTarget.coin.toUpperCase())?.leverage ?? null
               : null
           }
-        />
+        />}
         </>
         )}
       </section>

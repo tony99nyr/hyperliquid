@@ -19,6 +19,7 @@
 import { useEffect, useRef } from 'react';
 import { css } from '@styled-system/css';
 import PositionHistoryChart from '../left-rail/PositionHistoryChart';
+import { useReadOnly } from '../../read-only-context';
 import { isOverExtended, type FavoritePlay } from '@/lib/cockpit/favorite-plays-business-logic';
 import { GH, ZONE_COLORS, panelSurface, fmtUsd, fmtPx } from '../panel-styles';
 
@@ -49,6 +50,8 @@ export interface FavoritePlayDetailProps {
 export default function FavoritePlayDetail({ play, nowMs, tradeable, onStage, onClose }: FavoritePlayDetailProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  // Staging opens the entry ticket, so a read-only viewer gets no Stage button.
+  const readOnly = useReadOnly();
   const sideColor = play.side === 'long' ? ZONE_COLORS.ok : ZONE_COLORS.danger;
   const extended = isOverExtended(play);
 
@@ -124,7 +127,7 @@ export default function FavoritePlayDetail({ play, nowMs, tradeable, onStage, on
         </p>
 
         {/* Stage — discretionary entry (no-auto-fire). Tradeable coins only. */}
-        {tradeable ? (
+        {readOnly ? null : tradeable ? (
           <button
             type="button"
             data-testid="favorite-play-stage"
@@ -138,9 +141,9 @@ export default function FavoritePlayDetail({ play, nowMs, tradeable, onStage, on
             {play.coin} isn&apos;t a supported market in the cockpit — chart only. Place this one manually on HL.
           </span>
         )}
-        <span className={css({ fontFamily: 'mono', fontSize: '8px', color: 'github.textMuted' })}>
+        {!readOnly && <span className={css({ fontFamily: 'mono', fontSize: '8px', color: 'github.textMuted' })}>
           Staging seeds the entry form with this coin + side. You set your OWN size and stop, and approve it — nothing fires on its own.
-        </span>
+        </span>}
       </section>
     </div>
   );
