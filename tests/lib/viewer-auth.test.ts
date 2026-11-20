@@ -9,6 +9,7 @@ import {
   verifySessionToken,
   verifyAdminAuth,
   verifyReadAuth,
+  VIEWER_READS_PER_MIN,
   getRequestAuthRole,
   roleForCookieToken,
   ADMIN_AUTH_COOKIE_CONFIG,
@@ -47,12 +48,6 @@ describe('verifyViewerPin', () => {
     expect(verifyViewerPin(VIEWER)).toBe(true);
     expect(verifyViewerPin('nope')).toBe(false);
     expect(verifyViewerPin('')).toBe(false);
-  });
-  it('is false when VIEWER_PIN is unset or equals ADMIN_PIN', () => {
-    delete process.env.VIEWER_PIN;
-    expect(verifyViewerPin(VIEWER)).toBe(false);
-    process.env.VIEWER_PIN = process.env.ADMIN_PIN;
-    expect(verifyViewerPin(process.env.ADMIN_PIN ?? '')).toBe(false);
   });
 });
 
@@ -101,6 +96,28 @@ describe('viewer session tokens', () => {
     expect(verifyViewerSessionToken(`${p}.${n}.${Date.now() + 9e9}.${sig}`)).toBe(false);
     expect(verifyViewerSessionToken('viewer.a.b')).toBe(false);
     expect(verifyViewerSessionToken(undefined)).toBe(false);
+  });
+
+  it('the raw admin PIN as a cookie or bearer grants nothing (the login route is the only PIN path)', async () => {
+    const saved = process.env.ADMIN_PIN;
+    process.env.ADMIN_PIN = '482913';
+    try {
+      expect(await verifyAdminAuth(withCookie('482913'))).toBe(false);
+      const bearer = new NextRequest('https://cockpit.test/api/x', { headers: { authorization: 'Bearer 482913' } });
+      expect(await verifyAdminAuth(bearer)).toBe(false);
+      expect(await verifyReadAuth(bearer)).toBe(false);
+    } finally {
+      if (saved === undefined) delete process.env.ADMIN_PIN;
+      else process.env.ADMIN_PIN = saved;
+    }
+  });
+
+  it('caps the read requests of one viewer client and leaves an admin uncapped', async () => {
+    const viewer = issueViewerSessionToken(60) ?? '';
+    const from = (token: string) => new NextRequest('https://cockpit.test/api/x', { headers: { cookie: `${ADMIN_AUTH_COOKIE_CONFIG.name}=${token}`, 'x-real-ip': '10.9.9.9' } });
+    for (let i = 0; i < VIEWER_READS_PER_MIN; i++) expect(await verifyReadAuth(from(viewer))).toBe(true);
+    expect(await verifyReadAuth(from(viewer))).toBe(false);
+    expect(await verifyReadAuth(from(issueSessionToken(60)))).toBe(true);
   });
 
   it('the raw viewer PIN as a cookie or bearer grants nothing', async () => {

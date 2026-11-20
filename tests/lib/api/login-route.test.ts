@@ -64,6 +64,13 @@ describe('POST /api/auth/login roles', () => {
     expect(await res.json()).toEqual({ ok: true, role: 'admin' });
   });
 
+  it('a viewer login does not reset the throttle on wrong guesses', async () => {
+    // Alternate a wrong guess with a good viewer login. The throttle must still trip.
+    const statuses: number[] = [];
+    for (let i = 0; i < 20; i++) statuses.push((await login(i % 2 === 0 ? `wrong-${i}` : 'viewer-test-pin')).status);
+    expect(statuses).toContain(429);
+  });
+
   it('a wrong PIN gets 401', async () => {
     expect((await login('wrong')).status).toBe(401);
   });

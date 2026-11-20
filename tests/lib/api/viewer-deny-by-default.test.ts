@@ -85,7 +85,7 @@ const withoutImports = (src: string) => src.replace(/^import[\s\S]*?;\s*$/gm, ''
 /** Each exported handler's body text: from its declaration to the next top-level declaration. */
 function handlerBodies(src: string): Map<string, string> {
   const bodies = new Map<string, string>();
-  const decl = /^export async function (GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\(/gm;
+  const decl = /^export (?:async )?function (GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\(/gm;
   const topLevel = /^(export |async function |function |const |let |var |type |interface |class )/gm;
   for (let m = decl.exec(src); m; m = decl.exec(src)) {
     topLevel.lastIndex = m.index + 1;

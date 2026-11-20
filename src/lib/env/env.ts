@@ -73,9 +73,11 @@ const envSchema = z.object({
   // Admin gate (vendored auth).
   ADMIN_SECRET: z.string().min(1).optional(),
   ADMIN_PIN: z.string().min(1).optional(),
-  // Read-only viewer PIN. Unset means no viewer access. The auth module ignores
-  // it when it equals ADMIN_PIN or ADMIN_SECRET.
-  VIEWER_PIN: z.string().min(1).optional(),
+  // Read-only viewer PIN. Unset or blank means no viewer access. The auth module
+  // ignores it when it equals ADMIN_PIN or ADMIN_SECRET. Deliberately loose: a strict
+  // rule would make validateEnv throw app-wide when the operator blanks the value to
+  // revoke access, and that would take the auto-exit cron down with it.
+  VIEWER_PIN: z.string().optional(),
 
   // HL live execution (Phase 3 — SERVER ONLY, used only when TRADING_MODE=live).
   // The AGENT/API wallet key: trade-only, cannot withdraw, revocable on HL.

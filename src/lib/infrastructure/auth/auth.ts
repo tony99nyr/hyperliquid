@@ -14,6 +14,7 @@
 import { NextRequest } from 'next/server';
 import crypto from 'crypto';
 import { logError } from '../logging/logger';
+import { checkRateLimit } from '../rate-limiting/in-memory-rate-limit';
 
 const COOKIE_NAME = 'cockpit_auth';
 const ADMIN_COOKIE_NAME = 'admin_auth';
@@ -143,9 +144,10 @@ export function getClientIdentifier(request: NextRequest): string {
 
 /** True when a session-cookie value grants ADMIN (session token or legacy raw credential). */
 function isAdminCookieToken(token: string | undefined): boolean {
-  // Cookie carries an opaque session token (preferred). Fall back to direct
-  // PIN/secret match for backward-compat with any pre-existing cookie.
-  return !!token && (verifySessionToken(token) || verifyAdminSecret(token) || verifyPin(token));
+  // Cookie carries an opaque session token (preferred), or ADMIN_SECRET. The raw PIN is
+  // NOT accepted here: this check has no throttle, so a short PIN could be guessed
+  // through it. The PIN works only at /api/auth/login, behind the login throttle.
+  return !!token && (verifySessionToken(token) || verifyAdminSecret(token));
 }
 
 /** Reads the session cookie value from a route-handler request. */
@@ -159,7 +161,8 @@ function readSessionCookie(request: NextRequest): string | undefined {
 
 /**
  * Verifies ADMIN authentication from request (cookie or Authorization header).
- * Accepts ADMIN_SECRET or the admin PIN via Bearer token or cookie.
+ * Accepts a session token (cookie) or ADMIN_SECRET (cookie or Bearer). The raw admin
+ * PIN is accepted only by the login route, which is rate-limited.
  * A viewer session NEVER passes this check. Every mutating route uses it.
  */
 export async function verifyAdminAuth(request: NextRequest): Promise<boolean> {
@@ -169,7 +172,7 @@ export async function verifyAdminAuth(request: NextRequest): Promise<boolean> {
   const authHeader = request.headers.get('authorization');
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
   if (!token) return false;
-  return verifyAdminSecret(token) || verifyPin(token);
+  return verifyAdminSecret(token);
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +182,9 @@ export async function verifyAdminAuth(request: NextRequest): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 export type AuthRole = 'admin' | 'viewer';
+
+/** Read requests per minute for one viewer client. The cockpit page needs far fewer. */
+export const VIEWER_READS_PER_MIN = 300;
 
 const VIEWER_TOKEN_PREFIX = 'viewer';
 
@@ -259,7 +265,11 @@ export async function getRequestAuthRole(request: NextRequest): Promise<AuthRole
  * a non-GET handler references it.
  */
 export async function verifyReadAuth(request: NextRequest): Promise<boolean> {
-  return (await getRequestAuthRole(request)) !== null;
+  const role = await getRequestAuthRole(request);
+  if (role !== 'viewer') return role !== null;
+  // The read routes call Hyperliquid and Supabase from the production deployment, which
+  // the live watcher and the auto-exit share. Cap a viewer so a loop cannot starve them.
+  return checkRateLimit(`viewer-read:${getClientIdentifier(request)}`, VIEWER_READS_PER_MIN, 60_000).allowed;
 }
 
 /** Cookie configuration for cockpit (PIN) authentication. */

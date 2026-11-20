@@ -60,8 +60,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'Login is not configured' }, { status: 500 });
   }
 
-  // Success: reset the throttle for this client and set the opaque session token.
-  clearRateLimit(clientKey);
+  // Reset the throttle only after an ADMIN login. A viewer login must not reset it, or
+  // someone who holds the viewer PIN could guess the admin PIN without limit by
+  // alternating guesses with viewer logins.
+  if (role === 'admin') clearRateLimit(clientKey);
 
   const res = NextResponse.json({ ok: true, role });
   res.cookies.set(ADMIN_AUTH_COOKIE_CONFIG.name, sessionToken, {
