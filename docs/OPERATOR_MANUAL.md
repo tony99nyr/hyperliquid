@@ -103,6 +103,7 @@ section of the root [CLAUDE.md](../CLAUDE.md). The commands you run most:
 | `pnpm skill:ladder-expectancy` | After any ladder closes (the weekly run is part of `desk-retro`). |
 | `pnpm rubric` | Refresh `rubric_scores` (feeds the review-ladder thesis pillar). |
 | `pnpm skill:assess-health / advise-exit / open-position / run-session` | Position management lane (all confirm-gated). |
+| `pnpm skill:agent-action` | Scoped live action from the agent's machine: tighten a stop or close reduce-only, after the operator's yes (ADR-0009). Needs `AGENT_ACTIONS_ENABLED` and `AGENT_ACTION_TOKEN` in production. |
 | `pnpm perf:report --since last-retro --md` | Lane performance report (the Lanes tab shows the same data). |
 | `pnpm perf:marker propose --kind … --title … --write` | Propose a change marker. **Only a marker you confirm splits lane statistics:** confirm it in the Lanes tab change log (admin PIN). |
 | `pnpm env:pull` | Refresh `.env.local` from Vercel (after env changes). |

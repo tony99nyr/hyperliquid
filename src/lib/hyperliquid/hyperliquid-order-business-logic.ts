@@ -151,9 +151,17 @@ export function trimZeros(s: string): string {
  */
 export function formatHlSize(sz: number, szDecimals: number): string {
   const d = Math.max(0, szDecimals);
-  const f = 10 ** d;
-  const floored = Math.floor(sz * f) / f;
-  return trimZeros(floored.toFixed(d));
+  return trimZeros(floorHlSize(sz, d).toFixed(d));
+}
+
+/**
+ * Floor a size to the coin's lot. The epsilon keeps a size that is already on the lot
+ * grid: in binary floating point 0.29 * 100 is 28.999999999999996, and a bare floor
+ * would send 0.28 and leave one lot of a full close open.
+ */
+export function floorHlSize(sz: number, szDecimals: number): number {
+  const f = 10 ** Math.max(0, szDecimals);
+  return Math.floor(sz * f + 1e-9) / f;
 }
 
 /**

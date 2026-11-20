@@ -27,6 +27,10 @@ describe('trimZeros / formatHlSize', () => {
   it('floors size to szDecimals (never oversize)', () => {
     expect(formatHlSize(1.23456, 4)).toBe('1.2345'); // floored, not rounded up
     expect(formatHlSize(1.29999, 2)).toBe('1.29'); // floor, not 1.30
+    // A size already on the lot grid stays whole: 0.29 * 100 is 28.999999999999996 in binary.
+    expect(formatHlSize(0.29, 2)).toBe('0.29');
+    expect(formatHlSize(1.15, 2)).toBe('1.15');
+    expect(formatHlSize(4.35, 2)).toBe('4.35');
     expect(formatHlSize(1.5, 4)).toBe('1.5');
     expect(formatHlSize(2, 3)).toBe('2');
   });

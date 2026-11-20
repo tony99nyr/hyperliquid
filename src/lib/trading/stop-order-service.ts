@@ -21,8 +21,8 @@ function isStopOrder(o: HlOpenOrder): boolean {
   return o.isTrigger && o.reduceOnly && /stop/i.test(o.orderType);
 }
 
-/** The resting protective stop for `coin`, or null. Reads the live account orders. */
-async function findOpenStops(coin: string): Promise<HlOpenOrder[]> {
+/** Every resting protective stop for `coin`. Reads the live account orders. */
+export async function findOpenStops(coin: string): Promise<HlOpenOrder[]> {
   const address = getHlAccountAddress();
   if (!address) return [];
   const orders = await fetchOpenOrders(address, validateEnv().HL_NETWORK);

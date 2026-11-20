@@ -149,6 +149,13 @@ const envSchema = z.object({
   HTF_TREND_ALERT_ENABLED: boolFlag('HTF_TREND_ALERT_ENABLED'),
   // Cron drafts event straddles at T-30. Drafts stay unarmed; default OFF.
   EVENT_PREP_CRON_ENABLED: boolFlag('EVENT_PREP_CRON_ENABLED'),
+  // --- Scoped agent actions (ADR-0009) ---
+  // Kill switch for /api/agent/action: tighten a stop or close reduce-only. Default OFF.
+  AGENT_ACTIONS_ENABLED: boolFlag('AGENT_ACTIONS_ENABLED'),
+  // Dedicated bearer token for that endpoint. Deliberately loose here (a strict rule
+  // would make validateEnv throw app-wide on a bad value): agent-action-config treats
+  // a token under 32 characters as not configured.
+  AGENT_ACTION_TOKEN: z.string().optional(),
   // Dedicated bearer token for the NAS watcher to call /api/cockpit/ladder/fire-rung
   // (P1d). Separate from ADMIN_SECRET so the watcher never holds the admin credential.
   LADDER_CRON_SECRET: z.string().min(1).optional(),
@@ -199,6 +206,8 @@ export function validateEnv(source: NodeJS.ProcessEnv = process.env): CockpitEnv
     RUNAWAY_ALERT_ENABLED: source.RUNAWAY_ALERT_ENABLED,
     HTF_TREND_ALERT_ENABLED: source.HTF_TREND_ALERT_ENABLED,
     EVENT_PREP_CRON_ENABLED: source.EVENT_PREP_CRON_ENABLED,
+    AGENT_ACTIONS_ENABLED: source.AGENT_ACTIONS_ENABLED,
+    AGENT_ACTION_TOKEN: source.AGENT_ACTION_TOKEN,
     IAMROSSI_STANCE_URL: source.IAMROSSI_STANCE_URL,
     IAMROSSI_STANCE_TOKEN: source.IAMROSSI_STANCE_TOKEN,
     LADDER_CRON_SECRET: source.LADDER_CRON_SECRET,
