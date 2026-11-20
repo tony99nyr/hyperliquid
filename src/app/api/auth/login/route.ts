@@ -1,15 +1,22 @@
 /**
- * Admin-PIN login route. Verifies the submitted PIN (or ADMIN_SECRET) via the
+ * PIN login route. Verifies the submitted PIN (or ADMIN_SECRET) via the
  * vendored auth helpers, then sets an OPAQUE session-token cookie (never the raw
  * PIN/secret) so the RSC /cockpit gate passes on the next request. Brute force is
  * throttled per client IP. Server-only — never exposes the secret.
+ *
+ * Roles: the admin PIN or ADMIN_SECRET mints an admin session. The optional
+ * VIEWER_PIN mints a read-only viewer session, which every mutating route
+ * refuses. The route checks the admin credential first.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import {
   verifyPin,
   verifyAdminSecret,
+  verifyViewerPin,
   issueSessionToken,
+  issueViewerSessionToken,
+  type AuthRole,
   getClientIdentifier,
   ADMIN_AUTH_COOKIE_CONFIG,
 } from '@/lib/infrastructure/auth/auth';
@@ -38,15 +45,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'PIN required' }, { status: 400 });
   }
 
-  if (!verifyPin(pin) && !verifyAdminSecret(pin)) {
+  let role: AuthRole;
+  let sessionToken: string | null;
+  if (verifyPin(pin) || verifyAdminSecret(pin)) {
+    role = 'admin';
+    sessionToken = issueSessionToken(ADMIN_AUTH_COOKIE_CONFIG.maxAge);
+  } else if (verifyViewerPin(pin)) {
+    role = 'viewer';
+    sessionToken = issueViewerSessionToken(ADMIN_AUTH_COOKIE_CONFIG.maxAge);
+  } else {
     return NextResponse.json({ ok: false, error: 'Invalid PIN' }, { status: 401 });
   }
+  if (!sessionToken) {
+    return NextResponse.json({ ok: false, error: 'Login is not configured' }, { status: 500 });
+  }
 
-  // Success: reset the throttle for this client and mint an opaque session token.
+  // Success: reset the throttle for this client and set the opaque session token.
   clearRateLimit(clientKey);
-  const sessionToken = issueSessionToken(ADMIN_AUTH_COOKIE_CONFIG.maxAge);
 
-  const res = NextResponse.json({ ok: true });
+  const res = NextResponse.json({ ok: true, role });
   res.cookies.set(ADMIN_AUTH_COOKIE_CONFIG.name, sessionToken, {
     maxAge: ADMIN_AUTH_COOKIE_CONFIG.maxAge,
     httpOnly: ADMIN_AUTH_COOKIE_CONFIG.httpOnly,

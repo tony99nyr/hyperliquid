@@ -73,6 +73,9 @@ const envSchema = z.object({
   // Admin gate (vendored auth).
   ADMIN_SECRET: z.string().min(1).optional(),
   ADMIN_PIN: z.string().min(1).optional(),
+  // Read-only viewer PIN. Unset means no viewer access. The auth module ignores
+  // it when it equals ADMIN_PIN or ADMIN_SECRET.
+  VIEWER_PIN: z.string().min(1).optional(),
 
   // HL live execution (Phase 3 — SERVER ONLY, used only when TRADING_MODE=live).
   // The AGENT/API wallet key: trade-only, cannot withdraw, revocable on HL.
@@ -192,6 +195,7 @@ export function validateEnv(source: NodeJS.ProcessEnv = process.env): CockpitEnv
     SUPABASE_SERVICE_ROLE_KEY: source.SUPABASE_SERVICE_ROLE_KEY,
     ADMIN_SECRET: source.ADMIN_SECRET,
     ADMIN_PIN: source.ADMIN_PIN,
+    VIEWER_PIN: source.VIEWER_PIN,
     HL_AGENT_PRIVATE_KEY: source.HL_AGENT_PRIVATE_KEY,
     HL_NETWORK: source.HL_NETWORK,
     HL_ACCOUNT_ADDRESS: source.HL_ACCOUNT_ADDRESS,

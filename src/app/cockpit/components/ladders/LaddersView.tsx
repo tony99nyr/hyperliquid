@@ -12,6 +12,7 @@ import { css } from '@styled-system/css';
 import { GH, ZONE_COLORS, TERM } from '../panel-styles';
 import LadderBuilderModal from './LadderBuilderModal';
 import LadderDetailModal from './LadderDetailModal';
+import { useReadOnly } from '../../read-only-context';
 import { expiryReadout } from '@/lib/ladder/ladder-projection-business-logic';
 import { useNow } from '@/hooks/useNow';
 import type { Ladder } from '@/lib/ladder/ladder-types';
@@ -37,6 +38,7 @@ export default function LaddersView({ coin = 'ETH' }: LaddersViewProps) {
   const [error, setError] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const readOnly = useReadOnly();
   // The audit view: archived ladders are hidden by default; this toggle shows them (read-only).
   const [showArchived, setShowArchived] = useState(false);
   // Render-safe ticking clock for the expiry chips.
@@ -60,9 +62,9 @@ export default function LaddersView({ coin = 'ETH' }: LaddersViewProps) {
     <div className={css({ maxWidth: '900px', margin: '0 auto', padding: { base: '16px', md: '24px' } })}>
       <div className={css({ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '4px' })}>
         <h1 className={css({ fontFamily: 'sans', fontSize: '18px', fontWeight: 'bold', color: 'github.textBright', letterSpacing: '0.02em' })}>Armed Ladders</h1>
-        <button type="button" data-testid="ladder-new" onClick={() => setBuilding(true)}
+        {!readOnly && <button type="button" data-testid="ladder-new" onClick={() => setBuilding(true)}
           className={css({ fontFamily: 'sans', fontSize: '12.5px', fontWeight: 'semibold', borderRadius: '8px', padding: '8px 16px', border: 'none', cursor: 'pointer' })}
-          style={{ background: ZONE_COLORS.ok, color: TERM.darkText }}>+ New Ladder</button>
+          style={{ background: ZONE_COLORS.ok, color: TERM.darkText }}>+ New Ladder</button>}
       </div>
       <div className={css({ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '12px', marginBottom: '18px' })}>
         <p className={css({ fontFamily: 'mono', fontSize: '11px', color: 'cockpit.faint' })}>

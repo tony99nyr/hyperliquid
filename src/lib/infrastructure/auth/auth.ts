@@ -141,30 +141,125 @@ export function getClientIdentifier(request: NextRequest): string {
   return rawIp?.trim() || 'unknown';
 }
 
-/**
- * Verifies admin authentication from request (cookie or Authorization header).
- * Phase 0: accepts ADMIN_SECRET or the admin PIN via Bearer token or cookie.
- */
-export async function verifyAdminAuth(request: NextRequest): Promise<boolean> {
-  // Cookie path
+/** True when a session-cookie value grants ADMIN (session token or legacy raw credential). */
+function isAdminCookieToken(token: string | undefined): boolean {
+  // Cookie carries an opaque session token (preferred). Fall back to direct
+  // PIN/secret match for backward-compat with any pre-existing cookie.
+  return !!token && (verifySessionToken(token) || verifyAdminSecret(token) || verifyPin(token));
+}
+
+/** Reads the session cookie value from a route-handler request. */
+function readSessionCookie(request: NextRequest): string | undefined {
   const cookieHeader = request.headers.get('cookie') || '';
   const adminCookie = cookieHeader
     .split(';')
     .find((c) => c.trim().startsWith(`${ADMIN_COOKIE_NAME}=`));
-  if (adminCookie) {
-    const token = adminCookie.split('=')[1]?.trim();
-    // Cookie carries an opaque session token (preferred). Fall back to direct
-    // PIN/secret match for backward-compat with any pre-existing cookie.
-    if (token && (verifySessionToken(token) || verifyAdminSecret(token) || verifyPin(token))) {
-      return true;
-    }
-  }
+  return adminCookie?.split('=')[1]?.trim() || undefined;
+}
+
+/**
+ * Verifies ADMIN authentication from request (cookie or Authorization header).
+ * Accepts ADMIN_SECRET or the admin PIN via Bearer token or cookie.
+ * A viewer session NEVER passes this check. Every mutating route uses it.
+ */
+export async function verifyAdminAuth(request: NextRequest): Promise<boolean> {
+  if (isAdminCookieToken(readSessionCookie(request))) return true;
 
   // Bearer path
   const authHeader = request.headers.get('authorization');
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
   if (!token) return false;
   return verifyAdminSecret(token) || verifyPin(token);
+}
+
+// ---------------------------------------------------------------------------
+// Read-only viewer role. A separate VIEWER_PIN mints a viewer session token.
+// The viewer token has a different shape and a different signed payload, so
+// verifySessionToken (admin) always rejects it.
+// ---------------------------------------------------------------------------
+
+export type AuthRole = 'admin' | 'viewer';
+
+const VIEWER_TOKEN_PREFIX = 'viewer';
+
+/**
+ * PURE: the usable viewer PIN, or null when viewer access is off. Viewer access
+ * is off when the PIN is unset or blank, or when it equals the admin PIN or the
+ * admin secret (a shared credential must never downgrade to read-only).
+ */
+export function resolveViewerPin(
+  viewerPin: string | undefined,
+  adminPin: string | undefined,
+  adminSecret: string | undefined,
+): string | null {
+  if (!viewerPin || viewerPin.trim() === '') return null;
+  if (adminPin && constantTimeEquals(viewerPin, adminPin)) return null;
+  if (adminSecret && constantTimeEquals(viewerPin, adminSecret)) return null;
+  return viewerPin;
+}
+
+function configuredViewerPin(): string | null {
+  return resolveViewerPin(process.env.VIEWER_PIN, process.env.ADMIN_PIN, process.env.ADMIN_SECRET);
+}
+
+/** Constant-time check of a submitted PIN against VIEWER_PIN. False when viewer access is off. */
+export function verifyViewerPin(pin: string): boolean {
+  const viewerPin = configuredViewerPin();
+  if (!viewerPin || !pin) return false;
+  return constantTimeEquals(pin, viewerPin);
+}
+
+/**
+ * The signed payload binds the hash of the current VIEWER_PIN. A rotated or
+ * removed VIEWER_PIN therefore invalidates every viewer session at once.
+ */
+function viewerSignedPayload(nonce: string, expiry: string, viewerPin: string): string {
+  return `${VIEWER_TOKEN_PREFIX}.${nonce}.${expiry}.${hashPin(viewerPin)}`;
+}
+
+/** Mint a viewer session token, or null when viewer access is off. */
+export function issueViewerSessionToken(maxAgeSec: number = COOKIE_MAX_AGE): string | null {
+  const viewerPin = configuredViewerPin();
+  if (!viewerPin || !sessionSigningKey()) return null;
+  const nonce = createAuthToken();
+  const expiry = String(Date.now() + maxAgeSec * 1000);
+  const sig = signSessionPayload(viewerSignedPayload(nonce, expiry, viewerPin));
+  return `${VIEWER_TOKEN_PREFIX}.${nonce}.${expiry}.${sig}`;
+}
+
+/** True when `token` is an unexpired viewer token signed for the CURRENT VIEWER_PIN. */
+export function verifyViewerSessionToken(token: string | undefined): boolean {
+  const viewerPin = configuredViewerPin();
+  if (!token || !viewerPin || !sessionSigningKey()) return false;
+  const parts = token.split('.');
+  if (parts.length !== 4 || parts[0] !== VIEWER_TOKEN_PREFIX) return false;
+  const [, nonce, expiryStr, sig] = parts;
+  const expiry = Number(expiryStr);
+  if (!nonce || !Number.isFinite(expiry) || Date.now() >= expiry) return false;
+  return constantTimeEquals(sig ?? '', signSessionPayload(viewerSignedPayload(nonce, expiryStr, viewerPin)));
+}
+
+/** The role a session-cookie value grants, or null. Admin wins over viewer. */
+export function roleForCookieToken(token: string | undefined): AuthRole | null {
+  if (isAdminCookieToken(token)) return 'admin';
+  if (verifyViewerSessionToken(token)) return 'viewer';
+  return null;
+}
+
+/** The caller's role (admin or viewer), or null when unauthenticated. */
+export async function getRequestAuthRole(request: NextRequest): Promise<AuthRole | null> {
+  if (await verifyAdminAuth(request)) return 'admin';
+  return verifyViewerSessionToken(readSessionCookie(request)) ? 'viewer' : null;
+}
+
+/**
+ * READ-ONLY check: true for an admin OR a viewer. Use it ONLY in GET handlers
+ * that the cockpit page reads. Never use it in a mutating handler; the
+ * deny-by-default test (tests/lib/api/viewer-deny-by-default.test.ts) fails if
+ * a non-GET handler references it.
+ */
+export async function verifyReadAuth(request: NextRequest): Promise<boolean> {
+  return (await getRequestAuthRole(request)) !== null;
 }
 
 /** Cookie configuration for cockpit (PIN) authentication. */

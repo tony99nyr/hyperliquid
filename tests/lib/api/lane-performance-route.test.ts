@@ -5,7 +5,8 @@ const auth = vi.fn();
 const origin = vi.fn();
 const report = vi.fn();
 const confirm = vi.fn();
-vi.mock('@/lib/infrastructure/auth/auth', () => ({ verifyAdminAuth: (...args: unknown[]) => auth(...args), getClientIdentifier: () => 'lane-performance-test' }));
+vi.mock('@/lib/infrastructure/auth/auth', () => ({ verifyAdminAuth: (...args: unknown[]) => auth(...args),
+  verifyReadAuth: (...args: unknown[]) => auth(...args), getClientIdentifier: () => 'lane-performance-test' }));
 vi.mock('@/lib/infrastructure/auth/same-origin', () => ({ isSameOrigin: (...args: unknown[]) => origin(...args) }));
 vi.mock('@/lib/performance/lane-performance-service', () => ({ getLanePerformanceReport: (...args: unknown[]) => report(...args), confirmPerformanceMarker: (...args: unknown[]) => confirm(...args) }));
 

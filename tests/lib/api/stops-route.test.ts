@@ -8,7 +8,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const verifyAdminAuth = vi.fn();
 const findAllStops = vi.fn();
 
-vi.mock('@/lib/infrastructure/auth/auth', () => ({ verifyAdminAuth: (...a: unknown[]) => verifyAdminAuth(...a) }));
+vi.mock('@/lib/infrastructure/auth/auth', () => ({ verifyAdminAuth: (...a: unknown[]) => verifyAdminAuth(...a),
+  verifyReadAuth: (...a: unknown[]) => verifyAdminAuth(...a) }));
 vi.mock('@/lib/trading/stop-order-service', () => ({ findAllStops: (...a: unknown[]) => findAllStops(...a) }));
 
 import { GET } from '@/app/api/cockpit/stops/route';

@@ -13,7 +13,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAdminAuth, getClientIdentifier } from '@/lib/infrastructure/auth/auth';
+import { verifyReadAuth, getClientIdentifier } from '@/lib/infrastructure/auth/auth';
 import { isSameOrigin } from '@/lib/infrastructure/auth/same-origin';
 import { checkRateLimit } from '@/lib/infrastructure/rate-limiting/in-memory-rate-limit';
 import {
@@ -28,7 +28,7 @@ const TRADER_POSITIONS_MAX_PER_MIN = 30;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   // 1) Auth FIRST (an unauthenticated caller always gets 401).
-  if (!(await verifyAdminAuth(request))) {
+  if (!(await verifyReadAuth(request))) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
   }
   // 2) Same-origin: a leaked admin cookie on a hostile page can't drive this.

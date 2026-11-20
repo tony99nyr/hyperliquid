@@ -1,7 +1,8 @@
 /**
  * /cockpit — the live trading cockpit (RSC).
  *
- * Server responsibilities (per the RSC convention): admin-PIN auth gate, then
+ * Server responsibilities (per the RSC convention): PIN auth gate (admin or a
+ * read-only viewer), then
  * fetch the INITIAL low-frequency state (active session + leader positions) and
  * hand it to the CockpitClient, which opens the realtime transports. All
  * high-frequency / live data is subscribed client-side inside the islands — the
@@ -13,7 +14,7 @@
  */
 
 import { getTradingMode } from '@/lib/env/mode';
-import { isAdminAuthenticated } from '@/lib/infrastructure/auth/server-auth';
+import { getPageAuthRole } from '@/lib/infrastructure/auth/server-auth';
 import { getActiveSession } from '@/lib/cockpit/session-service';
 import { reapStaleExecutingPreviews } from '@/lib/cockpit/pending-actions-service';
 import {
@@ -31,9 +32,11 @@ import CockpitClient from './CockpitClient';
 export const dynamic = 'force-dynamic';
 
 export default async function CockpitPage() {
-  if (!(await isAdminAuthenticated())) {
+  const role = await getPageAuthRole();
+  if (!role) {
     return <PinGate />;
   }
+  const readOnly = role === 'viewer';
 
   const mode = getTradingMode();
   const session = await getActiveSession();
@@ -42,8 +45,9 @@ export default async function CockpitPage() {
   // Opportunistically recover any preview stuck 'executing' from a prior
   // serverless death (rare) so it reappears in the popup. Fail-soft: a reap
   // error must never break the page (matches the route's fail-soft ethos).
+  // The sweep writes, so it runs for an admin only.
   try {
-    await reapStaleExecutingPreviews();
+    if (!readOnly) await reapStaleExecutingPreviews();
   } catch {
     // non-critical maintenance sweep
   }
@@ -78,6 +82,7 @@ export default async function CockpitPage() {
       topTraders={topTraders}
       ratings={ratings}
       coins={[...TRADEABLE_COINS]}
+      readOnly={readOnly}
     />
   );
 }

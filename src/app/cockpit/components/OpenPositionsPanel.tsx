@@ -36,6 +36,7 @@ import { userPositionDisplay } from './position-panel-helpers';
 import ExitModal, { type ExitTarget } from './ExitModal';
 import AdjustLeverageModal, { type AdjustLeverageTarget } from './AdjustLeverageModal';
 import PositionInsightsModal from './PositionInsightsModal';
+import { useReadOnly } from '../read-only-context';
 
 /** "held 3h" inline label from the open timestamp + the ticking clock. */
 function heldShort(openedAtMs: number | null | undefined, nowMs: number): string {
@@ -100,6 +101,8 @@ export default function OpenPositionsPanel({
   const [exitReq, setExitReq] = useState<ExitRequest | null>(null);
   const [adjustReq, setAdjustReq] = useState<AdjustLeverageTarget | null>(null);
   const [closeAll, setCloseAll] = useState(false);
+  // Read-only viewer: hide every control that opens an order flow.
+  const readOnly = useReadOnly();
   // Coin of the open position whose insights drill-down is showing (click a row).
   const [insightsCoin, setInsightsCoin] = useState<string | null>(null);
   // Ticking clock for the "held" labels (lazy init keeps Date out of render purity).
@@ -140,7 +143,7 @@ export default function OpenPositionsPanel({
             {fmtUsd(totalUpnl)}
           </div>
         </div>
-        <button
+        {!readOnly && <button
           type="button"
           data-testid="new-position-button"
           onClick={onNewPosition}
@@ -148,7 +151,7 @@ export default function OpenPositionsPanel({
           className={css({ fontFamily: 'sans', fontSize: '12px', fontWeight: 'semibold', border: 'none', borderRadius: '7px', paddingX: '13px', paddingY: '7px', cursor: 'pointer', _hover: { opacity: 0.92 } })}
         >
           ＋ New Position
-        </button>
+        </button>}
       </header>
 
       {open.length === 0 ? (
@@ -156,7 +159,7 @@ export default function OpenPositionsPanel({
           <p className={css({ fontFamily: 'mono', fontSize: '13px', color: 'cockpit.faint' })}>
             Flat — no open positions. Safe-Exit idle.
           </p>
-          <button
+          {!readOnly && <button
             type="button"
             data-testid="empty-open-position"
             onClick={onNewPosition}
@@ -164,7 +167,7 @@ export default function OpenPositionsPanel({
             className={css({ marginTop: '14px', fontFamily: 'sans', fontSize: '12px', fontWeight: 'semibold', border: 'none', borderRadius: '7px', paddingX: '16px', paddingY: '9px', cursor: 'pointer' })}
           >
             ＋ Open a position
-          </button>
+          </button>}
         </div>
       ) : (
         <div className={css({ padding: '0 12px 12px', display: 'flex', flexDirection: 'column', gap: '8px' })}>
@@ -189,7 +192,7 @@ export default function OpenPositionsPanel({
       )}
 
       {/* Safe-Exit strip — SAFE-EXIT ALL (dead-man's switch). */}
-      {open.length > 0 && (
+      {open.length > 0 && !readOnly && (
         <div className={css({ margin: '0 12px 12px', display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap', padding: '12px 14px', bg: 'rgba(242,77,94,0.05)', border: '1px solid', borderColor: 'rgba(242,77,94,0.22)', borderRadius: '10px' })}>
           <div className={css({ flex: 1, minWidth: '200px' })}>
             <div className={css({ display: 'flex', alignItems: 'baseline', gap: '8px' })}>
@@ -292,6 +295,7 @@ function PositionRowCard({
   onClose: (t: ExitTarget) => void;
   onAdjust: (t: AdjustLeverageTarget) => void;
 }) {
+  const readOnly = useReadOnly();
   const d = userPositionDisplay(pos, pnl);
   const side = d.side;
   const sideColor = side === 'long' ? ZONE_COLORS.ok : ZONE_COLORS.danger;
@@ -417,8 +421,8 @@ function PositionRowCard({
         </div>
       </div>
 
-      {/* Actions */}
-      <div className={css({ display: 'flex', gap: '6px', justifyContent: 'flex-start' })}>
+      {/* Actions (hidden for a read-only viewer) */}
+      {!readOnly && <div className={css({ display: 'flex', gap: '6px', justifyContent: 'flex-start' })}>
         <button
           type="button"
           data-testid="position-adjust-lev"
@@ -447,7 +451,7 @@ function PositionRowCard({
         >
           Close
         </button>
-      </div>
+      </div>}
     </div>
   );
 }

@@ -136,6 +136,28 @@ desktop, but arming/firing is prod-only. `localhost:3000` is iamrossi.com, not t
   A stale NAS secret once left both routes dead for six weeks.
 - After any rotation, check that the `reconcile` and `auto-exit-cron` heartbeats refresh.
 
+**Read-only viewer access.** A second PIN, `VIEWER_PIN`, lets a person see the whole
+cockpit (positions, ladders, performance, lanes, scout, traders) and change nothing.
+A viewer session gets a "READ-ONLY" banner and no action controls. The server is the real
+control: every mutating route calls `verifyAdminAuth`, which refuses a viewer session.
+`tests/lib/api/viewer-deny-by-default.test.ts` fails if a non-GET route accepts a viewer.
+A viewer does not see the approval popup.
+
+To give access:
+1. Make a new PIN. Use at least 12 random characters. Do not reuse `ADMIN_PIN` or
+   `ADMIN_SECRET`: the app ignores a `VIEWER_PIN` that equals either of them.
+2. In the Vercel dashboard, open the project, then Settings → Environment Variables. Add
+   `VIEWER_PIN` for Production only. Mark it Sensitive.
+3. Redeploy production. Vercel applies a new variable only to a new deployment.
+4. Send the PIN to the viewer through a private channel, for example a password manager
+   share or Signal. Do not post it in a group chat or an email thread.
+5. The viewer opens `/cockpit` and types the PIN at the PIN gate.
+
+To revoke access, remove `VIEWER_PIN` or change its value, then redeploy. The viewer
+session token carries a hash of the PIN, so the change ends every open viewer session at
+once. A rotation of `ADMIN_SECRET` also ends every session, the admin session included.
+The login route shares the per-IP rate limit with the admin login.
+
 ## 5. Emergency card
 
 This is the canonical emergency card for the whole desk.

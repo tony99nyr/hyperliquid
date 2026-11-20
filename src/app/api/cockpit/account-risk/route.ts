@@ -6,14 +6,14 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAdminAuth } from '@/lib/infrastructure/auth/auth';
+import { verifyReadAuth } from '@/lib/infrastructure/auth/auth';
 import { fetchAccountRisk } from '@/lib/trading/account-risk-service';
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!(await verifyAdminAuth(request))) {
+  if (!(await verifyReadAuth(request))) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
   }
   try {

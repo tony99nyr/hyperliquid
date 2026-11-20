@@ -21,6 +21,7 @@ import { HOLD_TIMEFRAMES, suggestStopFrac, liquidationCushion, stopPxFromFrac, v
 import { isOverMargined } from '@/lib/trading/leverage-business-logic';
 import PositionHistoryChart from './left-rail/PositionHistoryChart';
 import PositionAdjustActions from './PositionAdjustActions';
+import { useReadOnly } from '../read-only-context';
 import { positionHealth, uPnlPct, type RegimeDir } from './open-positions-helpers';
 import { userPositionDisplay } from './position-panel-helpers';
 import { GH, ZONE_COLORS, TERM, fmtPx, fmtUsd, fmtCompactUsd } from './panel-styles';
@@ -65,6 +66,7 @@ export interface PositionInsightsModalProps {
 export default function PositionInsightsModal({
   pos, pnl, regime, mode = 'paper', realLiqPx = null, effLeverage = null, currentMarginUsd = null, nowMs, onReduce, onClose, onAdjust, onDismiss,
 }: PositionInsightsModalProps) {
+  const readOnly = useReadOnly();
   const d = userPositionDisplay(pos, pnl);
   const side = d.side;
   const sideColor = side === 'long' ? ZONE_COLORS.ok : ZONE_COLORS.danger;
@@ -377,6 +379,8 @@ export default function PositionInsightsModal({
           </div>
         </div>
 
+        {/* A read-only viewer sees the order state, but the disabled fieldset turns off every control below. */}
+        <fieldset disabled={readOnly} data-testid="insights-actions" style={{ display: 'contents' }}>
         {/* Protective stop — ADJUSTABLE: pick a hold-timeframe preset (Position = wide,
             wick-resistant) or type any level off the chart. Server re-validates side +
             distance; a wider stop survives short-term swings instead of force-closing. */}
@@ -540,6 +544,7 @@ export default function PositionInsightsModal({
           <button type="button" data-testid="insights-reduce" disabled={!canExit} onClick={onReduce} className={css({ fontFamily: 'sans', fontSize: '12px', fontWeight: 'medium', color: 'github.text', bg: 'cockpit.button', border: '1px solid token(colors.github.border)', borderRadius: '7px', paddingX: '14px', paddingY: '9px', cursor: 'pointer', _disabled: { opacity: 0.5, cursor: 'not-allowed' } })}>Reduce</button>
           <button type="button" data-testid="insights-close-position" disabled={!canExit} onClick={onClose} style={{ color: ZONE_COLORS.danger, background: 'rgba(242,77,94,0.08)', borderColor: 'rgba(242,77,94,0.32)' }} className={css({ fontFamily: 'sans', fontSize: '12px', fontWeight: 'semibold', border: '1px solid', borderRadius: '7px', paddingX: '16px', paddingY: '9px', cursor: 'pointer', _disabled: { opacity: 0.5, cursor: 'not-allowed' } })}>Close</button>
         </div>
+        </fieldset>
         <span className={css({ fontFamily: 'mono', fontSize: '8px', color: 'github.textMuted' })} style={{ color: TERM.faint }}>Insights are read-only; Reduce/Close still run through the approved reduce-only seam.</span>
         </div>
       </section>

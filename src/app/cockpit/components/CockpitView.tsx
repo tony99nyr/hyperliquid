@@ -35,6 +35,7 @@ import WhalePosture from './opportunity/WhalePosture';
 import HealthPanel from './HealthPanel';
 import LeaderVsYou from './LeaderVsYou';
 import EntryModal from './EntryModal';
+import { useReadOnly } from '../read-only-context';
 
 export interface CockpitViewProps {
   sessionId: string | null;
@@ -81,6 +82,8 @@ export default function CockpitView({
   // modal only POSTs /api/cockpit/open-position on that explicit Approve click;
   // nothing fires on its own.
   const [showEntry, setShowEntry] = useState(false);
+  // A read-only viewer never gets the entry ticket (the server refuses the order anyway).
+  const readOnly = useReadOnly();
   // Side to seed the entry preview with. Manual "+ New Position" defaults to buy;
   // opening from an opportunity carries THAT opportunity's side (so a SHORT setup
   // opens a SHORT preview, not the default long).
@@ -184,7 +187,7 @@ export default function CockpitView({
       {/* SELF-SERVICE entry modal — floats above everything. NO-AUTO-FIRE: it only
           executes on the operator's explicit Approve. The Claude-skill → approval
           popup path (mounted in CockpitClient) still works in parallel. */}
-      {showEntry && (
+      {showEntry && !readOnly && (
         <EntryModal
           // Re-key on the stage NONCE (bumped only on a fresh open/stage) so a new
           // Copy reseeds — but changing coin INSIDE the open ticket does NOT remount

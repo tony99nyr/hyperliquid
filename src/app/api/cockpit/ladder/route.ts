@@ -12,7 +12,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAdminAuth, getClientIdentifier } from '@/lib/infrastructure/auth/auth';
+import { verifyAdminAuth, verifyReadAuth, getClientIdentifier } from '@/lib/infrastructure/auth/auth';
 import { isSameOrigin } from '@/lib/infrastructure/auth/same-origin';
 import { checkRateLimit } from '@/lib/infrastructure/rate-limiting/in-memory-rate-limit';
 import { createLadder, listLadders, listLaddersWithRungs, type NewRung } from '@/lib/ladder/ladder-service';
@@ -33,7 +33,7 @@ function num(v: unknown): number | null {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!(await verifyAdminAuth(request))) {
+  if (!(await verifyReadAuth(request))) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
   }
   const statusRaw = request.nextUrl.searchParams.get('status');

@@ -7,14 +7,14 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAdminAuth } from '@/lib/infrastructure/auth/auth';
+import { verifyReadAuth } from '@/lib/infrastructure/auth/auth';
 import { getLadderWithRungs } from '@/lib/ladder/ladder-service';
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest, ctx: { params: Promise<{ id: string }> }): Promise<NextResponse> {
-  if (!(await verifyAdminAuth(request))) {
+  if (!(await verifyReadAuth(request))) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
   }
   const { id } = await ctx.params;

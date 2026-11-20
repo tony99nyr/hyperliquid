@@ -6,6 +6,7 @@ import type { Figure, LanePerformanceReport, LaneResult, MarkerInput } from '@/l
 import { useLanePerformance } from '@/hooks/useLanePerformance';
 import { useUrlParamState } from '@/hooks/useUrlParamState';
 import { GH, TERM } from '../panel-styles';
+import { useReadOnly } from '../../read-only-context';
 import { formatFigure, formatLoss, formatNote, formatUtcDate, formatUtcTimestamp, groupMarkers, verdictChip } from './format';
 
 type Subview = 'overview' | 'lanes' | 'forecast' | 'changes';
@@ -190,6 +191,7 @@ function Changes({ report, onConfirmed }: { report: LanePerformanceReport; onCon
   const [selected, setSelected] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [pending, setPending] = useState<string | null>(null);
+  const readOnly = useReadOnly();
   const grouped = groupMarkers(report.markers);
   async function confirm(marker: MarkerInput) {
     setPending(marker.id);
@@ -214,7 +216,7 @@ function Changes({ report, onConfirmed }: { report: LanePerformanceReport; onCon
   if (report.markers.length === 0) return <div style={card}>{report.notes.some((note) => note.includes('0046')) ? 'Markers need migration 0046' : 'No change markers yet'}</div>;
   return <div style={{ display: 'grid', gap: 12 }}>{[...grouped.confirmed, ...grouped.proposed].map((marker) => <article key={marker.id} data-testid="marker-row" style={card}>
     <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}><button type="button" aria-expanded={selected === marker.id} onClick={() => setSelected(selected === marker.id ? null : marker.id)} style={button}>{marker.title}</button><span style={muted}>{formatUtcDate(marker.at, 'legend')} · {marker.kind}</span><span>{marker.confirmed_at ? 'Confirmed' : 'Proposed'}</span>
-      {!marker.confirmed_at && <button type="button" disabled={pending === marker.id} onClick={() => void confirm(marker)} style={button}>{pending === marker.id ? 'Confirming…' : 'Confirm'}</button>}
+      {!marker.confirmed_at && !readOnly && <button type="button" disabled={pending === marker.id} onClick={() => void confirm(marker)} style={button}>{pending === marker.id ? 'Confirming…' : 'Confirm'}</button>}
     </div>
     {errors[marker.id] && <p role="alert" style={{ color: '#ff8793' }}>{errors[marker.id]}</p>}
     {selected === marker.id && <div style={{ marginTop: 12 }}><p style={muted}>{marker.note}</p>{report.lanes.flatMap((lane) => lane.markerSplits.filter((split) => split.markerId === marker.id).map((split) => <div key={`${lane.id}-${split.markerId}`} style={{ padding: 8, borderTop: `1px solid ${GH.border}` }}><Tag kind={lane.kind} /> {lane.id}: before <FigureValue figure={split.before.usd} /> · <FigureValue figure={split.before.meanR} />; after <FigureValue figure={split.after.usd} /> · <FigureValue figure={split.after.meanR} /></div>))}</div>}

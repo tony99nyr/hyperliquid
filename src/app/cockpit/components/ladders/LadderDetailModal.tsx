@@ -25,6 +25,7 @@ import { resolveArmRung } from '@/lib/ladder/ladder-arm-business-logic';
 import { computeLadderRisk } from '@/lib/ladder/ladder-risk-business-logic';
 import { projectRung, rungProximity, expiryReadout } from '@/lib/ladder/ladder-projection-business-logic';
 import LadderChart from './LadderChart';
+import { useReadOnly } from '../../read-only-context';
 import type { LadderWithRungs, LadderRung } from '@/lib/ladder/ladder-types';
 
 export interface LadderDetailModalProps {
@@ -54,6 +55,7 @@ function MarkProbe({ coin, onPx }: { coin: string; onPx: (coin: string, px: numb
 }
 
 export default function LadderDetailModal({ ladderId, onClose, onChanged }: LadderDetailModalProps) {
+  const readOnly = useReadOnly();
   const [ladder, setLadder] = useState<LadderWithRungs | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [typed, setTyped] = useState('');
@@ -309,8 +311,9 @@ export default function LadderDetailModal({ ladderId, onClose, onChanged }: Ladd
         </div>
 
         {/* Action footer — the consent surface (+ archive for terminal/draft ladders).
-            An already-archived ladder is read-only (audit view) → no footer. */}
-        {ladder && !ladder.archivedAt && (
+            An already-archived ladder is read-only (audit view) → no footer.
+            A read-only viewer gets no footer either. */}
+        {ladder && !ladder.archivedAt && !readOnly && (
           <div className={css({ padding: '14px 22px 18px', borderTop: '1px solid rgba(255,255,255,.07)', position: 'sticky', bottom: 0 })} style={{ background: '#0e131c' }}>
             {ladder.status === 'armed' ? (
               <button type="button" data-testid="ladder-detail-disarm" disabled={busy} onClick={() => void disarm()}

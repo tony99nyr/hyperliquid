@@ -49,6 +49,7 @@ import LaddersView from './components/ladders/LaddersView';
 import ScoutPanel from './components/ScoutPanel';
 import type { RatingsFreshness } from './components/left-rail/ratings-freshness-helpers';
 import ApprovalPopup from './components/ApprovalPopup';
+import { ReadOnlyProvider } from './read-only-context';
 
 /** The selectable surfaces — the allow-list for the `?tab=` URL param (junk → 'cockpit'). */
 const TAB_KEYS: readonly ViewKey[] = ['cockpit', 'traders', 'ladders', 'performance', 'lanes', 'scout'];
@@ -64,6 +65,14 @@ export interface CockpitClientProps {
   ratings?: RatingsFreshness | null;
   /** Coins the operator can switch between. Default ETH/BTC/HYPE. */
   coins?: string[];
+  /** True for a read-only viewer session: hide action controls and the approval popup. */
+  readOnly?: boolean;
+}
+
+/** Mounts the keep-matched follow alerts hook. Admin only: the hook POSTs follow-match. */
+function FollowedPositionAlerts() {
+  useFollowedPositionAlerts();
+  return null;
 }
 
 export default function CockpitClient({
@@ -74,6 +83,7 @@ export default function CockpitClient({
   topTraders = [],
   ratings = null,
   coins = [...TRADEABLE_COINS],
+  readOnly = false,
 }: CockpitClientProps) {
   // The selected surface (Cockpit / Traders / Performance / Scout). The desktop
   // top-bar nav and the mobile bottom tab are two controls for the SAME selection,
@@ -89,10 +99,11 @@ export default function CockpitClient({
   // it only opens the modal; the operator still Approves the entry.
   const [stageReq, setStageReq] = useState<{ coin: string; side: 'long' | 'short' } | null>(null);
   const onCopyPosition = useCallback((c: string, side: 'long' | 'short') => {
+    if (readOnly) return; // a viewer cannot open an entry ticket
     setCoin(c);
     setStageReq({ coin: c, side });
     setSurface('cockpit');
-  }, [setSurface]);
+  }, [setSurface, readOnly]);
 
   // Auto-bind the latest active session (server seed → poll) so a session opened
   // MID-FLOW surfaces its popup + Safe-Exit without a refresh.
@@ -123,7 +134,7 @@ export default function CockpitClient({
   // Keep-matched follow alerts: stages reduce-only suggestions into the approval popup
   // when a followed leader reduces/closes/flips. Gated OFF server-side (no-op until
   // FOLLOW_MATCH_ENABLED); never auto-fires (human approves every stage).
-  useFollowedPositionAlerts();
+  // Mounted below as <FollowedPositionAlerts /> for an admin only.
   const equityUsd = perf.summary?.equityUsd ?? null;
   const equityBreakdown = perf.summary?.equityBreakdown ?? null;
   const todayUsd = perf.summary?.kpis.todayPnlUsd ?? null;
@@ -136,6 +147,7 @@ export default function CockpitClient({
   const feedLive = sessionId === null ? null : rt.subscribed && rt.error === null;
 
   return (
+    <ReadOnlyProvider value={readOnly}>
     <div
       className={css({
         height: '100vh',
@@ -160,6 +172,16 @@ export default function CockpitClient({
         todayUsd={todayUsd}
         feedLive={feedLive}
       />
+
+      {readOnly && (
+        <div
+          role="status"
+          data-testid="read-only-banner"
+          className={css({ paddingX: '14px', paddingY: '6px', fontFamily: 'mono', fontSize: '12px', fontWeight: 'semibold', color: '#e3b341', bg: 'rgba(227,179,65,0.10)', borderBottom: '1px solid rgba(227,179,65,0.35)' })}
+        >
+          READ-ONLY · You can view everything. You cannot place, change or approve anything.
+        </div>
+      )}
 
       {surface === 'scout' ? (
         // SCOUT surface — the autonomous PAPER scout, deliberately a SEPARATE tab
@@ -237,7 +259,9 @@ export default function CockpitClient({
       {/* The approval popup overlays everything when a pending action appears.
           NO-AUTO-FIRE: nothing executes until the human approves here. Leader
           data feeds the Match-leader leverage preset (wave-2). */}
-      <ApprovalPopup sessionId={sessionId} leaderAddress={leaderAddress} leaderPositions={resolvedLeaderPositions} />
+      {!readOnly && <ApprovalPopup sessionId={sessionId} leaderAddress={leaderAddress} leaderPositions={resolvedLeaderPositions} />}
+      {!readOnly && <FollowedPositionAlerts />}
     </div>
+    </ReadOnlyProvider>
   );
 }

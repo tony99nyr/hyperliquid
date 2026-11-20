@@ -1,17 +1,18 @@
 /**
- * Server-component auth helper. Reads the admin cookie via next/headers and
+ * Server-component auth helper. Reads the session cookie via next/headers and
  * verifies it against the PIN / ADMIN_SECRET (vendored auth helpers). Used by the
  * RSC /cockpit gate — the request-object path in auth.ts is for route handlers.
  */
 
 import { cookies } from 'next/headers';
-import { verifyPin, verifyAdminSecret, verifySessionToken, ADMIN_AUTH_COOKIE_CONFIG } from './auth';
+import { roleForCookieToken, ADMIN_AUTH_COOKIE_CONFIG, type AuthRole } from './auth';
 
-/** True when the current request carries a valid admin cookie. */
-export async function isAdminAuthenticated(): Promise<boolean> {
+async function readSessionCookie(): Promise<string | undefined> {
   const store = await cookies();
-  const token = store.get(ADMIN_AUTH_COOKIE_CONFIG.name)?.value;
-  if (!token) return false;
-  // Opaque session token (preferred) or a direct PIN/secret cookie (legacy).
-  return verifySessionToken(token) || verifyAdminSecret(token) || verifyPin(token);
+  return store.get(ADMIN_AUTH_COOKIE_CONFIG.name)?.value;
+}
+
+/** The page-gate role: admin, viewer (read-only), or null (show the PIN gate). */
+export async function getPageAuthRole(): Promise<AuthRole | null> {
+  return roleForCookieToken(await readSessionCookie());
 }

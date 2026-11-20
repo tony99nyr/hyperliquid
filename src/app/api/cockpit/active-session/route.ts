@@ -10,13 +10,13 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAdminAuth } from '@/lib/infrastructure/auth/auth';
+import { verifyReadAuth } from '@/lib/infrastructure/auth/auth';
 import { getActiveSession } from '@/lib/cockpit/session-service';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!(await verifyAdminAuth(request))) {
+  if (!(await verifyReadAuth(request))) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
   }
   const session = await getActiveSession();

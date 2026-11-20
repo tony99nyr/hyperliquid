@@ -5,7 +5,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const verifyAdminAuth = vi.fn();
 const fetchAccountRisk = vi.fn();
 
-vi.mock('@/lib/infrastructure/auth/auth', () => ({ verifyAdminAuth: (...a: unknown[]) => verifyAdminAuth(...a) }));
+vi.mock('@/lib/infrastructure/auth/auth', () => ({ verifyAdminAuth: (...a: unknown[]) => verifyAdminAuth(...a),
+  verifyReadAuth: (...a: unknown[]) => verifyAdminAuth(...a) }));
 vi.mock('@/lib/trading/account-risk-service', () => ({ fetchAccountRisk: (...a: unknown[]) => fetchAccountRisk(...a) }));
 
 import { GET } from '@/app/api/cockpit/account-risk/route';
