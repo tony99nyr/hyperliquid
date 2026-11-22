@@ -3,10 +3,11 @@
  *
  *   { action: 'tighten-stop', coin, triggerPx }  -> move the protective stop tighter.
  *   { action: 'reduce', coin, fraction }         -> close a fraction (0 < f <= 1) reduce-only.
+ *   { action: 'take-profit', coin, triggerPx }   -> place a reduce-only take-profit when none rests.
  *
  * The agent calls this from outside production with a dedicated bearer token, after the
- * operator said yes. Both actions can only reduce risk: neither can open, add, flip,
- * loosen a stop or remove one. Gated by AGENT_ACTIONS_ENABLED (default OFF).
+ * operator said yes. Every action can only reduce risk: none can open, add, flip,
+ * loosen a stop or remove an order. Gated by AGENT_ACTIONS_ENABLED (default OFF).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -15,7 +16,7 @@ import { checkRateLimit } from '@/lib/infrastructure/rate-limiting/in-memory-rat
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 import { isAgentActionsEnabled, getAgentActionToken } from '@/lib/agent-actions/agent-action-config';
 import { parseAgentActionRequest } from '@/lib/agent-actions/agent-action-business-logic';
-import { reduceClose, tightenStop } from '@/lib/agent-actions/agent-action-service';
+import { placeTakeProfit, reduceClose, tightenStop } from '@/lib/agent-actions/agent-action-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,8 +49,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const result =
       req.action === 'tighten-stop'
         ? await tightenStop({ coin: req.coin, triggerPx: req.triggerPx })
-        : await reduceClose({ coin: req.coin, fraction: req.fraction });
-    // A refusal is a 409: the request was valid, the state did not allow it.
+        : req.action === 'take-profit'
+          ? await placeTakeProfit({ coin: req.coin, triggerPx: req.triggerPx })
+          : await reduceClose({ coin: req.coin, fraction: req.fraction });
+    // Not done is a 409: the request was valid, the state did not allow it. A not-done
+    // take-profit that carries takeProfitOid names an order that rests on the exchange.
     return NextResponse.json({ ok: result.done, action: req.action, ...result }, { status: result.done ? 200 : 409 });
   } catch (e) {
     return NextResponse.json({ ok: false, error: extractErrorMessage(e) }, { status: 500 });

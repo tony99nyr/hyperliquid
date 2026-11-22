@@ -11,7 +11,7 @@ vi.mock('@/lib/env/env', () => ({ validateEnv: () => ({ HL_NETWORK: 'mainnet' })
 vi.mock('@/lib/hyperliquid/hyperliquid-info-service', () => ({ fetchOpenOrders: h.fetchOpenOrders, fetchPerpMeta: h.fetchPerpMeta }));
 vi.mock('@/lib/hyperliquid/hyperliquid-exchange-service', () => ({ submitBracket: h.submitBracket }));
 
-import { placeBracketOnHl } from '@/lib/trading/stop-order-service';
+import { findOpenTp, findTakeProfitTypedOrders, placeBracketOnHl } from '@/lib/trading/stop-order-service';
 
 const restingStop = {
   coin: 'ETH', oid: 73, side: 'A', sz: 1.5, triggerPx: 1900,
@@ -152,3 +152,26 @@ describe('placeBracketOnHl', () => {
     expect(h.submitBracket).not.toHaveBeenCalled();
   });
 });
+
+describe('take-profit matchers', () => {
+  const tp = { coin: 'ETH', oid: 80, side: 'B', sz: 0.1186, triggerPx: 1519, isTrigger: true, reduceOnly: true, orderType: 'Take Profit Market' };
+  const orders = [
+    restingStop,
+    tp,
+    { ...tp, oid: 81, sz: 0, isPositionTpsl: true },
+    { ...tp, oid: 82, orderType: 'Take Profit Limit' },
+    { ...tp, oid: 83, reduceOnly: false },
+    { ...tp, oid: 84, coin: 'SOL' },
+  ];
+
+  it('findTakeProfitTypedOrders counts every take-profit type on the coin, whatever its flags', async () => {
+    h.fetchOpenOrders.mockReset().mockResolvedValue(orders);
+    expect((await findTakeProfitTypedOrders('eth')).map((o) => o.oid)).toEqual([80, 81, 82, 83]);
+  });
+
+  it('findOpenTp keeps its strict reduce-only match', async () => {
+    h.fetchOpenOrders.mockReset().mockResolvedValue([orders[4], orders[0], orders[3]]);
+    expect((await findOpenTp('ETH'))?.oid).toBe(82);
+  });
+});
+

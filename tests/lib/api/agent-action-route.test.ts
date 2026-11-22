@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const verifyCronBearer = vi.fn();
 const tightenStop = vi.fn();
 const reduceClose = vi.fn();
+const placeTakeProfit = vi.fn();
 const isAgentActionsEnabled = vi.fn();
 const getAgentActionToken = vi.fn();
 
@@ -19,6 +20,7 @@ vi.mock('@/lib/infrastructure/auth/auth', () => ({
 vi.mock('@/lib/agent-actions/agent-action-service', () => ({
   tightenStop: (...a: unknown[]) => tightenStop(...a),
   reduceClose: (...a: unknown[]) => reduceClose(...a),
+  placeTakeProfit: (...a: unknown[]) => placeTakeProfit(...a),
 }));
 vi.mock('@/lib/agent-actions/agent-action-config', () => ({
   isAgentActionsEnabled: () => isAgentActionsEnabled(),
@@ -47,6 +49,7 @@ beforeEach(() => {
   verifyCronBearer.mockReturnValue(true);
   tightenStop.mockResolvedValue({ done: true, skipped: null, coin: 'HYPE', newStopPx: 66.5 });
   reduceClose.mockResolvedValue({ done: true, skipped: null, coin: 'HYPE', filledSz: 1 });
+  placeTakeProfit.mockResolvedValue({ done: true, skipped: null, coin: 'ETH', takeProfitPx: 1519 });
 });
 
 describe('POST /api/agent/action', () => {
@@ -108,5 +111,20 @@ describe('POST /api/agent/action', () => {
   it('rate-limits after six requests in a minute', async () => {
     for (let i = 0; i < 6; i++) expect((await POST(req())).status).toBe(200);
     expect((await POST(req())).status).toBe(429);
+  });
+
+  it('routes a take-profit to the take-profit service only', async () => {
+    const res = await POST(req({ action: 'take-profit', coin: 'ETH', triggerPx: 1519 }));
+    expect(res.status).toBe(200);
+    expect(placeTakeProfit).toHaveBeenCalledWith({ coin: 'ETH', triggerPx: 1519 });
+    expect(tightenStop).not.toHaveBeenCalled();
+    expect(reduceClose).not.toHaveBeenCalled();
+    expect(await res.json()).toMatchObject({ ok: true, action: 'take-profit', takeProfitPx: 1519 });
+  });
+
+  it('answers 409 when the take-profit is refused', async () => {
+    placeTakeProfit.mockResolvedValue({ done: false, skipped: 'take-profit-already-rests', coin: 'ETH' });
+    const res = await POST(req({ action: 'take-profit', coin: 'ETH', triggerPx: 1519 }));
+    expect(res.status).toBe(409);
   });
 });

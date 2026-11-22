@@ -4,6 +4,7 @@
  * Sends one scoped, risk-reducing action to the production cockpit:
  *   tighten-stop: move the protective stop tighter (never looser, never removed).
  *   reduce:       close a fraction of the position, reduce-only.
+ *   take-profit:  place a reduce-only take-profit for the whole position, when none rests.
  *
  * HARD PRINCIPLE: this NEVER fires without `--confirm yes`. Without it the script
  * prints the request and stops, with no network call. The agent passes the flag only
@@ -15,6 +16,7 @@
  * Usage:
  *   pnpm skill:agent-action --action tighten-stop --coin HYPE --px 66.5 [--confirm yes]
  *   pnpm skill:agent-action --action reduce --coin HYPE --fraction 0.4 [--confirm yes]
+ *   pnpm skill:agent-action --action take-profit --coin ETH --px 1519 [--confirm yes]
  */
 
 import { parseArgs, header, line, run } from './_skill-runtime';
@@ -30,7 +32,13 @@ run(async () => {
   const request = parsed.request;
 
   header(`agent-action: ${request.action} ${request.coin}`);
-  line(request.action === 'tighten-stop' ? `Move the ${request.coin} stop to ${request.triggerPx} (tighter only).` : `Close ${(request.fraction * 100).toFixed(0)}% of the ${request.coin} position, reduce-only.`);
+  line(
+    request.action === 'tighten-stop'
+      ? `Move the ${request.coin} stop to ${request.triggerPx} (tighter only).`
+      : request.action === 'take-profit'
+        ? `Place a reduce-only take-profit for the whole ${request.coin} position at ${request.triggerPx}.`
+        : `Close ${(request.fraction * 100).toFixed(0)}% of the ${request.coin} position, reduce-only.`,
+  );
 
   if (args['confirm'] !== 'yes') {
     line('NOT SENT: pass --confirm yes after the operator approves.');
@@ -52,6 +60,8 @@ run(async () => {
   line(text.slice(0, 1200));
   if (!res.ok) {
     line('NOT DONE. On a 500 or a timeout the outcome is UNKNOWN: read the position before any retry.');
+    // A refusal can still name an order that rests (a take-profit placed, then a changed position).
+    if (/"takeProfitOid":\d+/.test(text)) line('A take-profit order RESTS on the exchange (see takeProfitOid): read the open orders.');
     process.exitCode = 1;
   }
 });

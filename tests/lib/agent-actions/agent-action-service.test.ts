@@ -18,6 +18,8 @@ const getHlAccountAddress = vi.fn();
 const findOpenStops = vi.fn();
 const placeStopOnHl = vi.fn();
 const cancelStopOnHl = vi.fn();
+const findTakeProfitTypedOrders = vi.fn();
+const placeTpOnHl = vi.fn();
 const fetchPerpMeta = vi.fn();
 const hlNetwork = vi.fn();
 
@@ -44,9 +46,11 @@ vi.mock('@/lib/trading/stop-order-service', () => ({
   findOpenStops: (...a: unknown[]) => findOpenStops(...a),
   placeStopOnHl: (...a: unknown[]) => placeStopOnHl(...a),
   cancelStopOnHl: (...a: unknown[]) => cancelStopOnHl(...a),
+  findTakeProfitTypedOrders: (...a: unknown[]) => findTakeProfitTypedOrders(...a),
+  placeTpOnHl: (...a: unknown[]) => placeTpOnHl(...a),
 }));
 
-import { reduceClose, tightenStop } from '@/lib/agent-actions/agent-action-service';
+import { placeTakeProfit, reduceClose, tightenStop } from '@/lib/agent-actions/agent-action-service';
 import { PreSubmitError } from '@/lib/trading/pre-submit-error';
 
 const shortHype = { coin: 'HYPE', side: 'short', szi: -2.89, size: 2.89, entryPx: 69.085 };
@@ -76,6 +80,9 @@ beforeEach(() => {
     cancelled.add(oid);
     return { pushed: true };
   });
+  // No take-profit rests until one is placed.
+  findTakeProfitTypedOrders.mockImplementation(async () => (placeTpOnHl.mock.calls.length > 0 ? [{ oid: 33, triggerPx: 60 }] : []));
+  placeTpOnHl.mockResolvedValue({ pushed: true, oid: 33 });
   acquireExitLock.mockResolvedValue({ id: 'lock-1' });
   releaseExitLock.mockResolvedValue(undefined);
   writeAnalysisLog.mockResolvedValue(undefined);
@@ -324,5 +331,128 @@ describe('reduceClose', () => {
     executeIntent.mockResolvedValue({ sz: 0.5, px: 63.4, partial: true });
     expect(await reduceClose({ coin: 'HYPE', fraction: 0.4 })).toMatchObject({ done: true, partial: true, filledSz: 0.5 });
     expect(releaseExitLock).toHaveBeenCalledWith('lock-1', 'partial');
+  });
+});
+
+describe('placeTakeProfit', () => {
+  it('places one reduce-only take-profit for the whole position and confirms that it rests', async () => {
+    const r = await placeTakeProfit({ coin: 'hype', triggerPx: 60 });
+    expect(r).toMatchObject({ done: true, skipped: null, coin: 'HYPE', side: 'short', takeProfitPx: 60, takeProfitOid: 33 });
+    expect(placeTpOnHl).toHaveBeenCalledTimes(1);
+    expect(placeTpOnHl).toHaveBeenCalledWith('HYPE', 60, 2.89, 'short');
+    expect(cancelStopOnHl).not.toHaveBeenCalled();
+    expect(placeStopOnHl).not.toHaveBeenCalled();
+    expect(executeIntent).not.toHaveBeenCalled();
+    expect(writeAnalysisLog).toHaveBeenCalledWith(expect.objectContaining({ severity: 'info', source: 'agent-action' }));
+  });
+
+  it.each([
+    ['a paper deployment', () => getTradingMode.mockReturnValue('paper'), 'not-live-deployment'],
+    ['a paper session', () => getActiveSession.mockResolvedValue({ id: 's', mode: 'paper' }), 'no-live-session'],
+    ['a flat coin', () => fetchClearinghouseState.mockResolvedValue(account([])), 'flat'],
+    ['a stale account read', () => fetchClearinghouseState.mockResolvedValue(account([shortHype], { stale: true })), 'account-unreadable'],
+    ['a mark that cannot be read', () => fetchAllMids.mockRejectedValue(new Error('429')), 'bad-mark'],
+    ['resting orders that cannot be read', () => findTakeProfitTypedOrders.mockRejectedValue(new Error('429')), 'cannot-read-resting-take-profit'],
+    ['a take-profit that already rests', () => findTakeProfitTypedOrders.mockResolvedValue([{ oid: 9, triggerPx: 58 }]), 'take-profit-already-rests'],
+    ['an unreadable entry price', () => fetchClearinghouseState.mockResolvedValue(account([{ ...shortHype, entryPx: null }])), 'entry-unreadable'],
+  ])('refuses %s and sends nothing', async (_name, arrange, reason) => {
+    arrange();
+    const r = await placeTakeProfit({ coin: 'HYPE', triggerPx: 60 });
+    expect(r).toMatchObject({ done: false, skipped: reason });
+    expect(placeTpOnHl).not.toHaveBeenCalled();
+  });
+
+  it('refuses a price that would close at a loss', async () => {
+    fetchAllMids.mockResolvedValue({ HYPE: 72 });
+    const r = await placeTakeProfit({ coin: 'HYPE', triggerPx: 70 });
+    expect(r).toMatchObject({ done: false, skipped: 'take-profit-not-beyond-entry' });
+    expect(placeTpOnHl).not.toHaveBeenCalled();
+  });
+
+  it('reports an unknown outcome when the placement throws, and does not retry', async () => {
+    placeTpOnHl.mockRejectedValue(new Error('timeout'));
+    const r = await placeTakeProfit({ coin: 'HYPE', triggerPx: 60 });
+    expect(r).toMatchObject({ done: false, skipped: 'take-profit-place-unknown' });
+    expect(placeTpOnHl).toHaveBeenCalledTimes(1);
+    expect(writeAnalysisLog).toHaveBeenCalledWith(expect.objectContaining({ severity: 'danger' }));
+  });
+
+  it('is not done when the exchange did not accept the order (paper no-op)', async () => {
+    placeTpOnHl.mockResolvedValue({ pushed: false, oid: null });
+    const r = await placeTakeProfit({ coin: 'HYPE', triggerPx: 60 });
+    expect(r).toMatchObject({ done: false, skipped: 'take-profit-not-pushed' });
+  });
+
+  it.each([
+    ['the new order is not the resting take-profit', () => findTakeProfitTypedOrders.mockResolvedValueOnce([]).mockResolvedValueOnce([{ oid: 99, triggerPx: 60 }])],
+    ['the read-back throws', () => findTakeProfitTypedOrders.mockResolvedValueOnce([]).mockRejectedValueOnce(new Error('429'))],
+    ['the exchange returned no order id', () => placeTpOnHl.mockResolvedValue({ pushed: true, oid: null })],
+  ])('is not done when %s', async (_name, arrange) => {
+    arrange();
+    const r = await placeTakeProfit({ coin: 'HYPE', triggerPx: 60 });
+    expect(r).toMatchObject({ done: false, skipped: 'take-profit-not-confirmed' });
+    expect(writeAnalysisLog).toHaveBeenCalledWith(expect.objectContaining({ severity: 'danger' }));
+  });
+
+  it('checks and places the price that the venue rests at, not the raw request', async () => {
+    const r = await placeTakeProfit({ coin: 'HYPE', triggerPx: 60.123456 });
+    expect(r).toMatchObject({ done: true, takeProfitPx: 60.123 });
+    expect(placeTpOnHl).toHaveBeenCalledWith('HYPE', 60.123, 2.89, 'short');
+  });
+
+  it('refuses a price that rounds to within the margin of the entry', async () => {
+    fetchAllMids.mockResolvedValue({ HYPE: 72 });
+    // 69.004 is under the entry (69.085), but not by the 0.2% margin.
+    const r = await placeTakeProfit({ coin: 'HYPE', triggerPx: 69.004 });
+    expect(r).toMatchObject({ done: false, skipped: 'take-profit-not-beyond-entry' });
+    expect(placeTpOnHl).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['the lot size read throws', () => fetchPerpMeta.mockRejectedValue(new Error('429'))],
+    ['the coin is not in the venue metadata', () => fetchPerpMeta.mockResolvedValue([{ name: 'ETH', szDecimals: 4 }])],
+  ])('refuses when %s', async (_name, arrange) => {
+    arrange();
+    const r = await placeTakeProfit({ coin: 'HYPE', triggerPx: 60 });
+    expect(r).toMatchObject({ done: false, skipped: 'lot-size-unreadable' });
+    expect(placeTpOnHl).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['is flat', () => account([])],
+    ['changed side', () => account([{ ...shortHype, side: 'long', szi: 2.89 }])],
+    ['grew', () => account([{ ...shortHype, size: 5 }])],
+    ['was replaced by one with another entry price', () => account([{ ...shortHype, entryPx: 61 }])],
+  ])('is not done, and alerts, when the position %s after the placement', async (_name, later) => {
+    fetchClearinghouseState.mockResolvedValueOnce(account([shortHype])).mockResolvedValueOnce(later());
+    const r = await placeTakeProfit({ coin: 'HYPE', triggerPx: 60 });
+    expect(r).toMatchObject({ done: false, skipped: 'position-changed-take-profit-rests', takeProfitOid: 33 });
+    expect(sendDiscord).toHaveBeenCalledWith(expect.stringContaining('cancel the take-profit'), expect.any(String));
+  });
+});
+
+describe('placeTakeProfit: a second take-profit', () => {
+  it('is not done, and alerts, when two take-profits rest after the placement', async () => {
+    findTakeProfitTypedOrders.mockResolvedValueOnce([]).mockResolvedValueOnce([{ oid: 33, triggerPx: 60 }, { oid: 77, triggerPx: 58 }]);
+    const r = await placeTakeProfit({ coin: 'HYPE', triggerPx: 60 });
+    expect(r).toMatchObject({ done: false, skipped: 'multiple-take-profits-rest', takeProfitOid: 33 });
+    expect(sendDiscord).toHaveBeenCalledWith(expect.stringContaining('33, 77'), expect.any(String));
+    expect(cancelStopOnHl).not.toHaveBeenCalled();
+  });
+});
+
+describe('leftover take-profit', () => {
+  it('a full close names a take-profit that still rests', async () => {
+    findTakeProfitTypedOrders.mockResolvedValue([{ oid: 44, triggerPx: 60 }]);
+    const r = await reduceClose({ coin: 'HYPE', fraction: 1 });
+    expect(r.done).toBe(true);
+    expect(sendDiscord).toHaveBeenCalledWith(expect.stringContaining('Resting take-profit oid 44 remains'), expect.any(String));
+    expect(writeAnalysisLog).toHaveBeenCalledWith(expect.objectContaining({ severity: 'danger' }));
+  });
+
+  it('a full close says so when the take-profit cannot be read', async () => {
+    findTakeProfitTypedOrders.mockRejectedValue(new Error('429'));
+    await reduceClose({ coin: 'HYPE', fraction: 1 });
+    expect(sendDiscord).toHaveBeenCalledWith(expect.stringContaining('Could not read the resting take-profit'), expect.any(String));
   });
 });

@@ -1,8 +1,9 @@
 /**
  * Scoped agent actions (ADR-0009): the PURE checks.
  *
- * The agent may ask production for two risk-reducing actions on a live position:
- * tighten the protective stop, or close part or all of the position reduce-only.
+ * The agent may ask production for three risk-reducing actions on a live position:
+ * tighten the protective stop, close part or all of the position reduce-only, or
+ * place a reduce-only take-profit when none rests.
  * Every rule that makes a request "risk-reducing" lives here, with no I/O.
  */
 
@@ -12,12 +13,15 @@ import { floorHlSize } from '@/lib/hyperliquid/hyperliquid-order-business-logic'
 export const MIN_STOP_DIST_FRAC = 0.005;
 /** Refuse a stop further than this fraction from the mark: a likely typing error. */
 export const MAX_STOP_DIST_FRAC = 0.5;
+/** A take-profit trigger must sit at least this fraction beyond the entry, which covers the fees. */
+export const MIN_TP_ENTRY_MARGIN_FRAC = 0.002;
 /** Hyperliquid rejects an order below this notional. */
 export const MIN_ORDER_NOTIONAL_USD = 10;
 
 export type AgentActionRequest =
   | { action: 'tighten-stop'; coin: string; triggerPx: number }
-  | { action: 'reduce'; coin: string; fraction: number };
+  | { action: 'reduce'; coin: string; fraction: number }
+  | { action: 'take-profit'; coin: string; triggerPx: number };
 
 export type ParseResult = { ok: true; request: AgentActionRequest } | { ok: false; error: string };
 export type CheckResult = { ok: true } | { ok: false; reason: string };
@@ -30,17 +34,17 @@ export function parseAgentActionRequest(body: unknown): ParseResult {
   const b = body as Record<string, unknown>;
   const coin = typeof b.coin === 'string' ? b.coin.trim().toUpperCase() : '';
   if (!COIN_RE.test(coin)) return { ok: false, error: 'coin is required (letters and digits only)' };
-  if (b.action === 'tighten-stop') {
+  if (b.action === 'tighten-stop' || b.action === 'take-profit') {
     const px = b.triggerPx;
     if (typeof px !== 'number' || !Number.isFinite(px) || px <= 0) return { ok: false, error: 'triggerPx must be a positive number' };
-    return { ok: true, request: { action: 'tighten-stop', coin, triggerPx: px } };
+    return { ok: true, request: { action: b.action, coin, triggerPx: px } };
   }
   if (b.action === 'reduce') {
     const f = b.fraction;
     if (typeof f !== 'number' || !Number.isFinite(f) || f <= 0 || f > 1) return { ok: false, error: 'fraction must be a number above 0 and at most 1' };
     return { ok: true, request: { action: 'reduce', coin, fraction: f } };
   }
-  return { ok: false, error: "action must be 'tighten-stop' or 'reduce'" };
+  return { ok: false, error: "action must be 'tighten-stop', 'reduce' or 'take-profit'" };
 }
 
 /**
@@ -93,5 +97,31 @@ export function checkReduce(input: { sz: number; markPx: number; fraction: numbe
   const closeSz = flooredCloseSize(sz, fraction, szDecimals);
   if (closeSz * markPx < MIN_ORDER_NOTIONAL_USD) return { ok: false, reason: 'close-below-min-notional' };
   if (fraction < 1 && (sz - closeSz) * markPx < MIN_ORDER_NOTIONAL_USD) return { ok: false, reason: 'remainder-below-min-notional' };
+  return { ok: true };
+}
+
+/**
+ * A take-profit is allowed only when its trigger is in profit. The order fills at
+ * market when the trigger is touched, so the fill itself can slip:
+ *  - the trigger is on the profit side of the mark (a short's below, a long's above),
+ *    between MIN and MAX distance from it, so it does not fire at once or on noise;
+ *  - the trigger is beyond the entry price by MIN_TP_ENTRY_MARGIN_FRAC or more, so
+ *    a typing error or the fees cannot put the trigger at a loss;
+ *  - the order is at or above the venue's minimum notional.
+ * `newPx` is the price that the venue rests at (rounded), not the raw request.
+ */
+export function checkTakeProfit(input: { side: 'long' | 'short'; markPx: number; entryPx: number | null; newPx: number; sz: number }): CheckResult {
+  const { side, markPx, entryPx, newPx, sz } = input;
+  if (!Number.isFinite(sz) || sz <= 0) return { ok: false, reason: 'flat' };
+  if (!Number.isFinite(markPx) || markPx <= 0) return { ok: false, reason: 'bad-mark' };
+  if (entryPx == null || !Number.isFinite(entryPx) || entryPx <= 0) return { ok: false, reason: 'entry-unreadable' };
+  if (!Number.isFinite(newPx) || newPx <= 0) return { ok: false, reason: 'bad-take-profit-price' };
+  if (side === 'long' ? newPx <= markPx : newPx >= markPx) return { ok: false, reason: 'take-profit-on-wrong-side-of-mark' };
+  const beyondEntry = side === 'long' ? newPx >= entryPx * (1 + MIN_TP_ENTRY_MARGIN_FRAC) : newPx <= entryPx * (1 - MIN_TP_ENTRY_MARGIN_FRAC);
+  if (!beyondEntry) return { ok: false, reason: 'take-profit-not-beyond-entry' };
+  const dist = Math.abs(markPx - newPx) / markPx;
+  if (dist < MIN_STOP_DIST_FRAC) return { ok: false, reason: 'take-profit-too-close-to-mark' };
+  if (dist > MAX_STOP_DIST_FRAC) return { ok: false, reason: 'take-profit-too-far-from-mark' };
+  if (sz * newPx < MIN_ORDER_NOTIONAL_USD) return { ok: false, reason: 'below-min-notional' };
   return { ok: true };
 }

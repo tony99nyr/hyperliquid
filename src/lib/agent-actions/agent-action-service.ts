@@ -1,12 +1,14 @@
 /**
  * Scoped agent actions (ADR-0009): the execution site.
  *
- * Two actions, both risk-reducing by construction:
+ * Three actions, all risk-reducing by construction:
  *  - tightenStop places a tighter reduce-only stop FIRST, confirms that it rests, and
  *    only then cancels the older ones, so the position is never without a stop.
  *  - reduceClose submits a reduce-only MARKET close built from the venue position,
  *    read while it holds the exit lock. The caller supplies a fraction only, never a
  *    side or a size.
+ *  - placeTakeProfit places one reduce-only take-profit for the whole position, only
+ *    when none rests and only with a trigger beyond the entry price. It never cancels.
  *
  * Fail closed: every unreadable input is a refusal. Live mainnet deployment and live
  * session only (lane boundary): a paper session never reaches the exchange from here.
@@ -23,9 +25,10 @@ import { writeAnalysisLog } from '@/lib/cockpit/analysis-log-service';
 import { sendDiscord } from '@/lib/infrastructure/notify/discord-notify';
 import { loadAutoExitConfig, getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
 import { acquireExitLock, releaseExitLock } from '@/lib/auto-exit/auto-exit-lock-service';
+import { formatHlPrice } from '@/lib/hyperliquid/hyperliquid-order-business-logic';
 import { PreSubmitError } from '@/lib/trading/pre-submit-error';
-import { findOpenStops, placeStopOnHl, cancelStopOnHl } from '@/lib/trading/stop-order-service';
-import { checkReduce, checkTightenStop, flooredCloseSize, tightestStopPx } from '@/lib/agent-actions/agent-action-business-logic';
+import { findOpenStops, findTakeProfitTypedOrders, placeStopOnHl, placeTpOnHl, cancelStopOnHl } from '@/lib/trading/stop-order-service';
+import { checkReduce, checkTakeProfit, checkTightenStop, flooredCloseSize, tightestStopPx } from '@/lib/agent-actions/agent-action-business-logic';
 
 const DISCORD_NAME = 'HL Agent Action';
 
@@ -43,6 +46,9 @@ export interface AgentActionResult {
   uncancelledOids?: number[];
   /** tighten-stop: true when the new stop triggered early and a stop was placed again for the rest. */
   reprotected?: boolean;
+  /** take-profit: the placed trigger price and its order id. */
+  takeProfitPx?: number;
+  takeProfitOid?: number;
   /** reduce: the filled size and price, and whether the fill was partial. */
   filledSz?: number;
   fillPx?: number;
@@ -87,6 +93,13 @@ async function loadVenue(address: string, coin: string): Promise<{ position: HlP
   }
   if (!Number.isFinite(markPx) || markPx <= 0) return { skipped: 'bad-mark' };
   return { position, markPx };
+}
+
+/** Names a take-profit that still rests on `coin` after the position closed. This code never cancels it. */
+async function leftoverTakeProfitNote(coin: string): Promise<string> {
+  const tps = await findTakeProfitTypedOrders(coin).catch(() => null);
+  if (tps == null) return ' Could not read the resting take-profit: check for a leftover one.';
+  return tps.length > 0 ? ` Resting take-profit oid ${tps.map((o) => o.oid).join(', ')} remains: cancel it in the cockpit, or it can close a later position.` : '';
 }
 
 export async function tightenStop(args: { coin: string; triggerPx: number }): Promise<AgentActionResult> {
@@ -173,7 +186,7 @@ export async function tightenStop(args: { coin: string; triggerPx: number }): Pr
   // The new stop no longer rests: it triggered between the confirm and the cancel.
   const after = await loadVenue(live.address, coin);
   if ('skipped' in after && after.skipped === 'flat') {
-    await report(sessionId, 'danger', `AGENT ACTION: ${moved}. The new stop triggered and closed the position.${oldNote}`);
+    await report(sessionId, 'danger', `AGENT ACTION: ${moved}. The new stop triggered and closed the position.${oldNote}${await leftoverTakeProfitNote(coin)}`);
     return { ...result, done: true, skipped: null };
   }
   if ('skipped' in after) return incomplete('unverified', 'The new stop triggered and the position could not be read: check it now.');
@@ -266,6 +279,7 @@ export async function reduceClose(args: { coin: string; fraction: number }): Pro
     const oids = await findOpenStops(coin).then((stops) => stops.map((o) => o.oid)).catch(() => null);
     if (oids == null) leftover = ' Could not read the resting stops: check for a leftover stop.';
     else if (oids.length > 0) leftover = ` Resting stop oid ${oids.join(', ')} remains: cancel it in the cockpit.`;
+    leftover += await leftoverTakeProfitNote(coin);
   }
   await report(
     sessionId,
@@ -273,4 +287,81 @@ export async function reduceClose(args: { coin: string; fraction: number }): Pro
     `AGENT ACTION: ${coin} ${position.side} reduced ${pct}: ${intent.side} ${fill.sz}/${sentSz} @ ${fill.px} reduce-only${partial ? ' (PARTIAL)' : ''}.${leftover}`,
   );
   return { ...base, coin, done: true, skipped: null, filledSz: fill.sz, fillPx: fill.px, partial };
+}
+
+export async function placeTakeProfit(args: { coin: string; triggerPx: number }): Promise<AgentActionResult> {
+  const coin = args.coin.toUpperCase();
+  const live = await loadLiveSession();
+  if ('skipped' in live) return { done: false, skipped: live.skipped, coin };
+  const venue = await loadVenue(live.address, coin);
+  if ('skipped' in venue) return { done: false, skipped: venue.skipped, coin };
+  const { sessionId } = live;
+  const { position, markPx } = venue;
+  const base = { coin, side: position.side, markPx };
+
+  // One take-profit per coin. This code never cancels or replaces one: the operator
+  // moves a resting take-profit (or a bracket leg) in the cockpit.
+  let resting: HlOpenOrder[];
+  try {
+    resting = await findTakeProfitTypedOrders(coin);
+  } catch {
+    return { ...base, done: false, skipped: 'cannot-read-resting-take-profit' };
+  }
+  if (resting.length > 0) return { ...base, done: false, skipped: 'take-profit-already-rests', takeProfitPx: resting[0].triggerPx ?? undefined, takeProfitOid: resting[0].oid };
+
+  // Check the price that the venue rests at: the exchange layer rounds the request.
+  let szDecimals: number | undefined;
+  try {
+    szDecimals = (await fetchPerpMeta('mainnet')).find((a) => a.name.toUpperCase() === coin)?.szDecimals;
+  } catch {
+    szDecimals = undefined;
+  }
+  if (szDecimals == null) return { ...base, done: false, skipped: 'lot-size-unreadable' };
+  const px = Number(formatHlPrice(args.triggerPx, szDecimals));
+  const check = checkTakeProfit({ side: position.side, markPx, entryPx: position.entryPx ?? null, newPx: px, sz: position.size });
+  if (!check.ok) return { ...base, done: false, skipped: check.reason };
+
+  const what = `${coin} ${position.side} take-profit @ ${px} (mark ${markPx}, entry ${position.entryPx}, size ${position.size})`;
+  let oid: number | null;
+  try {
+    const placed = await placeTpOnHl(coin, px, position.size, position.side);
+    if (!placed.pushed) return { ...base, done: false, skipped: 'take-profit-not-pushed' };
+    oid = placed.oid;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await report(sessionId, 'danger', `AGENT ACTION FAILED: ${what} threw (${msg}). Outcome UNKNOWN: read the open orders before any retry.`);
+    return { ...base, done: false, skipped: 'take-profit-place-unknown' };
+  }
+
+  // Done only when the new order is read back resting. An order that cannot be read
+  // back may have triggered, so the operator checks the position.
+  const restingNow = await findTakeProfitTypedOrders(coin).catch(() => null);
+  const confirmed = oid != null && restingNow != null && restingNow.some((o) => o.oid === oid);
+  if (!confirmed) {
+    await report(sessionId, 'danger', `AGENT ACTION: ${what} was sent but is not confirmed resting (it may have triggered): read the position and the open orders.`);
+    return { ...base, done: false, skipped: 'take-profit-not-confirmed', takeProfitPx: px };
+  }
+  const placedResult = { ...base, takeProfitPx: px, takeProfitOid: oid as number };
+
+  // This code takes no lock, so a second request or the cockpit can place a take-profit
+  // at the same moment. More than one resting order is reported, never cancelled here.
+  if (restingNow.length > 1) {
+    await report(sessionId, 'danger', `AGENT ACTION INCOMPLETE: ${what} rests (oid ${oid}), but ${restingNow.length} take-profits rest on ${coin} (oid ${restingNow.map((o) => o.oid).join(', ')}). Cancel the extra one in the cockpit.`);
+    return { ...placedResult, done: false, skipped: 'multiple-take-profits-rest' };
+  }
+
+  // The take-profit is a standalone order: the exchange keeps it when the position
+  // closes. If a stop or the auto-exit closed the position during the placement, the
+  // order rests on a flat coin and could close a later position.
+  const after = await loadVenue(live.address, coin);
+  // A changed entry price means a different position: the trigger was checked against the old entry.
+  if ('skipped' in after || after.position.side !== position.side || after.position.size !== position.size || after.position.entryPx !== position.entryPx) {
+    const state = 'skipped' in after
+      ? (after.skipped === 'flat' ? 'the position is now flat' : 'the position could not be read back')
+      : `the position is now ${after.position.size} ${after.position.side} @ ${after.position.entryPx} and the order was checked against ${position.size} @ ${position.entryPx}`;
+    await report(sessionId, 'danger', `AGENT ACTION INCOMPLETE: ${what} rests (oid ${oid}), but ${state}. Check the position and cancel the take-profit in the cockpit if it is not wanted.`);
+    return { ...placedResult, done: false, skipped: 'position-changed-take-profit-rests' };
+  }
+  await report(sessionId, 'info', `AGENT ACTION: ${what} rests, reduce-only. The stop and the take-profit are separate orders: when one closes the position, cancel the other in the cockpit.`);
+  return { ...placedResult, done: true, skipped: null };
 }

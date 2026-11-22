@@ -20,7 +20,7 @@ Two wider options were rejected:
 ## Decision
 
 **Production exposes one endpoint, `POST /api/agent/action`, with its own bearer
-token. The endpoint offers two actions, and both can only reduce risk.** The
+token. The endpoint offers three actions, and all of them can only reduce risk.** The
 operator still approves each action in the conversation. The agent then runs
 `pnpm skill:agent-action ... --confirm yes`.
 
@@ -28,6 +28,7 @@ operator still approves each action in the conversation. The agent then runs
 | --- | --- | --- |
 | `tighten-stop` | Places a tighter reduce-only stop, confirms that it rests, then cancels the older stops. | Loosen a stop, remove a stop, or leave the position without a stop. |
 | `reduce` | Closes a fraction (above 0, at most 1) with a reduce-only market order. | Open, add or flip. The caller sends a fraction, never a side or a size. |
+| `take-profit` (added 2026-11-22) | Places one reduce-only take-profit for the whole position, when none rests, and confirms that it rests. | Open, add or flip. Replace or cancel a resting take-profit. Rest with a trigger at a loss: the trigger (as rounded by the venue) must be 0.2% or more beyond the entry price and on the profit side of the mark. |
 
 The rules:
 
@@ -106,3 +107,25 @@ The execution site is `src/lib/agent-actions/agent-action-service.ts`.
    `AGENT_ACTION_URL` to the production base URL.
 
 Do not paste the token into a chat or a commit.
+
+## Addendum 2026-11-22: the take-profit action
+
+- The take-profit is a standalone order, like the cockpit take-profit. The exchange
+  does not cancel it when the position closes, and this endpoint never cancels an
+  order. A stop and a take-profit therefore outlive each other: when one closes the
+  position, the operator cancels the other in the cockpit. A leftover take-profit
+  can close a later position in the same coin at once. `reduce` (full close) and
+  `tighten-stop` name a leftover take-profit in their report.
+- A position-attached order (`positionTpsl`) would remove this risk. The endpoint
+  does not use it yet: a lone position-attached take-profit beside a standalone
+  stop has no testnet rehearsal.
+- The take-profit fills at market when the trigger is touched, like the cockpit
+  take-profit and every stop. In a fast reversal the fill can be worse than the
+  trigger. The entry margin guards against a typing error, not against slippage.
+- `take-profit` takes no lock. Two requests at the same moment can both place an
+  order. The action reads the resting take-profits back and reports more than one
+  as not done. The agent sends one request and reads the open orders before any retry.
+- After the placement the action reads the position again. A position that closed,
+  changed side or changed size is reported as not done, and the order stays for the
+  operator to judge.
+

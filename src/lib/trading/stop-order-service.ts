@@ -96,6 +96,19 @@ export async function findOpenTp(coin: string): Promise<HlOpenOrder | null> {
 }
 
 /**
+ * Every resting order for `coin` whose type is a take-profit, whatever its flags. The
+ * strict matcher above skips a row with an unreadable reduce-only flag; a caller that
+ * must not place a second take-profit counts such a row as occupied.
+ */
+export async function findTakeProfitTypedOrders(coin: string): Promise<HlOpenOrder[]> {
+  const address = getHlAccountAddress();
+  if (!address) throw new Error('cannot read take-profit orders: no HL account address');
+  const orders = await fetchOpenOrders(address, validateEnv().HL_NETWORK);
+  const c = coin.trim().toUpperCase();
+  return orders.filter((o) => o.coin === c && /take[\s-]?profit/i.test(o.orderType));
+}
+
+/**
  * Place a reduce-only TAKE-PROFIT for `coin` — same order side as a stop (opposite
  * the position: a long's TP SELLS) but fires on the PROFIT side. LIVE only; PAPER
  * no-op. Throws on HL rejection (fail-closed).

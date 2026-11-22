@@ -119,7 +119,7 @@ src/lib/health/                                      # multi-TF health engine (s
 src/lib/rubric/                                      # deterministic opportunity scoring (pillars + kill-gates) — ADR-0006
 src/lib/scout/                                       # autonomous PAPER scout (guard, trigger, cycle, review) — ADR-0005
 src/lib/auto-exit/ + src/lib/risk/                   # Layer-1 auto-exit + account circuit-breaker — ADR-0007
-src/lib/agent-actions/                               # scoped agent actions: tighten a stop or close reduce-only via /api/agent/action (ADR-0009)
+src/lib/agent-actions/                               # scoped agent actions: tighten a stop, close reduce-only or place a take-profit via /api/agent/action (ADR-0009)
 src/lib/ladder/                                      # Armed Ladders — autonomous multi-rung exec (LIVE) ⚠ read src/lib/ladder/CLAUDE.md
 src/lib/trader-watch/ + src/lib/watch/               # leader-position feed daemon + crash-safe position watcher
 src/lib/backtest/                                    # PURE regime-core replay + significance (scripts/backtest*.ts)
@@ -264,8 +264,8 @@ HUMAN-LANE ACTION.** The roster (14):
 - **Human action** (require an explicit `yes` / `--confirm yes` before
   `executeIntent`; never auto-fire): `open-position`, `advise-exit`.
   For a LIVE position the agent has no local signing key. After the operator's yes it
-  runs `pnpm skill:agent-action --action tighten-stop|reduce ... --confirm yes`, which
-  calls production with a scoped token. Both actions can only reduce risk
+  runs `pnpm skill:agent-action --action tighten-stop|reduce|take-profit ... --confirm yes`, which
+  calls production with a scoped token. Every action can only reduce risk
   ([ADR-0009](docs/adr/0009-scoped-agent-actions.md)). The server cannot verify the yes:
   never run it, or call the endpoint, without the operator's approval for that action.
 - **Orchestration**: `run-session` — the PICK→APPROVE active loop (entry popup,

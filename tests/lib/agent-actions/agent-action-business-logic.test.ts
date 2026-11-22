@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { checkReduce, checkTightenStop, parseAgentActionRequest, tightestStopPx } from '@/lib/agent-actions/agent-action-business-logic';
+import { checkReduce, checkTakeProfit, checkTightenStop, parseAgentActionRequest, tightestStopPx } from '@/lib/agent-actions/agent-action-business-logic';
 
 describe('parseAgentActionRequest', () => {
   it('accepts a tighten-stop request and normalises the coin', () => {
@@ -121,5 +121,44 @@ describe('checkReduce', () => {
     expect(checkReduce({ ...hype, markPx: 0, fraction: 1 })).toEqual({ ok: false, reason: 'bad-mark' });
     expect(checkReduce({ ...hype, fraction: 1.5 })).toEqual({ ok: false, reason: 'bad-fraction' });
     expect(checkReduce({ ...hype, fraction: 1, szDecimals: 1.5 })).toEqual({ ok: false, reason: 'bad-lot-size' });
+  });
+});
+
+describe('parseAgentActionRequest: take-profit', () => {
+  it('accepts a take-profit with a positive price', () => {
+    expect(parseAgentActionRequest({ action: 'take-profit', coin: 'eth', triggerPx: 1519 })).toEqual({ ok: true, request: { action: 'take-profit', coin: 'ETH', triggerPx: 1519 } });
+  });
+  it.each([0, -1, NaN, '1519', undefined])('refuses the price %s', (px) => {
+    expect(parseAgentActionRequest({ action: 'take-profit', coin: 'ETH', triggerPx: px }).ok).toBe(false);
+  });
+});
+
+describe('checkTakeProfit', () => {
+  const short = { side: 'short' as const, markPx: 1721.85, entryPx: 1686.3, sz: 0.1186 };
+  const long = { side: 'long' as const, markPx: 100, entryPx: 95, sz: 1 };
+
+  it('allows a short take-profit below the mark and the entry', () => {
+    expect(checkTakeProfit({ ...short, newPx: 1519 })).toEqual({ ok: true });
+  });
+  it('allows a long take-profit above the mark and the entry', () => {
+    expect(checkTakeProfit({ ...long, newPx: 110 })).toEqual({ ok: true });
+  });
+  it.each([
+    ['a short take-profit above the mark', { ...short, newPx: 1750 }, 'take-profit-on-wrong-side-of-mark'],
+    ['a long take-profit below the mark', { ...long, newPx: 99 }, 'take-profit-on-wrong-side-of-mark'],
+    ['a short take-profit below the mark but above the entry (a loss)', { ...short, newPx: 1700 }, 'take-profit-not-beyond-entry'],
+    ['a short take-profit at the entry', { ...short, newPx: 1686.3 }, 'take-profit-not-beyond-entry'],
+    ['a short take-profit under 0.2% beyond the entry', { ...short, markPx: 1700, newPx: 1684 }, 'take-profit-not-beyond-entry'],
+    ['a long take-profit under 0.2% beyond the entry', { ...long, markPx: 94, newPx: 95.1 }, 'take-profit-not-beyond-entry'],
+    ['a long take-profit above the mark but below the entry (a loss)', { ...long, markPx: 90, newPx: 93 }, 'take-profit-not-beyond-entry'],
+    ['a take-profit closer than 0.5% to the mark', { ...long, markPx: 100, newPx: 100.4 }, 'take-profit-too-close-to-mark'],
+    ['a take-profit further than 50% from the mark', { ...long, newPx: 151 }, 'take-profit-too-far-from-mark'],
+    ['an unreadable entry price', { ...short, entryPx: null, newPx: 1519 }, 'entry-unreadable'],
+    ['a flat position', { ...short, sz: 0, newPx: 1519 }, 'flat'],
+    ['a bad mark', { ...short, markPx: 0, newPx: 1519 }, 'bad-mark'],
+    ['a bad price', { ...short, newPx: NaN }, 'bad-take-profit-price'],
+    ['an order under the minimum notional', { ...short, sz: 0.005, newPx: 1519 }, 'below-min-notional'],
+  ])('refuses %s', (_name, input, reason) => {
+    expect(checkTakeProfit(input)).toEqual({ ok: false, reason });
   });
 });
