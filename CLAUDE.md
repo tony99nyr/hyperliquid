@@ -224,6 +224,12 @@ the comments at the top of each vendored stub module.
     `ops/node-env.sh` (Node 24 at `/volume1/home/admin/.local/node`) — App
     Central's `/usr/local/bin/node` is v16 and killed every loop on 2026-09-02.
     See `services/trader-watch/README.md` → Node.js 24.
+  - **NAS shutdown**: at each NAS shutdown, `/usr/local/etc/init.d/K99custom-services`
+    stops crond and every process whose command line or working folder is under
+    `/volume1/home/admin` (source: `deploy/nas/K99custom-services` in
+    tony99nyr/encore-karaoke). Run a new NAS loop from that folder and the script
+    covers it. A loop that runs from another path keeps the volumes busy, and the
+    restart stops at "preparing to restart": add that path to the script.
 - **Phase 6 — perf + cockpit polish (DONE)**: Performance tab (equity = spot
   cash + perp, 30d curve, trade ledger, scout track record), live leverage
   adjustment + HL position reconciliation, URL-param tab/timeframe persistence,
