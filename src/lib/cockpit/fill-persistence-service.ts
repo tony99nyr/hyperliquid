@@ -294,8 +294,7 @@ async function loadLedger(client: SupabaseClient, sessionId: string, coin: strin
  * and the stored row stays the newer one. Mode-agnostic — never inspects `fill.source`.
  *
  * Idempotent + crash-consistent by construction: it derives the position purely
- * from the `fills` rows (the duplicate-guarded source of truth; only the
- * backfill's hl_raw.foldPending audit marker is ever updated), so
+ * from the `fills` rows (the duplicate-guarded, append-only source of truth), so
  * calling it twice produces the same result and a partially-applied prior run
  * self-heals. See the file header + ADR-0001.
  */

@@ -11,10 +11,10 @@
  * `client_intent_id` guard behind it. Fail-soft throughout (a cron must not
  * crash); per-row failures skip that row and keep going.
  *
- * A backfilled row goes in with `hl_raw.foldPending: true`, and the marker is
- * cleared only after the positions fold succeeds. The dedupe treats the order as
- * booked, so without the marker a failed fold would never run again. Each run
- * re-folds every position that still has a marked row, inside or outside the HL window.
+ * Each run first re-folds every live position whose ledger holds more fills than
+ * its last fold saw (`list_unfolded_live_positions`, migration 0053). That finds a
+ * fold that failed after its fill committed, from any writer (executeIntent, this
+ * backfill, a raced duplicate), inside or outside the HL window, with no marker.
  *
  * LIVE-ONLY by construction: it reads the REAL account's fills and writes only
  * into live sessions. Paper fills always pass through `executeIntent`, so paper
@@ -59,8 +59,8 @@ export async function backfillExchangeFills(
   const client = opts.client ?? getServiceRoleClient();
   const lookbackMs = opts.lookbackMs ?? DEFAULT_LOOKBACK_MS;
 
-  // 0) Finish the folds that earlier runs left. This needs only the database, so it
-  //    runs before the HL read and also during an HL outage.
+  // 0) Finish the folds that failed earlier, from any writer. This needs only the
+  //    database, so it runs before the HL read and also during an HL outage.
   const refold = await retryPendingFolds(client);
 
   // 1) The exchange's own fill history for the window. A failed read with nothing
@@ -94,58 +94,27 @@ async function bookMissingFills(fills: HlFill[], client: SupabaseClient): Promis
   return why ? { ...summary, incomplete: why } : summary;
 }
 
-/** Most marked rows one run re-folds: far above any real backlog, and below the
- *  PostgREST max_rows of 1000, so one query reads them. */
-const PENDING_FOLD_LIMIT = 500;
+/** Most positions one run re-folds: far above any real backlog. */
+const PENDING_FOLD_LIMIT = 200;
 
 /**
- * Re-fold every (session, coin) that has a backfilled row whose fold did not finish,
- * then clear the markers. The query does not depend on the HL fills window, so a
- * marker that outlives the window (a cron outage) is still found. Returns why the
- * run is incomplete, or null when every pending fold finished.
+ * Re-fold every live (session, coin) whose ledger is ahead of its positions row.
+ * The check compares counts in the database, so it does not depend on the HL fills
+ * window or on which writer's fold failed. Returns why the run is incomplete, or
+ * null when no fold is pending.
  */
 async function retryPendingFolds(client: SupabaseClient): Promise<string | null> {
-  type Row = { id: string; hl_order_id: string; session_id: string; coin: string; hl_raw: Record<string, unknown> };
-  // Read one row past the limit to know whether more wait. Known limit: if more than
-  // PENDING_FOLD_LIMIT rows keep failing, the rows after them wait too, and every run
-  // reports incomplete until the cause is fixed.
-  const { data, error } = await client
-    .from('fills')
-    .select('id, hl_order_id, session_id, coin, hl_raw')
-    .contains('hl_raw', { foldPending: true })
-    .order('id', { ascending: true })
-    .limit(PENDING_FOLD_LIMIT + 1);
+  // Read one past the limit to know whether more wait.
+  const { data, error } = await client.rpc('list_unfolded_live_positions', { p_limit: PENDING_FOLD_LIMIT + 1 });
   if (error) return `pending folds read failed: ${error.message}`;
-  const more = (data ?? []).length > PENDING_FOLD_LIMIT;
-  const marked = ((data ?? []) as Row[]).slice(0, PENDING_FOLD_LIMIT);
-  const byPosition = new Map<string, Row[]>();
-  for (const r of marked) {
-    const key = `${r.session_id}|${r.coin}`;
-    byPosition.set(key, [...(byPosition.get(key) ?? []), r]);
-  }
+  const rows = (data ?? []) as Array<{ session_id: string; coin: string }>;
+  const more = rows.length > PENDING_FOLD_LIMIT;
   let pending = 0;
-  for (const rows of byPosition.values()) {
-    try {
-      // One fold covers every pending row of the position: the fold reads the whole ledger.
-      await applyFillToPositionRows({ sessionId: rows[0].session_id, coin: rows[0].coin }, undefined, client);
-    } catch {
-      pending += rows.length;
-      continue;
-    }
-    for (const r of rows) {
-      // A failed clear leaves the marker, so the next run folds again: count it as pending.
-      await clearFoldPending(client, String(r.hl_order_id), r.hl_raw).catch(() => pending++);
-    }
+  for (const r of rows.slice(0, PENDING_FOLD_LIMIT)) {
+    await applyFillToPositionRows({ sessionId: r.session_id, coin: r.coin }, undefined, client).catch(() => pending++);
   }
-  const rest = more ? ' (more marked rows wait for the next run)' : '';
+  const rest = more ? ' (more positions wait for the next run)' : '';
   return pending > 0 || more ? `${pending} fold(s) pending${rest}` : null;
-}
-
-/** Replace hl_raw with a copy that has no foldPending marker. */
-async function clearFoldPending(client: SupabaseClient, hlOrderId: string, hlRaw: Record<string, unknown>): Promise<void> {
-  const { foldPending: _pending, ...rest } = hlRaw;
-  const { error } = await client.from('fills').update({ hl_raw: rest }).eq('hl_order_id', hlOrderId);
-  if (error) throw new Error(`clear foldPending failed: ${error.message}`);
 }
 
 /** Insert and fold every exchange fill that the ledger is missing. */
@@ -243,7 +212,7 @@ async function insertMissingFills(fills: HlFill[], client: SupabaseClient): Prom
       partial: false,
       source: 'live',
       hlOrderId: cand.hlOrderId,
-      hlRaw: { backfill: true, foldPending: true, rows: cand.rawRows },
+      hlRaw: { backfill: true, rows: cand.rawRows },
       filledAt: cand.filledAt,
     };
     try {
@@ -253,26 +222,18 @@ async function insertMissingFills(fills: HlFill[], client: SupabaseClient): Prom
         // session and coin of the row that the ledger holds, not this run's attribution.
         const { data: held, error: heldErr } = await client
           .from('fills')
-          .select('session_id, coin, hl_raw')
+          .select('session_id, coin')
           .eq('hl_order_id', cand.hlOrderId)
           .maybeSingle();
         if (heldErr) throw new Error(`duplicate fill read failed: ${heldErr.message}`);
-        const row = held as { session_id: string; coin: string; hl_raw: Record<string, unknown> | null } | null;
+        const row = held as { session_id: string; coin: string } | null;
         if (!row) throw new Error(`duplicate fill row for oid ${cand.hlOrderId} not found`);
-        // Dedupe skips this order from now on, so mark the held row before the fold and
-        // clear it after: a fold that fails or never finishes leaves it for the retry pass.
-        const heldRaw = { ...(row.hl_raw ?? {}), foldPending: true };
-        const { error: markErr } = await client.from('fills').update({ hl_raw: heldRaw }).eq('hl_order_id', cand.hlOrderId);
-        // Fold even when the mark failed: the fold does not need the marker.
+        // A failed read or fold here is safe: the held row's ledger is then ahead of
+        // its positions row, and the next run's retryPendingFolds re-folds it.
         await applyFillToPositionRows({ sessionId: row.session_id, coin: row.coin }, undefined, client);
-        if (markErr) continue; // folded, and there is no marker to clear
-        await clearFoldPending(client, cand.hlOrderId, heldRaw).catch(() => {});
         continue;
       }
       await applyFillToPositionRows(fill, undefined, client);
-      // The fold succeeded: clear the marker. If the clear fails, the next run
-      // re-folds once more (idempotent), so the row is still booked and counted.
-      await clearFoldPending(client, cand.hlOrderId, fill.hlRaw ?? {}).catch(() => {});
       inserted++;
       await writeAnalysisLog({
         sessionId,
@@ -282,7 +243,7 @@ async function insertMissingFills(fills: HlFill[], client: SupabaseClient): Prom
       }).catch(() => {});
     } catch {
       // fail-soft per row. A failed insert leaves no row, so the next run inserts it
-      // again; a failed fold leaves foldPending set, so the next run re-folds it.
+      // again; a failed fold leaves the ledger ahead, so the next run re-folds it.
       failed++;
     }
   }
