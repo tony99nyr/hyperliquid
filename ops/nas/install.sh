@@ -256,7 +256,7 @@ cmd_install_scout() {
     none:*|*" host=$HOST") ;;
     *)
       if [ "$HB_AGE" -lt "$FRESH_SEC" ] 2>/dev/null; then
-        fail "another scout-watch wrote a heartbeat ${HB_AGE}s ago ($HB_DETAIL). On the office box run 'systemctl --user stop scout-watch', wait 5 minutes, then run install-scout again"
+        fail "another scout-watch wrote a heartbeat ${HB_AGE}s ago ($HB_DETAIL). On the office box run 'systemctl --user disable --now scout-watch' (or hl-scout-watch), wait 5 minutes, then run install-scout again"
         return
       fi ;;
   esac

@@ -66,7 +66,8 @@ Cut-over, in this order:
 
 1. NAS, as admin: `cd /volume1/home/admin/hyperliquid && git pull origin main && sh ops/nas/install.sh check --probe-claude`.
    Fix each FAIL line.
-2. NAS: `sudo sh ops/nas/install.sh install-retro`. Check Discord for the test ping.
+2. NAS: `sudo sh ops/nas/install.sh install-retro`. When the test ping reaches Discord,
+   disable the office retro timer: `systemctl --user disable --now desk-retro-reminder.timer`.
 3. Office box: `systemctl --user disable --now scout-watch` (on a box set up with
    option A below the unit is `hl-scout-watch`), so a reboot cannot start it again.
    Stop the scout
@@ -74,11 +75,11 @@ Cut-over, in this order:
    Wait 5 minutes.
 4. NAS: `sudo sh ops/nas/install.sh install-scout --office-stopped`. It starts the daemon and waits for
    the first consumer cycle (up to 12 minutes). The summary shows its memory.
-5. When the summary shows a NAS heartbeat and `consumer exit=0`, disable the office
-   retro timer: `systemctl --user disable --now desk-retro-reminder.timer`.
+5. The summary must show a NAS heartbeat and `consumer exit=0`. If the first consumer
+   cycle has not run yet, run `sh ops/nas/install.sh status` after 30 minutes.
 
 Rollback: NAS `sudo sh ops/nas/install.sh uninstall-scout`, then office box
-`systemctl --user enable --now scout-watch`.
+`systemctl --user enable --now scout-watch` (or `hl-scout-watch`).
 
 After a push that touches scout code: NAS `sudo sh services/scout-watch/update.sh`
 (pull, install, restart). Check it any time with `sh ops/nas/install.sh status`.

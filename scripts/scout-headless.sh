@@ -98,6 +98,9 @@ EOF
 # Strip markdown code fences (a fenced reply would fail parse every cycle) and take the
 # last non-empty line — anything malformed is rejected by parseScoutDecision (no trade).
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
+# Desk policy: subscription only. The daemon loads .env.local into its env, so drop
+# any API key here, right before the model call.
+unset ANTHROPIC_API_KEY
 # Extract the JSON object robustly: strip code fences, then take the LAST line that
 # actually begins with '{' (the model intermittently appends a trailing prose line
 # after the JSON — a blind `tail -1` grabbed the prose and failed to parse, ~1/3 of
