@@ -63,9 +63,9 @@ describe('GET /api/cron/reconcile-positions', () => {
   });
 
   it('writes a DEGRADED heartbeat when the backfill used cached fills after a failed HL read', async () => {
-    backfillExchangeFills.mockResolvedValue({ skipped: false, scanned: 2, inserted: 0, unattributed: 0, staleRead: 'timeout' });
+    backfillExchangeFills.mockResolvedValue({ skipped: false, scanned: 2, inserted: 0, unattributed: 0, incomplete: 'HL fills read failed, used cached fills: timeout' });
     await GET(req('nas'));
-    expect(writeScoutHeartbeat).toHaveBeenCalledWith('degraded', expect.stringContaining('cached fills'), 'reconcile');
+    expect(writeScoutHeartbeat).toHaveBeenCalledWith('degraded', expect.stringContaining('backfill INCOMPLETE'), 'reconcile');
     expect(writeScoutHeartbeat).not.toHaveBeenCalledWith('ok', expect.anything(), 'reconcile-ok');
   });
 

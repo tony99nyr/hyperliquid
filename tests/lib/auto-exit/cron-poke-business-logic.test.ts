@@ -46,6 +46,8 @@ describe('reconcileRanCompletely', () => {
   it('is false when the reconcile or the backfill skipped, or the poke failed', () => {
     expect(reconcileRanCompletely(true, { ...body, skipped: true })).toBe(false);
     expect(reconcileRanCompletely(true, { ...body, backfill: { skipped: true } })).toBe(false);
+    // A cached-fills read or failed rows must not let the NAS skip the auto-exit poke.
+    expect(reconcileRanCompletely(true, { ...body, backfill: { skipped: false, incomplete: 'HL read failed' } })).toBe(false);
     expect(reconcileRanCompletely(false, body)).toBe(false);
     expect(reconcileRanCompletely(true, null)).toBe(false);
   });

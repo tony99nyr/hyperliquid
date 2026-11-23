@@ -38,8 +38,9 @@ export interface BackfillSummary {
   inserted: number;
   /** Missing orders with NO live session to attach to (left for a later run). */
   unattributed: number;
-  /** Set when the HL read failed and the run used cached fills: the run is incomplete. */
-  staleRead?: string;
+  /** Why a run that did not skip still did not heal (a failed HL read served from the
+   *  cache, or rows that failed to book). Absent on a complete run. */
+  incomplete?: string;
 }
 
 /** Default window: 48h. Every cron tick re-covers the window; dedupe makes that free. */
@@ -62,7 +63,10 @@ export async function backfillExchangeFills(
   const summary = await bookMissingFills(hl.fills, client);
   // A failed read that fell back to an expired cache is incomplete: the newest fills
   // can be missing. Say so, so the reconcile heartbeat does not count the run as healed.
-  return hl.error ? { ...summary, staleRead: hl.error } : summary;
+  const why = [hl.error ? `HL fills read failed, used cached fills: ${hl.error}` : null, summary.incomplete ?? null]
+    .filter((w): w is string => w !== null)
+    .join('; ');
+  return why ? { ...summary, incomplete: why } : summary;
 }
 
 /** Steps 2 and up: book every exchange fill that the ledger is missing. */
@@ -140,6 +144,7 @@ async function bookMissingFills(fills: HlFill[], client: SupabaseClient): Promis
 
   // 4) Insert oldest-first through the canonical persistence seam.
   let inserted = 0;
+  let failed = 0;
   let unattributed = 0;
   for (const cand of missing) {
     const sessionId = attributeSession(cand.coin, holderByCoin, lastTraderByCoin, newestActive?.id ?? null);
@@ -179,9 +184,11 @@ async function bookMissingFills(fills: HlFill[], client: SupabaseClient): Promis
       }).catch(() => {});
     } catch {
       // fail-soft per row; the next run retries it (dedupe keeps it exact)
+      failed++;
     }
   }
-  return { skipped: false, scanned: fills.length, inserted, unattributed };
+  const summary: BackfillSummary = { skipped: false, scanned: fills.length, inserted, unattributed };
+  return failed > 0 ? { ...summary, incomplete: `${failed} fill(s) failed to book` } : summary;
 }
 
 function describe(c: BackfillCandidate): string {

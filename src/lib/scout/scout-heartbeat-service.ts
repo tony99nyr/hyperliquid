@@ -50,7 +50,7 @@ export async function restartDegradedClockAfterOutage(now: number = Date.now()):
       .eq('source', 'reconcile-ok');
     // If this fails, the outage counts as degraded time and the next skip can page.
     if (updateError) console.error(`[scout-heartbeat] degraded-clock restart failed: ${updateError.message}`);
-  } catch {
-    /* best-effort */
+  } catch (e) {
+    console.error(`[scout-heartbeat] degraded-clock restart failed: ${e instanceof Error ? e.message : String(e)}`);
   }
 }

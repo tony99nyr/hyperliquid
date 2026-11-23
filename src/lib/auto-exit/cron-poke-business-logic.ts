@@ -23,11 +23,12 @@ export const PROD_CRON_SOURCES = ['reconcile', 'auto-exit-cron'] as const;
 /** The hourly probe window: the NAS ticks every 5 min, so exactly one tick an hour lands in it. */
 export const PROBE_WINDOW_MINUTES = 5;
 
-/** True when the reconcile route answered 2xx and neither the reconcile nor the backfill skipped. */
+/** True when the reconcile route answered 2xx, neither the reconcile nor the backfill
+ * skipped, and the backfill reports no incomplete work (a cached read or failed rows). */
 export function reconcileRanCompletely(httpOk: boolean, body: unknown): boolean {
   if (!httpOk || typeof body !== 'object' || body === null) return false;
-  const b = body as { ok?: unknown; skipped?: unknown; backfill?: { skipped?: unknown } };
-  return b.ok === true && b.skipped === false && b.backfill?.skipped === false;
+  const b = body as { ok?: unknown; skipped?: unknown; backfill?: { skipped?: unknown; incomplete?: unknown } };
+  return b.ok === true && b.skipped === false && b.backfill?.skipped === false && !b.backfill?.incomplete;
 }
 
 /**

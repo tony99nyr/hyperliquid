@@ -76,7 +76,7 @@ export function staleMessage(row: HeartbeatRow, now: number, parentDetail: strin
   const hours = ((now - row.lastTickAtMs) / 3_600_000).toFixed(1);
   if (row.source === 'reconcile-ok') {
     const why = parentDetail ? ` Last run: ${parentDetail.slice(0, 160)}.` : '';
-    return `⚠️ **RECONCILE DEGRADED ${hours}h** — the reconcile route runs but has not completed a reconcile + fill backfill. Phantom positions can accumulate.${why} Fix the cause in the skip reason (an HL read fault, HL_ACCOUNT_ADDRESS, or a Supabase read).`;
+    return `⚠️ **RECONCILE DEGRADED ${hours}h** — the reconcile route runs but has not completed a fresh reconcile + fill backfill. Phantom positions can accumulate.${why} Fix the cause in the skip reason (an HL read fault, HL_ACCOUNT_ADDRESS, or a Supabase read).`;
   }
   if (row.source === 'reconcile') {
     return `⚠️ **RECONCILE CRON SILENT ${hours}h** — the ledger self-heal (venue-fill backfill) is not running. Phantom positions can accumulate. Check the pokers: the NAS .auto-exit-secret bearer and the local scout daemon, then the Vercel route.`;

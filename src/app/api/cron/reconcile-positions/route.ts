@@ -39,7 +39,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const skips = [
       summary.skipped ? `reconcile SKIPPED (${summary.reason})` : null,
       backfill.skipped ? `backfill SKIPPED (${backfill.reason})` : null,
-      backfill.staleRead ? `backfill read cached fills (HL fills read failed: ${backfill.staleRead})` : null,
+      backfill.incomplete ? `backfill INCOMPLETE (${backfill.incomplete})` : null,
     ].filter((s): s is string => s !== null);
     const degraded = skips.length > 0;
     // 'reconcile-ok' moves only on a run that healed: the watchdog pages when the route
