@@ -10,6 +10,7 @@
 #   cd /volume1/home/admin/hyperliquid && git pull origin main
 #   sh ops/nas/install.sh check --probe-claude          (as admin)
 #   sudo sh ops/nas/install.sh install-scout --office-stopped   (as root)
+# The jobs themselves run as admin (su from root's crontab), never as root.
 #
 # Commands:
 #   check [--probe-claude]  Preflight. Changes nothing. --probe-claude runs one tiny
@@ -25,12 +26,11 @@
 #   uninstall-retro         Remove the desk-retro cron line.
 #   status                  Daemon, heartbeat, cron lines, last consumer result.
 #
-# Update after a push to main: sudo sh services/scout-watch/update.sh (pull, install, restart).
+# Update after a push to main, as admin: sh services/scout-watch/update.sh (pull, install, restart).
 # Paste the lines from "=== SUMMARY ===" down into the desk session.
 #
-# AUTH POLICY: the claude CLI runs on Tony's subscription. The daemon runs as root,
-# so the login is a CLAUDE_CODE_OAUTH_TOKEN line in services/scout-watch/.env, made
-# once with `claude setup-token`. This script FAILS when it finds ANTHROPIC_API_KEY.
+# AUTH POLICY: the claude CLI runs on Tony's subscription: a CLAUDE_CODE_OAUTH_TOKEN
+# line in services/scout-watch/.env, made once with `claude setup-token`. This script FAILS when it finds ANTHROPIC_API_KEY.
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 SCOUT_DIR="$REPO/services/scout-watch"
@@ -75,20 +75,20 @@ has_key() {
 # other root job. Keeps a backup of the old crontab in logs/.
 cron_replace() {
   tag="$1"
-  tmp="$(mktemp)"
-  if ! crontab -l > "$tmp.old" 2>/dev/null; then
-    rm -f "$tmp" "$tmp.old"
+  d="$(mktemp -d)" || return 1   # mode 700: root's crontab can hold secrets
+  if ! crontab -l > "$d/old" 2>/dev/null; then
+    rm -rf "$d"
     fail "cannot read the crontab of $(id -un): run this command with sudo"
     return 1
   fi
-  backup="$REPO/logs/crontab-backup-$(date +%Y%m%d-%H%M%S)"
-  # Other root jobs can hold secrets: admin must not read the backup.
-  (umask 077 && cp "$tmp.old" "$backup")
-  grep -vF "$tag" "$tmp.old" > "$tmp"
-  [ -n "$2" ] && printf '%s\n' "$2" >> "$tmp"
-  crontab "$tmp"
+  (umask 077 && cp "$d/old" "$REPO/logs/crontab-backup-$(date +%Y%m%d-%H%M%S)")
+  # grep exits 1 when it keeps no line (fine) and 2 on an error (stop).
+  grep -vF "$tag" "$d/old" > "$d/new"
+  if [ $? -gt 1 ]; then rm -rf "$d"; fail "could not filter the crontab"; return 1; fi
+  [ -n "$2" ] && printf '%s\n' "$2" >> "$d/new"
+  crontab "$d/new"
   rc=$?
-  rm -f "$tmp" "$tmp.old"
+  rm -rf "$d"
   return $rc
 }
 
@@ -100,6 +100,11 @@ cron_note() {
   elif cron_has "$1"; then note "INFO  $2 cron lines installed"
   else note "INFO  $2 cron lines not installed"; fi
 }
+
+# The jobs run as the owner of the checkout (admin), not as root: root's cron must not
+# run scripts that admin can edit. su -l gives the owner's HOME (claude, git key).
+OWNER="$(stat -c %U "$REPO/.git" 2>/dev/null || id -un)"
+as_owner() { echo "su -l -s /bin/sh $OWNER -c '$1'"; }
 
 need_root() {
   [ "$(id -u)" = 0 ] && return 0
@@ -175,7 +180,7 @@ preflight() {
   else
     warn "no AUTO_EXIT_CRON_SECRET: the scout-watch fallback poke is off (nas-watch still pokes)"
   fi
-  if has_key ANTHROPIC_API_KEY || grep -Eq '^[[:space:]]*(export[[:space:]]+)?ANTHROPIC_API_KEY=' .env.local "$SCOUT_ENV" 2>/dev/null; then
+  if has_key ANTHROPIC_API_KEY || grep -Eq '^[[:space:]]*(export[[:space:]]+)?ANTHROPIC_API_KEY[[:space:]]*=' .env.local "$SCOUT_ENV" 2>/dev/null; then
     fail "ANTHROPIC_API_KEY is set: remove it (desk policy: subscription login only)"
   else
     pass "no ANTHROPIC_API_KEY"
@@ -211,10 +216,12 @@ preflight() {
     warn "memory available ${avail:-?} MB, swap used ${swap_used:-?} MB: scout-watch needs about 300 MB, plus about 300 MB during each claude call"
   fi
 
-  case "$(date +%z)" in
-    -0500|-0400) pass "timezone $(date +%Z) (cron times are New York time)" ;;
-    *) warn "timezone $(date +%Z) $(date +%z): the retro line fires at 12:57 NAS time, not New York time (fix the NAS timezone in ADM Settings)" ;;
-  esac
+  # Offsets on 2026-01-01 and 2026-07-01: a New York zone shows both, a fixed EST does not.
+  if [ "$(date -d @1767268800 +%z)$(date -d @1782907200 +%z)" = "-0500-0400" ]; then
+    pass "timezone $(date +%Z) follows New York daylight saving (cron times are New York time)"
+  else
+    warn "timezone $(date +%Z) does not follow New York daylight saving: the retro line fires at 12:57 NAS time (fix the NAS timezone in ADM Settings)"
+  fi
 
   heartbeat
   case "$HB_AGE" in
@@ -234,7 +241,7 @@ cmd_install_retro() {
   need_root || return
   preflight
   if [ "$FAILS" -gt 0 ]; then note "STOP  fix the FAIL lines, then run install-retro again"; return; fi
-  cron_replace "$TAG_RETRO" "57 12 * * 1 cd $REPO && . ./ops/node-env.sh && pnpm --silent retro:remind >> $REPO/logs/desk-retro-reminder.log 2>&1 $TAG_RETRO"
+  cron_replace "$TAG_RETRO" "57 12 * * 1 $(as_owner "cd $REPO && . ./ops/node-env.sh && pnpm --silent retro:remind >> logs/desk-retro-reminder.log 2>&1") $TAG_RETRO"
   cron_has "$TAG_RETRO" && pass "desk-retro cron line installed (Mon 12:57)" || fail "crontab did not take the desk-retro line"
   if pnpm --silent retro:remind --test; then
     pass "Discord test ping sent: check the channel for 'Test ping from $HOST'"
@@ -274,11 +281,11 @@ cmd_install_scout() {
   fi
   chmod 600 "$SCOUT_ENV"
 
-  cron_replace "$TAG_SCOUT" "@reboot sleep 60 && cd $SCOUT_DIR && /bin/sh start.sh >> logs/cron-start.log 2>&1 $TAG_SCOUT
-*/3 * * * * cd $SCOUT_DIR && /bin/sh watchdog.sh >> logs/watchdog.log 2>&1 $TAG_SCOUT"
+  cron_replace "$TAG_SCOUT" "@reboot sleep 60 && $(as_owner "cd $SCOUT_DIR && /bin/sh start.sh >> logs/cron-start.log 2>&1") $TAG_SCOUT
+*/3 * * * * $(as_owner "cd $SCOUT_DIR && /bin/sh watchdog.sh >> logs/watchdog.log 2>&1") $TAG_SCOUT"
   cron_has "$TAG_SCOUT" && pass "scout-watch cron lines installed (@reboot, */3 watchdog)" || { fail "crontab did not take the scout-watch lines"; return; }
 
-  [ -n "$pid" ] || (cd "$SCOUT_DIR" && /bin/sh start.sh)
+  [ -n "$pid" ] || su -l -s /bin/sh "$OWNER" -c "cd $SCOUT_DIR && /bin/sh start.sh"
   echo "Waiting up to 12 minutes for the first tick and the first consumer cycle..."
   i=0
   while [ "$i" -lt 48 ]; do
@@ -314,7 +321,7 @@ cmd_uninstall_scout() {
   need_root || return
   cron_replace "$TAG_SCOUT" ""
   cron_has "$TAG_SCOUT" && fail "scout-watch cron lines still present" || pass "scout-watch cron lines removed"
-  (cd "$SCOUT_DIR" && /bin/sh stop.sh)
+  su -l -s /bin/sh "$OWNER" -c "cd $SCOUT_DIR && /bin/sh stop.sh"
   sleep 5
   [ -z "$(scout_pid)" ] && pass "scout-watch stopped on this NAS" || fail "scout-watch still runs (sh services/scout-watch/stop.sh --force)"
 }

@@ -35,8 +35,8 @@ See `docs/scout/README.md` for the scout architecture and runbook.
 
 The office PC is to sleep at night, so scout-watch moves to the NAS.
 `ops/nas/install.sh` installs it in root's crontab, beside trader-watch, and it
-also moves the Monday desk-retro reminder. The daemon runs as root, like the other
-NAS services. The office box keeps its systemd unit only as a rollback.
+also moves the Monday desk-retro reminder. The cron lines run the jobs as admin
+(`su -l admin`), so root never runs a script that admin can edit. The office box keeps its systemd unit only as a rollback.
 
 The embedded consumer (`scripts/scout-headless.sh`, every 30 min) does the same
 work as the interactive scout Claude session on the office box: `scout:cycle`, one
@@ -81,8 +81,8 @@ Cut-over, in this order:
 Rollback: NAS `sudo sh ops/nas/install.sh uninstall-scout`, then office box
 `systemctl --user enable --now scout-watch` (or `hl-scout-watch`).
 
-After a push that touches scout code: NAS `sudo sh services/scout-watch/update.sh`
-(pull, install, restart). Check it any time with `sh ops/nas/install.sh status`.
+After a push that touches scout code: NAS, as admin, `sh services/scout-watch/update.sh`
+(pull, install, restart; under sudo it re-runs itself as admin). Check it any time with `sh ops/nas/install.sh status`.
 
 ## Supervise the daemon — option A: systemd --user (recommended on this box)
 
