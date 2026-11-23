@@ -120,28 +120,4 @@ describe('realtime hooks and a snapshot in flight', () => {
     });
     expect(screen.getByTestId('ids').textContent).toBe('b');
   });
-
-  it('drops a snapshot that missed more events than it can replay', async () => {
-    await act(async () => {
-      render(<ChannelHarness />);
-    });
-    const held = realtime.deferNextFetch();
-    await act(async () => {
-      window.dispatchEvent(new Event('online'));
-    });
-    await act(async () => {
-      for (let i = 0; i < 500; i++) {
-        realtime.emit('rt:positions:', { eventType: 'UPDATE', new: { id: 'b', created_at: 1 }, old: {} });
-      }
-      // The list is full, so the snapshot cannot replay this DELETE.
-      realtime.emit('rt:positions:', { eventType: 'DELETE', new: {}, old: { id: 'a' } });
-    });
-    await act(async () => {
-      held.resolve([
-        { id: 'a', created_at: 2 },
-        { id: 'b', created_at: 1 },
-      ]);
-    });
-    expect(screen.getByTestId('ids').textContent).toBe('b');
-  });
 });

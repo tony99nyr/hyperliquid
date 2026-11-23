@@ -63,13 +63,6 @@ const REALTIME_REFETCH_MS = 60_000;
 const DEFAULT_LIMIT = 200;
 
 /**
- * The most events one snapshot in flight records for replay. A snapshot that
- * misses more (a hung request while the socket stays busy) is dropped: its
- * replay would be incomplete, and the next snapshot replaces it.
- */
-const MAX_MISSED_EVENTS = 500;
-
-/**
  * Per-subscribe uniqueness for the realtime channel topic.
  *
  * THE BUG THIS GUARDS AGAINST: Supabase's `client.channel(topic)` returns an
@@ -144,8 +137,7 @@ export function useRealtimeRows<T extends { id: string }>(opts: RealtimeRowsOpti
         let q = client.from(table).select('*');
         if (filterColumn && filterValue !== null) q = q.eq(filterColumn, filterValue);
         const { data, error: fetchErr } = await q.order(orderColumn, { ascending: orderAscending }).limit(limit);
-        // Dropped: a later snapshot was applied, or this one missed too many events.
-        if (!active || seq < applied || !inFlight.has(seq)) return;
+        if (!active || seq < applied) return;
         if (fetchErr) {
           setError(fetchErr.message);
           setLoaded(true);
@@ -180,10 +172,7 @@ export function useRealtimeRows<T extends { id: string }>(opts: RealtimeRowsOpti
           { event: '*', schema: 'public', table, ...(pgFilter ? { filter: pgFilter } : {}) },
           (payload) => {
             if (!active) return;
-            for (const [seq, missed] of inFlight) {
-              if (missed.length >= MAX_MISSED_EVENTS) inFlight.delete(seq);
-              else missed.push(payload);
-            }
+            for (const missed of inFlight.values()) missed.push(payload);
             setRows((prev) => apply(prev, payload));
           },
         )
