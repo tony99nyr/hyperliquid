@@ -34,7 +34,7 @@ describe('backfillExchangeFills: a failed HL read is never a healed run', () => 
 });
 
 type Result = { data?: unknown; error?: { message: string; code?: string } | null };
-type Call = { table: string; op: string; payload?: unknown; cols?: string; contains?: unknown };
+type Call = { table: string; op: string; payload?: unknown; cols?: string; contains?: unknown; eq?: [string, unknown] };
 
 /** A chainable fake client: `respond` picks each query's result from its table, op and columns. */
 function fakeClient(respond: (c: Call) => Result) {
@@ -53,7 +53,8 @@ function fakeClient(respond: (c: Call) => Result) {
       contains: (_col: string, value: unknown) => ((call.contains = value), b),
       then: (ok: (v: unknown) => unknown, bad: (e: unknown) => unknown) => done().then(ok, bad),
     };
-    for (const m of ['eq', 'neq', 'in', 'order', 'limit']) b[m] = () => b;
+    for (const m of ['neq', 'in', 'order', 'limit', 'maybeSingle']) b[m] = () => b;
+    b.eq = (col: string, value: unknown) => ((call.eq = [col, value]), b);
     return b;
   };
   return { client: { from } as unknown as SupabaseClient, calls };
@@ -143,5 +144,47 @@ describe('backfillExchangeFills: a fill that fails to book is retried', () => {
     const r = await backfillExchangeFills({ client });
     expect(r.incomplete).toBe('1 fold(s) pending');
     expect(calls.some((c) => c.table === 'fills' && c.op === 'update')).toBe(false);
+  });
+
+  // A raced writer booked oid 42 under session s9 first; this run would attribute it to s1.
+  const racedClient = (failFold: boolean, failMark = false) => {
+    let raced = false;
+    return fakeClient((c) => {
+      if (failMark && c.table === 'fills' && c.op === 'update') return { error: { message: 'timeout' } };
+      if (c.table === 'sessions') return { data: [SESSION] };
+      if (c.table === 'fills' && c.op === 'insert') return (raced = true), { error: { message: 'duplicate key', code: '23505' } };
+      if (raced && c.table === 'fills' && c.cols === 'session_id, coin, hl_raw') return { data: { session_id: 's9', coin: 'ETH', hl_raw: null } };
+      if (failFold && c.table === 'positions' && c.op === 'upsert') return { error: { message: 'timeout' } };
+      return { data: [] };
+    });
+  };
+
+  it('folds the session that holds a raced duplicate, not its own attribution', async () => {
+    read({ fills: [withOid] });
+    const { client, calls } = racedClient(false);
+    const r = await backfillExchangeFills({ client });
+    expect(r).toMatchObject({ inserted: 0 });
+    expect(r.incomplete).toBeUndefined();
+    expect(calls.find((c) => c.cols === 'session_id, coin, hl_raw')?.eq).toEqual(['hl_order_id', '42']);
+    const upserts = calls.filter((c) => c.table === 'positions' && c.op === 'upsert');
+    expect(upserts.map((c) => (c.payload as { session_id: string }).session_id)).toEqual(['s9']);
+  });
+
+  it('leaves the held row marked foldPending when its fold fails, so the retry pass finds it', async () => {
+    read({ fills: [withOid] });
+    const { client, calls } = racedClient(true);
+    const r = await backfillExchangeFills({ client });
+    expect(r.incomplete).toBe('1 fill(s) failed to book');
+    const updates = calls.filter((c) => c.table === 'fills' && c.op === 'update');
+    expect(updates).toEqual([expect.objectContaining({ payload: { hl_raw: { foldPending: true } }, eq: ['hl_order_id', '42'] })]);
+  });
+
+  it('still folds a raced duplicate whose marker write fails', async () => {
+    read({ fills: [withOid] });
+    const { client, calls } = racedClient(false, true);
+    const r = await backfillExchangeFills({ client });
+    expect(r.incomplete).toBeUndefined();
+    const upserts = calls.filter((c) => c.table === 'positions' && c.op === 'upsert');
+    expect(upserts.map((c) => (c.payload as { session_id: string }).session_id)).toEqual(['s9']);
   });
 });
