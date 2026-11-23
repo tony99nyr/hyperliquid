@@ -174,7 +174,7 @@ describe('executeIntent (paper end-to-end)', () => {
 
   it('threads the OPENING intent leverage to applyFillToPosition (drives ROE)', async () => {
     await executeIntent(intent({ sz: 1, leverage: 5 }));
-    // 2nd positional arg = leverage metadata (fold stays leverage-agnostic).
+    // The options object carries leverage metadata (fold stays leverage-agnostic).
     expect(mockedApply.mock.calls[0][1]?.leverage).toBe(5);
   });
 

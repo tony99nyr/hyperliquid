@@ -27,8 +27,8 @@ import {
   fillFromRow,
   positionFromRow,
   type FillSelectRow,
+  type PnlInsertRow,
 } from './cockpit-rows-business-logic';
-import type { PnlInsertRow } from './cockpit-rows-business-logic';
 import { applyFills, computeOpenedAtMs } from '@/lib/trading/pnl-business-logic';
 import type { CanonicalFill } from '@/types/fill';
 import type { Position } from '@/types/position';

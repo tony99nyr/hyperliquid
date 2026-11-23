@@ -166,7 +166,7 @@ describe('applyFillToPositionRows (fold WHOLE ledger → version-checked apply_p
     expect(pos.sz).toBeCloseTo(2);
   });
 
-  it('throws when the RPC fails for any reason other than a missing function', async () => {
+  it('throws when the fold RPC fails', async () => {
     mock.queueResult({ data: [ledgerRow()], error: null });
     mock.queueResult({ error: { code: '57014', message: 'statement timeout' } });
     await expect(applyFillToPositionRows(fill(), { client })).rejects.toThrow(/fold write failed: statement timeout/);
