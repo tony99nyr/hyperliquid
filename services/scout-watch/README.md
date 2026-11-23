@@ -33,45 +33,51 @@ See `docs/scout/README.md` for the scout architecture and runbook.
 
 ## Run it on the NAS (cut-over planned 2026-11-23)
 
-The office PC is to sleep at night, so scout-watch moves to the NAS. The NAS runs
-it from the admin crontab, beside trader-watch. `ops/nas/install.sh` does the
-install, and it also moves the Monday desk-retro reminder. The office box keeps
-the systemd unit only as a rollback.
+The office PC is to sleep at night, so scout-watch moves to the NAS.
+`ops/nas/install.sh` installs it in root's crontab, beside trader-watch, and it
+also moves the Monday desk-retro reminder. The daemon runs as root, like the other
+NAS services. The office box keeps its systemd unit only as a rollback.
 
-**Never run two copies.** Two daemons double-write triggers and can both open on
-the same directive. `install-scout` refuses while the `scout-watch` heartbeat is
-younger than 5 minutes and comes from another host. The heartbeat `detail` ends
-in `host=<hostname>`.
+The embedded consumer (`scripts/scout-headless.sh`, every 30 min) does the same
+work as the interactive scout Claude session on the office box: `scout:cycle`, one
+Sonnet decision, a paper trade or a stand-down, and a Discord ping for a steward
+proposal. A dead consumer pages Discord through the stale `scout-cycle` heartbeat.
+So the NAS daemon replaces that session too. Stop the session at cut-over: two
+consumers can both open on the same directive.
 
-What the NAS needs first (copy these by hand, never commit them):
+**Never run two daemons.** Two daemons double-write triggers. `install-scout`
+refuses while the `scout-watch` heartbeat is younger than 5 minutes and comes
+from another host. The heartbeat `detail` ends in `host=<hostname>`.
 
-- `.env.local` in the repo, with the Supabase service-role keys,
-  `DISCORD_WEBHOOK_URL` and `AUTO_EXIT_CRON_SECRET`. The NAS copy may be older
-  than the office copy: `check` names each missing key.
-- The claude CLI under Node 24 (`npm i -g @anthropic-ai/claude-code` with
-  `/volume1/home/admin/.local/node/bin` first on PATH), and one interactive
-  `claude` sign-in as admin with the subscription. Never set `ANTHROPIC_API_KEY`.
-- Optional: `services/scout-watch/.env` with `HEALTHCHECKS_SCOUT_WATCH_URL`.
-  `install-scout` writes `CLAUDE_BIN` there.
+What the NAS needs first (never commit these):
+
+- `.env.local` in the repo, with the Supabase service-role keys and
+  `DISCORD_WEBHOOK_URL`. `check` names each missing key. `install-scout` copies the
+  poke bearer from `.auto-exit-secret` to `services/scout-watch/.env`.
+- A subscription token for the claude CLI. As admin on the NAS, run
+  `/volume1/home/admin/.local/bin/claude setup-token`, sign in with the
+  subscription, and add `CLAUDE_CODE_OAUTH_TOKEN=<token>` to
+  `services/scout-watch/.env` (`chmod 600`). Never set `ANTHROPIC_API_KEY`.
 
 The daemon state file (`~/.hl-cockpit-scout-state.json`) does not move. The NAS
 daemon starts from a fresh baseline, so it can miss a trigger in its first cycle.
 
 Cut-over, in this order:
 
-1. NAS: `cd /volume1/home/admin/hyperliquid && git pull origin main && sh ops/nas/install.sh check --probe-claude`.
+1. NAS, as admin: `cd /volume1/home/admin/hyperliquid && git pull origin main && sh ops/nas/install.sh check --probe-claude`.
    Fix each FAIL line.
-2. NAS: `sh ops/nas/install.sh install-retro`. Check Discord for the test ping.
-3. Office box: `systemctl --user stop scout-watch` (stop only, keep it enabled). Wait 5 minutes.
-4. NAS: `sh ops/nas/install.sh install-scout`. It starts the daemon and waits for the
-   first consumer cycle (up to 12 minutes).
+2. NAS: `sudo sh ops/nas/install.sh install-retro`. Check Discord for the test ping.
+3. Office box: `systemctl --user stop scout-watch` (stop only, keep it enabled), and
+   stop the scout Claude session's loop. Wait 5 minutes.
+4. NAS: `sudo sh ops/nas/install.sh install-scout`. It starts the daemon and waits for
+   the first consumer cycle (up to 12 minutes). The summary shows its memory.
 5. When the summary shows a NAS heartbeat and `consumer exit=0`, disable the office
    units: `systemctl --user disable --now scout-watch desk-retro-reminder.timer`.
 
-Rollback: NAS `sh ops/nas/install.sh uninstall-scout`, then office box
+Rollback: NAS `sudo sh ops/nas/install.sh uninstall-scout`, then office box
 `systemctl --user enable --now scout-watch`.
 
-After a push that touches scout code: NAS `sh services/scout-watch/update.sh`
+After a push that touches scout code: NAS `sudo sh services/scout-watch/update.sh`
 (pull, install, restart). Check it any time with `sh ops/nas/install.sh status`.
 
 ## Supervise the daemon — option A: systemd --user (recommended on this box)

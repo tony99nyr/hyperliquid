@@ -38,6 +38,14 @@ if [ -f "$PID_FILE" ]; then
     rm -f "$PID_FILE"
 fi
 
+# A daemon without a PID file here (started by another user, or from another
+# checkout) still counts: two daemons double-write triggers.
+OTHER=$(ps -ef 2>/dev/null | grep "[s]cripts/scout-watch.ts" | awk '{print $2}' | head -1)
+if [ -n "$OTHER" ]; then
+    echo "scout-watch already runs as PID $OTHER (user $(stat -c %U "/proc/$OTHER" 2>/dev/null)); not starting a second copy"
+    exit 0
+fi
+
 mkdir -p logs
 
 # Archive a non-empty previous log with a timestamp.

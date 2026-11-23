@@ -5,9 +5,11 @@
 #   - scout-watch: the always-on paper scout daemon (services/scout-watch).
 #   - desk-retro reminder: the Monday 12:57 Discord ping (pnpm retro:remind).
 #
-# Run it on the NAS as admin (the user whose crontab runs trader-watch), from the
-# repo, after a pull:
-#   cd /volume1/home/admin/hyperliquid && git pull origin main && sh ops/nas/install.sh check
+# The NAS cron jobs run from root's crontab (as trader-watch does), so every
+# install and uninstall command needs root. check and status also work as admin.
+#   cd /volume1/home/admin/hyperliquid && git pull origin main
+#   sh ops/nas/install.sh check --probe-claude          (as admin)
+#   sudo sh ops/nas/install.sh install-scout             (as root)
 #
 # Commands:
 #   check [--probe-claude]  Preflight. Changes nothing. --probe-claude runs one tiny
@@ -20,17 +22,18 @@
 #   uninstall-scout         Remove the scout-watch cron lines and stop the daemon.
 #   uninstall-retro         Remove the desk-retro cron line.
 #   status                  Daemon, heartbeat, cron lines, last consumer result.
-#   run-retro               What the cron line runs: the Monday reminder.
 #
-# Update after a push to main: sh services/scout-watch/update.sh (pull, install, restart).
+# Update after a push to main: sudo sh services/scout-watch/update.sh (pull, install, restart).
 # Paste the lines from "=== SUMMARY ===" down into the desk session.
 #
-# AUTH POLICY: the claude CLI runs on Tony's subscription (a one-time `claude` login
-# as admin on the NAS). This script FAILS when it finds ANTHROPIC_API_KEY.
+# AUTH POLICY: the claude CLI runs on Tony's subscription. The daemon runs as root,
+# so the login is a CLAUDE_CODE_OAUTH_TOKEN line in services/scout-watch/.env, made
+# once with `claude setup-token`. This script FAILS when it finds ANTHROPIC_API_KEY.
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 SCOUT_DIR="$REPO/services/scout-watch"
 SCOUT_ENV="$SCOUT_DIR/.env"
+LOG="$SCOUT_DIR/logs/scout-watch.log"
 TAG_SCOUT="# hl-nas:scout-watch"
 TAG_RETRO="# hl-nas:desk-retro"
 # A heartbeat younger than this means a scout-watch daemon still runs somewhere.
@@ -65,15 +68,49 @@ has_key() {
 }
 
 # cron_replace TAG LINES: drop every crontab line that ends in TAG, then append LINES.
+# Refuses when it cannot read the crontab: writing an empty file would delete every
+# other root job. Keeps a backup of the old crontab in logs/.
 cron_replace() {
   tag="$1"
   tmp="$(mktemp)"
-  crontab -l 2>/dev/null | grep -vF "$tag" > "$tmp"
+  if ! crontab -l > "$tmp.old" 2>/dev/null; then
+    rm -f "$tmp" "$tmp.old"
+    fail "cannot read the crontab of $(id -un): run this command with sudo"
+    return 1
+  fi
+  cp "$tmp.old" "$REPO/logs/crontab-backup-$(date +%Y%m%d-%H%M%S)"
+  grep -vF "$tag" "$tmp.old" > "$tmp"
   [ -n "$2" ] && printf '%s\n' "$2" >> "$tmp"
-  crontab "$tmp" && rm -f "$tmp"
+  crontab "$tmp"
+  rc=$?
+  rm -f "$tmp" "$tmp.old"
+  return $rc
 }
 
 cron_has() { crontab -l 2>/dev/null | grep -qF "$1"; }
+
+# cron_note TAG NAME: an INFO line on whether the cron lines are in root's crontab.
+cron_note() {
+  if [ "$(id -u)" != 0 ]; then note "INFO  $2 cron lines: run with sudo to see root's crontab"
+  elif cron_has "$1"; then note "INFO  $2 cron lines installed"
+  else note "INFO  $2 cron lines not installed"; fi
+}
+
+need_root() {
+  [ "$(id -u)" = 0 ] && return 0
+  fail "this command edits root's crontab: run it with sudo"
+  return 1
+}
+
+# Memory of every process that grep pattern $1 matches in `ps -ef`, in MB.
+rss_mb() {
+  total=0
+  for pid in $(ps -ef 2>/dev/null | grep "$1" | awk '{print $2}'); do
+    kb="$(awk '/^VmRSS:/ {print $2}' "/proc/$pid/status" 2>/dev/null)"
+    total=$((total + ${kb:-0}))
+  done
+  echo $((total / 1024))
+}
 
 # heartbeat: sets HB_AGE (seconds, "none" or "error") and HB_DETAIL.
 heartbeat() {
@@ -91,6 +128,8 @@ resolve_claude() {
     CLAUDE="$(sed -n 's/^CLAUDE_BIN=//p' "$SCOUT_ENV" | tail -1)"
   fi
   [ -n "$CLAUDE" ] || CLAUDE="$(command -v claude 2>/dev/null)"
+  # The NAS install (native installer, as admin). Root's PATH does not have it.
+  [ -n "$CLAUDE" ] || { [ -x /volume1/home/admin/.local/bin/claude ] && CLAUDE=/volume1/home/admin/.local/bin/claude; }
 }
 
 # --- preflight ----------------------------------------------------------------
@@ -123,10 +162,12 @@ preflight() {
     fail "no Supabase service-role key in .env.local"
   fi
   if has_key DISCORD_WEBHOOK_URL; then pass "DISCORD_WEBHOOK_URL set"; else fail "DISCORD_WEBHOOK_URL missing from .env.local (retro reminder, scout alerts)"; fi
-  if has_key AUTO_EXIT_CRON_SECRET; then
+  if has_key AUTO_EXIT_CRON_SECRET || grep -q '^AUTO_EXIT_CRON_SECRET=' "$SCOUT_ENV" 2>/dev/null; then
     pass "AUTO_EXIT_CRON_SECRET set (scout-watch fallback poker)"
+  elif [ -s .auto-exit-secret ]; then
+    pass "AUTO_EXIT_CRON_SECRET in .auto-exit-secret (install-scout copies it to services/scout-watch/.env)"
   else
-    warn "AUTO_EXIT_CRON_SECRET not in .env.local: the scout-watch fallback poke is off (nas-watch still pokes)"
+    warn "no AUTO_EXIT_CRON_SECRET: the scout-watch fallback poke is off (nas-watch still pokes)"
   fi
   if has_key ANTHROPIC_API_KEY || grep -q '^ANTHROPIC_API_KEY=' "$SCOUT_ENV" 2>/dev/null; then
     fail "ANTHROPIC_API_KEY is set: remove it (desk policy: subscription login only)"
@@ -137,10 +178,13 @@ preflight() {
   resolve_claude
   if [ -n "$CLAUDE" ] && [ -x "$CLAUDE" ]; then
     pass "claude $("$CLAUDE" --version 2>/dev/null | head -1) at $CLAUDE"
-    if [ -f "$HOME/.claude/.credentials.json" ] || grep -q '^CLAUDE_CODE_OAUTH_TOKEN=' "$SCOUT_ENV" 2>/dev/null; then
-      pass "claude login found for $(id -un 2>/dev/null) (HOME=$HOME)"
+    if grep -q '^CLAUDE_CODE_OAUTH_TOKEN=..' "$SCOUT_ENV" 2>/dev/null; then
+      pass "subscription token in services/scout-watch/.env"
+      # The probe below must use the same token as the daemon.
+      CLAUDE_CODE_OAUTH_TOKEN="$(sed -n 's/^CLAUDE_CODE_OAUTH_TOKEN=//p' "$SCOUT_ENV" | tail -1)"
+      export CLAUDE_CODE_OAUTH_TOKEN
     else
-      warn "no claude login in $HOME/.claude: run 'claude' once as $(id -un 2>/dev/null) and sign in with the subscription"
+      fail "no CLAUDE_CODE_OAUTH_TOKEN in services/scout-watch/.env: as admin run '$CLAUDE setup-token', sign in with the subscription, and add the line (chmod 600)"
     fi
     if [ "$PROBE_CLAUDE" = 1 ]; then
       reply="$(printf 'Reply with the single word OK.' | "$CLAUDE" -p --model haiku 2>&1 | head -3)"
@@ -150,7 +194,7 @@ preflight() {
       esac
     fi
   else
-    fail "claude CLI not found (install with the Node 24 PATH: npm i -g @anthropic-ai/claude-code, or set CLAUDE_BIN in services/scout-watch/.env)"
+    fail "claude CLI not found (set CLAUDE_BIN in services/scout-watch/.env)"
   fi
 
   avail="$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null)"
@@ -174,16 +218,17 @@ preflight() {
   esac
   pid="$(scout_pid)"
   [ -n "$pid" ] && note "INFO  scout-watch runs on this NAS (PID $pid)" || note "INFO  scout-watch does not run on this NAS"
-  cron_has "$TAG_SCOUT" && note "INFO  scout-watch cron lines installed" || note "INFO  scout-watch cron lines not installed"
-  cron_has "$TAG_RETRO" && note "INFO  desk-retro cron line installed" || note "INFO  desk-retro cron line not installed"
+  cron_note "$TAG_SCOUT" scout-watch
+  cron_note "$TAG_RETRO" desk-retro
 }
 
 # --- commands -----------------------------------------------------------------
 
 cmd_install_retro() {
+  need_root || return
   preflight
   if [ "$FAILS" -gt 0 ]; then note "STOP  fix the FAIL lines, then run install-retro again"; return; fi
-  cron_replace "$TAG_RETRO" "57 12 * * 1 /bin/sh $REPO/ops/nas/install.sh run-retro >> $REPO/logs/desk-retro-reminder.log 2>&1 $TAG_RETRO"
+  cron_replace "$TAG_RETRO" "57 12 * * 1 cd $REPO && . ./ops/node-env.sh && pnpm --silent retro:remind >> $REPO/logs/desk-retro-reminder.log 2>&1 $TAG_RETRO"
   cron_has "$TAG_RETRO" && pass "desk-retro cron line installed (Mon 12:57)" || fail "crontab did not take the desk-retro line"
   if pnpm --silent retro:remind --test; then
     pass "Discord test ping sent: check the channel for 'Test ping from $HOST'"
@@ -193,69 +238,70 @@ cmd_install_retro() {
 }
 
 cmd_install_scout() {
+  need_root || return
   preflight
   if [ "$FAILS" -gt 0 ]; then note "STOP  fix the FAIL lines, then run install-scout again"; return; fi
+  # The interlock: a fresh heartbeat from another host means another box still runs it.
+  case "$HB_AGE:$HB_DETAIL" in
+    none:*|*"host=$HOST"*) ;;
+    *)
+      if [ "$HB_AGE" -lt "$FRESH_SEC" ] 2>/dev/null; then
+        fail "another scout-watch wrote a heartbeat ${HB_AGE}s ago ($HB_DETAIL). On the office box run 'systemctl --user stop scout-watch', wait 5 minutes, then run install-scout again"
+        return
+      fi ;;
+  esac
   pid="$(scout_pid)"
-  if [ -z "$pid" ]; then
-    # The interlock: a fresh heartbeat from another host means the office box still runs it.
-    case "$HB_AGE" in
-      none) ;;
-      *[!0-9]*) fail "heartbeat age unreadable ($HB_AGE)"; return ;;
-      *)
-        if [ "$HB_AGE" -lt "$FRESH_SEC" ]; then
-          fail "another scout-watch wrote a heartbeat ${HB_AGE}s ago ($HB_DETAIL). On the office box run 'systemctl --user stop scout-watch', wait 5 minutes, then run install-scout again"
-          return
-        fi ;;
-    esac
-  fi
 
-  resolve_claude
+  # start.sh exports services/scout-watch/.env to the daemon.
   if ! grep -q '^CLAUDE_BIN=' "$SCOUT_ENV" 2>/dev/null; then
-    echo "CLAUDE_BIN=$CLAUDE" >> "$SCOUT_ENV" && chmod 600 "$SCOUT_ENV"
+    echo "CLAUDE_BIN=$CLAUDE" >> "$SCOUT_ENV"
     pass "wrote CLAUDE_BIN=$CLAUDE to services/scout-watch/.env"
   fi
+  # nas-watch reads the poke bearer from .auto-exit-secret; the daemon reads only its env.
+  if ! has_key AUTO_EXIT_CRON_SECRET && ! grep -q '^AUTO_EXIT_CRON_SECRET=' "$SCOUT_ENV" 2>/dev/null && [ -s .auto-exit-secret ]; then
+    echo "AUTO_EXIT_CRON_SECRET=$(tr -d ' \r\n' < .auto-exit-secret)" >> "$SCOUT_ENV"
+    pass "copied .auto-exit-secret to services/scout-watch/.env"
+  fi
+  chmod 600 "$SCOUT_ENV"
 
   cron_replace "$TAG_SCOUT" "@reboot sleep 60 && cd $SCOUT_DIR && /bin/sh start.sh >> logs/cron-start.log 2>&1 $TAG_SCOUT
 */3 * * * * cd $SCOUT_DIR && /bin/sh watchdog.sh >> logs/watchdog.log 2>&1 $TAG_SCOUT"
   cron_has "$TAG_SCOUT" && pass "scout-watch cron lines installed (@reboot, */3 watchdog)" || { fail "crontab did not take the scout-watch lines"; return; }
 
-  if [ -z "$pid" ]; then
-    (cd "$SCOUT_DIR" && /bin/sh start.sh)
-  fi
+  [ -n "$pid" ] || (cd "$SCOUT_DIR" && /bin/sh start.sh)
   echo "Waiting up to 12 minutes for the first tick and the first consumer cycle..."
-  log="$SCOUT_DIR/logs/scout-watch.log"
   i=0
   while [ "$i" -lt 48 ]; do
     sleep 15
     i=$((i + 1))
-    grep -q 'consumer exit=' "$log" 2>/dev/null && break
+    grep -q 'consumer exit=' "$LOG" 2>/dev/null && break
     [ -n "$(scout_pid)" ] || break
   done
   report_scout
 }
 
 report_scout() {
-  log="$SCOUT_DIR/logs/scout-watch.log"
   pid="$(scout_pid)"
-  [ -n "$pid" ] && pass "scout-watch runs (PID $pid)" || fail "scout-watch is not running (tail of $log below)"
+  [ -n "$pid" ] && pass "scout-watch runs (PID $pid, user $(stat -c %U "/proc/$pid" 2>/dev/null), memory $(rss_mb "[s]cripts/scout-watch.ts") MB)" || fail "scout-watch is not running (tail of $LOG below)"
   heartbeat
   case "$HB_DETAIL" in
     *"host=$HOST"*)
       if [ "$HB_AGE" -lt "$FRESH_SEC" ] 2>/dev/null; then pass "heartbeat ${HB_AGE}s old from this NAS: $HB_DETAIL"; else fail "heartbeat from this NAS is ${HB_AGE}s old"; fi ;;
     *) fail "heartbeat ${HB_AGE}s old is not from this NAS: $HB_DETAIL" ;;
   esac
-  last="$(grep 'consumer exit=' "$log" 2>/dev/null | tail -1)"
+  last="$(grep 'consumer exit=' "$LOG" 2>/dev/null | tail -1)"
   case "$last" in
     *"consumer exit=0"*) pass "last consumer cycle: $(echo "$last" | cut -c1-200)" ;;
     "") warn "no consumer cycle in the log yet (it runs every 30 min): run status later" ;;
     *) fail "last consumer cycle failed: $(echo "$last" | cut -c1-200)" ;;
   esac
-  echo "--- tail of $log ---"
-  tail -8 "$log" 2>/dev/null
+  echo "--- tail of $LOG ---"
+  tail -8 "$LOG" 2>/dev/null
   echo "---"
 }
 
 cmd_uninstall_scout() {
+  need_root || return
   cron_replace "$TAG_SCOUT" ""
   cron_has "$TAG_SCOUT" && fail "scout-watch cron lines still present" || pass "scout-watch cron lines removed"
   (cd "$SCOUT_DIR" && /bin/sh stop.sh)
@@ -264,6 +310,7 @@ cmd_uninstall_scout() {
 }
 
 cmd_uninstall_retro() {
+  need_root || return
   cron_replace "$TAG_RETRO" ""
   cron_has "$TAG_RETRO" && fail "desk-retro cron line still present" || pass "desk-retro cron line removed"
 }
@@ -271,14 +318,10 @@ cmd_uninstall_retro() {
 cmd_status() {
   . ./ops/node-env.sh 2>/dev/null || fail "no Node >= 24"
   report_scout
-  cron_has "$TAG_SCOUT" && pass "scout-watch cron lines installed" || warn "scout-watch cron lines not installed"
-  if cron_has "$TAG_RETRO"; then
-    pass "desk-retro cron line installed"
-    last="$(grep 'desk-retro-reminder:' logs/desk-retro-reminder.log 2>/dev/null | tail -1)"
-    [ -n "$last" ] && note "INFO  last retro run: $last"
-  else
-    warn "desk-retro cron line not installed"
-  fi
+  cron_note "$TAG_SCOUT" scout-watch
+  cron_note "$TAG_RETRO" desk-retro
+  last="$(grep 'desk-retro-reminder:' logs/desk-retro-reminder.log 2>/dev/null | tail -1)"
+  [ -n "$last" ] && note "INFO  last retro run: $last"
 }
 
 PROBE_CLAUDE=0
@@ -291,10 +334,6 @@ case "$1" in
   uninstall-scout) cmd_uninstall_scout; summary uninstall-scout ;;
   uninstall-retro) cmd_uninstall_retro; summary uninstall-retro ;;
   status) cmd_status; summary status ;;
-  run-retro)
-    . ./ops/node-env.sh || exit 1
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] desk-retro run"
-    exec pnpm --silent retro:remind ;;
-  *) sed -n '2,27p' "$0"; exit 2 ;;
+  *) sed -n '2,26p' "$0"; exit 2 ;;
 esac
 [ "$FAILS" -eq 0 ]
