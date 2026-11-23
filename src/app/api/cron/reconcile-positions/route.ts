@@ -40,6 +40,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       summary.skipped ? `reconcile SKIPPED (${summary.reason})` : null,
       backfill.skipped ? `backfill SKIPPED (${backfill.reason})` : null,
     ].filter((s): s is string => s !== null);
+    // 'reconcile-ok' moves only on a run that healed: the watchdog pages when it goes
+    // stale while 'reconcile' stays fresh (degraded for 30+ min, not one transient skip).
+    if (skips.length === 0) {
+      await writeScoutHeartbeat('ok', `reconcile + backfill completed via ${poker}`, 'reconcile-ok').catch(() => {});
+    }
     await writeScoutHeartbeat(
       skips.length > 0 ? 'degraded' : 'ok',
       skips.length > 0

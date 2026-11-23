@@ -4,6 +4,7 @@ import {
   staleMessage,
   STALE_AFTER_MS,
   REALERT_COOLDOWN_MS,
+  shouldJudge,
 } from '@/lib/scout/scout-heartbeat-alert-business-logic';
 
 const NOW = 1_784_300_000_000;
@@ -68,5 +69,31 @@ describe('staleMessage routes the operator to the RIGHT system (review 10-03)', 
   });
   it('scout sources keep the scout wording', () => {
     expect(staleMessage(row('scout-watch'), 3_600_000)).toMatch(/scout-repair runbook/);
+  });
+});
+
+describe('reconcile-ok: page on a long degraded run, not on one skip (2026-11-22)', () => {
+  const MIN = 60_000;
+  it('a degraded route (reconcile fresh, reconcile-ok 31 min old) pages', () => {
+    expect(shouldJudge('reconcile-ok', true, NOW - 5 * MIN, NOW)).toBe(true);
+    expect(heartbeatVerdict(row({ source: 'reconcile-ok', lastTickAtMs: NOW - 31 * MIN }), NOW)).toBe('stale-page');
+  });
+  it('one transient skip does not page: the last healthy run is minutes old', () => {
+    expect(heartbeatVerdict(row({ source: 'reconcile-ok', lastTickAtMs: NOW - 12 * MIN }), NOW)).toBe('ok');
+  });
+  it('a dead route pages once, as RECONCILE CRON SILENT, not also as degraded', () => {
+    expect(shouldJudge('reconcile-ok', true, NOW - 45 * MIN, NOW)).toBe(false);
+    expect(shouldJudge('reconcile-ok', true, null, NOW)).toBe(false);
+  });
+  it('an absent reconcile-ok row (before the first healthy run after deploy) does not page', () => {
+    expect(shouldJudge('reconcile-ok', false, NOW - 5 * MIN, NOW)).toBe(false);
+  });
+  it('other sources are always judged, absent or not', () => {
+    expect(shouldJudge('reconcile', false, null, NOW)).toBe(true);
+  });
+  it('the page names the degraded state and carries the skip reason', () => {
+    const m = staleMessage(row({ source: 'reconcile-ok', lastTickAtMs: NOW - 2 * 3600e3 }), NOW, 'reconcile SKIPPED (hl read failed)');
+    expect(m).toMatch(/RECONCILE DEGRADED 2\.0h/);
+    expect(m).toContain('hl read failed');
   });
 });

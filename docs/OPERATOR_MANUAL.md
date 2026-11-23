@@ -36,6 +36,10 @@ NAS or desktop cannot move money.
 **Cron heartbeats.** The auto-exit and reconcile routes write `scout_heartbeat` rows
 (`source` = `auto-exit-cron` and `reconcile`). The ladder-watch tick pages Discord when a
 row is older than 30 min (re-page at most every 6h). `desk-review` also flags them STALE.
+The reconcile route also writes `reconcile-ok`, but only on a run where the reconcile and
+the fill backfill both completed. The tick pages RECONCILE DEGRADED when `reconcile-ok`
+is older than 30 min while `reconcile` is fresh: the route runs, but it skips on HL read
+faults and heals nothing. One skipped run does not page.
 The Scout tab shows only the scout rows (`scout-watch`, `scout-cycle`).
 
 **Monthly spot-check:** healthchecks.io shows green · cron-job.org history shows 200s ·

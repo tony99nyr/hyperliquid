@@ -37,14 +37,16 @@ describe('GET /api/cron/reconcile-positions', () => {
     const res = await GET(req('nas'));
     expect(res.status).toBe(200);
     expect(writeScoutHeartbeat).toHaveBeenCalledWith('ok', expect.stringContaining('via nas'), 'reconcile');
-    expect(writeScoutHeartbeat).toHaveBeenCalledTimes(1);
+    // Only a healed run moves the heal heartbeat the degraded-run page watches.
+    expect(writeScoutHeartbeat).toHaveBeenCalledWith('ok', expect.stringContaining('via nas'), 'reconcile-ok');
+    expect(writeScoutHeartbeat).toHaveBeenCalledTimes(2);
   });
 
   it('writes a DEGRADED heartbeat when the backfill skipped (alive but not healing)', async () => {
     backfillExchangeFills.mockResolvedValue({ skipped: true, reason: 'HL fills read failed', scanned: 0, inserted: 0, unattributed: 0 });
     await GET(req());
     expect(writeScoutHeartbeat).toHaveBeenCalledWith('degraded', expect.stringContaining('SKIPPED'), 'reconcile');
-    expect(writeScoutHeartbeat).toHaveBeenCalledTimes(1);
+    expect(writeScoutHeartbeat).toHaveBeenCalledTimes(1); // no 'reconcile-ok': a skip heals nothing
   });
 
   it('writes a DEGRADED heartbeat when the reconcile skipped (an HL read fault must not look healthy)', async () => {

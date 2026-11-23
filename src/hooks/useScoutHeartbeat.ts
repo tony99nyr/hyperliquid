@@ -40,7 +40,9 @@ export function useScoutHeartbeat(opts: { enabled?: boolean } = {}): RealtimeTab
     filter: null,
     orderColumn: 'last_tick_at',
     orderAscending: false,
-    limit: 5,
+    // Room for every source (scout x2, prod crons x2, reconcile-ok) plus headroom: the
+    // Scout tab finds its rows by source, and a full window would drop the slowest one.
+    limit: 10,
     enabled: opts.enabled ?? true,
   });
 }
