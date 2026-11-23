@@ -34,8 +34,6 @@ export interface UseRealtimeChannelOptions<T extends { id: string }> {
 
 export type RealtimeChannelState<T> = RealtimeRowsState<T>;
 
-const DEFAULT_LIMIT = 200;
-
 /**
  * Subscribe to one session-scoped table. Returns accumulated rows + status.
  * Re-subscribes when `table` or `sessionId` change.
@@ -43,7 +41,7 @@ const DEFAULT_LIMIT = 200;
 export function useRealtimeChannel<T extends { id: string }>(
   opts: UseRealtimeChannelOptions<T>,
 ): RealtimeChannelState<T> {
-  const { table, sessionId, map, compare, limit = DEFAULT_LIMIT } = opts;
+  const { table, sessionId, map, compare, limit } = opts;
   return useRealtimeRows({
     table,
     filter: sessionId ? { column: 'session_id', value: sessionId } : null,

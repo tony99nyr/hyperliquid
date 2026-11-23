@@ -46,8 +46,6 @@ export interface UseRealtimeTableOptions<T extends { id: string }> {
 
 export type RealtimeTableState<T> = RealtimeRowsState<T>;
 
-const DEFAULT_LIMIT = 200;
-
 /**
  * Subscribe to one GLOBAL (un-session-scoped) table. Returns accumulated rows +
  * status. Re-subscribes when table / filter / order / enabled change.
@@ -55,7 +53,7 @@ const DEFAULT_LIMIT = 200;
 export function useRealtimeTable<T extends { id: string }>(
   opts: UseRealtimeTableOptions<T>,
 ): RealtimeTableState<T> {
-  const { table, map, compare, limit = DEFAULT_LIMIT } = opts;
+  const { table, map, compare, limit } = opts;
   const filterColumn = opts.filter?.column ?? null;
   const filterValue = opts.filter?.value ?? null;
   // An address-scoped read with a missing value is inert (caller intends to wait).

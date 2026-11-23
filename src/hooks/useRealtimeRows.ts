@@ -28,8 +28,8 @@ export interface RealtimeRowsOptions<T extends { id: string }> {
   map: (row: RealtimeRow) => T;
   /** Sort comparator applied after each accumulate. */
   compare: (a: T, b: T) => number;
-  /** Max rows to retain (oldest dropped after sort). */
-  limit: number;
+  /** Max rows to retain (oldest dropped after sort). Default 200. */
+  limit?: number;
   /** Snapshot order column and direction. */
   orderColumn: string;
   orderAscending: boolean;
@@ -60,6 +60,15 @@ export interface RealtimeRowsState<T> {
  */
 const REALTIME_REFETCH_MS = 60_000;
 
+const DEFAULT_LIMIT = 200;
+
+/**
+ * The most events one snapshot in flight records for replay. A snapshot that
+ * misses more (a hung request while the socket stays busy) is dropped: its
+ * replay would be incomplete, and the next snapshot replaces it.
+ */
+const MAX_MISSED_EVENTS = 500;
+
 /**
  * Per-subscribe uniqueness for the realtime channel topic.
  *
@@ -85,7 +94,7 @@ function uniqueTopicSuffix(): string {
 }
 
 export function useRealtimeRows<T extends { id: string }>(opts: RealtimeRowsOptions<T>): RealtimeRowsState<T> {
-  const { table, topic, map, compare, limit, orderColumn, orderAscending, enabled } = opts;
+  const { table, topic, map, compare, limit = DEFAULT_LIMIT, orderColumn, orderAscending, enabled } = opts;
   const filterColumn = opts.filter?.column ?? null;
   const filterValue = opts.filter?.value ?? null;
 
@@ -135,7 +144,8 @@ export function useRealtimeRows<T extends { id: string }>(opts: RealtimeRowsOpti
         let q = client.from(table).select('*');
         if (filterColumn && filterValue !== null) q = q.eq(filterColumn, filterValue);
         const { data, error: fetchErr } = await q.order(orderColumn, { ascending: orderAscending }).limit(limit);
-        if (!active || seq < applied) return;
+        // Dropped: a later snapshot was applied, or this one missed too many events.
+        if (!active || seq < applied || !inFlight.has(seq)) return;
         if (fetchErr) {
           setError(fetchErr.message);
           setLoaded(true);
@@ -170,7 +180,10 @@ export function useRealtimeRows<T extends { id: string }>(opts: RealtimeRowsOpti
           { event: '*', schema: 'public', table, ...(pgFilter ? { filter: pgFilter } : {}) },
           (payload) => {
             if (!active) return;
-            for (const missed of inFlight.values()) missed.push(payload);
+            for (const [seq, missed] of inFlight) {
+              if (missed.length >= MAX_MISSED_EVENTS) inFlight.delete(seq);
+              else missed.push(payload);
+            }
             setRows((prev) => apply(prev, payload));
           },
         )
