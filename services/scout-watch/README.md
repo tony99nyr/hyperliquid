@@ -18,8 +18,10 @@ is the offline fallback). Costs **zero model tokens**.
    daemon spawns `scripts/scout-headless.sh` (snapshot → headless Sonnet decision →
    strict-JSON paper trade). Do NOT add a separate consumer cron as well: two consumers
    can both open on the same directive.
-3. **The prod-cron poker**: every 10 min it pokes `/api/cron/auto-exit` and
-   `/api/cron/reconcile-positions` with `AUTO_EXIT_CRON_SECRET` from `.env.local`.
+3. **The fallback prod-cron poker**: every 10 min it checks the `reconcile` and
+   `auto-exit-cron` heartbeats. When the NAS stamped both in the last 12 min and no
+   NAS poke failed, it does nothing. Otherwise it pokes `/api/cron/auto-exit` and `/api/cron/reconcile-positions`
+   with `AUTO_EXIT_CRON_SECRET` from `.env.local`.
    Rotating that secret needs a `.env.local` update here as well as on the NAS.
 
 Paper mode does NOT come from `.env.local` (which has no `TRADING_MODE`). Three pins set

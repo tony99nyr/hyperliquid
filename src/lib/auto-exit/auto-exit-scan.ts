@@ -10,6 +10,8 @@
 
 import { listActiveSessions } from '@/lib/cockpit/session-service';
 import { loadOpenPositions } from '@/lib/cockpit/fill-persistence-service';
+import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 export interface ScanCandidate {
   sessionId: string;
@@ -41,4 +43,22 @@ export async function listExitCandidates(): Promise<ScanCandidate[]> {
     }
   }
   return candidates;
+}
+
+/** Open positions in active LIVE sessions, counted STRICTLY: any read error throws, so a
+ * caller can tell "confirmed none" from "could not read" (listExitCandidates fails soft
+ * to an empty list, which must never justify skipping the auto-exit). */
+export async function countLiveOpenPositions(client: SupabaseClient = getServiceRoleClient()): Promise<number> {
+  const { data: sessions, error } = await client.from('sessions').select('id').eq('status', 'active').eq('mode', 'live');
+  if (error || !sessions) throw new Error(`live sessions read failed: ${error?.message ?? 'no data'}`);
+  const ids = (sessions as Array<{ id: string }>).map((s) => s.id);
+  if (ids.length === 0) return 0;
+  const { count, error: posError } = await client
+    .from('positions')
+    .select('session_id', { count: 'exact', head: true })
+    .in('session_id', ids)
+    .neq('side', 'flat')
+    .gt('sz', 0);
+  if (posError || count === null) throw new Error(`live positions count failed: ${posError?.message ?? 'no count'}`);
+  return count;
 }

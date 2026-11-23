@@ -57,7 +57,12 @@ One `nas-watch.sh` tick runs these steps (see the script header):
 2. `pnpm rubric --once`: opportunity scan + position reviews + `market_snapshots`.
 3. `pnpm vault-watch --once`: vault NAV snapshots for the scout lanes.
 4. `pnpm scout:lanes`: per-lane scorecard snapshot for the Scout tab.
-5. Pokes `/api/cron/auto-exit` and `/api/cron/reconcile-positions` with the bearer.
+5. `pnpm cron:nas`: pokes `/api/cron/reconcile-positions` with the bearer, then pokes
+   `/api/cron/auto-exit` unless the reconcile poke succeeded and no live position is open.
+   Then it stamps the auto-exit heartbeat itself, except on the first tick of each hour,
+   which pokes anyway so a broken route still pages. On a failed poke it marks both
+   heartbeats `nas-poke-failed`, so `scout:watch` pokes instead. Vercel Hobby caps
+   Active CPU at 4 hours a month (hit 2026-11-22).
 
 - **auto-exit**: the Layer-1 risk-exit detector. LIVE in production; the kill-switch is
   `AUTO_EXIT_ENABLED`. See [LIVE_AUTO_EXIT.md](./LIVE_AUTO_EXIT.md).

@@ -42,6 +42,10 @@ export async function reconcileLivePositions(client: SupabaseClient = getService
   try {
     const ch = await fetchClearinghouseState(addr, { uncached: true }); // cron: once per tick, must see a FRESH read (never memoized)
     if (ch.stale) return { skipped: true, reason: 'HL read stale — refusing to reconcile', checked: 0, flattened: 0, resynced: 0 };
+    // An invalid address returns an EMPTY, non-stale book with `error` set, and a body
+    // without assetPositions lists none: neither may read as "every position closed"
+    // (it would flatten the whole ledger).
+    if (ch.error || ch.positionsListed !== true) return { skipped: true, reason: `HL read error — refusing to reconcile: ${ch.error ?? 'no assetPositions in the read'}`, checked: 0, flattened: 0, resynced: 0 };
     hl = ch.positions.map((p) => ({ coin: p.coin, szi: p.szi, entryPx: p.entryPx, leverage: p.leverage }));
   } catch (err) {
     return { skipped: true, reason: `HL read failed: ${extractErrorMessage(err)}`, checked: 0, flattened: 0, resynced: 0 };

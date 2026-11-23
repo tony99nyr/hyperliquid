@@ -27,6 +27,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs, optionalNumber, header, line, run } from './_skill-runtime';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
+import { nasCoversProdCrons, PROD_CRON_SOURCES } from '@/lib/auto-exit/cron-poke-business-logic';
 import { fetchCandles } from '@/lib/hyperliquid/candle-service';
 import {
   runScoutWatchCycle,
@@ -206,7 +207,8 @@ async function enforceExits(ts: string): Promise<void> {
 // PROD-CRON POKE (retro 2026-10-03): the reconcile + auto-exit crons ran DEAD for
 // six weeks because their external poker (the NAS secret file) went stale after a
 // secret rotation. This daemon holds the CURRENT secret via .env.local, so it pokes
-// both routes every POKE_EVERY_MS as a redundant trigger. Idempotent server-side;
+// both routes every POKE_EVERY_MS as a redundant trigger, but only while the NAS
+// heartbeats are stale (nasCoversProdCrons). Idempotent server-side;
 // a failure logs at most once per hour (the heartbeat rows are the real alarm).
 const POKE_EVERY_MS = 10 * 60_000;
 const POKE_URLS = [
@@ -216,11 +218,33 @@ const POKE_URLS = [
 let lastPokeAt = 0;
 const lastPokeErrorLogAt: Record<string, number> = {}; // per-URL throttle (review 10-03)
 
+async function nasCoversProdCronsNow(): Promise<boolean> {
+  try {
+    const { data, error } = await getServiceRoleClient()
+      .from('scout_heartbeat')
+      .select('source, last_tick_at, status, detail')
+      .in('source', [...PROD_CRON_SOURCES]);
+    if (error || !data) return false;
+    const rows = (data as Array<{ source: string; last_tick_at: string; status: string | null; detail: string | null }>).map((r) => ({
+      source: r.source,
+      lastTickAtMs: Date.parse(r.last_tick_at),
+      status: r.status,
+      detail: r.detail,
+    }));
+    return nasCoversProdCrons(rows, Date.now());
+  } catch {
+    return false;
+  }
+}
+
 async function pokeProdCrons(ts: string): Promise<void> {
   if (Date.now() - lastPokeAt < POKE_EVERY_MS) return;
   lastPokeAt = Date.now();
   const secret = process.env.AUTO_EXIT_CRON_SECRET;
   if (!secret) return; // box without the secret: the NAS poker is then the only trigger
+  // FALLBACK ONLY (2026-11-22, Vercel Hobby Active-CPU cap): while the NAS keeps both
+  // cron heartbeats fresh, this poke only doubled the calls. A failed read pokes.
+  if (await nasCoversProdCronsNow()) return;
   // Parallel + per-URL error throttle: a slow route must not stall the trigger tick,
   // and one URL's noise must not silence the other's first error for an hour.
   await Promise.allSettled(

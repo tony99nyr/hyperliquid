@@ -9,10 +9,11 @@ export PATH="/volume1/home/admin/.local/node/bin:/usr/local/bin:/usr/bin:/bin:$P
 # Runs a single cycle of: (1) health watch (per-coin health/P&L/alerts -> Supabase),
 # (2) rubric scan (deterministic opportunity scan + position reviews + market_snapshots
 # -> Supabase), (3) vault-watch --once (vault NAV snapshots), (4) scout:lanes (per-lane
-# scorecards), and (5) OPTIONAL Vercel pokes of /api/cron/auto-exit AND
-# /api/cron/reconcile-positions. The pokes run only when a bearer is present:
+# scorecards), and (5) the prod crons (pnpm cron:nas): Vercel pokes of
+# /api/cron/reconcile-positions (every tick) and /api/cron/auto-exit (skipped while
+# the book is confirmed flat). The pokes need a bearer:
 # AUTO_EXIT_CRON_SECRET in the env, else the $REPO/.auto-exit-secret file. scout:watch on
-# the office box pokes the same routes, so a secret rotation must update BOTH boxes.
+# the office box is the fallback poker, so a secret rotation must update BOTH boxes.
 # LEADER-watch is intentionally NOT here — the
 # always-on `services/trader-watch` daemon already keeps leader_positions fresh ~every
 # 30s, so a 5-min `--once` tick here would just double-write (wasted HL calls).
@@ -42,7 +43,6 @@ export PATH="/volume1/home/admin/.local/node/bin:/usr/local/bin:/usr/bin:/bin:$P
 # (or export HEALTHCHECKS_NAS_WATCH_URL). Without it, pinging is skipped (no-op).
 
 REPO="${HL_COCKPIT_DIR:-/volume1/home/admin/hyperliquid}"
-AUTO_EXIT_URL="${AUTO_EXIT_URL:-https://hyperliquid-rouge.vercel.app/api/cron/auto-exit}"
 
 # --- make pnpm/node findable under cron's minimal PATH ---
 for p in /etc/profile "$HOME/.profile"; do [ -f "$p" ] && . "$p" >/dev/null 2>&1; done
@@ -131,23 +131,17 @@ case "$UTC_H" in 07|15|23)
   fi ;;
 esac
 
-# --- Vercel pokes (same CRON_SECRET, kept OUT of git) ---
+# --- Prod crons (Vercel Hobby caps Active CPU, so poke only when needed) ---
+# pnpm cron:nas pokes the reconcile every tick, and skips the auto-exit poke while
+# the book is confirmed flat. Same CRON_SECRET, kept OUT of git.
 SECRET="${AUTO_EXIT_CRON_SECRET:-}"
 [ -z "$SECRET" ] && [ -f "$REPO/.auto-exit-secret" ] && SECRET="$(cat "$REPO/.auto-exit-secret" 2>/dev/null | tr -d '\r\n')"
-RECONCILE_URL="${RECONCILE_URL:-https://hyperliquid-rouge.vercel.app/api/cron/reconcile-positions}"
 if [ -n "$SECRET" ]; then
-  log "-> auto-exit poke ($AUTO_EXIT_URL)"
-  curl -s -m 30 -H "Authorization: Bearer $SECRET" -H "X-Poker: nas" "$AUTO_EXIT_URL" 2>&1 | sed 's/^/   /'
-  echo ""
-  # Position reconciliation — mirror the cockpit's positions to the REAL HL account
-  # (flatten/resync anything closed or changed directly in the HL app). NOT gated by
-  # AUTO_EXIT — it's a data sync, never a trade. Runs server-side where the address lives.
-  log "-> reconcile-positions poke ($RECONCILE_URL)"
-  curl -s -m 30 -H "Authorization: Bearer $SECRET" -H "X-Poker: nas" "$RECONCILE_URL" 2>&1 | sed 's/^/   /'
-  echo ""
+  export AUTO_EXIT_CRON_SECRET="$SECRET"
 else
-  log "-> Vercel pokes SKIPPED (no AUTO_EXIT_CRON_SECRET env and no $REPO/.auto-exit-secret file)"
+  log "-> no AUTO_EXIT_CRON_SECRET env and no $REPO/.auto-exit-secret file: Vercel pokes will be skipped"
 fi
+run_step "prod crons (pnpm cron:nas)" "$PNPM" cron:nas
 
 if [ "$ERR" -eq 0 ]; then
   log "=== tick done (ok) ==="
