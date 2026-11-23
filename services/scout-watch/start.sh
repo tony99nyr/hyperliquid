@@ -27,6 +27,8 @@ fi
 # nothing it spawns can ever read a stray live mode. The interactive scout session
 # is separately protected by .env.local (paper) + the assertScoutPaperMode guard.
 export TRADING_MODE=paper
+# Desk policy: the claude CLI runs on the subscription only, never on API billing.
+unset ANTHROPIC_API_KEY
 
 # Already running? (PID file points at a live process)
 if [ -f "$PID_FILE" ]; then

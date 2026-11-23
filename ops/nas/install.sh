@@ -9,7 +9,7 @@
 # install and uninstall command needs root. check and status also work as admin.
 #   cd /volume1/home/admin/hyperliquid && git pull origin main
 #   sh ops/nas/install.sh check --probe-claude          (as admin)
-#   sudo sh ops/nas/install.sh install-scout             (as root)
+#   sudo sh ops/nas/install.sh install-scout --office-stopped   (as root)
 #
 # Commands:
 #   check [--probe-claude]  Preflight. Changes nothing. --probe-claude runs one tiny
@@ -17,8 +17,10 @@
 #   install-retro           Add the Monday 12:57 cron line and send a Discord test ping.
 #   install-scout           Add the scout-watch cron lines (@reboot start, */3 watchdog),
 #                           start the daemon and wait for its first consumer cycle.
-#                           REFUSES while another box writes a fresh scout-watch
-#                           heartbeat: stop the office-box unit first.
+#                           Needs --office-stopped: Tony confirms that the office
+#                           box unit and the scout Claude session are stopped. It
+#                           also REFUSES while another box writes a fresh heartbeat
+#                           (a stale row alone does not prove the other daemon died).
 #   uninstall-scout         Remove the scout-watch cron lines and stop the daemon.
 #   uninstall-retro         Remove the desk-retro cron line.
 #   status                  Daemon, heartbeat, cron lines, last consumer result.
@@ -39,6 +41,7 @@ TAG_RETRO="# hl-nas:desk-retro"
 # A heartbeat younger than this means a scout-watch daemon still runs somewhere.
 FRESH_SEC=300
 HOST="$(hostname 2>/dev/null)"
+[ -n "$HOST" ] || { echo "hostname is empty: cannot tell this box's heartbeat apart" >&2; exit 1; }
 
 cd "$REPO" || exit 1
 mkdir -p logs "$SCOUT_DIR/logs"
@@ -78,7 +81,9 @@ cron_replace() {
     fail "cannot read the crontab of $(id -un): run this command with sudo"
     return 1
   fi
-  cp "$tmp.old" "$REPO/logs/crontab-backup-$(date +%Y%m%d-%H%M%S)"
+  backup="$REPO/logs/crontab-backup-$(date +%Y%m%d-%H%M%S)"
+  # Other root jobs can hold secrets: admin must not read the backup.
+  (umask 077 && cp "$tmp.old" "$backup")
   grep -vF "$tag" "$tmp.old" > "$tmp"
   [ -n "$2" ] && printf '%s\n' "$2" >> "$tmp"
   crontab "$tmp"
@@ -135,21 +140,22 @@ resolve_claude() {
 # --- preflight ----------------------------------------------------------------
 
 preflight() {
-  note "repo $REPO at $(git log -1 --format='%h %cd' --date=short 2>/dev/null)"
+  note "repo $REPO at $(git -c safe.directory="$REPO" log -1 --format='%h %cd' --date=short 2>/dev/null)"
   if [ -f scripts/scout-heartbeat-check.ts ]; then
     pass "checkout has the NAS install support"
   else
     fail "checkout is older than the NAS install support (run: git pull origin main)"
   fi
-  [ -z "$(git status --porcelain --untracked-files=no 2>/dev/null)" ] \
+  [ -z "$(git -c safe.directory="$REPO" status --porcelain --untracked-files=no 2>&1)" ] \
     && pass "checkout has no local edits" \
     || warn "checkout has local edits (git status): update.sh may fail to pull"
 
   if . ./ops/node-env.sh 2>/dev/null; then pass "node $("$HL_NODE" -v) at $HL_NODE"; else fail "no Node >= 24 (see ops/node-env.sh)"; fi
-  if command -v pnpm >/dev/null 2>&1 && pnpm -v >/dev/null 2>&1; then
-    pass "pnpm $(pnpm -v)"
+  # Cron PATH has only what node-env.sh adds, so pnpm must sit beside Node 24.
+  if [ -x "$(dirname "${HL_NODE:-/x}")/pnpm" ] && pnpm -v >/dev/null 2>&1; then
+    pass "pnpm $(pnpm -v) beside Node 24 (found by cron)"
   else
-    fail "pnpm not usable on PATH (npm i -g pnpm, with the Node 24 PATH exported)"
+    fail "no pnpm beside Node 24 in $(dirname "${HL_NODE:-?}") (npm i -g pnpm, with the Node 24 PATH exported)"
   fi
   [ -x node_modules/.bin/tsx ] && pass "tsx installed" || fail "node_modules/.bin/tsx missing (run: sh services/scout-watch/build.sh)"
 
@@ -169,7 +175,7 @@ preflight() {
   else
     warn "no AUTO_EXIT_CRON_SECRET: the scout-watch fallback poke is off (nas-watch still pokes)"
   fi
-  if has_key ANTHROPIC_API_KEY || grep -q '^ANTHROPIC_API_KEY=' "$SCOUT_ENV" 2>/dev/null; then
+  if has_key ANTHROPIC_API_KEY || grep -Eq '^[[:space:]]*(export[[:space:]]+)?ANTHROPIC_API_KEY=' .env.local "$SCOUT_ENV" 2>/dev/null; then
     fail "ANTHROPIC_API_KEY is set: remove it (desk policy: subscription login only)"
   else
     pass "no ANTHROPIC_API_KEY"
@@ -239,11 +245,15 @@ cmd_install_retro() {
 
 cmd_install_scout() {
   need_root || return
+  if [ "$OFFICE_STOPPED" != 1 ]; then
+    fail "add --office-stopped once the office box ran 'systemctl --user disable --now scout-watch' and the scout Claude session is stopped"
+    return
+  fi
   preflight
   if [ "$FAILS" -gt 0 ]; then note "STOP  fix the FAIL lines, then run install-scout again"; return; fi
   # The interlock: a fresh heartbeat from another host means another box still runs it.
   case "$HB_AGE:$HB_DETAIL" in
-    none:*|*"host=$HOST"*) ;;
+    none:*|*" host=$HOST") ;;
     *)
       if [ "$HB_AGE" -lt "$FRESH_SEC" ] 2>/dev/null; then
         fail "another scout-watch wrote a heartbeat ${HB_AGE}s ago ($HB_DETAIL). On the office box run 'systemctl --user stop scout-watch', wait 5 minutes, then run install-scout again"
@@ -285,7 +295,7 @@ report_scout() {
   [ -n "$pid" ] && pass "scout-watch runs (PID $pid, user $(stat -c %U "/proc/$pid" 2>/dev/null), memory $(rss_mb "[s]cripts/scout-watch.ts") MB)" || fail "scout-watch is not running (tail of $LOG below)"
   heartbeat
   case "$HB_DETAIL" in
-    *"host=$HOST"*)
+    *" host=$HOST")
       if [ "$HB_AGE" -lt "$FRESH_SEC" ] 2>/dev/null; then pass "heartbeat ${HB_AGE}s old from this NAS: $HB_DETAIL"; else fail "heartbeat from this NAS is ${HB_AGE}s old"; fi ;;
     *) fail "heartbeat ${HB_AGE}s old is not from this NAS: $HB_DETAIL" ;;
   esac
@@ -325,7 +335,9 @@ cmd_status() {
 }
 
 PROBE_CLAUDE=0
+OFFICE_STOPPED=0
 [ "$2" = "--probe-claude" ] && PROBE_CLAUDE=1
+[ "$2" = "--office-stopped" ] && OFFICE_STOPPED=1
 
 case "$1" in
   check) preflight; summary check ;;

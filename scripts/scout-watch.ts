@@ -311,9 +311,17 @@ async function oneCycle(state: ScoutState): Promise<ScoutState> {
 run(async () => {
   const releaseLock = await acquirePidLock(path.join(process.cwd(), '.scout-watch.pid'));
   try {
-  const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  const dirty = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim().length > 0;
-  line(`Provenance: commit=${commit} dirty=${dirty}`);
+  // Provenance is a log line only. git can refuse the checkout (on the NAS root runs the
+  // daemon in an admin-owned repo: "dubious ownership"), and that must not stop the daemon.
+  let provenance = 'commit=unknown';
+  try {
+    const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const dirty = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().length > 0;
+    provenance = `commit=${commit} dirty=${dirty}`;
+  } catch {
+    /* keep commit=unknown */
+  }
+  line(`Provenance: ${provenance}`);
   const args = parseArgs(process.argv.slice(2));
   const once = args['once'] === true || args['once'] === 'true';
   const interval = Math.max(MIN_INTERVAL_SECONDS, optionalNumber(args, 'interval', DEFAULT_INTERVAL_SECONDS));
