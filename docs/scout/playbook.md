@@ -648,3 +648,77 @@ the implementation with expectancy or amend the registered rule.
   (marks empty)". HL returned 429 on candle reads during this retro; the
   closed-trade figures do not depend on them.
 - **No rule changes.** DESK_PROFITABILITY untouched (no lever's verdict moved).
+
+### 2026-11-23 review (day 153, weekly retro)
+
+- **Scorecard (deterministic):** the account-level KILL stands (legacy lanes,
+  stopped): net −$92.55 over 117 trades. **htf-trend reached n=20:** 20 closed,
+  65% win, net +$113.51, run-rate $30/mo; donchian-20-10 expectancy +0.49R.
+  The two closes are the SOL short (+1.29R) and the ETH short (+1.16R), both
+  from Nov 11, both closed Nov 16. Two shorts are open (BTC from Nov 19, ETH
+  from Nov 20). The local card printed INCOMPLETE because HL returned 429 and
+  the funding estimate missed 203 hours. The NAS card (18:00Z) has zero missing
+  hours and prints GRADUATE.
+- **htf-trend n=20 checkpoint: NOT graduated.** The bar amended on 2026-10-03
+  needs +0.25R or more with the largest 5-day entry cluster removed, after the
+  0.7 haircut. `pnpm analysis:profit-review`: all 20 closes mean +0.49R (sum
+  +9.82R, +0.34R after the haircut). With the Aug 20 cluster removed (4
+  closes): n=16, mean +0.08R, sum +1.30R, net $8.47 (+0.06R after the
+  haircut). The lane fails the cluster-robust test. The kill bar is not met, so
+  the lane CONTINUES on paper under its frozen rules. The card's GRADUATE does
+  not apply the amended test (follow-up recorded). Side coverage: 6 longs sum
+  +4.16R, 14 shorts sum +5.66R. `HTF_TREND_ALERT_ENABLED` stays OFF unless the
+  operator decides otherwise.
+- **Shadow replay:** htf-trend 43 episodes, 13 matched, 30 missed (70%; two
+  runs, because HL 429 made the HYPE and SOL candles stale on the first run).
+  New this week: BTC short Nov 18 and ETH short Nov 19 matched. HYPE short and
+  SOL short of Nov 20 missed: the 2-per-direction cap was full from 00:07Z (BTC
+  and ETH shorts open). Zero unexplained misses.
+- **Killed-lane trade (fault):** the scout opened a compression-straddle BTC
+  short on Nov 18 16:47Z. The lane was KILLed on Oct 26, but the decision
+  snapshot still showed its directive as live. The scout closed the position
+  before the BTC htf-trend entry of Nov 19 00:06Z. Paper only. Follow-up
+  recorded: remove the directives of killed lanes from the snapshot.
+- **Perf report (since last retro), quoted:** "fade-short-pyramid | live |
+  COLLECT | n/a | 2 | 1 | $9.69 | +0.10 r_slip | 2/10", "dip-long-pyramid |
+  live | COLLECT | n/a | 1 | 1 | $0.74 | +0.02 r_slip | 1/10", "htf-trend |
+  scout | GRADUATE | ... | 20 | 1 | $16.01 | +1.23 r | 20/20". Forecast to
+  2026-12-23: "P5 / P50 / P95: $0.00 / $0.74 / $11.91", "P(net>0): 51.3% |
+  Expected monthly: $3.48 | Realised live net/month (last 90d): $3.48" (inputs
+  hash 7069baaf). The ledger resolved before the report this week, so the
+  window-edge artefact of Nov 9 and Nov 16 did not recur.
+- **Ledger expectancy:** 30 closed, net $49.39, expectancy +0.03R. Every family
+  COLLECT. New rows, all runaway auto-drafts: HYPE short 2ac1a598 WON +0.43R,
+  ETH short 6f4ddfed LOST −0.22R (the size of its stop at 1770.1), SOL long bd867d12 SCRATCH
+  +0.02R; HYPE short 62887f99 and SOL short a3354503 never filled. The stale
+  FOMC long leg 82a31710 resolved as never filled. fade-short-pyramid: 3
+  closed, +0.08R. event-straddle unchanged: 8/10.
+- **Discard vet:** 2 new discards, both never triggered (HYPE runaway short
+  62887f99 expired; SOL runaway short a3354503 disarmed Nov 21 by desk-review).
+  0 missed targets. The run also re-listed older rows (5bec6dd2, the two CPI
+  legs and 82a31710); the earlier retros counted them, so this retro does not.
+- **Open pre-registration counts (4b):** htf-trend paper 20/20, +2, checkpoint
+  failed on the cluster test (above). event-straddle entry-deadline: 0, starts
+  with the FOMC of Dec 9. Entry overshoot: no new event leg this week.
+  Cross-venue funding-veto capture: NAS-only; baseline 64 captures at Nov 16
+  15:55Z, 85 expected by Nov 23 15:55Z; the operator's nas-doctor run confirms
+  it. Capital-rule: not a first-of-month retro. htf-trend-live: DRAFTED, not in
+  effect.
+- **Steward counterfactuals:** 22 scorable, helped 5 / hurt 11, net −$17.74 if
+  followed. Unchanged. Advisory-only status stays.
+- **Benchmarks (cards written 18:00Z, fresh):** HLP buy-hold +$12.42 over 27d;
+  funding-carry card +$0.98 over 30d. Both are noise against the $50 bar.
+- **Calendar:** pruned CPI Nov 10 and PPI Nov 13. Added CPI (Dec data) Jan 13
+  2027 13:30Z (BLS schedule), a straddle class. Verified on the official pages:
+  FOMC Dec 8-9 (Fed calendar), PCE Nov 25 and Dec 23 (BEA), CPI Dec 10 (BLS).
+  Retail sales Nov 17 and NVIDIA Nov 17 prune next retro. The January FOMC
+  (Jan 26-27 2027, tentative on the Fed page) is not in yet: add it after a
+  second read.
+- **Agent actions:** the take-profit action shipped (0b55cce) and placed its
+  first live order on Nov 23 at about 02:08Z (ETH 1519). The ETH short closed
+  later for a loss the size of its stop; the venue shows no position and no
+  resting order.
+- **Markers:** unchanged, 2 confirmed and 2 proposed. The proposals wait for the
+  operator in the Lanes tab.
+- **No rule changes.** DESK_PROFITABILITY gains a dated entry: lever 1 reached
+  its n=20 checkpoint and did not pass.

@@ -116,6 +116,22 @@ live-path fixes 3e325a9 · compression-straddle KILL) — **pending operator
 confirmation** in the cockpit Lanes tab Change log. Lane statistics split only
 on a confirmed marker.
 
+## 2026-11-23 review
+
+### Lever 1 (finish the bars): the n=20 checkpoint did not pass
+
+htf-trend reached 20 closes: 65% win, net +$113.51, mean +0.49R (+0.34R after
+the 0.7 haircut). The registered cluster-robust test fails. With the largest
+5-day entry cluster removed (Aug 20, 4 closes) the lane shows n=16, mean
++0.08R, net $8.47 (+0.06R after the haircut), against a bar of +0.25R. The
+lane is not graduated. Its kill bar is not met, so it continues on paper under
+its frozen rules. The live drafter flag `HTF_TREND_ALERT_ENABLED` stays OFF
+unless the operator decides otherwise. The lane card prints GRADUATE because
+it does not apply the amended test; do not read that card as the verdict.
+
+The ladder ledger is at 30 closed, net $49.39, +0.03R. Every family is still
+COLLECT.
+
 ## How to reproduce the numbers
 
 - **Core numbers:** run `pnpm analysis:profit-review` (`scripts/analysis/profit-review/`).

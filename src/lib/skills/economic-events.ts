@@ -25,16 +25,9 @@ export interface EconEvent {
 }
 
 export const ECONOMIC_EVENTS: EconEvent[] = [
-  // (BoE Nov 5 and NFP Nov 6 printed before the 2026-11-09 retro; pruned at the
-  // 2026-11-16 retro. The straddle shadow replay matches legs by the print
+  // (CPI Nov 10 and PPI Nov 13 printed before the 2026-11-16 retro; pruned at the
+  // 2026-11-23 retro. The straddle shadow replay matches legs by the print
   // timestamp in each ladder's thesis, not this list.)
-  {
-    name: 'CPI (Oct data)',
-    atIso: '2026-11-10T13:30:00Z',
-    note: 'BLS CPI 08:30 ET / 13:30 UTC (EST; verified BLS schedule). Binary macro — straddle it.',
-    straddleCoin: 'BTC',
-    prepLeadMinutes: 30,
-  },
   {
     name: 'Retail sales (Oct data)',
     atIso: '2026-11-17T13:30:00Z',
@@ -53,7 +46,14 @@ export const ECONOMIC_EVENTS: EconEvent[] = [
   {
     name: 'CPI (Nov data)',
     atIso: '2026-12-10T13:30:00Z',
-    note: 'BLS CPI 08:30 ET / 13:30 UTC (EST; verified BLS schedule 2026-11-02). Binary macro — straddle it.',
+    note: 'BLS CPI 08:30 ET / 13:30 UTC (EST; verified BLS schedule 2026-11-23). Binary macro — straddle it.',
+    straddleCoin: 'BTC',
+    prepLeadMinutes: 30,
+  },
+  {
+    name: 'CPI (Dec data)',
+    atIso: '2027-01-13T13:30:00Z',
+    note: 'BLS CPI 08:30 ET / 13:30 UTC (EST; verified BLS schedule 2026-11-23). Binary macro — straddle it.',
     straddleCoin: 'BTC',
     prepLeadMinutes: 30,
   },
@@ -61,7 +61,7 @@ export const ECONOMIC_EVENTS: EconEvent[] = [
     name: 'FOMC (Dec)',
     atIso: '2026-12-09T19:00:00Z',
     note:
-      'Rate decision 14:00 ET / 19:00 UTC (Dec 8-9 meeting; EST) + presser 19:30. Dot-plot/SEP meeting, ' +
+      'Rate decision 14:00 ET / 19:00 UTC (Dec 8-9 meeting, verified Fed calendar 2026-11-23; EST) + presser 19:30. Dot-plot/SEP meeting, ' +
       'Warsh Fed #3 — binary macro, straddle it.',
     straddleCoin: 'BTC',
     prepLeadMinutes: 30,
@@ -78,11 +78,10 @@ export const ECONOMIC_EVENTS: EconEvent[] = [
   { name: 'NFP (Feb data)', atIso: '2027-03-05T13:30:00Z', note: 'BLS Employment Situation, 08:30 ET. Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
   // PCE dates from bea.gov/news/schedule (2026 checked 2026-10-24; 2027 Feb-Dec published, checked 2026-11-02).
   { name: 'PCE (Oct data)', atIso: '2026-11-25T13:30:00Z', note: 'BEA Personal Income and Outlays, 08:30 ET. Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
-  { name: 'PCE (Nov data)', atIso: '2026-12-23T13:30:00Z', note: 'BEA Personal Income and Outlays, 08:30 ET. Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
+  { name: 'PCE (Nov data)', atIso: '2026-12-23T13:30:00Z', note: 'BEA Personal Income and Outlays, 08:30 ET (verified BEA schedule 2026-11-23). Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
   // TODO: the PCE (Dec data) release (late Jan 2027) is not yet on the BEA schedule; add it when published.
   { name: 'PCE (Jan 2027 data)', atIso: '2027-02-25T13:30:00Z', note: 'BEA Personal Income and Outlays, 08:30 ET (verified BEA schedule 2026-11-02). Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
   // PPI dates from the BLS PPI release schedule (checked 2026-10-24; Oct-data date added 2026-11-02).
-  { name: 'PPI (Oct data)', atIso: '2026-11-13T13:30:00Z', note: 'BLS Producer Price Index, 08:30 ET (verified BLS schedule 2026-11-02). Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
   { name: 'PPI (Nov data)', atIso: '2026-12-15T13:30:00Z', note: 'BLS Producer Price Index, 08:30 ET. Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
   { name: 'PPI (Dec data)', atIso: '2027-01-14T13:30:00Z', note: 'BLS Producer Price Index, 08:30 ET. Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
   { name: 'PPI (Jan data)', atIso: '2027-02-12T13:30:00Z', note: 'BLS Producer Price Index, 08:30 ET. Awareness only (catalyst-class study).', prepLeadMinutes: 0 },
