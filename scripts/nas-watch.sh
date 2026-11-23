@@ -141,6 +141,8 @@ if [ -n "$SECRET" ]; then
 else
   log "-> no AUTO_EXIT_CRON_SECRET env and no $REPO/.auto-exit-secret file: Vercel pokes will be skipped"
 fi
+# The tick-start minute keeps the hourly auto-exit probe in its window on a slow tick.
+export NAS_TICK_UTC_MINUTE="$UTC_M"
 run_step "prod crons (pnpm cron:nas)" "$PNPM" cron:nas
 
 if [ "$ERR" -eq 0 ]; then

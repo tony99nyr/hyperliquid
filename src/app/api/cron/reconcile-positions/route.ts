@@ -35,10 +35,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // weeks (a stale poker bearer) while three phantom-position incidents piled up.
     // The heartbeat row makes the next silent death visible in every desk review.
     const poker = request.headers.get('x-poker') ?? 'unknown';
+    // A skipped reconcile or backfill is alive but not healing: stamp it degraded, not ok.
+    const skips = [
+      summary.skipped ? `reconcile SKIPPED (${summary.reason})` : null,
+      backfill.skipped ? `backfill SKIPPED (${backfill.reason})` : null,
+    ].filter((s): s is string => s !== null);
     await writeScoutHeartbeat(
-      backfill.skipped ? 'degraded' : 'ok',
-      backfill.skipped
-        ? `reconcile ran but backfill SKIPPED (${backfill.reason}) via ${poker}`
+      skips.length > 0 ? 'degraded' : 'ok',
+      skips.length > 0
+        ? `reconcile ran but ${skips.join(', ')} via ${poker}`
         : `reconcile ran: checked ${summary.checked}, backfill scanned ${backfill.scanned} inserted ${backfill.inserted} via ${poker}`,
       'reconcile',
     ).catch(() => {});
