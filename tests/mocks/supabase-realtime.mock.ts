@@ -60,8 +60,10 @@ export interface RealtimeBrowserMock {
   /** Emit a postgres_changes event to all live channels matching a topic prefix. */
   emit(topicPrefix: string, payload: MockChangePayload): void;
   /**
-   * Hold the NEXT snapshot query open until `resolve` runs, to test events that
-   * arrive while a snapshot is in flight.
+   * Hold the next snapshot query open until `resolve` runs, to test events that
+   * arrive while a snapshot is in flight. Each call holds one more query, in
+   * order. The held result goes to whichever hook queries next, so use it with
+   * one hook mounted.
    */
   deferNextFetch(): { resolve(data: unknown[]): void };
   reset(): void;
@@ -127,7 +129,7 @@ export function createRealtimeBrowserMock(
   });
 
   type FetchResult = { data: unknown[]; error: { message: string } | null };
-  let deferred: Promise<FetchResult> | null = null;
+  const deferred: Promise<FetchResult>[] = [];
 
   // Minimal initial-snapshot builder: from(t).select().eq().order().limit() → result.
   const from = vi.fn(() => {
@@ -136,11 +138,8 @@ export function createRealtimeBrowserMock(
       eq: () => builder,
       order: () => builder,
       limit: () => {
-        if (deferred) {
-          const held = deferred;
-          deferred = null;
-          return held;
-        }
+        const held = deferred.shift();
+        if (held) return held;
         return Promise.resolve({ data: initialFetch.data ?? [], error: initialFetch.error ?? null });
       },
     };
@@ -160,11 +159,11 @@ export function createRealtimeBrowserMock(
     },
     deferNextFetch() {
       let resolve: (r: FetchResult) => void = () => {};
-      deferred = new Promise<FetchResult>((r) => { resolve = r; });
+      deferred.push(new Promise<FetchResult>((r) => { resolve = r; }));
       return { resolve: (data) => resolve({ data, error: null }) };
     },
     reset() {
-      deferred = null;
+      deferred.length = 0;
       channels.length = 0;
       requestedTopics.length = 0;
       liveByTopic.clear();

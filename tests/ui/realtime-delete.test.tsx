@@ -62,6 +62,20 @@ describe('realtime hooks remove a row on DELETE', () => {
   // scout_heartbeat left the realtime publication in 0024, so production sends no
   // event here. The test covers the generic useRealtimeTable path and a mapper
   // whose id is a non-`id` primary key.
+  it('useRealtimeTable (scout_heartbeat) drops the row keyed by source', async () => {
+    await act(async () => {
+      render(<HeartbeatHarness />);
+    });
+    expect(screen.getByTestId('ids').textContent).toBe('scout-watch,reconcile-ok');
+
+    await act(async () => {
+      realtime.emit('rt-table:scout_heartbeat:', { eventType: 'DELETE', new: {}, old: { source: 'scout-watch' } });
+    });
+    expect(screen.getByTestId('ids').textContent).toBe('reconcile-ok');
+  });
+});
+
+describe('realtime hooks and a snapshot in flight', () => {
   it('keeps a DELETE that arrives while a snapshot is in flight', async () => {
     await act(async () => {
       render(<ChannelHarness />);
@@ -85,15 +99,25 @@ describe('realtime hooks remove a row on DELETE', () => {
     expect(screen.getByTestId('ids').textContent).toBe('b');
   });
 
-  it('useRealtimeTable (scout_heartbeat) drops the row keyed by source', async () => {
+  it('drops a snapshot that resolves after a later one was applied', async () => {
     await act(async () => {
-      render(<HeartbeatHarness />);
+      render(<ChannelHarness />);
     });
-    expect(screen.getByTestId('ids').textContent).toBe('scout-watch,reconcile-ok');
-
+    const older = realtime.deferNextFetch();
+    const newer = realtime.deferNextFetch();
     await act(async () => {
-      realtime.emit('rt-table:scout_heartbeat:', { eventType: 'DELETE', new: {}, old: { source: 'scout-watch' } });
+      window.dispatchEvent(new Event('online'));
+      window.dispatchEvent(new Event('online'));
     });
-    expect(screen.getByTestId('ids').textContent).toBe('reconcile-ok');
+    await act(async () => {
+      newer.resolve([{ id: 'b', created_at: 1 }]);
+    });
+    await act(async () => {
+      older.resolve([
+        { id: 'a', created_at: 2 },
+        { id: 'b', created_at: 1 },
+      ]);
+    });
+    expect(screen.getByTestId('ids').textContent).toBe('b');
   });
 });

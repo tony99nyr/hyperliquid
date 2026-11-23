@@ -114,37 +114,42 @@ export function useRealtimeRows<T extends { id: string }>(opts: RealtimeRowsOpti
     const apply = (prev: T[], payload: RealtimeChangePayload) =>
       applyRealtimeChange(prev, payload, mapRef.current, compareRef.current, limit);
 
-    // Events that arrive while a snapshot is in flight. The snapshot may have been
-    // read before them (a DELETE would put the row back), so each snapshot replays
-    // the events that arrived after it started. Replay is safe: accumulate is by
-    // id and a DELETE of a missing row is a no-op. Cleared when no snapshot is
-    // in flight, so no start index points into a cleared log.
-    let eventLog: RealtimeChangePayload[] = [];
-    let inFlight = 0;
+    // Snapshots in flight, by start order, each with the events that arrived after
+    // it started. A snapshot may have been read before an event (a DELETE would
+    // put the row back), so it replays them. Replay is safe: accumulate is by id
+    // and a DELETE of a missing row is a no-op. A snapshot that resolves after a
+    // later-started one was applied is stale, so the hook drops it. Known gap: a
+    // replayed upsert whose DELETE was lost in a disconnect stays until the next
+    // snapshot, which on an idle visible tab waits for activity or a reconnect.
+    const inFlight = new Map<number, RealtimeChangePayload[]>();
+    let started = 0;
+    let applied = 0;
 
     // 1) Snapshot loader: the authoritative latest-N rows. Runs on mount, then
     // periodically and on tab-visible/reconnect as the realtime safety net.
     const loadSnapshot = async () => {
-      inFlight += 1;
-      const start = eventLog.length;
+      const seq = ++started;
+      const missed: RealtimeChangePayload[] = [];
+      inFlight.set(seq, missed);
       try {
         let q = client.from(table).select('*');
         if (filterColumn && filterValue !== null) q = q.eq(filterColumn, filterValue);
         const { data, error: fetchErr } = await q.order(orderColumn, { ascending: orderAscending }).limit(limit);
-        if (!active) return;
+        if (!active || seq < applied) return;
         if (fetchErr) {
           setError(fetchErr.message);
           setLoaded(true);
           return;
         }
+        applied = seq;
+        // Older snapshots still in flight are now stale: stop recording for them.
+        for (const s of inFlight.keys()) if (s < seq) inFlight.delete(s);
         const mapped = (data ?? []).map((r) => mapRef.current(r as RealtimeRow));
         mapped.sort(compareRef.current);
-        const next = eventLog.slice(start).reduce(apply, mapped.slice(0, limit));
-        setRows(next);
+        setRows(missed.reduce(apply, mapped.slice(0, limit)));
         setLoaded(true);
       } finally {
-        inFlight -= 1;
-        if (inFlight === 0) eventLog = [];
+        inFlight.delete(seq);
       }
     };
 
@@ -165,7 +170,7 @@ export function useRealtimeRows<T extends { id: string }>(opts: RealtimeRowsOpti
           { event: '*', schema: 'public', table, ...(pgFilter ? { filter: pgFilter } : {}) },
           (payload) => {
             if (!active) return;
-            if (inFlight > 0) eventLog.push(payload);
+            for (const missed of inFlight.values()) missed.push(payload);
             setRows((prev) => apply(prev, payload));
           },
         )

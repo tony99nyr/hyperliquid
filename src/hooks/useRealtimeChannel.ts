@@ -54,6 +54,6 @@ export function useRealtimeChannel<T extends { id: string }>(
     orderColumn: opts.orderColumn ?? 'created_at',
     orderAscending: opts.orderAscending ?? false,
     // No session ⇒ inert (no fetch, no subscription).
-    enabled: sessionId !== null && sessionId !== '',
+    enabled: Boolean(sessionId),
   });
 }

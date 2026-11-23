@@ -214,7 +214,7 @@ export function accumulateById<T extends { id: string }>(
 
 /** The parts of a Supabase postgres_changes payload that the hooks read. */
 export interface RealtimeChangePayload {
-  eventType?: 'INSERT' | 'UPDATE' | 'DELETE' | '*';
+  eventType?: 'INSERT' | 'UPDATE' | 'DELETE';
   new?: unknown;
   old?: unknown;
 }
@@ -228,10 +228,11 @@ export interface RealtimeChangePayload {
  *   builds its id from the primary key (`id` for every table in the realtime
  *   publication). A DELETE that matches no row returns `prev` unchanged.
  *
- * A session-filtered channel does get the DELETE of its own rows and not those of
- * other sessions (checked against the live Supabase project on 2026-11-23, with
- * analysis_log). realtime-js sends `new: {}` on a DELETE, so a DELETE never
- * reads `new`.
+ * Supabase documents that DELETE events are not filterable. A probe against the
+ * live project (analysis_log, 2026-11-23) still showed a session-filtered channel
+ * get the DELETE of its own rows and not those of other sessions. Either way the
+ * snapshot refresh stays the backstop. realtime-js sends `new: {}` on a DELETE,
+ * so a DELETE never reads `new`.
  */
 export function applyRealtimeChange<T extends { id: string }>(
   prev: T[],
