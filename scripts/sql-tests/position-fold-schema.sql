@@ -30,3 +30,7 @@ insert into fills (session_id, coin) values ('a0000000-0000-0000-0000-0000000000
 insert into positions (session_id, coin, side, updated_at) values ('a0000000-0000-0000-0000-000000000000', 'NEW', 'flat', now() - interval '1 day');
 -- PAPER: a paper fill with no row: never listed by the live gap check.
 insert into fills (session_id, coin) values ('b0000000-0000-0000-0000-000000000000', 'PAPER');
+-- NOROW: a recent live fill whose first fold failed (no row): listed.
+insert into fills (session_id, coin) values ('a0000000-0000-0000-0000-000000000000', 'NOROW');
+-- OLDNOROW: an old live fill with no row (predates the positions table): not listed.
+insert into fills (session_id, coin, filled_at) values ('a0000000-0000-0000-0000-000000000000', 'OLDNOROW', now() - interval '30 days');

@@ -15,8 +15,8 @@ select pg_temp.check((select ledger_fill_count from positions where coin = 'OLD'
 select pg_temp.check((select ledger_fill_count from positions where coin = 'MARK') = 0, 'marked row left at 0');
 select pg_temp.check((select ledger_fill_count from positions where coin = 'NEW') = 0, 'row with a newer fill left at 0');
 select pg_temp.check(
-  (select array_agg(coin order by coin) from list_unfolded_live_positions(10)) = array['MARK', 'NEW'],
-  'gap list holds only the pending live rows');
+  (select array_agg(coin order by coin) from list_unfolded_live_positions(10)) = array['MARK', 'NEW', 'NOROW'],
+  'gap list holds only the pending live rows and a recent fill with no row');
 
 -- The version check: newer applies, stale is refused, equal applies.
 insert into fills (session_id, coin) select 'a0000000-0000-0000-0000-000000000000', 'ETH' from generate_series(1, 4);
@@ -27,9 +27,9 @@ select pg_temp.check((select sz = 4 and realized_pnl_usd = 20 and leverage = 5 a
 select pg_temp.check((select count(*) = 2 from pnl where coin = 'ETH'), 'pnl snapshot only for applied folds');
 
 -- Metadata: a repeated close keeps it; a reopen with unknown metadata clears it.
-select apply_position_fold('a0000000-0000-0000-0000-000000000000', 'ETH', 'flat', 0, 0, 30, 2, null, null, null, 4);
-select apply_position_fold('a0000000-0000-0000-0000-000000000000', 'ETH', 'flat', 0, 0, 30, 2, null, null, null, 4);
-select pg_temp.check((select leverage = 5 and lane = 'carry' from positions where coin = 'ETH'), 'repeated close keeps metadata');
+select pg_temp.check(apply_position_fold('a0000000-0000-0000-0000-000000000000', 'ETH', 'flat', 0, 0, 30, 2, null, null, null, 4), 'close at an equal count applies');
+select pg_temp.check(apply_position_fold('a0000000-0000-0000-0000-000000000000', 'ETH', 'flat', 0, 0, 30, 2, null, null, null, 4), 'repeated close applies');
+select pg_temp.check((select side = 'flat' and sz = 0 and leverage = 5 and lane = 'carry' from positions where coin = 'ETH'), 'repeated close is flat and keeps metadata');
 insert into fills (session_id, coin) values ('a0000000-0000-0000-0000-000000000000', 'ETH');
 select apply_position_fold('a0000000-0000-0000-0000-000000000000', 'ETH', 'long', 1, 100, 30, 2, '2026-11-22T00:00:00Z', null, null, 5);
 select pg_temp.check((select leverage is null and lane is null from positions where coin = 'ETH'), 'reopen takes its own (unknown) metadata');
@@ -43,11 +43,13 @@ delete from fills where id = (select id from fills where coin = 'ETH' limit 1);
 select pg_temp.check(apply_position_fold('a0000000-0000-0000-0000-000000000000', 'ETH', 'long', 1, 100, 30, 2, '2026-11-22T00:00:00Z', null, null, 4), 'count above ledger heals');
 
 reset role;
-set role anon;
-do $$ begin
-  perform apply_position_fold('a0000000-0000-0000-0000-000000000000', 'ETH', 'long', 9, 1, 1, 1, null, null, null, 99);
-  raise exception 'FAILED: anon may execute apply_position_fold';
-exception when insufficient_privilege then null;
-end $$;
-reset role;
+-- Only service_role may run the functions. Check the grants directly: anon has no
+-- table privileges here, so a call would fail on the table even with a leaked grant.
+select pg_temp.check(not has_function_privilege(r, f, 'execute'), r || ' cannot execute ' || f)
+from unnest(array['anon', 'authenticated', 'public']) as r,
+     unnest(array[
+       'public.apply_position_fold(uuid, text, text, float8, float8, float8, float8, timestamptz, float8, text, integer)',
+       'public.list_unfolded_live_positions(integer)']) as f
+where r <> 'public';
+select pg_temp.check(has_function_privilege('service_role', 'public.list_unfolded_live_positions(integer)', 'execute'), 'service_role can execute the gap list');
 select 'position-fold SQL contract: PASS';

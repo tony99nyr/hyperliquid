@@ -123,7 +123,7 @@ describe('backfillExchangeFills: a fill that fails to book is retried', () => {
     const { client } = gapClient((c) => (isFoldWrite(c) ? { error: { message: 'timeout' } } : undefined));
     const r = await backfillExchangeFills({ client });
     expect(r.skipped).toBe(true);
-    expect(r.incomplete).toBe('1 fold(s) pending');
+    expect(r.incomplete).toBe('1 fold(s) pending, last error: applyFillToPositionRows fold write failed: timeout');
   });
 
   it('reports a failed gap read as incomplete', async () => {

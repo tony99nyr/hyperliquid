@@ -110,11 +110,17 @@ async function retryPendingFolds(client: SupabaseClient): Promise<string | null>
   const rows = (data ?? []) as Array<{ session_id: string; coin: string }>;
   const more = rows.length > PENDING_FOLD_LIMIT;
   let pending = 0;
+  let lastError = '';
   for (const r of rows.slice(0, PENDING_FOLD_LIMIT)) {
-    await applyFillToPositionRows({ sessionId: r.session_id, coin: r.coin }, { client }).catch(() => pending++);
+    await applyFillToPositionRows({ sessionId: r.session_id, coin: r.coin }, { client }).catch((err: unknown) => {
+      pending++;
+      lastError = err instanceof Error ? err.message : String(err);
+    });
   }
+  // Name the last error, so a permanent fault (a missing function) shows in the summary.
+  const why = lastError ? `, last error: ${lastError}` : '';
   const rest = more ? ' (more positions wait for the next run)' : '';
-  return pending > 0 || more ? `${pending} fold(s) pending${rest}` : null;
+  return pending > 0 || more ? `${pending} fold(s) pending${why}${rest}` : null;
 }
 
 /** Insert and fold every exchange fill that the ledger is missing. */
