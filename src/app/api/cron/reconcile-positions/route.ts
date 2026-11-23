@@ -17,7 +17,7 @@ import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
 import { getAutoExitCronSecret } from '@/lib/auto-exit/auto-exit-config';
 import { reconcileLivePositions } from '@/lib/cockpit/position-reconcile-service';
 import { backfillExchangeFills } from '@/lib/cockpit/fill-backfill-service';
-import { writeScoutHeartbeat } from '@/lib/scout/scout-heartbeat-service';
+import { restartDegradedClockAfterOutage, writeScoutHeartbeat } from '@/lib/scout/scout-heartbeat-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,6 +44,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // stale while 'reconcile' stays fresh (degraded for 30+ min, not one transient skip).
     if (skips.length === 0) {
       await writeScoutHeartbeat('ok', `reconcile + backfill completed via ${poker}`, 'reconcile-ok').catch(() => {});
+    } else {
+      await restartDegradedClockAfterOutage().catch(() => {});
     }
     await writeScoutHeartbeat(
       skips.length > 0 ? 'degraded' : 'ok',

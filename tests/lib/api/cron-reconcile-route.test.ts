@@ -11,12 +11,16 @@ const getAutoExitCronSecret = vi.fn();
 const reconcileLivePositions = vi.fn();
 const backfillExchangeFills = vi.fn();
 const writeScoutHeartbeat = vi.fn().mockResolvedValue(undefined);
+const restartDegradedClockAfterOutage = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('@/lib/infrastructure/auth/auth', () => ({ verifyCronBearer: (...a: unknown[]) => verifyCronBearer(...a) }));
 vi.mock('@/lib/auto-exit/auto-exit-config', () => ({ getAutoExitCronSecret: (...a: unknown[]) => getAutoExitCronSecret(...a) }));
 vi.mock('@/lib/cockpit/position-reconcile-service', () => ({ reconcileLivePositions: (...a: unknown[]) => reconcileLivePositions(...a) }));
 vi.mock('@/lib/cockpit/fill-backfill-service', () => ({ backfillExchangeFills: (...a: unknown[]) => backfillExchangeFills(...a) }));
-vi.mock('@/lib/scout/scout-heartbeat-service', () => ({ writeScoutHeartbeat: (...a: unknown[]) => writeScoutHeartbeat(...a) }));
+vi.mock('@/lib/scout/scout-heartbeat-service', () => ({
+  writeScoutHeartbeat: (...a: unknown[]) => writeScoutHeartbeat(...a),
+  restartDegradedClockAfterOutage: (...a: unknown[]) => restartDegradedClockAfterOutage(...a),
+}));
 
 import { GET } from '@/app/api/cron/reconcile-positions/route';
 import type { NextRequest } from 'next/server';
@@ -40,6 +44,7 @@ describe('GET /api/cron/reconcile-positions', () => {
     // Only a healed run moves the heal heartbeat the degraded-run page watches.
     expect(writeScoutHeartbeat).toHaveBeenCalledWith('ok', expect.stringContaining('via nas'), 'reconcile-ok');
     expect(writeScoutHeartbeat).toHaveBeenCalledTimes(2);
+    expect(restartDegradedClockAfterOutage).not.toHaveBeenCalled();
   });
 
   it('writes a DEGRADED heartbeat when the backfill skipped (alive but not healing)', async () => {
@@ -47,6 +52,8 @@ describe('GET /api/cron/reconcile-positions', () => {
     await GET(req());
     expect(writeScoutHeartbeat).toHaveBeenCalledWith('degraded', expect.stringContaining('SKIPPED'), 'reconcile');
     expect(writeScoutHeartbeat).toHaveBeenCalledTimes(1); // no 'reconcile-ok': a skip heals nothing
+    // ...but it restarts the degraded clock BEFORE the reconcile stamp, which it reads.
+    expect(restartDegradedClockAfterOutage.mock.invocationCallOrder[0]).toBeLessThan(writeScoutHeartbeat.mock.invocationCallOrder[0]);
   });
 
   it('writes a DEGRADED heartbeat when the reconcile skipped (an HL read fault must not look healthy)', async () => {

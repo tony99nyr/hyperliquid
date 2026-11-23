@@ -4,7 +4,7 @@ import {
   staleMessage,
   STALE_AFTER_MS,
   REALERT_COOLDOWN_MS,
-  shouldJudge,
+  healRow,
 } from '@/lib/scout/scout-heartbeat-alert-business-logic';
 
 const NOW = 1_784_300_000_000;
@@ -74,25 +74,29 @@ describe('staleMessage routes the operator to the RIGHT system (review 10-03)', 
 
 describe('reconcile-ok: page on a long degraded run, not on one skip (2026-11-22)', () => {
   const MIN = 60_000;
-  it('a degraded route (reconcile fresh, reconcile-ok 31 min old) pages', () => {
-    expect(shouldJudge('reconcile-ok', true, NOW - 5 * MIN, NOW)).toBe(true);
-    expect(heartbeatVerdict(row({ source: 'reconcile-ok', lastTickAtMs: NOW - 31 * MIN }), NOW)).toBe('stale-page');
+  const ok = (lastHealMinAgo: number) => row({ source: 'reconcile-ok', lastTickAtMs: NOW - lastHealMinAgo * MIN });
+  const judge = (lastHealMinAgo: number, parentMinAgo: number) => {
+    const r = healRow(ok(lastHealMinAgo), NOW - parentMinAgo * MIN, NOW);
+    return r === null ? 'skipped' : heartbeatVerdict(r, NOW);
+  };
+  it('a route degraded for 31 min (parent fresh) pages', () => {
+    expect(judge(36, 5)).toBe('stale-page');
   });
-  it('one transient skip does not page: the last healthy run is minutes old', () => {
-    expect(heartbeatVerdict(row({ source: 'reconcile-ok', lastTickAtMs: NOW - 12 * MIN }), NOW)).toBe('ok');
+  it('one transient skip does not page', () => {
+    expect(judge(12, 2)).toBe('ok');
   });
   it('a dead route pages once, as RECONCILE CRON SILENT, not also as degraded', () => {
-    expect(shouldJudge('reconcile-ok', true, NOW - 45 * MIN, NOW)).toBe(false);
-    expect(shouldJudge('reconcile-ok', true, null, NOW)).toBe(false);
-  });
-  it('an absent reconcile-ok row (before the first healthy run after deploy) does not page', () => {
-    expect(shouldJudge('reconcile-ok', false, NOW - 5 * MIN, NOW)).toBe(false);
-  });
-  it('other sources are always judged, absent or not', () => {
-    expect(shouldJudge('reconcile', false, null, NOW)).toBe(true);
+    // healthy until it died 20 min ago: no degraded time at all
+    expect(judge(20, 20)).toBe('ok');
+    // degraded for 20 min, then died: the frozen duration never reaches 30 min
+    expect(judge(45, 25)).toBe('ok');
+    // parent stale or absent: the parent's own page covers it
+    expect(judge(60, 45)).toBe('skipped');
+    expect(healRow(ok(60), null, NOW)).toBeNull();
   });
   it('the page names the degraded state and carries the skip reason', () => {
-    const m = staleMessage(row({ source: 'reconcile-ok', lastTickAtMs: NOW - 2 * 3600e3 }), NOW, 'reconcile SKIPPED (hl read failed)');
+    const r = healRow(ok(125), NOW - 5 * MIN, NOW)!;
+    const m = staleMessage(r, NOW, 'reconcile SKIPPED (hl read failed)');
     expect(m).toMatch(/RECONCILE DEGRADED 2\.0h/);
     expect(m).toContain('hl read failed');
   });

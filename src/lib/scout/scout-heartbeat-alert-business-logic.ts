@@ -33,23 +33,17 @@ export const STALE_AFTER_MS: Record<string, number> = {
 export const HEAL_PARENT: Record<string, string> = { 'reconcile-ok': 'reconcile' };
 
 /**
- * Decide whether to judge `source` at all this tick. A heal row is skipped:
- *  - when absent: it appears on the first healthy run after deploy, and an absent row
- *    must not page as "never healed" before that run;
- *  - when its parent is absent or stale: the parent's own stale page covers that case.
- * Every other source is always judged (an absent row pages, review F7).
+ * The row that heartbeatVerdict judges for a heal source, or null to skip it this tick.
+ * Its age is the DEGRADED duration: the parent's last tick minus the last healed run,
+ * not the wall-clock age. A route that stops running freezes its parent's tick, so the
+ * duration stops growing and only the parent's own stale page fires: one page per
+ * fault, with the right runbook. Skipped while the parent is absent or stale.
  */
-export function shouldJudge(
-  source: string,
-  present: boolean,
-  parentLastTickAtMs: number | null,
-  now: number,
-): boolean {
-  const parent = HEAL_PARENT[source];
-  if (parent === undefined) return true;
-  if (!present || parentLastTickAtMs === null) return false;
-  const parentStaleAfter = STALE_AFTER_MS[parent] ?? 0;
-  return now - parentLastTickAtMs <= parentStaleAfter;
+export function healRow(heal: HeartbeatRow, parentLastTickAtMs: number | null, now: number): HeartbeatRow | null {
+  const parent = HEAL_PARENT[heal.source];
+  if (parent === undefined || parentLastTickAtMs === null) return null;
+  if (now - parentLastTickAtMs > (STALE_AFTER_MS[parent] ?? 0)) return null;
+  return { ...heal, lastTickAtMs: now - Math.max(0, parentLastTickAtMs - heal.lastTickAtMs) };
 }
 
 /** Re-page at most every 6h while stale (the operator got the message; don't spam). */
@@ -82,7 +76,7 @@ export function staleMessage(row: HeartbeatRow, now: number, parentDetail: strin
   const hours = ((now - row.lastTickAtMs) / 3_600_000).toFixed(1);
   if (row.source === 'reconcile-ok') {
     const why = parentDetail ? ` Last run: ${parentDetail.slice(0, 160)}.` : '';
-    return `⚠️ **RECONCILE DEGRADED ${hours}h** — the reconcile route runs but has not completed a reconcile + fill backfill. Phantom positions can accumulate.${why} Check the HL info API and HL_ACCOUNT_ADDRESS.`;
+    return `⚠️ **RECONCILE DEGRADED ${hours}h** — the reconcile route runs but has not completed a reconcile + fill backfill. Phantom positions can accumulate.${why} Fix the cause in the skip reason (an HL read fault, HL_ACCOUNT_ADDRESS, or a Supabase read).`;
   }
   if (row.source === 'reconcile') {
     return `⚠️ **RECONCILE CRON SILENT ${hours}h** — the ledger self-heal (venue-fill backfill) is not running. Phantom positions can accumulate. Check the pokers: the NAS .auto-exit-secret bearer and the local scout daemon, then the Vercel route.`;
