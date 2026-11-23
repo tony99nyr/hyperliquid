@@ -61,8 +61,8 @@ export async function backfillExchangeFills(
     return { skipped: true, reason: `HL fills read failed: ${hl.error}`, scanned: 0, inserted: 0, unattributed: 0 };
   }
   const summary = await bookMissingFills(hl.fills, client);
-  // A failed read that fell back to an expired cache is incomplete: the newest fills
-  // can be missing. Say so, so the reconcile heartbeat does not count the run as healed.
+  // A failed read that fell back to an expired cache (the newest fills can be missing),
+  // or rows that failed to book, leave the run incomplete: the heartbeat must not count it as healed.
   const why = [hl.error ? `HL fills read failed, used cached fills: ${hl.error}` : null, summary.incomplete ?? null]
     .filter((w): w is string => w !== null)
     .join('; ');
@@ -188,7 +188,12 @@ async function bookMissingFills(fills: HlFill[], client: SupabaseClient): Promis
     }
   }
   const summary: BackfillSummary = { skipped: false, scanned: fills.length, inserted, unattributed };
-  return failed > 0 ? { ...summary, incomplete: `${failed} fill(s) failed to book` } : summary;
+  // An unattributed fill is unbooked, like the no-live-sessions skip above. A late partial
+  // (underBooked) is not counted: no run can book it, and it has its own alert.
+  const why = [failed > 0 ? `${failed} fill(s) failed to book` : null, unattributed > 0 ? `${unattributed} fill(s) unattributed` : null]
+    .filter((w): w is string => w !== null)
+    .join('; ');
+  return why ? { ...summary, incomplete: why } : summary;
 }
 
 function describe(c: BackfillCandidate): string {
