@@ -94,6 +94,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
   }
   if (ladder.status !== 'draft') return NextResponse.json({ ok: false, error: `ladder is '${ladder.status}', only a draft can be armed` }, { status: 409 });
+  if (ladder.archivedAt) return NextResponse.json({ ok: false, error: 'ladder is archived (discarded); it cannot be armed' }, { status: 409 });
   // Defense-in-depth with the DB CHECK: a scout-authored ladder can NEVER be armed.
   if (ladder.author !== 'operator') return NextResponse.json({ ok: false, error: 'only operator-authored ladders can be armed' }, { status: 403 });
 

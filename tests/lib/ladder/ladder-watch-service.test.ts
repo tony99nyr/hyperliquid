@@ -62,12 +62,13 @@ const isLadderAutofireEnabled = vi.fn();
 const listLadders = vi.fn();
 const getLadderWithRungs = vi.fn();
 const markLadderExpired = vi.fn();
+const disarmLadder = vi.fn();
 const fetchCandles = vi.fn();
 const performLadderRungFire = vi.fn();
 const computeHtfExitIndicators = vi.fn();
 
 vi.mock('@/lib/ladder/ladder-flags', () => ({ isLadderAutofireEnabled: (...a: unknown[]) => isLadderAutofireEnabled(...a) }));
-vi.mock('@/lib/ladder/ladder-service', () => ({ listLadders: (...a: unknown[]) => listLadders(...a), getLadderWithRungs: (...a: unknown[]) => getLadderWithRungs(...a), markLadderExpired: (...a: unknown[]) => markLadderExpired(...a) }));
+vi.mock('@/lib/ladder/ladder-service', () => ({ listLadders: (...a: unknown[]) => listLadders(...a), getLadderWithRungs: (...a: unknown[]) => getLadderWithRungs(...a), markLadderExpired: (...a: unknown[]) => markLadderExpired(...a), disarmLadder: (...a: unknown[]) => disarmLadder(...a) }));
 vi.mock('@/lib/hyperliquid/candle-service', () => ({ fetchCandles: (...a: unknown[]) => fetchCandles(...a) }));
 vi.mock('@/lib/ladder/ladder-fire-service', () => ({ performLadderRungFire: (...a: unknown[]) => performLadderRungFire(...a) }));
 vi.mock('@/lib/ladder/ladder-htf-exit-service', () => ({ computeHtfExitIndicators: (...a: unknown[]) => computeHtfExitIndicators(...a) }));
@@ -86,6 +87,7 @@ beforeEach(() => {
   isLadderAutofireEnabled.mockReturnValue(true);
   listLadders.mockResolvedValue([{ id: 'L1' }]);
   markLadderExpired.mockResolvedValue(undefined);
+  disarmLadder.mockResolvedValue(undefined);
   getLadderWithRungs.mockResolvedValue(ladder([openRung()]));
   fetchCandles.mockResolvedValue({ candles: [candle(1900), candle(2050), candle(9999)], stale: false });
   performLadderRungFire.mockResolvedValue({ fired: true, skipped: null });
@@ -105,6 +107,24 @@ describe('runLadderWatchTick', () => {
     listLadders.mockResolvedValue([{ id: 'L1', expiresAt: new Date(now - 60_000).toISOString() }]);
     const s = await runLadderWatchTick({ now });
     expect(markLadderExpired).toHaveBeenCalledWith('L1');
+    expect(s.laddersEvaluated).toBe(0);
+    expect(fetchCandles).not.toHaveBeenCalled();
+    expect(performLadderRungFire).not.toHaveBeenCalled();
+  });
+
+  it('expires an ARCHIVED armed ladder once it is overdue (the 82a31710 case)', async () => {
+    const now = 1_700_000_000_000;
+    listLadders.mockResolvedValue([{ id: 'L1', archivedAt: new Date(now - 86_400_000).toISOString(), expiresAt: new Date(now - 60_000).toISOString() }]);
+    await runLadderWatchTick({ now });
+    expect(markLadderExpired).toHaveBeenCalledWith('L1');
+    expect(disarmLadder).not.toHaveBeenCalled();
+  });
+
+  it('disarms an unexpired ARCHIVED armed ladder and never evaluates it', async () => {
+    const now = 1_700_000_000_000;
+    listLadders.mockResolvedValue([{ id: 'L1', archivedAt: new Date(now - 60_000).toISOString(), expiresAt: new Date(now + 60_000).toISOString() }]);
+    const s = await runLadderWatchTick({ now });
+    expect(disarmLadder).toHaveBeenCalledWith('L1', 'archived');
     expect(s.laddersEvaluated).toBe(0);
     expect(fetchCandles).not.toHaveBeenCalled();
     expect(performLadderRungFire).not.toHaveBeenCalled();

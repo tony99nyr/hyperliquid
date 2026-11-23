@@ -314,7 +314,7 @@ export interface HtfDraftSelectionInput {
   /** Breakout signals of this daily close. Any order: selection follows the universe order. */
   signals: HtfTrendSignal[];
   now: number;
-  /** Current draft + armed, unarchived ladders, with the stale and spent htf ladders removed. */
+  /** Unarchived drafts plus every armed ladder, with the stale and spent htf ladders removed. */
   ladders: LadderWithRungs[];
   /** Every open live position (fresh, successful read). */
   positions: HtfBookPosition[];

@@ -12,7 +12,7 @@
 
 import 'server-only';
 import { isLadderAutofireEnabled } from './ladder-flags';
-import { listLadders, getLadderWithRungs, markLadderExpired } from './ladder-service';
+import { listLadders, getLadderWithRungs, markLadderExpired, disarmLadder } from './ladder-service';
 import { evaluateLadderRungs, type RungMarketSnapshot } from './ladder-trigger-evaluator';
 import { snapshotFromCandleResult } from './ladder-watch-business-logic';
 import { ladderWindowState, entryGateClosed, isHtfChannelExitName, WATCH_CANDLE_MS } from './ladder-types';
@@ -67,6 +67,9 @@ export async function runLadderWatchTick(args: { now: number }): Promise<LadderW
     const window = ladderWindowState(l, args.now);
     if (window === 'expired') {
       await markLadderExpired(l.id).catch(() => {}); // best-effort; the fire path still refuses
+    } else if (l.archivedAt) {
+      // Archived = discarded by the operator. Never evaluate it; disarm it (the fire path refuses too).
+      await disarmLadder(l.id, 'archived').catch(() => {});
     } else if (window === 'before-window') {
       // Armed authorization stands; triggers don't evaluate yet. Purely restrictive;
       // the fire path re-checks the same predicate.

@@ -173,15 +173,21 @@ export async function getLadderWithRungs(id: string): Promise<LadderWithRungs | 
  *  false/undefined = ACTIVE only (the default the UI shows); true = ARCHIVED only (audit view). */
 export interface ListLaddersOpts {
   archived?: boolean;
+  /** Only these ladder ids, archived or not (opts.archived is then ignored). */
+  ids?: string[];
 }
 
 /** List ladders (newest first), optionally filtered by status. Excludes archived by
- *  default (set opts.archived to view the archived audit list instead). */
+ *  default (set opts.archived to view the archived audit list instead).
+ *  Exception: an ARMED row is never hidden, archived or not. The watcher must see every
+ *  armed ladder to fire or expire it, and the operator must see it to disarm it (ladder
+ *  82a31710 was archived, then armed, and never expired). */
 export async function listLadders(status?: Ladder['status'], opts?: ListLaddersOpts): Promise<Ladder[]> {
   const db = getServiceRoleClient();
   let q = db.from('ladders').select('*').order('created_at', { ascending: false });
   if (status) q = q.eq('status', status);
-  q = opts?.archived ? q.not('archived_at', 'is', null) : q.is('archived_at', null);
+  if (opts?.ids) q = q.in('id', opts.ids);
+  else q = opts?.archived ? q.not('archived_at', 'is', null) : q.or('archived_at.is.null,status.eq.armed');
   const { data, error } = await q;
   if (error) throw new Error(`listLadders failed: ${error.message}`);
   return (data ?? []).map(rowToLadder);

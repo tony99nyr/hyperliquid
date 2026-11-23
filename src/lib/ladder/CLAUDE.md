@@ -61,7 +61,7 @@ Every step is fail-closed; a failed check SKIPs (rung stays pending, retryable) 
 auto-disarms. **Do not reorder, weaken, or short-circuit these.**
 
 0. **`LADDER_AUTOFIRE_ENABLED`** — the belt-and-suspenders kill-switch at the seam (the route checks it first; this is the single enforcement point for *any* caller).
-1. Ladder exists, `status='armed'`, not expired (else `disarmLadder('expired')`).
+1. Ladder exists, `status='armed'`, not expired (else `disarmLadder('expired')`), not archived (else `disarmLadder('archived')`: an archived ladder is a discarded plan). `listLadders` never hides an armed row, so the watcher sees an archived armed ladder, expires or disarms it, and never evaluates it.
 2. **`author='operator'`** — a scout ladder can NEVER fire (defense-in-depth with the DB CHECK).
    - 2b. **mode-match** — a deployment fires only its OWN mode's ladders (`(mode==='live') === (getTradingMode()==='live')`). Checked BEFORE the claim so the matching deployment still fires it.
    - 2c. **`LADDER_LIVE_ENABLED`** re-checked at fire (live kill-switch, not only at arm).

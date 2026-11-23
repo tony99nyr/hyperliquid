@@ -151,6 +151,13 @@ describe('performLadderRungFire — guard stack', () => {
     expect(claimRungFire).not.toHaveBeenCalled();
   });
 
+  it('disarms + skips an archived ladder (a discarded plan never fires)', async () => {
+    getLadderWithRungs.mockResolvedValue(ladder({ archivedAt: new Date(NOW - 1).toISOString() }));
+    expect((await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW })).skipped).toBe('archived');
+    expect(disarmLadder).toHaveBeenCalledWith('L1', 'archived');
+    expect(claimRungFire).not.toHaveBeenCalled();
+  });
+
   it('refuses (but keeps ARMED) a ladder whose activation window has not opened', async () => {
     getLadderWithRungs.mockResolvedValue(ladder({ activeFrom: new Date(NOW + 60_000).toISOString() }));
     expect((await performLadderRungFire({ ladderId: 'L1', rungId: 'r1', now: NOW })).skipped).toBe('before-active-from');

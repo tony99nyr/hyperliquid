@@ -53,7 +53,9 @@ export async function runExpiryAlerts(now = Date.now()): Promise<ExpiryAlertSumm
   if (listError) throw new Error(`list residual expiry alerts failed: ${listError.message}`);
   if (!unstamped?.length) return summary;
   const candidates = new Set(unstamped.map((row) => row.id as string));
-  const expired = (await listLaddersWithRungs('expired')).filter((ladder) => candidates.has(ladder.id));
+  // Load the candidates by id, archived or not: a ladder archived before it was armed
+  // expires as an archived row, and the full expired history is not read every tick.
+  const expired = await listLaddersWithRungs('expired', { ids: [...candidates] });
   const eligible = expired.filter((ladder) => ladder.mode === 'live' &&
     ladder.rungs.some((rung) => rung.status === 'fired' && (rung.action === 'open' || rung.action === 'add')));
   summary.checked += eligible.length;

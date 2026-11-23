@@ -8,7 +8,7 @@
  * before reaching here. Generalizes performRiskExit (exit-only → open/add/reduce/close).
  *
  * Guard stack, in order (each fail-closed; on doubt, SKIP — never fire):
- *   1. ladder exists, status='armed', not expired (else disarm-on-expiry)
+ *   1. ladder exists, status='armed', not expired (else disarm-on-expiry), not archived (else disarm)
  *   2. author='operator' (a scout ladder can NEVER fire — defense-in-depth w/ DB CHECK)
  *   3. rung exists + status='pending'
  *   4. precondition snapshot still matches (§3.7) — any live-state drift → auto-disarm
@@ -136,6 +136,12 @@ export async function performLadderRungFire(args: { ladderId: string; rungId: st
   if (window === 'expired') {
     await disarmLadder(ladder.id, 'expired');
     return skip('expired');
+  }
+  // 1a) An archived ladder is a plan the operator discarded, and the cockpit hides it.
+  // It must never fire. Disarm is risk-reducing and leaves the resting stop in place.
+  if (ladder.archivedAt) {
+    await disarmLadder(ladder.id, 'archived');
+    return skip('archived');
   }
   // 1b) Activation window (same predicate as the watcher — ladderWindowState): an armed
   // ladder is NOT yet fireable before active_from. Restrictive only — refuse, stay armed.

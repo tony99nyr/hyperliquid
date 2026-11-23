@@ -80,6 +80,16 @@ describe('runExpiryAlerts residual', () => {
     expect(findAllStops).not.toHaveBeenCalled();
   });
 
+  it('alerts for a ladder that was archived before it was armed', async () => {
+    const archived = { ...ladder, archivedAt: '2026-10-28T17:34:39Z' };
+    listLaddersWithRungs.mockImplementation(async (status: string, opts?: { ids?: string[] }) =>
+      status === 'expired' && opts?.ids?.includes(ladder.id) ? [archived] : []);
+    const summary = await runExpiryAlerts();
+    expect(listLaddersWithRungs).toHaveBeenCalledWith('expired', { ids: [ladder.id] });
+    expect(summary.alerted).toEqual([ladder.id]);
+    expect(sendDiscord.mock.calls[0][0]).toMatch(/BTC short 0\.2 coins/);
+  });
+
   it('does not claim an alert when the position is flat', async () => {
     fetchClearinghouseState.mockResolvedValue({ stale: false, error: null, positions: [] });
     const summary = await runExpiryAlerts();

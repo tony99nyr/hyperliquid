@@ -36,6 +36,7 @@ export async function armLadder(
     })
     .eq('id', id)
     .eq('status', 'draft') // only a draft can be armed — idempotent guard
+    .is('archived_at', null) // an archived draft is hidden from the operator: never arm it
     .eq('updated_at', args.expectedUpdatedAt) // only the exact row version the operator reviewed
     .select('id');
   if (error) throw new Error(`armLadder failed: ${error.message}`);
