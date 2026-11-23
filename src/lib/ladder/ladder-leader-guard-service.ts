@@ -79,7 +79,7 @@ export async function runLeaderGuard(now = Date.now()): Promise<LeaderGuardSumma
     });
     if (!verdict.shouldDisarm || !verdict.reason) continue;
 
-    await disarmLadder(ladder.id, verdict.reason);
+    if (!(await disarmLadder(ladder.id, verdict.reason))) continue; // done or expired meanwhile
     summary.disarmed.push({ ladderId: ladder.id, reason: verdict.reason });
     const msg = `🛑 Ladder ${ladder.id.slice(0, 8)} "${ladder.title}" AUTO-DISARMED — ${verdict.reason}. Pending rungs will not fire; any open position keeps its resting stop. Review + re-arm only with a fresh thesis.`;
     const session = await getActiveSession().catch(() => null);

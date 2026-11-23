@@ -107,7 +107,7 @@ beforeEach(() => {
   setRungStatus.mockResolvedValue(undefined);
   markLadderDone.mockResolvedValue(undefined);
   disarmOcoSiblings.mockResolvedValue([]);
-  disarmLadder.mockResolvedValue(undefined);
+  disarmLadder.mockResolvedValue(true);
   getActiveSession.mockResolvedValue({ id: 's1' });
   openSession.mockResolvedValue({ id: 's1' });
   fetchAllMids.mockResolvedValue({ ETH: 2000 });

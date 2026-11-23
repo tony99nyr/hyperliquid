@@ -87,7 +87,7 @@ beforeEach(() => {
   isLadderAutofireEnabled.mockReturnValue(true);
   listLadders.mockResolvedValue([{ id: 'L1' }]);
   markLadderExpired.mockResolvedValue(undefined);
-  disarmLadder.mockResolvedValue(undefined);
+  disarmLadder.mockResolvedValue(true);
   getLadderWithRungs.mockResolvedValue(ladder([openRung()]));
   fetchCandles.mockResolvedValue({ candles: [candle(1900), candle(2050), candle(9999)], stale: false });
   performLadderRungFire.mockResolvedValue({ fired: true, skipped: null });

@@ -156,7 +156,7 @@ async function housekeep(
       if (o && reason === 'flat' && !(await confirmedFlat(o))) {
         out.errors.push(`housekeeping ${l.id.slice(0, 8)}: the second account read did not confirm a flat ${o.coin} ${o.side}: not disarmed this cycle`);
       } else if (reason) {
-        await disarmLadder(l.id, 'htf-trend-spent');
+        if (!(await disarmLadder(l.id, 'htf-trend-spent'))) continue; // done or expired meanwhile
         out.disarmedSpent.push(l.id);
         if (isDiscordConfigured()) {
           const sent = await sendDiscord(htfSpentDisarmMessage(l, reason), DISCORD_NAME).catch(() => false);

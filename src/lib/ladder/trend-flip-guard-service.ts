@@ -67,7 +67,7 @@ export async function runTrendFlipGuard(now = Date.now()): Promise<TrendFlipGuar
       ? `8h stance left bullish (now ${stance.regime}/${Math.round(stance.regimeConfidence * 100)}%, ${stance.position}${stance.enabled ? '' : ', system disabled'})`
       : 'stance absent for coin';
     const reason = `trend-flip: ${why}`;
-    await disarmLadder(ladder.id, reason);
+    if (!(await disarmLadder(ladder.id, reason))) continue; // done or expired meanwhile
     summary.disarmed.push({ ladderId: ladder.id, reason });
     const msg =
       `🛑 Ladder ${ladder.id.slice(0, 8)} "${ladder.title}" AUTO-DISARMED — ${reason}. ` +

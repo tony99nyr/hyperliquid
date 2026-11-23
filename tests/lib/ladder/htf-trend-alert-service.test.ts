@@ -52,7 +52,7 @@ beforeEach(() => {
   mocks.calendarExhausted.mockReturnValue(false); mocks.nearestBlackoutEvent.mockReturnValue(null);
   mocks.sendDiscord.mockResolvedValue(true); mocks.isDiscordConfigured.mockReturnValue(true);
   mocks.validateEnv.mockReturnValue({ COCKPIT_BASE_URL: 'https://example.test' });
-  mocks.createLadder.mockResolvedValue('created-ladder-123'); mocks.archiveLadder.mockResolvedValue(true); mocks.disarmLadder.mockResolvedValue(undefined);
+  mocks.createLadder.mockResolvedValue('created-ladder-123'); mocks.archiveLadder.mockResolvedValue(true); mocks.disarmLadder.mockResolvedValue(true);
   mocks.readHtfDaily.mockImplementation(async (coin: string) => {
     const value = dailyByCoin[coin];
     return value ? { signalCloseMs: closeMs, read: value } : null;

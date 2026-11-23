@@ -21,7 +21,7 @@ describe('ladder disarm route', () => {
     _resetRateLimits();
     verifyAdminAuth.mockResolvedValue(true);
     isSameOrigin.mockReturnValue(true);
-    disarmLadder.mockResolvedValue(undefined);
+    disarmLadder.mockResolvedValue(true);
   });
 
   it('writes the operator disarm reason and returns success on repeated disarms', async () => {

@@ -171,14 +171,19 @@ export async function disarmOcoSiblings(groupId: string | null, exceptLadderId: 
   return (data ?? []).map((r) => r.id as string);
 }
 
-/** Disarm a ladder (operator kill-switch or precondition drift): status→'disarmed'. */
-export async function disarmLadder(id: string, reason: string): Promise<void> {
+/** Disarm a ladder (operator kill-switch or precondition drift): status→'disarmed'.
+ *  Acts only on an armed or draft row, so it never overwrites a concurrent done or
+ *  expired status. Returns whether the row changed. */
+export async function disarmLadder(id: string, reason: string): Promise<boolean> {
   const db = getServiceRoleClient();
-  const { error } = await db
+  const { data, error } = await db
     .from('ladders')
     .update({ status: 'disarmed', disarmed_at: new Date().toISOString(), disarm_reason: reason, updated_at: new Date().toISOString() })
-    .eq('id', id);
+    .eq('id', id)
+    .in('status', ['armed', 'draft'])
+    .select('id');
   if (error) throw new Error(`disarmLadder failed: ${error.message}`);
+  return (data?.length ?? 0) > 0;
 }
 
 export interface DraftReanchorArgs {

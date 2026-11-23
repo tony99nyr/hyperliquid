@@ -33,9 +33,17 @@ const ladder: LadderWithRungs = {
 };
 
 let unstamped: boolean;
+let queries: Array<{ update: ReturnType<typeof vi.fn>; in: ReturnType<typeof vi.fn> }>;
+let fireRows: Array<{ rung_id: string }>;
+let fireFilters: unknown[][];
+let fireError: { message: string } | null;
 beforeEach(() => {
   vi.clearAllMocks();
   unstamped = true;
+  queries = [];
+  fireRows = [];
+  fireFilters = [];
+  fireError = null;
   listLaddersWithRungs.mockImplementation(async (status: string) => status === 'expired' ? [ladder] : []);
   getHlAccountAddress.mockReturnValue('0xabc');
   getActiveSession.mockResolvedValue({ id: 'session-1' });
@@ -43,10 +51,16 @@ beforeEach(() => {
   findAllStops.mockResolvedValue({ BTC: { oid: 99, triggerPx: 102, sz: 0.2 } });
   sendDiscord.mockResolvedValue(undefined);
   writeAnalysisLog.mockResolvedValue(undefined);
-  from.mockImplementation(() => {
+  from.mockImplementation((table: string) => {
+    if (table === 'ladder_fires') {
+      const fires = { select: () => fires, in: (...a: unknown[]) => { fireFilters.push(a); return fires; }, then: (resolve: (v: unknown) => void) => resolve(fireError ? { data: null, error: fireError } : { data: fireRows, error: null }) };
+      return fires;
+    }
     const query = {
-      select: vi.fn(), eq: vi.fn(), is: vi.fn(), update: vi.fn(),
+      select: vi.fn(), eq: vi.fn(), is: vi.fn(), in: vi.fn(), update: vi.fn(),
     };
+    queries.push(query);
+    query.in.mockImplementation(() => query);
     query.select.mockImplementation(() => query);
     query.eq.mockImplementation(() => query);
     query.is.mockImplementation(() => query);
@@ -88,6 +102,51 @@ describe('runExpiryAlerts residual', () => {
     expect(listLaddersWithRungs).toHaveBeenCalledWith('expired', { ids: [ladder.id] });
     expect(summary.alerted).toEqual([ladder.id]);
     expect(sendDiscord.mock.calls[0][0]).toMatch(/BTC short 0\.2 coins/);
+  });
+
+  const settledAt = () => new Date(Date.now() - 3_600_000).toISOString();
+  const neverFired = (disarmedAt: string) => ({ ...ladder, disarmedAt,
+    rungs: ladder.rungs.map((rung) => ({ ...rung, status: 'pending' as const })) });
+  const stampQuery = () => queries.find((q) => q.in.mock.calls.length > 0);
+
+  it('stamps a settled ladder whose entry never fired, so it leaves the candidate list', async () => {
+    listLaddersWithRungs.mockImplementation(async (status: string) => status === 'expired' ? [neverFired(settledAt())] : []);
+    const summary = await runExpiryAlerts();
+    expect(summary.alerted).toEqual([]);
+    expect(sendDiscord).not.toHaveBeenCalled();
+    expect(fetchClearinghouseState).not.toHaveBeenCalled();
+    expect(stampQuery()?.update).toHaveBeenCalledWith(expect.objectContaining({ residual_alert_at: expect.any(String) }));
+    expect(stampQuery()?.in).toHaveBeenCalledWith('id', [ladder.id]);
+  });
+
+  it('keeps watching a ladder that expired moments ago (a fire may still land)', async () => {
+    listLaddersWithRungs.mockImplementation(async (status: string) => status === 'expired' ? [neverFired(new Date().toISOString())] : []);
+    await runExpiryAlerts();
+    expect(stampQuery()).toBeUndefined();
+  });
+
+  it('pages for an entry with a fire on record, even when the rung status write failed', async () => {
+    fireRows = [{ rung_id: 'r1' }];
+    listLaddersWithRungs.mockImplementation(async (status: string) => status === 'expired' ? [neverFired(settledAt())] : []);
+    const summary = await runExpiryAlerts();
+    expect(fireFilters).toContainEqual(['rung_id', ['r1']]);
+    expect(summary.alerted).toEqual([ladder.id]);
+    expect(sendDiscord.mock.calls[0][0]).toMatch(/BTC short 0\.2 coins/);
+  });
+
+  it('stamps nothing quietly when the fire ledger is unreadable', async () => {
+    fireError = { message: 'timeout' };
+    listLaddersWithRungs.mockImplementation(async (status: string) => status === 'expired' ? [neverFired(settledAt())] : []);
+    await runExpiryAlerts();
+    expect(stampQuery()).toBeUndefined();
+  });
+
+  it('stamps a settled ladder that is flat on a good read (a later position is not its own)', async () => {
+    fetchClearinghouseState.mockResolvedValue({ stale: false, error: null, positions: [] });
+    listLaddersWithRungs.mockImplementation(async (status: string) => status === 'expired' ? [{ ...ladder, disarmedAt: settledAt() }] : []);
+    const summary = await runExpiryAlerts();
+    expect(summary.alerted).toEqual([]);
+    expect(stampQuery()?.in).toHaveBeenCalledWith('id', [ladder.id]);
   });
 
   it('does not claim an alert when the position is flat', async () => {

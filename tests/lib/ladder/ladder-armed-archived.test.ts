@@ -21,7 +21,7 @@ vi.mock('@/lib/cockpit/supabase-server', () => ({
   getServiceRoleClient: () => ({ from: (t: string) => { calls.push(['from', t]); return query(); } }),
 }));
 
-import { armLadder, listLadders } from '@/lib/ladder/ladder-service';
+import { armLadder, disarmLadder, listLadders } from '@/lib/ladder/ladder-service';
 
 const archivedFilters = () => calls.filter((c) => ['is', 'not', 'or'].includes(c[0]) && String(c[1]).startsWith('archived_at'));
 
@@ -51,5 +51,15 @@ describe('armLadder and archived drafts', () => {
     await armLadder('L1', { preconditionHash: 'h', expiresAtMs: 0, cloidByRungId: {}, expectedUpdatedAt: 'u' });
     expect(calls).toContainEqual(['eq', 'status', 'draft']);
     expect(calls).toContainEqual(['is', 'archived_at', null]);
+  });
+});
+
+describe('disarmLadder', () => {
+  it('never overwrites a done or expired status, and says whether it disarmed', async () => {
+    expect(await disarmLadder('L1', 'archived')).toBe(false);
+    expect(calls).toContainEqual(['eq', 'id', 'L1']);
+    expect(calls).toContainEqual(['in', 'status', ['armed', 'draft']]);
+    result = { data: [{ id: 'L1' }], error: null };
+    expect(await disarmLadder('L1', 'archived')).toBe(true);
   });
 });
