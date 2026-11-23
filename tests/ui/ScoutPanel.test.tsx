@@ -1,8 +1,10 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import ScoutPanel from '@/app/cockpit/components/ScoutPanel';
 import type { ScoutHeartbeat } from '@/hooks/useScoutHeartbeat';
 
+// The mock ignores `enabled` (the overrides below disable the real hook), so these
+// tests pin the panel's row selection, not the subscription.
 const heartbeatRows = vi.hoisted(() => ({ rows: [] as ScoutHeartbeat[] }));
 vi.mock('@/hooks/useScoutHeartbeat', () => ({
   useScoutHeartbeat: () => ({ rows: heartbeatRows.rows, loaded: true, error: null, subscribed: true }),
@@ -155,6 +157,7 @@ describe('ScoutPanel — lanes', () => {
 });
 
 describe('ScoutPanel — producer heartbeat', () => {
+  afterEach(() => { heartbeatRows.rows = []; });
   const hb = (source: string, agoMs: number): ScoutHeartbeat => ({
     id: source, source, lastTickMs: Date.now() - agoMs, status: 'ok', detail: '',
   });
