@@ -7,7 +7,7 @@
  *   applyFillToPositionRows(fill)  → fold ALL fills for (session, coin) from the
  *                                    ledger (pure applyFills) → write positions
  *                                    row + pnl row via the version-checked
- *                                    apply_position_fold RPC (migration 0052)
+ *                                    apply_position_fold RPC (migrations 0052, 0053)
  *
  * Idempotency + crash-consistency (ADR-0001): the `fills` table is the single
  * source of truth. `fills.client_intent_id` is unique, so a duplicate insert
@@ -16,15 +16,14 @@
  * RECOMPUTED by folding the whole ledger rather than incrementally mutated, so:
  *   - re-running executeIntent with the same intent converges to the same
  *     position (no double-counting — the duplicate fill never reaches the ledger);
- *   - a crash between the fills insert and the position upsert self-heals on the
+ *   - a crash between the fills insert and the position write self-heals on the
  *     next run (the committed fill is picked up by the re-fold).
  */
 
 import { getServiceRoleClient } from './supabase-server';
 import {
   buildFillRow,
-  buildPnlRow,
-  buildPositionRow,
+  buildPositionFoldArgs,
   fillFromRow,
   positionFromRow,
   type FillSelectRow,
@@ -46,17 +45,10 @@ const FILL_LEDGER_COLUMNS =
  * Canonical coin normalization. The positions table is keyed on (session, coin)
  * with a case-sensitive unique constraint, and the realtime UI joins on coin, so
  * EVERY read/write path must agree on the same normalized form. Doing it in one
- * helper keeps the select filter, the upsert payload, and loadPosition aligned.
+ * helper keeps the select filter, the fold write, and loadPosition aligned.
  */
 function normalizeCoin(coin: string): string {
   return coin.trim().toUpperCase();
-}
-
-/** True when PostgREST cannot find apply_position_fold (migration 0052 not applied). */
-function isMissingFoldRpc(error: { code?: string; message?: string }): boolean {
-  // Match the function name too: 42883 also fires for a missing operator inside the
-  // RPC body, and that must fail loudly, not fall back to the unserialised write.
-  return (error.code === 'PGRST202' || error.code === '42883') && /apply_position_fold/.test(error.message ?? '');
 }
 
 /** True when an error indicates a duplicate fill row (idempotent re-run). */
@@ -300,10 +292,9 @@ async function loadLedger(client: SupabaseClient, sessionId: string, coin: strin
  */
 export async function applyFillToPositionRows(
   fill: Pick<CanonicalFill, 'sessionId' | 'coin'>,
-  leverage?: number,
-  client: SupabaseClient = getServiceRoleClient(),
-  lane?: string,
+  opts: { leverage?: number; lane?: string; client?: SupabaseClient } = {},
 ): Promise<Position> {
+  const client = opts.client ?? getServiceRoleClient();
   const sessionId = fill.sessionId;
   const coin = normalizeCoin(fill.coin);
 
@@ -319,42 +310,19 @@ export async function applyFillToPositionRows(
   const openedAtIso = openedAtMs == null ? null : new Date(openedAtMs).toISOString();
 
   // 3. Write the positions row + a pnl snapshot through the version-checked RPC
-  //    (migration 0052). Two folds of the same (session, coin) can race: the RPC
-  //    refuses a fold that saw fewer ledger rows than the stored row, so an older
-  //    snapshot never overwrites a newer one. Leverage and lane are METADATA from
-  //    the opening intent (not folded, ADR-0001): buildPositionRow leaves them out
-  //    when unknown, and the RPC keeps the stored value for a null.
-  const positionRow = buildPositionRow(sessionId, next, new Date().toISOString(), leverage, openedAtIso, lane);
-  const { error: rpcError } = await client.rpc('apply_position_fold', {
-    p_session_id: sessionId,
-    p_coin: coin,
-    p_side: positionRow.side,
-    p_sz: positionRow.sz,
-    p_avg_entry_px: positionRow.avg_entry_px,
-    p_realized_pnl_usd: positionRow.realized_pnl_usd,
-    p_fees_paid_usd: positionRow.fees_paid_usd,
-    p_opened_at: openedAtIso,
-    p_leverage: positionRow.leverage ?? null,
-    p_lane: positionRow.lane ?? null,
-    p_ledger_fill_count: ledger.length,
+  //    (migrations 0052 and 0053). Two folds of the same (session, coin) can race:
+  //    the RPC refuses a fold that saw fewer ledger rows than the stored row, so an
+  //    older snapshot never overwrites a newer one. A refused fold returns false and
+  //    needs nothing more: the newer fold already wrote the row.
+  const args = buildPositionFoldArgs({
+    sessionId,
+    position: next,
+    openedAtIso,
+    ledgerFillCount: ledger.length,
+    leverage: opts.leverage,
+    lane: opts.lane,
   });
-  // A refused (stale) fold returns false: a concurrent fold with a newer ledger
-  // already wrote the row, so there is nothing to do.
-  if (!rpcError) return next;
-  if (!isMissingFoldRpc(rpcError)) {
-    throw new Error(`applyFillToPositionRows fold write failed: ${rpcError.message}`);
-  }
-
-  // 4. Fallback until migration 0052 is applied: the unserialised upsert + pnl insert.
-  //    Remove once production has the RPC.
-  console.warn('[applyFillToPositionRows] apply_position_fold missing (apply migration 0052); unserialised upsert used');
-  const { error: upsertError } = await client
-    .from('positions')
-    .upsert(positionRow, { onConflict: 'session_id,coin' });
-  if (upsertError) throw new Error(`applyFillToPositionRows upsert failed: ${upsertError.message}`);
-  const pnlRow = buildPnlRow(sessionId, next);
-  const { error: pnlError } = await client.from('pnl').insert(pnlRow);
-  if (pnlError) throw new Error(`applyFillToPositionRows pnl insert failed: ${pnlError.message}`);
-
+  const { error } = await client.rpc('apply_position_fold', args);
+  if (error) throw new Error(`applyFillToPositionRows fold write failed: ${error.message}`);
   return next;
 }

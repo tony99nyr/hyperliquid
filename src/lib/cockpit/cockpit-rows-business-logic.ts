@@ -255,72 +255,55 @@ export function fillFromRow(row: FillSelectRow): CanonicalFill {
   };
 }
 
-export interface PositionUpsertRow {
-  session_id: string;
-  coin: string;
-  side: Position['side'];
-  sz: number;
-  avg_entry_px: number;
-  realized_pnl_usd: number;
-  fees_paid_usd: number;
-  updated_at: string;
-  /**
-   * Position leverage (e.g. 5 = 5x). METADATA set from the opening intent — the
-   * fold (applyFills) stays leverage-AGNOSTIC (ADR-0001); leverage is carried
-   * here purely so the UI can derive ROE. Omitted from the row when undefined so
-   * an upsert that doesn't know the leverage (e.g. a reduce-only fold) does NOT
-   * clobber a previously-stored value to NULL — see buildPositionRow.
-   */
-  leverage?: number | null;
+/** The arguments of the apply_position_fold RPC (migrations 0052 and 0053). */
+export interface PositionFoldArgs {
+  p_session_id: string;
+  p_coin: string;
+  p_side: Position['side'];
+  p_sz: number;
+  p_avg_entry_px: number;
+  p_realized_pnl_usd: number;
+  p_fees_paid_usd: number;
   /** When the current open run started (ISO), or null when flat. Drives "held". */
-  opened_at?: string | null;
+  p_opened_at: string | null;
   /**
-   * Strategy lane (scout multi-lane refactor). METADATA like `leverage` — omitted
-   * when undefined so a lane-unaware re-fold (e.g. a reduce-only exit) preserves
-   * the lane set at entry rather than nulling it. Null for non-lane-scoped books.
+   * Leverage and lane are METADATA from the opening intent: the fold stays
+   * leverage-agnostic (ADR-0001). Null means "not known by this fold": the RPC keeps
+   * the stored value within one open run.
    */
-  lane?: string | null;
+  p_leverage: number | null;
+  p_lane: string | null;
+  /** How many ledger rows the fold saw: the RPC's version check. */
+  p_ledger_fill_count: number;
 }
 
 /**
- * Build the positions upsert row. `leverage` is OPTIONAL metadata: when provided
- * (the opening fill carried the intent's leverage) it is written; when undefined
- * the column is left OUT of the payload entirely so a subsequent leverage-unaware
- * upsert (a reduce-only re-fold) preserves the leverage set at entry rather than
- * nulling it. The position size/pnl always recompute from fills (leverage-agnostic).
- * `openedAtIso` is fold-derived (computeOpenedAtMs) — always written (incl. null on
- * flat) since it recomputes deterministically from the full ledger.
+ * Build the apply_position_fold arguments from a folded position. Leverage counts
+ * only when it is a positive, finite number, and lane only when it is a non-empty
+ * string (trimmed); anything else is sent as null (unknown).
  */
-export function buildPositionRow(
-  sessionId: string,
-  pos: Position,
-  updatedAtIso: string,
-  leverage?: number | null,
-  openedAtIso?: string | null,
-  lane?: string | null,
-): PositionUpsertRow {
-  const row: PositionUpsertRow = {
-    session_id: sessionId,
-    coin: pos.coin,
-    side: pos.side,
-    sz: pos.sz,
-    avg_entry_px: pos.avgEntryPx,
-    realized_pnl_usd: pos.realizedPnlUsd,
-    fees_paid_usd: pos.feesPaidUsd,
-    updated_at: updatedAtIso,
+export function buildPositionFoldArgs(input: {
+  sessionId: string;
+  position: Position;
+  openedAtIso: string | null;
+  ledgerFillCount: number;
+  leverage?: number | null;
+  lane?: string | null;
+}): PositionFoldArgs {
+  const { sessionId, position: pos, leverage, lane } = input;
+  return {
+    p_session_id: sessionId,
+    p_coin: pos.coin,
+    p_side: pos.side,
+    p_sz: pos.sz,
+    p_avg_entry_px: pos.avgEntryPx,
+    p_realized_pnl_usd: pos.realizedPnlUsd,
+    p_fees_paid_usd: pos.feesPaidUsd,
+    p_opened_at: input.openedAtIso,
+    p_leverage: leverage != null && Number.isFinite(leverage) && leverage > 0 ? leverage : null,
+    p_lane: typeof lane === 'string' && lane.trim() !== '' ? lane.trim() : null,
+    p_ledger_fill_count: input.ledgerFillCount,
   };
-  // Only attach leverage when known — a positive, finite number. Undefined/null
-  // leaves the column untouched on upsert (don't clobber the entry leverage).
-  if (leverage !== undefined && leverage !== null && Number.isFinite(leverage) && leverage > 0) {
-    row.leverage = leverage;
-  }
-  if (openedAtIso !== undefined) row.opened_at = openedAtIso;
-  // Lane metadata: attach only a non-empty string; undefined/null/'' leaves the
-  // column untouched on upsert so a reduce-only re-fold preserves the entry lane.
-  if (typeof lane === 'string' && lane.trim() !== '') {
-    row.lane = lane.trim();
-  }
-  return row;
 }
 
 export interface PnlInsertRow {
@@ -330,26 +313,6 @@ export interface PnlInsertRow {
   unrealized_pnl_usd: number;
   fees_paid_usd: number;
   mark_px: number | null;
-}
-
-/**
- * Build a pnl snapshot row from a position. Unrealized P&L needs a mark price;
- * a fill records realized + fees, so unrealized is 0 and mark is null unless a
- * caller supplies one.
- */
-export function buildPnlRow(
-  sessionId: string,
-  pos: Position,
-  opts: { unrealizedPnlUsd?: number; markPx?: number | null } = {},
-): PnlInsertRow {
-  return {
-    session_id: sessionId,
-    coin: pos.coin,
-    realized_pnl_usd: pos.realizedPnlUsd,
-    unrealized_pnl_usd: opts.unrealizedPnlUsd ?? 0,
-    fees_paid_usd: pos.feesPaidUsd,
-    mark_px: opts.markPx ?? null,
-  };
 }
 
 /**

@@ -111,7 +111,7 @@ async function retryPendingFolds(client: SupabaseClient): Promise<string | null>
   const more = rows.length > PENDING_FOLD_LIMIT;
   let pending = 0;
   for (const r of rows.slice(0, PENDING_FOLD_LIMIT)) {
-    await applyFillToPositionRows({ sessionId: r.session_id, coin: r.coin }, undefined, client).catch(() => pending++);
+    await applyFillToPositionRows({ sessionId: r.session_id, coin: r.coin }, { client }).catch(() => pending++);
   }
   const rest = more ? ' (more positions wait for the next run)' : '';
   return pending > 0 || more ? `${pending} fold(s) pending${rest}` : null;
@@ -230,10 +230,10 @@ async function insertMissingFills(fills: HlFill[], client: SupabaseClient): Prom
         if (!row) throw new Error(`duplicate fill row for oid ${cand.hlOrderId} not found`);
         // A failed read or fold here is safe: the held row's ledger is then ahead of
         // its positions row, and the next run's retryPendingFolds re-folds it.
-        await applyFillToPositionRows({ sessionId: row.session_id, coin: row.coin }, undefined, client);
+        await applyFillToPositionRows({ sessionId: row.session_id, coin: row.coin }, { client });
         continue;
       }
-      await applyFillToPositionRows(fill, undefined, client);
+      await applyFillToPositionRows(fill, { client });
       inserted++;
       await writeAnalysisLog({
         sessionId,

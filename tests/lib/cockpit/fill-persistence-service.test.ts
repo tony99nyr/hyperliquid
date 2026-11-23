@@ -91,7 +91,7 @@ describe('applyFillToPositionRows (fold WHOLE ledger → version-checked apply_p
     mock.queueResult({ data: [ledgerRow({ sz: 2, px: 2000, feeUsd: 1 })], error: null });
     mock.queueResult({ data: true, error: null }); // rpc applied
 
-    const pos = await applyFillToPositionRows(fill({ sz: 2, px: 2000, feeUsd: 1 }), undefined, client);
+    const pos = await applyFillToPositionRows(fill({ sz: 2, px: 2000, feeUsd: 1 }), { client });
 
     expect(pos).toMatchObject({ side: 'long', sz: 2, avgEntryPx: 2000, feesPaidUsd: 1 });
     expect(mock.ops.map((o) => `${o.op}:${o.table}`)).toEqual(['select:fills', 'rpc:apply_position_fold']);
@@ -126,7 +126,7 @@ describe('applyFillToPositionRows (fold WHOLE ledger → version-checked apply_p
     });
     mock.queueResult({ data: true, error: null });
 
-    const pos = await applyFillToPositionRows(fill({ clientIntentId: 'b', sz: 1, px: 2200, feeUsd: 0.5 }), undefined, client);
+    const pos = await applyFillToPositionRows(fill({ clientIntentId: 'b', sz: 1, px: 2200, feeUsd: 0.5 }), { client });
     expect(pos).toMatchObject({ sz: 2, avgEntryPx: 2100, feesPaidUsd: 1.5 });
     expect((mock.ops[1].payload as FoldArgs).p_ledger_fill_count).toBe(2);
   });
@@ -135,7 +135,7 @@ describe('applyFillToPositionRows (fold WHOLE ledger → version-checked apply_p
     mock.queueResult({ data: [ledgerRow({ sz: 2, px: 2000, feeUsd: 1 })], error: null });
     mock.queueResult({ data: true, error: null });
 
-    await applyFillToPositionRows(fill({ sz: 2, px: 2000, feeUsd: 1 }), 5, client, ' carry ');
+    await applyFillToPositionRows(fill({ sz: 2, px: 2000, feeUsd: 1 }), { leverage: 5, lane: ' carry ', client });
 
     expect(mock.ops[1].payload).toMatchObject({ p_leverage: 5, p_lane: 'carry' });
   });
@@ -144,7 +144,7 @@ describe('applyFillToPositionRows (fold WHOLE ledger → version-checked apply_p
     mock.queueResult({ data: [ledgerRow({ sz: 2, px: 2000, feeUsd: 1 })], error: null });
     mock.queueResult({ data: false, error: null });
 
-    await expect(applyFillToPositionRows(fill({ sz: 2, px: 2000, feeUsd: 1 }), undefined, client)).resolves.toMatchObject({ sz: 2 });
+    await expect(applyFillToPositionRows(fill({ sz: 2, px: 2000, feeUsd: 1 }), { client })).resolves.toMatchObject({ sz: 2 });
     expect(mock.ops).toHaveLength(2);
   });
 
@@ -159,7 +159,7 @@ describe('applyFillToPositionRows (fold WHOLE ledger → version-checked apply_p
     mock.queueResult({ data: page2, error: null });
     mock.queueResult({ data: true, error: null });
 
-    const pos = await applyFillToPositionRows(fill(), undefined, client);
+    const pos = await applyFillToPositionRows(fill(), { client });
 
     expect(mock.ops.slice(0, 2).map((o) => o.range)).toEqual([{ from: 0, to: 999 }, { from: 1000, to: 1999 }]);
     expect((mock.ops[2].payload as FoldArgs).p_ledger_fill_count).toBe(1001);
@@ -169,78 +169,25 @@ describe('applyFillToPositionRows (fold WHOLE ledger → version-checked apply_p
   it('throws when the RPC fails for any reason other than a missing function', async () => {
     mock.queueResult({ data: [ledgerRow()], error: null });
     mock.queueResult({ error: { code: '57014', message: 'statement timeout' } });
-    await expect(applyFillToPositionRows(fill(), undefined, client)).rejects.toThrow(/fold write failed: statement timeout/);
+    await expect(applyFillToPositionRows(fill(), { client })).rejects.toThrow(/fold write failed: statement timeout/);
   });
 
   it('a re-run with the SAME ledger yields the SAME position (no double-count)', async () => {
     const data = [ledgerRow({ sz: 2, px: 2000, feeUsd: 1 })];
     mock.queueResult({ data, error: null });
     mock.queueResult({ data: true, error: null });
-    const first = await applyFillToPositionRows(fill({ sz: 2, px: 2000, feeUsd: 1 }), undefined, client);
+    const first = await applyFillToPositionRows(fill({ sz: 2, px: 2000, feeUsd: 1 }), { client });
 
     mock.reset();
     mock.queueResult({ data, error: null });
     mock.queueResult({ data: true, error: null });
-    const second = await applyFillToPositionRows(fill({ sz: 2, px: 2000, feeUsd: 1 }), undefined, client);
+    const second = await applyFillToPositionRows(fill({ sz: 2, px: 2000, feeUsd: 1 }), { client });
 
     expect(second).toEqual(first);
   });
 
   it('throws when the ledger load fails', async () => {
     mock.queueResult({ error: { message: 'load boom' } });
-    await expect(applyFillToPositionRows(fill(), undefined, client)).rejects.toThrow(/load failed: load boom/);
-  });
-
-  describe('fallback while migration 0052 is not applied (RPC missing)', () => {
-    const missing = { error: { code: 'PGRST202', message: 'Could not find the function public.apply_position_fold' } };
-
-    it('falls back to the plain upsert + pnl insert', async () => {
-      mock.queueResult({ data: [ledgerRow({ sz: 2, px: 2000, feeUsd: 1 })], error: null });
-      mock.queueResult(missing);
-      mock.queueResult({ error: null }); // upsert
-      mock.queueResult({ error: null }); // pnl
-
-      await applyFillToPositionRows(fill({ sz: 2, px: 2000, feeUsd: 1 }), 5, client);
-
-      expect(mock.ops.map((o) => `${o.op}:${o.table}`)).toEqual([
-        'select:fills',
-        'rpc:apply_position_fold',
-        'upsert:positions',
-        'insert:pnl',
-      ]);
-      expect(mock.ops[2].options).toEqual({ onConflict: 'session_id,coin' });
-      expect(mock.ops[2].payload).toMatchObject({ sz: 2, leverage: 5 });
-    });
-
-    it('does not fall back for an undefined function inside the RPC body', async () => {
-      mock.queueResult({ data: [ledgerRow()], error: null });
-      mock.queueResult({ error: { code: '42883', message: 'operator does not exist: text = uuid' } });
-      await expect(applyFillToPositionRows(fill(), undefined, client)).rejects.toThrow(/fold write failed/);
-      expect(mock.ops).toHaveLength(2);
-    });
-
-    it('LEVERAGE-PRESERVATION CONTRACT: a reduce-only re-fold OMITS leverage from the upsert', async () => {
-      // A reduce-only fold does not know the entry leverage. The upsert must leave the
-      // column out (not null), so PostgREST keeps the stored entry leverage (drives ROE).
-      mock.queueResult({
-        data: [
-          ledgerRow({ clientIntentId: 'open', sz: 2, px: 2000, feeUsd: 1, filledAt: 1 }),
-          ledgerRow({ clientIntentId: 'reduce', side: 'sell', sz: 1, px: 2100, feeUsd: 0.5, reduceOnly: true, filledAt: 2 }),
-        ],
-        error: null,
-      });
-      mock.queueResult(missing);
-      mock.queueResult({ error: null });
-      mock.queueResult({ error: null });
-
-      await applyFillToPositionRows(
-        fill({ clientIntentId: 'reduce', side: 'sell', sz: 1, px: 2100, feeUsd: 0.5, reduceOnly: true }),
-        undefined,
-        client,
-      );
-      const payload = mock.ops[2].payload as Record<string, unknown>;
-      expect(payload.sz).toBe(1);
-      expect('leverage' in payload).toBe(false);
-    });
+    await expect(applyFillToPositionRows(fill(), { client })).rejects.toThrow(/load failed: load boom/);
   });
 });

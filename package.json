@@ -83,7 +83,8 @@
     "study:regime": "tsx --tsconfig tsconfig.scripts.json scripts/regime-split-expectancy.ts",
     "study:hip3-earnings": "tsx --tsconfig tsconfig.scripts.json scripts/hip3-earnings-straddle.ts",
     "retro:remind": "tsx --tsconfig tsconfig.scripts.json scripts/desk-retro-reminder.ts",
-    "scout:heartbeat": "tsx --tsconfig tsconfig.scripts.json scripts/scout-heartbeat-check.ts"
+    "scout:heartbeat": "tsx --tsconfig tsconfig.scripts.json scripts/scout-heartbeat-check.ts",
+    "test:sql": "bash scripts/test-fold-sql.sh"
   },
   "dependencies": {
     "@nktkas/hyperliquid": "^0.32.2",

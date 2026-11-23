@@ -27,14 +27,14 @@ export function nextPosition(prior: Position | undefined, fill: CanonicalFill): 
 
 /**
  * I/O orchestration: load the position for fill.coin + fill.sessionId from
- * Supabase, compute `nextPosition` (pure), upsert the positions row + insert a
+ * Supabase, compute `nextPosition` (pure), write the positions row + a
  * pnl row, and return the new position. Delegates to the cockpit persistence
  * service. Mode-agnostic — never inspects `fill.source`.
  *
  * `leverage` is OPTIONAL intent metadata (the opening order's leverage). It does
  * NOT enter the fold — the position size/pnl recompute from fills, leverage-free
  * (ADR-0001). It is persisted alongside the folded row so the UI derives ROE.
- * Undefined leaves any previously-stored leverage untouched.
+ * Undefined keeps the stored leverage within the same open run.
  */
 export async function applyFillToPosition(
   fill: CanonicalFill,
@@ -43,5 +43,5 @@ export async function applyFillToPosition(
 ): Promise<Position> {
   // `lane` is OPTIONAL strategy-lane metadata (scout multi-lane), threaded exactly
   // like leverage and likewise never folded. `undefined` client → service-role.
-  return applyFillToPositionRows(fill, leverage, undefined, lane);
+  return applyFillToPositionRows(fill, { leverage, lane });
 }

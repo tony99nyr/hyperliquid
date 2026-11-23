@@ -47,6 +47,10 @@ Supabase (Postgres + realtime) · recharts + lightweight-charts · viem +
 - **`pnpm check:migrations`**: checks that every table and function in
   `supabase/migrations/` exists in Supabase. It is NOT in `validate` or CI. Run it before
   pushing code that depends on a new migration, and apply the migration first.
+- **`pnpm test:sql`**: runs the SQL contract test of the position-fold functions
+  (migrations 0052 and 0053) in a throwaway Postgres container. It needs Docker and is
+  NOT in `validate` or CI. Run it when you change `apply_position_fold` or
+  `list_unfolded_live_positions`.
 - **`pnpm verify:lanes`**: real-browser check of the cockpit Lanes view. Run it for Lanes
   view changes (contract: `docs/LANE_PERFORMANCE_CONTRACT.md`).
 

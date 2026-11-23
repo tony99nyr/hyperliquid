@@ -7,8 +7,7 @@ import {
   buildHealthSnapshotRow,
   buildContextGaugeRow,
   buildFillRow,
-  buildPositionRow,
-  buildPnlRow,
+  buildPositionFoldArgs,
   positionFromRow,
 } from '@/lib/cockpit/cockpit-rows-business-logic';
 import type { CanonicalFill } from '@/types/fill';
@@ -145,68 +144,38 @@ describe('fill / position / pnl rows', () => {
     });
   });
 
-  it('buildPositionRow includes updated_at + unique key columns', () => {
-    const pos: Position = {
-      coin: 'ETH',
-      side: 'long',
-      sz: 1.5,
-      avgEntryPx: 2000,
-      realizedPnlUsd: 0,
-      feesPaidUsd: 1.2,
-    };
-    const row = buildPositionRow('s1', pos, '2026-01-01T00:00:00.000Z');
-    expect(row).toEqual({
-      session_id: 's1',
-      coin: 'ETH',
-      side: 'long',
-      sz: 1.5,
-      avg_entry_px: 2000,
-      realized_pnl_usd: 0,
-      fees_paid_usd: 1.2,
-      updated_at: '2026-01-01T00:00:00.000Z',
+  describe('buildPositionFoldArgs', () => {
+    const pos: Position = { coin: 'ETH', side: 'long', sz: 1.5, avgEntryPx: 2000, realizedPnlUsd: 3, feesPaidUsd: 1.2 };
+    const base = { sessionId: 's1', position: pos, openedAtIso: '2026-01-01T00:00:00.000Z', ledgerFillCount: 4 };
+
+    it('maps the folded position and the ledger count onto the RPC arguments', () => {
+      expect(buildPositionFoldArgs(base)).toEqual({
+        p_session_id: 's1',
+        p_coin: 'ETH',
+        p_side: 'long',
+        p_sz: 1.5,
+        p_avg_entry_px: 2000,
+        p_realized_pnl_usd: 3,
+        p_fees_paid_usd: 1.2,
+        p_opened_at: '2026-01-01T00:00:00.000Z',
+        p_leverage: null,
+        p_lane: null,
+        p_ledger_fill_count: 4,
+      });
     });
-    // No leverage arg → column omitted (won't clobber a stored value on upsert).
-    expect('leverage' in row).toBe(false);
-  });
 
-  it('buildPositionRow attaches leverage only when a positive finite value is given', () => {
-    const pos: Position = { coin: 'ETH', side: 'long', sz: 1, avgEntryPx: 2000, realizedPnlUsd: 0, feesPaidUsd: 0 };
-    const iso = '2026-01-01T00:00:00.000Z';
-    expect(buildPositionRow('s1', pos, iso, 5).leverage).toBe(5);
-    // Bogus / absent values leave the column out entirely.
-    expect('leverage' in buildPositionRow('s1', pos, iso, null)).toBe(false);
-    expect('leverage' in buildPositionRow('s1', pos, iso, 0)).toBe(false);
-    expect('leverage' in buildPositionRow('s1', pos, iso, NaN)).toBe(false);
-  });
+    it('sends leverage only when it is a positive finite number', () => {
+      expect(buildPositionFoldArgs({ ...base, leverage: 5 }).p_leverage).toBe(5);
+      for (const leverage of [null, 0, -2, NaN, Infinity]) {
+        expect(buildPositionFoldArgs({ ...base, leverage }).p_leverage).toBeNull();
+      }
+    });
 
-  it('buildPositionRow attaches lane only when a non-empty string is given (else omitted → preserved on re-fold)', () => {
-    const pos: Position = { coin: 'ETH', side: 'long', sz: 1, avgEntryPx: 2000, realizedPnlUsd: 0, feesPaidUsd: 0 };
-    const iso = '2026-01-01T00:00:00.000Z';
-    expect(buildPositionRow('s1', pos, iso, undefined, undefined, 'vault').lane).toBe('vault');
-    expect(buildPositionRow('s1', pos, iso, 5, iso, '  carry  ').lane).toBe('carry'); // trimmed
-    // Absent / null / empty leave the column out entirely (don't clobber stored lane).
-    expect('lane' in buildPositionRow('s1', pos, iso)).toBe(false);
-    expect('lane' in buildPositionRow('s1', pos, iso, undefined, undefined, null)).toBe(false);
-    expect('lane' in buildPositionRow('s1', pos, iso, undefined, undefined, '')).toBe(false);
-    expect('lane' in buildPositionRow('s1', pos, iso, undefined, undefined, '   ')).toBe(false);
-  });
-
-  it('buildPnlRow defaults unrealized to 0 + mark to null', () => {
-    const pos: Position = {
-      coin: 'ETH',
-      side: 'flat',
-      sz: 0,
-      avgEntryPx: 0,
-      realizedPnlUsd: 50,
-      feesPaidUsd: 2,
-    };
-    expect(buildPnlRow('s1', pos)).toEqual({
-      session_id: 's1',
-      coin: 'ETH',
-      realized_pnl_usd: 50,
-      unrealized_pnl_usd: 0,
-      fees_paid_usd: 2,
-      mark_px: null,
+    it('sends lane trimmed, and null for an empty or blank lane', () => {
+      expect(buildPositionFoldArgs({ ...base, lane: '  carry  ' }).p_lane).toBe('carry');
+      for (const lane of [null, '', '   ']) {
+        expect(buildPositionFoldArgs({ ...base, lane }).p_lane).toBeNull();
+      }
     });
   });
 
