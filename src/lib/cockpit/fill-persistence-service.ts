@@ -29,7 +29,7 @@ import {
   type FillSelectRow,
   type PnlInsertRow,
 } from './cockpit-rows-business-logic';
-import { applyFills, computeOpenedAtMs } from '@/lib/trading/pnl-business-logic';
+import { foldLedger } from '@/lib/trading/pnl-business-logic';
 import type { CanonicalFill } from '@/types/fill';
 import type { Position } from '@/types/position';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -303,10 +303,8 @@ export async function applyFillToPositionRows(
   const ledger = await loadLedger(client, sessionId, coin);
 
   // 2. Pure fold of the entire ledger — identical math regardless of source.
-  const next = applyFills(coin, ledger);
-  // When the CURRENT open run started (fold-derived; null when flat) — the row is
-  // reused across reopens so this can't be a created_at. Drives the "held" insight.
-  const openedAtMs = computeOpenedAtMs(ledger);
+  //    openedAtMs is when the current open run started (null when flat).
+  const { position: next, openedAtMs } = foldLedger(coin, ledger);
   const openedAtIso = openedAtMs == null ? null : new Date(openedAtMs).toISOString();
 
   // 3. Write the positions row + a pnl snapshot through the version-checked RPC

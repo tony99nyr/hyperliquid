@@ -3,7 +3,7 @@ import {
   emptyPosition,
   applyFill,
   applyFills,
-  computeOpenedAtMs,
+  foldLedger,
   unrealizedPnl,
   avgEntry,
   totalPnl,
@@ -195,34 +195,34 @@ describe('pnl-business-logic', () => {
     });
   });
 
-  describe('computeOpenedAtMs', () => {
+  describe('foldLedger openedAtMs', () => {
     it('returns the flat→open fill time', () => {
-      expect(computeOpenedAtMs([
+      expect(foldLedger('ETH', [
         fill({ side: 'buy', px: 2000, sz: 1, filledAt: 1000 }),
         fill({ side: 'buy', px: 2010, sz: 1, filledAt: 2000 }), // add — open time unchanged
-      ])).toBe(1000);
+      ]).openedAtMs).toBe(1000);
     });
     it('null when the position is flat (fully closed)', () => {
-      expect(computeOpenedAtMs([
+      expect(foldLedger('ETH', [
         fill({ side: 'buy', px: 2000, sz: 2, filledAt: 1000 }),
         fill({ side: 'sell', px: 2100, sz: 2, filledAt: 3000 }), // back to flat
-      ])).toBeNull();
+      ]).openedAtMs).toBeNull();
     });
     it('resets to the latest open after a close→reopen', () => {
-      expect(computeOpenedAtMs([
+      expect(foldLedger('ETH', [
         fill({ side: 'buy', px: 2000, sz: 1, filledAt: 1000 }),
         fill({ side: 'sell', px: 2100, sz: 1, filledAt: 2000 }), // flat
         fill({ side: 'buy', px: 2050, sz: 1, filledAt: 5000 }), // reopened
-      ])).toBe(5000);
+      ]).openedAtMs).toBe(5000);
     });
     it('resets on a flip', () => {
-      expect(computeOpenedAtMs([
+      expect(foldLedger('ETH', [
         fill({ side: 'buy', px: 2000, sz: 1, filledAt: 1000 }),
         fill({ side: 'sell', px: 2100, sz: 3, filledAt: 4000 }), // long 1 → short 2 (flip)
-      ])).toBe(4000);
+      ]).openedAtMs).toBe(4000);
     });
     it('null for an empty ledger', () => {
-      expect(computeOpenedAtMs([])).toBeNull();
+      expect(foldLedger('ETH', []).openedAtMs).toBeNull();
     });
     it('ignores a reduce-only fill against a flat book, as the fold does', () => {
       const ledger = [
@@ -231,7 +231,7 @@ describe('pnl-business-logic', () => {
         fill({ side: 'buy', px: 73, sz: 1.09, reduceOnly: true, filledAt: 2000 }), // closes it
       ];
       expect(applyFills('ETH', ledger).side).toBe('flat');
-      expect(computeOpenedAtMs(ledger)).toBeNull();
+      expect(foldLedger('ETH', ledger).openedAtMs).toBeNull();
     });
     it('treats a floating-point residual of a plain close as flat', () => {
       const ledger = [
@@ -241,13 +241,39 @@ describe('pnl-business-logic', () => {
         fill({ side: 'buy', px: 72, sz: 1, filledAt: 9000 }), // a new run
       ];
       expect(applyFills('ETH', ledger.slice(0, 3))).toMatchObject({ side: 'flat', sz: 0, avgEntryPx: 0 });
-      expect(computeOpenedAtMs(ledger)).toBe(9000);
+      expect(foldLedger('ETH', ledger).openedAtMs).toBe(9000);
+    });
+    it('treats rounding error left from an earlier larger size as flat', () => {
+      expect(foldLedger('ETH', [
+        fill({ side: 'buy', px: 70, sz: 73.34, filledAt: 1000 }),
+        fill({ side: 'buy', px: 70, sz: 14.5, filledAt: 2000 }),
+        fill({ side: 'sell', px: 70, sz: 87.35, filledAt: 3000 }),
+        fill({ side: 'sell', px: 70, sz: 0.49, filledAt: 4000 }), // leaves ~9e-15 in floats
+      ])).toEqual({ position: expect.objectContaining({ side: 'flat', sz: 0 }), openedAtMs: null });
+    });
+    it('treats the residual of a large plain close as flat', () => {
+      const ledger = [
+        fill({ side: 'buy', px: 0.001, sz: 51404401.7, filledAt: 1000 }),
+        fill({ side: 'buy', px: 0.001, sz: 22906741.6, filledAt: 2000 }),
+        fill({ side: 'sell', px: 0.001, sz: 74311143.3, filledAt: 3000 }), // residual ~1.5e-8 in floats
+      ];
+      expect(foldLedger('ETH', ledger)).toEqual({ position: expect.objectContaining({ side: 'flat', sz: 0 }), openedAtMs: null });
+    });
+    it('keeps a real small remainder or flip of a large plain close', () => {
+      const open = fill({ side: 'buy', px: 0.001, sz: 10_000_000, filledAt: 1000 });
+      const partial = foldLedger('ETH', [open, fill({ side: 'sell', px: 0.001, sz: 9_999_999.995, filledAt: 2000 })]);
+      expect(partial.position).toMatchObject({ side: 'long', avgEntryPx: 0.001 });
+      expect(partial.position.sz).toBeCloseTo(0.005, 6);
+      expect(partial.openedAtMs).toBe(1000);
+      const flip = foldLedger('ETH', [open, fill({ side: 'sell', px: 0.001, sz: 10_000_000.005, filledAt: 2000 })]);
+      expect(flip.position.side).toBe('short');
+      expect(flip.openedAtMs).toBe(2000);
     });
     it('treats a reduce-only dust residual as flat, as the fold does', () => {
-      expect(computeOpenedAtMs([
+      expect(foldLedger('ETH', [
         fill({ side: 'buy', px: 70, sz: 1, filledAt: 1000 }),
         fill({ side: 'sell', px: 70, sz: 0.99, reduceOnly: true, filledAt: 2000 }), // leaves 0.01 dust
-      ])).toBeNull();
+      ]).openedAtMs).toBeNull();
     });
   });
 

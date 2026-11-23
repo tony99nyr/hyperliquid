@@ -69,8 +69,13 @@ function clampReduceOnlySize(fill: CanonicalFill, beforeSigned: number): number 
  *  otherwise linger as a phantom open position. Cockpit positions are risk-based
  *  (≫ $1), so a sub-$1 residual is unambiguously dust, never a real position. */
 const DUST_NOTIONAL_USD = 1;
-/** A size this small after a close is floating-point error, not a position. */
-const SIZE_EPSILON = 1e-9;
+/**
+ * A plain-close residual is rounding error, not a position, when it is below
+ * RESIDUAL_FLOOR (far below any HL lot: perp szDecimals is at most 5) or within
+ * RESIDUAL_ULPS float ULPs (units in the last place) of the size before the close.
+ */
+const RESIDUAL_FLOOR = 1e-9;
+const RESIDUAL_ULPS = 64;
 
 export function applyFill(pos: Position, fill: CanonicalFill): Position {
   if (fill.coin !== pos.coin) {
@@ -103,7 +108,7 @@ export function applyFill(pos: Position, fill: CanonicalFill): Position {
   let afterSigned = beforeSigned + delta;
   // A close that should land on zero can leave a floating-point residual
   // (0.04 - 0.03 - 0.01). Treat it as flat, or a phantom position stays open.
-  if (beforeSigned !== 0 && Math.sign(delta) !== Math.sign(beforeSigned) && Math.abs(afterSigned) < SIZE_EPSILON) afterSigned = 0;
+  if (beforeSigned !== 0 && Math.sign(delta) !== Math.sign(beforeSigned) && Math.abs(afterSigned) <= Math.max(RESIDUAL_FLOOR, RESIDUAL_ULPS * Number.EPSILON * Math.abs(beforeSigned))) afterSigned = 0;
 
   const feesPaidUsd = pos.feesPaidUsd + fill.feeUsd;
   let realizedPnlUsd = pos.realizedPnlUsd;
@@ -156,28 +161,27 @@ export function applyFill(pos: Position, fill: CanonicalFill): Position {
 
 /** Apply a sequence of fills in order. */
 export function applyFills(coin: string, fills: CanonicalFill[]): Position {
-  return fills.reduce((pos, f) => applyFill(pos, f), emptyPosition(coin));
+  return foldLedger(coin, fills).position;
 }
 
 /**
- * When the CURRENT open run started (ms), from the time-ordered fills ledger — the
- * filled_at of the fill that took the position flat→open (or flipped it), reset to
- * null whenever it returns to flat. PURE. Drives the position's "held" duration.
- * (The positions row is reused across reopens, so this can't be a created_at.)
- * Walks the same applyFill fold as applyFills, so the reduce-only clamp and the
- * dust guard apply here too: a flat fold always gives null.
+ * Fold a time-ordered fills ledger into the position AND the time its CURRENT open
+ * run started (ms): the filled_at of the fill that took it flat→open or flipped it,
+ * null while flat. PURE. One walk of applyFill gives both, so they cannot disagree
+ * (a flat position always has a null openedAtMs). openedAtMs drives the position's
+ * "held" duration; the positions row is reused across reopens, so it cannot be a
+ * created_at.
  */
-export function computeOpenedAtMs(fills: CanonicalFill[]): number | null {
-  if (fills.length === 0) return null;
-  let pos = emptyPosition(fills[0].coin);
-  let openedAt: number | null = null;
+export function foldLedger(coin: string, fills: CanonicalFill[]): { position: Position; openedAtMs: number | null } {
+  let position = emptyPosition(coin);
+  let openedAtMs: number | null = null;
   for (const f of fills) {
-    const prev = pos;
-    pos = applyFill(pos, f);
-    if (pos.side === 'flat') openedAt = null;
-    else if (prev.side !== pos.side) openedAt = f.filledAt; // opened or flipped
+    const prev = position;
+    position = applyFill(position, f);
+    if (position.side === 'flat') openedAtMs = null;
+    else if (prev.side !== position.side) openedAtMs = f.filledAt; // opened or flipped
   }
-  return openedAt;
+  return { position, openedAtMs };
 }
 
 /**
