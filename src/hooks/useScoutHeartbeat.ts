@@ -18,7 +18,8 @@ export interface ScoutHeartbeat {
 }
 
 function mapHeartbeatRow(row: RealtimeRow): ScoutHeartbeat {
-  const source = typeof row.source === 'string' ? row.source : 'scout';
+  // source is the not-null primary key (migration 0010), so it is always a string.
+  const source = String(row.source);
   const t = row.last_tick_at;
   const lastTickMs = typeof t === 'string' ? new Date(t).getTime() : typeof t === 'number' ? t : 0;
   return {

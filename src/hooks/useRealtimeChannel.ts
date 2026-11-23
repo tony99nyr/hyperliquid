@@ -18,7 +18,7 @@ import { isPageActive } from './page-activity';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { getBrowserClient } from '@/lib/cockpit/supabase-browser';
 import {
-  accumulateById,
+  applyRealtimeChange,
   type RealtimeRow,
 } from './realtime-row-mappers';
 
@@ -168,13 +168,7 @@ export function useRealtimeChannel<T extends { id: string }>(
           },
           (payload) => {
             if (!active) return;
-            const raw = (payload.new ?? payload.old) as RealtimeRow | undefined;
-            if (!raw) return;
-            const mapped = mapRef.current(raw);
-            setRows((prev) => {
-              const acc = accumulateById(prev, mapped, compareRef.current);
-              return acc.slice(0, limit);
-            });
+            setRows((prev) => applyRealtimeChange(prev, payload, mapRef.current, compareRef.current, limit));
           },
         )
         .subscribe((status) => {

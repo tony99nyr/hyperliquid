@@ -25,7 +25,16 @@
 
 import { vi } from 'vitest';
 
-type ChangeCallback = (payload: { new?: unknown; old?: unknown }) => void;
+/**
+ * A postgres_changes payload. Shape it like realtime-js: a DELETE carries
+ * `eventType: 'DELETE'`, `new: {}` and, with RLS on, only the primary key in `old`.
+ */
+export interface MockChangePayload {
+  eventType?: 'INSERT' | 'UPDATE' | 'DELETE';
+  new?: unknown;
+  old?: unknown;
+}
+type ChangeCallback = (payload: MockChangePayload) => void;
 type StatusCallback = (status: string) => void;
 
 export interface MockRealtimeChannel {
@@ -51,7 +60,7 @@ export interface RealtimeBrowserMock {
   /** Topics passed to client.channel(), in order — assert uniqueness here. */
   requestedTopics: string[];
   /** Emit a postgres_changes event to all live channels matching a topic prefix. */
-  emit(topicPrefix: string, payload: { new?: unknown; old?: unknown }): void;
+  emit(topicPrefix: string, payload: MockChangePayload): void;
   reset(): void;
 }
 

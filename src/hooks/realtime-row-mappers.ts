@@ -212,6 +212,51 @@ export function accumulateById<T extends { id: string }>(
   return without.sort(compare);
 }
 
+/** The parts of a Supabase postgres_changes payload that the hooks read. */
+export interface RealtimeChangePayload {
+  eventType?: string;
+  new?: unknown;
+  old?: unknown;
+}
+
+function asRow(v: unknown): RealtimeRow | null {
+  return v && typeof v === 'object' && Object.keys(v).length > 0 ? (v as RealtimeRow) : null;
+}
+
+/**
+ * Apply one postgres_changes event to the hook's row list. PURE.
+ *
+ * - INSERT / UPDATE: map `new` and accumulate by id.
+ * - DELETE: remove the row whose mapped id matches `old`. Every realtime table
+ *   has REPLICA IDENTITY FULL, but with RLS on, Supabase sends only the primary
+ *   key in `old`. So the delete matches only when the mapper builds its id from
+ *   the primary key (`id`, or `source` for scout_heartbeat). The rubric_scores
+ *   and leader_positions mappers build a synthetic id from other columns, so a
+ *   delete there matches nothing and the next snapshot refresh removes the row.
+ *   Neither table is in the realtime publication now (0014, 0024).
+ *
+ * realtime-js sends `new: {}` on a DELETE and `old: {}` on an INSERT, so an empty
+ * object counts as absent.
+ */
+export function applyRealtimeChange<T extends { id: string }>(
+  prev: T[],
+  payload: RealtimeChangePayload,
+  map: (row: RealtimeRow) => T,
+  compare: (a: T, b: T) => number,
+  limit: number,
+): T[] {
+  if (payload.eventType === 'DELETE') {
+    const old = asRow(payload.old);
+    if (!old) return prev;
+    const id = map(old).id;
+    const next = prev.filter((r) => r.id !== id);
+    return next.length === prev.length ? prev : next;
+  }
+  const row = asRow(payload.new);
+  if (!row) return prev;
+  return accumulateById(prev, map(row), compare).slice(0, limit);
+}
+
 /**
  * A leader_positions row — the watcher's live, reconciled view of ONE leader's
  * open position in ONE coin (GLOBAL: no session_id). Powers the rail's

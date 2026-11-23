@@ -7,6 +7,8 @@ import {
   mapPnlRow,
   mapPositionRow,
   accumulateById,
+  applyRealtimeChange,
+  mapRubricScoreRow,
   byCreatedAtDesc,
   byCreatedAtAsc,
 } from '@/hooks/realtime-row-mappers';
@@ -106,6 +108,46 @@ describe('realtime-row-mappers', () => {
     it('supports ascending order', () => {
       const out = accumulateById([mk('b', 2)], mk('a', 1), byCreatedAtAsc);
       expect(out.map((r) => r.id)).toEqual(['a', 'b']);
+    });
+  });
+
+  describe('applyRealtimeChange', () => {
+    const mk = (id: string, createdAt: number) => ({ id, createdAt });
+    const map = (r: Record<string, unknown>) => ({ id: String(r.id), createdAt: Number(r.created_at ?? 0) });
+
+    it('accumulates an INSERT and caps at the limit', () => {
+      const out = applyRealtimeChange(
+        [mk('a', 1), mk('b', 2)],
+        { eventType: 'INSERT', new: { id: 'c', created_at: 3 }, old: {} },
+        map,
+        byCreatedAtDesc,
+        2,
+      );
+      expect(out.map((r) => r.id)).toEqual(['c', 'b']);
+    });
+
+    it('removes the row on a DELETE whose old holds only the primary key', () => {
+      const prev = [mk('a', 1), mk('b', 2)];
+      const out = applyRealtimeChange(prev, { eventType: 'DELETE', new: {}, old: { id: 'a' } }, map, byCreatedAtDesc, 10);
+      expect(out.map((r) => r.id)).toEqual(['b']);
+    });
+
+    it('keeps the same list on a DELETE of a row it does not hold', () => {
+      const prev = [mk('a', 1)];
+      const out = applyRealtimeChange(prev, { eventType: 'DELETE', new: {}, old: { id: 'z' } }, map, byCreatedAtDesc, 10);
+      expect(out).toBe(prev);
+    });
+
+    it('does not add a row for a DELETE (new is an empty object)', () => {
+      const prev = [mk('a', 1)];
+      const out = applyRealtimeChange(prev, { eventType: 'DELETE', new: {}, old: {} }, map, byCreatedAtDesc, 10);
+      expect(out).toBe(prev);
+    });
+
+    it('matches nothing for a synthetic-id mapper given a key-only old (rubric_scores)', () => {
+      const prev = [mapRubricScoreRow({ id: 'u1', coin: 'ETH', side: 'long' })];
+      const out = applyRealtimeChange(prev, { eventType: 'DELETE', old: { id: 'u1' } }, mapRubricScoreRow, () => 0, 10);
+      expect(out).toBe(prev);
     });
   });
 });
