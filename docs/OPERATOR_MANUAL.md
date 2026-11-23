@@ -58,7 +58,7 @@ One `nas-watch.sh` tick runs these steps (see the script header):
 3. `pnpm vault-watch --once`: vault NAV snapshots for the scout lanes.
 4. `pnpm scout:lanes`: per-lane scorecard snapshot for the Scout tab.
 5. `pnpm cron:nas`: pokes `/api/cron/reconcile-positions` with the bearer, then pokes
-   `/api/cron/auto-exit` unless the reconcile poke succeeded and no live position is open.
+   `/api/cron/auto-exit` unless the reconcile ran with no skip and no live position is open.
    Then it stamps the auto-exit heartbeat itself, except on the first tick of each hour,
    which pokes anyway so a broken route still pages. On a failed poke it marks both
    heartbeats `nas-poke-failed`, so `scout:watch` pokes instead. Vercel Hobby caps

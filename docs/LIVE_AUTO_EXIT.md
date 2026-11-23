@@ -74,10 +74,10 @@ All thresholds live in a versioned manifest (`data/auto-exit/`), tunable without
   enforced by a static no-execute test, so the decision + firing live in exactly one
   auditable place (`src/lib/trading/risk-exit-service.ts`).
 - **Two pokers, no Vercel cron** (no Vercel Pro needed). The NAS `nas-watch.sh` tick
-  runs `pnpm cron:nas` every 5 min: it pokes the endpoint while a live position is open,
-  and with no live position it skips the poke and stamps the heartbeat itself (the route
-  would scan an empty list). `scout:watch` on the office box pokes every 10 min, but only
-  while the NAS heartbeats are stale (Vercel Hobby Active-CPU cap, 2026-11-22). The executor + agent key stay on Vercel. Only when BOTH pokers are down do the
+  runs `pnpm cron:nas` every 5 min. With no live position it skips most auto-exit pokes
+  (the rules: [OPERATOR_MANUAL.md](OPERATOR_MANUAL.md) step 5). `scout:watch` on the
+  office box pokes every 10 min, but only while the NAS heartbeats are stale or a NAS
+  poke failed (Vercel Hobby Active-CPU cap, 2026-11-22). The executor + agent key stay on Vercel. Only when BOTH pokers are down do the
   checks pause (the manual Safe-Exit always remains). Each run writes the
   `scout_heartbeat` row `source='auto-exit-cron'`; the ladder-watch tick pages Discord
   when it is older than 30 min.
