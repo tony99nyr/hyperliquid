@@ -251,12 +251,13 @@ export async function persistFillRow(
  * position. Mode-agnostic — never inspects `fill.source`.
  *
  * Idempotent + crash-consistent by construction: it derives the position purely
- * from the immutable `fills` rows (the duplicate-guarded source of truth), so
+ * from the `fills` rows (the duplicate-guarded source of truth; only the
+ * backfill's hl_raw.foldPending audit marker is ever updated), so
  * calling it twice produces the same result and a partially-applied prior run
  * self-heals. See the file header + ADR-0001.
  */
 export async function applyFillToPositionRows(
-  fill: CanonicalFill,
+  fill: Pick<CanonicalFill, 'sessionId' | 'coin'>,
   leverage?: number,
   client: SupabaseClient = getServiceRoleClient(),
   lane?: string,
