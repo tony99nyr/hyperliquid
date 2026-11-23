@@ -44,7 +44,12 @@ export async function restartDegradedClockAfterOutage(now: number = Date.now()):
     if (error) return;
     const last = data ? Date.parse(String((data as { last_tick_at: string }).last_tick_at)) : NaN;
     if (Number.isFinite(last) && now - last <= STALE_AFTER_MS.reconcile) return;
-    await client.from('scout_heartbeat').update({ last_tick_at: new Date(now).toISOString() }).eq('source', 'reconcile-ok');
+    const { error: updateError } = await client
+      .from('scout_heartbeat')
+      .update({ last_tick_at: new Date(now).toISOString() })
+      .eq('source', 'reconcile-ok');
+    // If this fails, the outage counts as degraded time and the next skip can page.
+    if (updateError) console.error(`[scout-heartbeat] degraded-clock restart failed: ${updateError.message}`);
   } catch {
     /* best-effort */
   }

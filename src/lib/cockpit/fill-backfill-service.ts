@@ -21,7 +21,7 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 import { getServiceRoleClient } from './supabase-server';
 import { getHlAccountAddress } from '@/lib/auto-exit/auto-exit-config';
-import { fetchRecentFills } from '@/lib/hyperliquid/hyperliquid-info-service';
+import { fetchRecentFills, type HlFill } from '@/lib/hyperliquid/hyperliquid-info-service';
 import { persistFillRow, applyFillToPositionRows } from './fill-persistence-service';
 import { writeAnalysisLog } from './analysis-log-service';
 import { computeMissingFills, attributeSession, type BackfillCandidate } from './fill-backfill-business-logic';
@@ -38,6 +38,8 @@ export interface BackfillSummary {
   inserted: number;
   /** Missing orders with NO live session to attach to (left for a later run). */
   unattributed: number;
+  /** Set when the HL read failed and the run used cached fills: the run is incomplete. */
+  staleRead?: string;
 }
 
 /** Default window: 48h. Every cron tick re-covers the window; dedupe makes that free. */
@@ -57,12 +59,20 @@ export async function backfillExchangeFills(
   if (hl.error && hl.fills.length === 0) {
     return { skipped: true, reason: `HL fills read failed: ${hl.error}`, scanned: 0, inserted: 0, unattributed: 0 };
   }
+  const summary = await bookMissingFills(hl.fills, client);
+  // A failed read that fell back to an expired cache is incomplete: the newest fills
+  // can be missing. Say so, so the reconcile heartbeat does not count the run as healed.
+  return hl.error ? { ...summary, staleRead: hl.error } : summary;
+}
+
+/** Steps 2 and up: book every exchange fill that the ledger is missing. */
+async function bookMissingFills(fills: HlFill[], client: SupabaseClient): Promise<BackfillSummary> {
 
   // 2) Which orders does the ledger already know, and at what booked size? Match
   //    on hl_order_id — executeIntent bookings and prior backfills both set it.
   //    Chunked: a 2000-oid `.in()` would blow the URL and PostgREST row caps.
-  const oids = Array.from(new Set(hl.fills.filter((f) => f.oid != null).map((f) => String(f.oid))));
-  if (oids.length === 0) return { skipped: false, scanned: hl.fills.length, inserted: 0, unattributed: 0 };
+  const oids = Array.from(new Set(fills.filter((f) => f.oid != null).map((f) => String(f.oid))));
+  if (oids.length === 0) return { skipped: false, scanned: fills.length, inserted: 0, unattributed: 0 };
   const knownSzByOid = new Map<string, number>();
   for (let i = 0; i < oids.length; i += 200) {
     const { data: knownRows, error: knownErr } = await client
@@ -70,7 +80,7 @@ export async function backfillExchangeFills(
       .select('hl_order_id, sz')
       .in('hl_order_id', oids.slice(i, i + 200));
     if (knownErr) {
-      return { skipped: true, reason: `fills dedupe read failed: ${knownErr.message}`, scanned: hl.fills.length, inserted: 0, unattributed: 0 };
+      return { skipped: true, reason: `fills dedupe read failed: ${knownErr.message}`, scanned: fills.length, inserted: 0, unattributed: 0 };
     }
     for (const r of knownRows ?? []) {
       const row = r as { hl_order_id: string | null; sz: number };
@@ -79,7 +89,7 @@ export async function backfillExchangeFills(
     }
   }
 
-  const { candidates: missing, underBooked } = computeMissingFills(hl.fills, knownSzByOid);
+  const { candidates: missing, underBooked } = computeMissingFills(fills, knownSzByOid);
   // Late partials of an already-booked order CANNOT be inserted (one row per oid,
   // fills_hl_order_id_uniq) — surface the shortfall loudly instead of silently
   // under-counting; the operator reconciles by hand. Expected ~never at this
@@ -91,7 +101,7 @@ export async function backfillExchangeFills(
       'HL Reconcile',
     ).catch(() => {});
   }
-  if (missing.length === 0) return { skipped: false, scanned: hl.fills.length, inserted: 0, unattributed: 0 };
+  if (missing.length === 0) return { skipped: false, scanned: fills.length, inserted: 0, unattributed: 0 };
 
   // 3) Session attribution inputs (live sessions only).
   const { data: liveSessions } = await client
@@ -101,7 +111,7 @@ export async function backfillExchangeFills(
     .order('created_at', { ascending: false });
   const liveIds = (liveSessions ?? []).map((s) => (s as { id: string }).id);
   if (liveIds.length === 0) {
-    return { skipped: true, reason: 'no live sessions to attribute to', scanned: hl.fills.length, inserted: 0, unattributed: missing.length };
+    return { skipped: true, reason: 'no live sessions to attribute to', scanned: fills.length, inserted: 0, unattributed: missing.length };
   }
   const newestActive = (liveSessions ?? []).find((s) => (s as { status: string }).status === 'active') as { id: string } | undefined;
 
@@ -171,7 +181,7 @@ export async function backfillExchangeFills(
       // fail-soft per row; the next run retries it (dedupe keeps it exact)
     }
   }
-  return { skipped: false, scanned: hl.fills.length, inserted, unattributed };
+  return { skipped: false, scanned: fills.length, inserted, unattributed };
 }
 
 function describe(c: BackfillCandidate): string {

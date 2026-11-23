@@ -34,6 +34,12 @@ describe('restartDegradedClockAfterOutage', () => {
     expect(updates).toEqual([{ row: { last_tick_at: new Date(NOW).toISOString() }, source: 'reconcile-ok' }]);
   });
 
+  it('with no previous reconcile run, restarts the clock', async () => {
+    withReconcileRow({ data: null, error: null });
+    await restartDegradedClockAfterOutage(NOW);
+    expect(updates).toHaveLength(1);
+  });
+
   it('inside a running degraded stretch (previous run minutes old), keeps the clock', async () => {
     withReconcileRow({ data: { last_tick_at: new Date(NOW - 5 * MIN).toISOString() }, error: null });
     await restartDegradedClockAfterOutage(NOW);

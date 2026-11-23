@@ -62,6 +62,13 @@ describe('GET /api/cron/reconcile-positions', () => {
     expect(writeScoutHeartbeat).toHaveBeenCalledWith('degraded', expect.stringMatching(/reconcile SKIPPED \(HL read stale\).*via nas$/), 'reconcile');
   });
 
+  it('writes a DEGRADED heartbeat when the backfill used cached fills after a failed HL read', async () => {
+    backfillExchangeFills.mockResolvedValue({ skipped: false, scanned: 2, inserted: 0, unattributed: 0, staleRead: 'timeout' });
+    await GET(req('nas'));
+    expect(writeScoutHeartbeat).toHaveBeenCalledWith('degraded', expect.stringContaining('cached fills'), 'reconcile');
+    expect(writeScoutHeartbeat).not.toHaveBeenCalledWith('ok', expect.anything(), 'reconcile-ok');
+  });
+
   it('401s without a valid bearer and writes NO heartbeat (an unauthorised poke must not look alive)', async () => {
     verifyCronBearer.mockReturnValue(false);
     const res = await GET(req());

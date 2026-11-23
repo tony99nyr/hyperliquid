@@ -39,17 +39,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const skips = [
       summary.skipped ? `reconcile SKIPPED (${summary.reason})` : null,
       backfill.skipped ? `backfill SKIPPED (${backfill.reason})` : null,
+      backfill.staleRead ? `backfill read cached fills (HL fills read failed: ${backfill.staleRead})` : null,
     ].filter((s): s is string => s !== null);
-    // 'reconcile-ok' moves only on a run that healed: the watchdog pages when it goes
-    // stale while 'reconcile' stays fresh (degraded for 30+ min, not one transient skip).
-    if (skips.length === 0) {
+    const degraded = skips.length > 0;
+    // 'reconcile-ok' moves only on a run that healed: the watchdog pages when the route
+    // stays degraded for 30+ min (not on one transient skip).
+    if (!degraded) {
       await writeScoutHeartbeat('ok', `reconcile + backfill completed via ${poker}`, 'reconcile-ok').catch(() => {});
     } else {
       await restartDegradedClockAfterOutage().catch(() => {});
     }
     await writeScoutHeartbeat(
-      skips.length > 0 ? 'degraded' : 'ok',
-      skips.length > 0
+      degraded ? 'degraded' : 'ok',
+      degraded
         ? `reconcile route ran but ${skips.join(', ')} via ${poker}`
         : `reconcile ran: checked ${summary.checked}, backfill scanned ${backfill.scanned} inserted ${backfill.inserted} via ${poker}`,
       'reconcile',

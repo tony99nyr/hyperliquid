@@ -36,14 +36,12 @@ NAS or desktop cannot move money.
 **Cron heartbeats.** The auto-exit and reconcile routes write `scout_heartbeat` rows
 (`source` = `auto-exit-cron` and `reconcile`). The ladder-watch tick pages Discord when a
 row is older than 30 min (re-page at most every 6h). `desk-review` also flags them STALE.
-The reconcile route also writes `reconcile-ok`, but only on a run where the reconcile and
-the fill backfill both completed. The tick pages RECONCILE DEGRADED when `reconcile` is
-fresh but its last run came 30+ min after the last `reconcile-ok`: the route runs, but it
-skips (an HL read fault, for example) and heals nothing. One skipped run does not page.
-The watchdog seeds an absent `reconcile-ok` row, so a route that is degraded from the deploy onwards still pages. A
-second degraded episode within 6h of a page stays quiet (the same cooldown as staleness).
-The first degraded run after an outage (`reconcile` older than 30 min) moves
-`reconcile-ok` up to now, so an outage of 30+ min never counts as degraded.
+The reconcile route also writes `reconcile-ok`, but only on a run that healed: the
+reconcile and the fill backfill both completed on a fresh HL read. The tick pages
+RECONCILE DEGRADED when `reconcile` is fresh but its last run came 30+ min after the last
+`reconcile-ok`, so one skipped run does not page. The watchdog seeds an absent
+`reconcile-ok` row, and the first degraded run after an outage of 30+ min moves it up to
+now, so the outage does not count as degraded. Re-pages share the 6h cooldown.
 The Scout tab shows only the scout rows (`scout-watch`, `scout-cycle`).
 
 **Monthly spot-check:** healthchecks.io shows green · cron-job.org history shows 200s ·
