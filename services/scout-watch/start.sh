@@ -62,7 +62,7 @@ fi
 # to `pnpm` if the local tsx binary is absent.
 TSX_BIN="$REPO_ROOT/node_modules/.bin/tsx"
 if [ -x "$TSX_BIN" ]; then
-    ( cd "$REPO_ROOT" && "$TSX_BIN" --tsconfig tsconfig.scripts.json scripts/scout-watch.ts ) \
+    ( cd "$REPO_ROOT" && exec nohup "$TSX_BIN" --tsconfig tsconfig.scripts.json scripts/scout-watch.ts ) \
         > "$LOG_FILE" 2>&1 &
 else
     echo "Local tsx not found at $TSX_BIN — falling back to pnpm (run 'pnpm install' in the repo)."

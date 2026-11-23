@@ -72,7 +72,7 @@ has_key() {
 
 # cron_replace TAG LINES: drop every crontab line that ends in TAG, then append LINES.
 # Refuses when it cannot read the crontab: writing an empty file would delete every
-# other root job. Keeps a backup of the old crontab in logs/.
+# other root job. Keeps a backup of the old crontab in /root/crontab-backups.
 cron_replace() {
   tag="$1"
   d="$(mktemp -d)" || return 1   # mode 700: root's crontab can hold secrets
@@ -81,7 +81,8 @@ cron_replace() {
     fail "cannot read the crontab of $(id -un): run this command with sudo"
     return 1
   fi
-  (umask 077 && cp "$d/old" "$REPO/logs/crontab-backup-$(date +%Y%m%d-%H%M%S)")
+  # Backup in root's own folder: admin can plant a symlink in the checkout's logs/.
+  (umask 077 && mkdir -p /root/crontab-backups && cp "$d/old" "$(mktemp /root/crontab-backups/crontab.XXXXXX)")
   # grep exits 1 when it keeps no line (fine) and 2 on an error (stop).
   grep -vF "$tag" "$d/old" > "$d/new"
   if [ $? -gt 1 ]; then rm -rf "$d"; fail "could not filter the crontab"; return 1; fi
@@ -105,6 +106,8 @@ cron_note() {
 # run scripts that admin can edit. su -l gives the owner's HOME (claude, git key).
 OWNER="$(stat -c %U "$REPO/.git" 2>/dev/null || id -un)"
 as_owner() { echo "su -l -s /bin/sh $OWNER -c '$1'"; }
+# The jobs write their logs as the owner: a log folder made under sudo must be theirs.
+[ "$(id -u)" = 0 ] && chown "$OWNER" "$REPO/logs" "$SCOUT_DIR/logs" 2>/dev/null
 
 need_root() {
   [ "$(id -u)" = 0 ] && return 0
@@ -243,7 +246,8 @@ cmd_install_retro() {
   if [ "$FAILS" -gt 0 ]; then note "STOP  fix the FAIL lines, then run install-retro again"; return; fi
   cron_replace "$TAG_RETRO" "57 12 * * 1 $(as_owner "cd $REPO && . ./ops/node-env.sh && pnpm --silent retro:remind >> logs/desk-retro-reminder.log 2>&1") $TAG_RETRO"
   cron_has "$TAG_RETRO" && pass "desk-retro cron line installed (Mon 12:57)" || fail "crontab did not take the desk-retro line"
-  if pnpm --silent retro:remind --test; then
+  # The same user and environment as the cron line, so the test proves the cron path.
+  if su -l -s /bin/sh "$OWNER" -c "cd $REPO && . ./ops/node-env.sh && pnpm --silent retro:remind --test"; then
     pass "Discord test ping sent: check the channel for 'Test ping from $HOST'"
   else
     fail "Discord test ping failed (see the output above)"
