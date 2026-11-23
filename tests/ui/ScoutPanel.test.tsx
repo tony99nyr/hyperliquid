@@ -1,6 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import ScoutPanel from '@/app/cockpit/components/ScoutPanel';
+import type { ScoutHeartbeat } from '@/hooks/useScoutHeartbeat';
+
+const heartbeatRows = vi.hoisted(() => ({ rows: [] as ScoutHeartbeat[] }));
+vi.mock('@/hooks/useScoutHeartbeat', () => ({
+  useScoutHeartbeat: () => ({ rows: heartbeatRows.rows, loaded: true, error: null, subscribed: true }),
+}));
+
 import type { PnlSnapshot, PositionRow } from '@/hooks/realtime-row-mappers';
 import type { PerformanceSummary } from '@/lib/cockpit/performance-service';
 import type { LaneCard } from '@/types/scout';
@@ -144,5 +151,23 @@ describe('ScoutPanel — lanes', () => {
   it('hides the lanes section when there are no lane cards', () => {
     render(<ScoutPanel {...base} lanesOverride={{ account: null, lanes: [], updatedAt: null }} />);
     expect(screen.queryByTestId('scout-lanes')).toBeNull();
+  });
+});
+
+describe('ScoutPanel — producer heartbeat', () => {
+  const hb = (source: string, agoMs: number): ScoutHeartbeat => ({
+    id: source, source, lastTickMs: Date.now() - agoMs, status: 'ok', detail: '',
+  });
+
+  it('shows the scout-watch tick age when the scout-watch row exists', () => {
+    heartbeatRows.rows = [hb('reconcile', 10_000), hb('scout-watch', 5 * 60_000)];
+    render(<ScoutPanel hypsOverride={[]} positionsOverride={{ positions: [], latestPnlByCoin: {} }} />);
+    expect(screen.getByTestId('scout-heartbeat').textContent).toBe('watch: 5m ago');
+  });
+
+  it('shows never ticked when only prod cron rows exist (no fallback to a cron tick)', () => {
+    heartbeatRows.rows = [hb('reconcile', 10_000), hb('auto-exit-cron', 20_000), hb('reconcile-ok', 30_000)];
+    render(<ScoutPanel hypsOverride={[]} positionsOverride={{ positions: [], latestPnlByCoin: {} }} />);
+    expect(screen.getByTestId('scout-heartbeat').textContent).toBe('watch: —');
   });
 });

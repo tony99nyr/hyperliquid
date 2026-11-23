@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "test:lib": "SUPPRESS_TEST_OUTPUT=true vitest run --config vitest.config.lib.ts --reporter=dot",
     "test:ui": "SUPPRESS_TEST_OUTPUT=true vitest run --config vitest.config.ui.ts --reporter=dot",
+    "storyboard": "mkdir -p storyboard-out/scout-heartbeat && panda cssgen --outfile storyboard-out/scout-heartbeat/panda.css && SUPPRESS_TEST_OUTPUT=true vitest run --config vitest.config.storyboard.ts --reporter=dot",
     "validate": "pnpm type:check && pnpm test && pnpm lint && pnpm build",
     "env:pull": "vercel env pull .env.local",
     "env:help": "echo 'Run: pnpm env:pull to pull Vercel env vars into .env.local (repo must be linked: vercel link). Sensitive vars added manually if needed.'",

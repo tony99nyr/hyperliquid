@@ -45,6 +45,7 @@
     "vitest.config.ts",
     "vitest.config.lib.ts",
     "vitest.config.ui.ts",
+    "vitest.config.storyboard.ts",
     "scripts/analysis"
   ]
 }

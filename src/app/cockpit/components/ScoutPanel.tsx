@@ -83,7 +83,10 @@ export default function ScoutPanel({ hypsOverride, positionsOverride, perfOverri
 
   // Daemon liveness: "watch tick Nm ago", red when silent past the stale window.
   const heartbeat = useScoutHeartbeat({ enabled: hypsOverride === undefined });
-  const lastTickMs = (heartbeat.rows.find((r) => r.source === 'scout-watch') ?? heartbeat.rows[0])?.lastTickMs ?? 0;
+  // Producer liveness: the 'scout-watch' row only. The table also holds the prod cron
+  // rows (reconcile, auto-exit-cron, reconcile-ok), so never fall back to another row:
+  // a cron tick would hide a dead scout. A missing row renders as never ticked.
+  const lastTickMs = heartbeat.rows.find((r) => r.source === 'scout-watch')?.lastTickMs ?? 0;
   // CONSUMER liveness (source 'scout-cycle'): the half that actually DECIDES. It died
   // unnoticed for 8 days behind a healthy producer row — render it separately so a dead
   // consumer is a visible stale age, never silence.
