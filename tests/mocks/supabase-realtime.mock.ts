@@ -24,16 +24,14 @@
  */
 
 import { vi } from 'vitest';
+import type { RealtimeChangePayload } from '@/hooks/realtime-row-mappers';
 
 /**
- * A postgres_changes payload. Shape it like realtime-js: a DELETE carries
- * `eventType: 'DELETE'`, `new: {}` and, with RLS on, only the primary key in `old`.
+ * A postgres_changes payload, the same type the hooks read. Shape it like
+ * realtime-js: a DELETE carries `eventType: 'DELETE'`, `new: {}` and, with RLS
+ * on, only the primary key in `old`.
  */
-export interface MockChangePayload {
-  eventType?: 'INSERT' | 'UPDATE' | 'DELETE';
-  new?: unknown;
-  old?: unknown;
-}
+export type MockChangePayload = RealtimeChangePayload;
 type ChangeCallback = (payload: MockChangePayload) => void;
 type StatusCallback = (status: string) => void;
 
@@ -61,6 +59,11 @@ export interface RealtimeBrowserMock {
   requestedTopics: string[];
   /** Emit a postgres_changes event to all live channels matching a topic prefix. */
   emit(topicPrefix: string, payload: MockChangePayload): void;
+  /**
+   * Hold the NEXT snapshot query open until `resolve` runs, to test events that
+   * arrive while a snapshot is in flight.
+   */
+  deferNextFetch(): { resolve(data: unknown[]): void };
   reset(): void;
 }
 
@@ -123,13 +126,23 @@ export function createRealtimeBrowserMock(
     return Promise.resolve('ok');
   });
 
+  type FetchResult = { data: unknown[]; error: { message: string } | null };
+  let deferred: Promise<FetchResult> | null = null;
+
   // Minimal initial-snapshot builder: from(t).select().eq().order().limit() → result.
   const from = vi.fn(() => {
     const builder: Record<string, unknown> = {
       select: () => builder,
       eq: () => builder,
       order: () => builder,
-      limit: () => Promise.resolve({ data: initialFetch.data ?? [], error: initialFetch.error ?? null }),
+      limit: () => {
+        if (deferred) {
+          const held = deferred;
+          deferred = null;
+          return held;
+        }
+        return Promise.resolve({ data: initialFetch.data ?? [], error: initialFetch.error ?? null });
+      },
     };
     return builder;
   });
@@ -145,7 +158,13 @@ export function createRealtimeBrowserMock(
         }
       }
     },
+    deferNextFetch() {
+      let resolve: (r: FetchResult) => void = () => {};
+      deferred = new Promise<FetchResult>((r) => { resolve = r; });
+      return { resolve: (data) => resolve({ data, error: null }) };
+    },
     reset() {
+      deferred = null;
       channels.length = 0;
       requestedTopics.length = 0;
       liveByTopic.clear();

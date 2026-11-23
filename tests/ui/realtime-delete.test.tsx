@@ -62,6 +62,29 @@ describe('realtime hooks remove a row on DELETE', () => {
   // scout_heartbeat left the realtime publication in 0024, so production sends no
   // event here. The test covers the generic useRealtimeTable path and a mapper
   // whose id is a non-`id` primary key.
+  it('keeps a DELETE that arrives while a snapshot is in flight', async () => {
+    await act(async () => {
+      render(<ChannelHarness />);
+    });
+    expect(screen.getByTestId('ids').textContent).toBe('a,b');
+
+    // A refetch reads the table before the delete and resolves after it.
+    const held = realtime.deferNextFetch();
+    await act(async () => {
+      window.dispatchEvent(new Event('online'));
+    });
+    await act(async () => {
+      realtime.emit('rt:positions:', { eventType: 'DELETE', new: {}, old: { id: 'a' } });
+    });
+    await act(async () => {
+      held.resolve([
+        { id: 'a', created_at: 2 },
+        { id: 'b', created_at: 1 },
+      ]);
+    });
+    expect(screen.getByTestId('ids').textContent).toBe('b');
+  });
+
   it('useRealtimeTable (scout_heartbeat) drops the row keyed by source', async () => {
     await act(async () => {
       render(<HeartbeatHarness />);
