@@ -9,13 +9,15 @@ Design docs: [ARMED_LADDER_ARCHITECTURE.md](./ARMED_LADDER_ARCHITECTURE.md) ·
 ```
 DESKTOP / office box (you + Claude)   NAS (always-on, no keys)         CLOUD
 ───────────────────────────────────   ────────────────────────         ─────
-pnpm scout:watch (systemd --user;     pnpm trader-watch (daemon)       Vercel prod: the app +
-  embeds the scout consumer and       crontab: nas-watch.sh every        EXECUTORS (agent key lives
-  pokes the prod crons, 10 min)         5 min (health, rubric, vault,    ONLY here; all real orders)
-ad-hoc skills (pnpm skill:*)            scout lanes, then pokes          cron-job.org → ladder-watch ~2min
-weekly desk retro                       auto-exit + reconcile)           healthchecks.io → dead-man alert
-authoring/reviewing ladders                                              Supabase → shared DB/realtime
-dev / validate / deploy
+ad-hoc skills (pnpm skill:*)          pnpm trader-watch (daemon)       Vercel prod: the app +
+weekly desk retro                     pnpm scout:watch (embeds the       EXECUTORS (agent key lives
+authoring/reviewing ladders             scout consumer, pokes the        ONLY here; all real orders)
+dev / validate / deploy                 prod crons, 10 min)            cron-job.org → ladder-watch ~2min
+                                      crontab: nas-watch.sh every      healthchecks.io → dead-man alert
+                                        5 min (health, rubric, vault,  Supabase → shared DB/realtime
+                                        scout lanes, then pokes
+                                        auto-exit + reconcile)
+                                      Monday desk-retro reminder
 ```
 
 **The rule that explains everything:** the HL agent key exists ONLY in Vercel prod env.
@@ -91,22 +93,19 @@ One `nas-watch.sh` tick runs these steps (see the script header):
 
 ## 3. Desktop / office box: where YOU (and Claude) work
 
-**Supervised daemon:** `pnpm scout:watch` runs here under `systemd --user` (see
-`services/scout-watch/README.md`). It writes triggers to Supabase `scout_triggers`, runs
+**Scout daemon:** since 2026-11-23, `pnpm scout:watch` runs on the NAS from root's
+crontab as admin (`ops/nas/install.sh`; steps and rollback in
+`services/scout-watch/README.md`, "Run it on the NAS"). It writes triggers to Supabase `scout_triggers`, runs
 the scout consumer (`scripts/scout-headless.sh`) EMBEDDED every
 `SCOUT_CONSUMER_INTERVAL_MIN` (default 30), and pokes the prod crons. **Do not add a
 separate `scout-headless.sh` cron:** two consumers can both open on the same directive.
 A cron is only for a box that runs the consumer without the daemon. Consumer liveness is
-the `scout_heartbeat` row `source='scout-cycle'`. The office box runs scout-watch only;
-the other loops are NAS-owned.
-**Moving to the NAS:** scout-watch and the desk-retro reminder move to the NAS admin
-crontab through `ops/nas/install.sh`, so the office box can sleep at night. Cut-over
-steps: `services/scout-watch/README.md`, "Run it on the NAS". Until the cut-over, the
-office box runs both.
+the `scout_heartbeat` row `source='scout-cycle'`. The office box runs no always-on job, so it can sleep at night. Never start a second
+scout-watch on it: two copies double-write.
 
-**Timers:** `desk-retro-reminder.timer` sends a Discord ping on Mondays at 12:57 local
-that the weekly retro is due (`ops/systemd/desk-retro-reminder.service` has the install
-steps). Per-event straddle prep timers (`<event>-prep.timer`) are installed per event.
+**Timers:** the NAS sends the Discord ping on Mondays at 12:57 New York time that the
+weekly retro is due (`ops/nas/install.sh install-retro`). The office
+`desk-retro-reminder.timer` is off and stays only as a rollback. Per-event straddle prep timers (`<event>-prep.timer`) are installed per event.
 
 **Ad-hoc skills (run in a Claude session or a terminal).** The full roster is the Skills
 section of the root [CLAUDE.md](../CLAUDE.md). The commands you run most:

@@ -31,9 +31,9 @@ it: `start.sh` (`export TRADING_MODE=paper`), the systemd unit
 
 See `docs/scout/README.md` for the scout architecture and runbook.
 
-## Run it on the NAS (cut-over planned 2026-11-23)
+## Run it on the NAS (cut-over done 2026-11-23)
 
-The office PC is to sleep at night, so scout-watch moves to the NAS.
+The office PC sleeps at night, so scout-watch runs on the NAS.
 `ops/nas/install.sh` installs it in root's crontab, beside trader-watch, and it
 also moves the Monday desk-retro reminder. The cron lines run the jobs as admin
 (`su -l admin`), so root never runs a script that admin can edit. The office box keeps its systemd unit only as a rollback.
