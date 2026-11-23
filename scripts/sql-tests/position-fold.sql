@@ -46,10 +46,9 @@ reset role;
 -- Only service_role may run the functions. Check the grants directly: anon has no
 -- table privileges here, so a call would fail on the table even with a leaked grant.
 select pg_temp.check(not has_function_privilege(r, f, 'execute'), r || ' cannot execute ' || f)
-from unnest(array['anon', 'authenticated', 'public']) as r,
+from unnest(array['anon', 'authenticated']) as r,
      unnest(array[
        'public.apply_position_fold(uuid, text, text, float8, float8, float8, float8, timestamptz, float8, text, integer)',
-       'public.list_unfolded_live_positions(integer)']) as f
-where r <> 'public';
+       'public.list_unfolded_live_positions(integer)']) as f;
 select pg_temp.check(has_function_privilege('service_role', 'public.list_unfolded_live_positions(integer)', 'execute'), 'service_role can execute the gap list');
 select 'position-fold SQL contract: PASS';
