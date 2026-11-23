@@ -61,8 +61,12 @@ export async function reconcileLivePositions(client: SupabaseClient = getService
     .select('session_id, coin, side, sz, avg_entry_px, leverage, updated_at')
     .neq('side', 'flat')
     .in('session_id', ids);
+  // The updated_at each row had when read: the write below applies only while it is
+  // unchanged, so a fill folded after this read is never overwritten by stale HL state.
+  const readAt = new Map<string, string>();
   const cockpit: CockpitPos[] = (posRows ?? []).map((r) => {
     const row = r as { session_id: string; coin: string; side: 'long' | 'short' | 'flat'; sz: number; avg_entry_px: number; leverage: number | null; updated_at: string };
+    readAt.set(`${row.session_id}:${row.coin}`, row.updated_at);
     const t = Date.parse(row.updated_at);
     return { sessionId: row.session_id, coin: row.coin, side: row.side, sz: row.sz, avgEntryPx: row.avg_entry_px, leverage: row.leverage, updatedAtMs: Number.isFinite(t) ? t : undefined };
   });
@@ -105,12 +109,15 @@ export async function reconcileLivePositions(client: SupabaseClient = getService
       avg_entry_px: a.target.avgEntryPx,
     };
     if (a.target.leverage != null) payload.leverage = a.target.leverage;
-    const { error } = await client
+    const { data: written, error } = await client
       .from('positions')
       .update(payload)
       .eq('session_id', a.sessionId)
-      .eq('coin', a.coin.trim().toUpperCase());
+      .eq('coin', a.coin)
+      .eq('updated_at', readAt.get(`${a.sessionId}:${a.coin}`) ?? '')
+      .select('coin');
     if (error) continue; // fail-soft per row
+    if (!written || written.length === 0) continue; // a fold changed the row since the read: next tick decides
     if (a.reason === 'flatten') flattened++;
     else resynced++;
     try {

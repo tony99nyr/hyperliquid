@@ -24,7 +24,7 @@ import { vi } from 'vitest';
 
 export interface RecordedOp {
   table: string;
-  /** 'insert' | 'upsert' | 'update' | 'select' */
+  /** 'insert' | 'upsert' | 'update' | 'select' | 'rpc' (table = the function name) */
   op: string;
   /** The row(s) passed to insert/upsert/update. */
   payload?: unknown;
@@ -34,6 +34,8 @@ export interface RecordedOp {
   filters: Array<{ column: string; value: unknown }>;
   /** Order clauses applied via .order(col, opts), in call order. */
   order?: Array<{ column: string; options: unknown }>;
+  /** The .range(from, to) page window, when set. */
+  range?: { from: number; to: number };
   /** Less-than comparators applied via .lt(col, val), in call order. */
   lt?: Array<{ column: string; value: unknown }>;
 }
@@ -46,6 +48,7 @@ export interface SupabaseMockResult {
 export interface SupabaseMock {
   client: {
     from: ReturnType<typeof vi.fn>;
+    rpc: ReturnType<typeof vi.fn>;
   };
   /** Every terminal operation in call order. */
   ops: RecordedOp[];
@@ -82,6 +85,10 @@ export function createSupabaseMock(): SupabaseMock {
         // Chainable (a second `.order()` is a tiebreak) AND thenable via `then`
         // below, so `await q.order(...)` and `await q.order(...).order(...)` both
         // resolve to a list result.
+        return builder;
+      },
+      range(from: number, to: number) {
+        op.range = { from, to };
         return builder;
       },
       lt(column: string, value: unknown) {
@@ -129,8 +136,13 @@ export function createSupabaseMock(): SupabaseMock {
     },
   }));
 
+  const rpc = vi.fn((fn: string, args?: unknown) => {
+    ops.push({ table: fn, op: 'rpc', payload: args, filters: [] });
+    return Promise.resolve(nextResult());
+  });
+
   return {
-    client: { from },
+    client: { from, rpc },
     ops,
     queueResult(result: SupabaseMockResult) {
       resultQueue.push(result);
@@ -139,6 +151,7 @@ export function createSupabaseMock(): SupabaseMock {
       ops.length = 0;
       resultQueue.length = 0;
       from.mockClear();
+      rpc.mockClear();
     },
   };
 }

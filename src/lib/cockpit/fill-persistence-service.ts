@@ -5,8 +5,9 @@
  *
  *   persistFillRow(fill)           → fills row, idempotent on client_intent_id
  *   applyFillToPositionRows(fill)  → fold ALL fills for (session, coin) from the
- *                                    ledger (pure applyFills) → upsert positions
- *                                    row + insert pnl row
+ *                                    ledger (pure applyFills) → write positions
+ *                                    row + pnl row via the version-checked
+ *                                    apply_position_fold RPC (migration 0052)
  *
  * Idempotency + crash-consistency (ADR-0001): the `fills` table is the single
  * source of truth. `fills.client_intent_id` is unique, so a duplicate insert
@@ -49,6 +50,13 @@ const FILL_LEDGER_COLUMNS =
  */
 function normalizeCoin(coin: string): string {
   return coin.trim().toUpperCase();
+}
+
+/** True when PostgREST cannot find apply_position_fold (migration 0052 not applied). */
+function isMissingFoldRpc(error: { code?: string; message?: string }): boolean {
+  // Match the function name too: 42883 also fires for a missing operator inside the
+  // RPC body, and that must fail loudly, not fall back to the unserialised write.
+  return (error.code === 'PGRST202' || error.code === '42883') && /apply_position_fold/.test(error.message ?? '');
 }
 
 /** True when an error indicates a duplicate fill row (idempotent re-run). */
@@ -245,10 +253,45 @@ export async function persistFillRow(
   return true;
 }
 
+/** PostgREST returns at most 1000 rows per request (the project max_rows). */
+const LEDGER_PAGE = 1000;
+
+/**
+ * Read every fills row of (session, coin), page by page. A single read stops at the
+ * row cap, so a long ledger would fold without its newest fills. A fill inserted
+ * during the read can shift a row onto the next page: the client_intent_id dedupe
+ * drops that repeat, so the row count stays the number of distinct fills seen. The
+ * stable sort puts such a late, older fill back in filled_at order.
+ */
+async function loadLedger(client: SupabaseClient, sessionId: string, coin: string): Promise<CanonicalFill[]> {
+  const byIntent = new Map<string, CanonicalFill>();
+  for (let start = 0; ; start += LEDGER_PAGE) {
+    const { data, error } = await client
+      .from('fills')
+      .select(FILL_LEDGER_COLUMNS)
+      .eq('session_id', sessionId)
+      .eq('coin', coin)
+      .order('filled_at', { ascending: true })
+      // Deterministic tiebreak: two fills can share a microsecond-equal filled_at
+      // under burst/retry; a stable secondary key keeps the fold order (and thus
+      // realized P&L on flip-then-reduce sequences) reproducible.
+      .order('id', { ascending: true })
+      .range(start, start + LEDGER_PAGE - 1);
+    if (error) throw new Error(`applyFillToPositionRows load failed: ${error.message}`);
+    const rows = (data ?? []) as FillSelectRow[];
+    for (const row of rows) {
+      const fill = fillFromRow(row);
+      if (!byIntent.has(fill.clientIntentId)) byIntent.set(fill.clientIntentId, fill);
+    }
+    if (rows.length < LEDGER_PAGE) return [...byIntent.values()].sort((a, b) => a.filledAt - b.filledAt);
+  }
+}
+
 /**
  * Recompute the position for (session, coin) by folding the WHOLE fills ledger,
- * then upsert the positions row + insert a pnl snapshot. Returns the new
- * position. Mode-agnostic — never inspects `fill.source`.
+ * then write the positions row + a pnl snapshot. Returns this fold's position.
+ * When a concurrent fold already wrote a newer ledger, the RPC refuses this write
+ * and the stored row stays the newer one. Mode-agnostic — never inspects `fill.source`.
  *
  * Idempotent + crash-consistent by construction: it derives the position purely
  * from the `fills` rows (the duplicate-guarded source of truth; only the
@@ -267,37 +310,49 @@ export async function applyFillToPositionRows(
 
   // 1. Load the full fills ledger for this session+coin, oldest first, so the
   //    fold order matches execution order. This is the source of truth.
-  const { data: fillRows, error: loadError } = await client
-    .from('fills')
-    .select(FILL_LEDGER_COLUMNS)
-    .eq('session_id', sessionId)
-    .eq('coin', coin)
-    .order('filled_at', { ascending: true })
-    // Deterministic tiebreak: two fills can share a microsecond-equal filled_at
-    // under burst/retry; a stable secondary key keeps the fold order (and thus
-    // realized P&L on flip-then-reduce sequences) reproducible.
-    .order('id', { ascending: true });
-  if (loadError) throw new Error(`applyFillToPositionRows load failed: ${loadError.message}`);
+  const ledger = await loadLedger(client, sessionId, coin);
 
   // 2. Pure fold of the entire ledger — identical math regardless of source.
-  const ledger = ((fillRows ?? []) as FillSelectRow[]).map(fillFromRow);
   const next = applyFills(coin, ledger);
   // When the CURRENT open run started (fold-derived; null when flat) — the row is
   // reused across reopens so this can't be a created_at. Drives the "held" insight.
   const openedAtMs = computeOpenedAtMs(ledger);
   const openedAtIso = openedAtMs == null ? null : new Date(openedAtMs).toISOString();
 
-  // 3. Upsert the positions row (unique on session_id+coin). Leverage is METADATA
-  //    from the opening intent (not folded — ADR-0001); when known it's written so
-  //    the UI derives ROE, when undefined the column is left out so a reduce-only
-  //    re-fold preserves the entry leverage rather than nulling it.
+  // 3. Write the positions row + a pnl snapshot through the version-checked RPC
+  //    (migration 0052). Two folds of the same (session, coin) can race: the RPC
+  //    refuses a fold that saw fewer ledger rows than the stored row, so an older
+  //    snapshot never overwrites a newer one. Leverage and lane are METADATA from
+  //    the opening intent (not folded, ADR-0001): buildPositionRow leaves them out
+  //    when unknown, and the RPC keeps the stored value for a null.
   const positionRow = buildPositionRow(sessionId, next, new Date().toISOString(), leverage, openedAtIso, lane);
+  const { error: rpcError } = await client.rpc('apply_position_fold', {
+    p_session_id: sessionId,
+    p_coin: coin,
+    p_side: positionRow.side,
+    p_sz: positionRow.sz,
+    p_avg_entry_px: positionRow.avg_entry_px,
+    p_realized_pnl_usd: positionRow.realized_pnl_usd,
+    p_fees_paid_usd: positionRow.fees_paid_usd,
+    p_opened_at: openedAtIso,
+    p_leverage: positionRow.leverage ?? null,
+    p_lane: positionRow.lane ?? null,
+    p_ledger_fill_count: ledger.length,
+  });
+  // A refused (stale) fold returns false: a concurrent fold with a newer ledger
+  // already wrote the row, so there is nothing to do.
+  if (!rpcError) return next;
+  if (!isMissingFoldRpc(rpcError)) {
+    throw new Error(`applyFillToPositionRows fold write failed: ${rpcError.message}`);
+  }
+
+  // 4. Fallback until migration 0052 is applied: the unserialised upsert + pnl insert.
+  //    Remove once production has the RPC.
+  console.warn('[applyFillToPositionRows] apply_position_fold missing (apply migration 0052); unserialised upsert used');
   const { error: upsertError } = await client
     .from('positions')
     .upsert(positionRow, { onConflict: 'session_id,coin' });
   if (upsertError) throw new Error(`applyFillToPositionRows upsert failed: ${upsertError.message}`);
-
-  // 4. Append a pnl snapshot (realized + fees; unrealized needs a mark, left 0).
   const pnlRow = buildPnlRow(sessionId, next);
   const { error: pnlError } = await client.from('pnl').insert(pnlRow);
   if (pnlError) throw new Error(`applyFillToPositionRows pnl insert failed: ${pnlError.message}`);

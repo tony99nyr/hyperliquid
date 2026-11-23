@@ -53,12 +53,20 @@ function fakeClient(respond: (c: Call) => Result) {
       contains: (_col: string, value: unknown) => ((call.contains = value), b),
       then: (ok: (v: unknown) => unknown, bad: (e: unknown) => unknown) => done().then(ok, bad),
     };
-    for (const m of ['neq', 'in', 'order', 'limit', 'maybeSingle']) b[m] = () => b;
+    for (const m of ['neq', 'in', 'order', 'limit', 'maybeSingle', 'range']) b[m] = () => b;
     b.eq = (col: string, value: unknown) => ((call.eq = [col, value]), b);
     return b;
   };
-  return { client: { from } as unknown as SupabaseClient, calls };
+  const rpc = (fn: string, args: unknown) => {
+    const call: Call = { table: fn, op: 'rpc', payload: args };
+    calls.push(call);
+    return Promise.resolve({ data: true, error: null, ...respond(call) });
+  };
+  return { client: { from, rpc } as unknown as SupabaseClient, calls };
 }
+
+/** The positions write of a fold: the version-checked RPC (migration 0052). */
+const isFoldWrite = (c: Call) => c.table === 'apply_position_fold';
 
 const SESSION = { id: 's1', status: 'active', created_at: '2026-11-01' };
 const withOid = { ...fill, oid: 42 };
@@ -80,7 +88,7 @@ describe('backfillExchangeFills: a fill that fails to book is retried', () => {
     read({ fills: [withOid] });
     const { client, calls } = fakeClient((c) => {
       if (c.table === 'sessions') return { data: [SESSION] };
-      if (c.table === 'positions' && c.op === 'upsert') return { error: { message: 'timeout' } };
+      if (isFoldWrite(c)) return { error: { message: 'timeout' } };
       return { data: [] };
     });
     const r = await backfillExchangeFills({ client });
@@ -121,8 +129,8 @@ describe('backfillExchangeFills: a fill that fails to book is retried', () => {
     const r = await backfillExchangeFills({ client });
     expect(r.incomplete).toBeUndefined();
     expect(calls.find((c) => c.contains)?.contains).toEqual({ foldPending: true });
-    const upsert = calls.find((c) => c.table === 'positions' && c.op === 'upsert');
-    expect(upsert?.payload).toMatchObject({ session_id: 's1', coin: 'ETH', sz: 2 });
+    const fold = calls.find(isFoldWrite);
+    expect(fold?.payload).toMatchObject({ p_session_id: 's1', p_coin: 'ETH', p_sz: 2 });
     const update = calls.find((c) => c.table === 'fills' && c.op === 'update');
     expect(update?.payload).toEqual({ hl_raw: { backfill: true, rows: [] } });
   });
@@ -132,14 +140,14 @@ describe('backfillExchangeFills: a fill that fails to book is retried', () => {
     const { client, calls } = pendingClient((c) => (c.table === 'fills' && c.op === 'update' ? { error: { message: 'timeout' } } : undefined));
     const r = await backfillExchangeFills({ client });
     expect(r.skipped).toBe(true);
-    expect(calls.some((c) => c.table === 'positions' && c.op === 'upsert')).toBe(true);
+    expect(calls.some(isFoldWrite)).toBe(true);
     expect(r.incomplete).toBe('1 fold(s) pending');
   });
 
   it('reports a re-fold that fails again as a pending fold and keeps the marker', async () => {
     read({ fills: [] });
     const { client, calls } = pendingClient((c) =>
-      c.table === 'positions' && c.op === 'upsert' ? { error: { message: 'timeout' } } : undefined,
+      isFoldWrite(c) ? { error: { message: 'timeout' } } : undefined,
     );
     const r = await backfillExchangeFills({ client });
     expect(r.incomplete).toBe('1 fold(s) pending');
@@ -154,7 +162,7 @@ describe('backfillExchangeFills: a fill that fails to book is retried', () => {
       if (c.table === 'sessions') return { data: [SESSION] };
       if (c.table === 'fills' && c.op === 'insert') return (raced = true), { error: { message: 'duplicate key', code: '23505' } };
       if (raced && c.table === 'fills' && c.cols === 'session_id, coin, hl_raw') return { data: { session_id: 's9', coin: 'ETH', hl_raw: null } };
-      if (failFold && c.table === 'positions' && c.op === 'upsert') return { error: { message: 'timeout' } };
+      if (failFold && isFoldWrite(c)) return { error: { message: 'timeout' } };
       return { data: [] };
     });
   };
@@ -166,8 +174,8 @@ describe('backfillExchangeFills: a fill that fails to book is retried', () => {
     expect(r).toMatchObject({ inserted: 0 });
     expect(r.incomplete).toBeUndefined();
     expect(calls.find((c) => c.cols === 'session_id, coin, hl_raw')?.eq).toEqual(['hl_order_id', '42']);
-    const upserts = calls.filter((c) => c.table === 'positions' && c.op === 'upsert');
-    expect(upserts.map((c) => (c.payload as { session_id: string }).session_id)).toEqual(['s9']);
+    const folds = calls.filter(isFoldWrite);
+    expect(folds.map((c) => (c.payload as { p_session_id: string }).p_session_id)).toEqual(['s9']);
   });
 
   it('leaves the held row marked foldPending when its fold fails, so the retry pass finds it', async () => {
@@ -184,7 +192,7 @@ describe('backfillExchangeFills: a fill that fails to book is retried', () => {
     const { client, calls } = racedClient(false, true);
     const r = await backfillExchangeFills({ client });
     expect(r.incomplete).toBeUndefined();
-    const upserts = calls.filter((c) => c.table === 'positions' && c.op === 'upsert');
-    expect(upserts.map((c) => (c.payload as { session_id: string }).session_id)).toEqual(['s9']);
+    const folds = calls.filter(isFoldWrite);
+    expect(folds.map((c) => (c.payload as { p_session_id: string }).p_session_id)).toEqual(['s9']);
   });
 });
