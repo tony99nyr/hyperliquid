@@ -14,6 +14,15 @@ cd "$SCRIPT_DIR"
 
 PID_FILE="$SCRIPT_DIR/scout-watch.pid"
 
+# Box-local settings, kept out of git (for example CLAUDE_BIN on the NAS). `set -a`
+# exports them to the daemon and to the consumer it spawns. Load them before the
+# paper pin below, so a stray TRADING_MODE in .env cannot win.
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    set -a
+    . "$SCRIPT_DIR/.env"
+    set +a
+fi
+
 # DEFENSIVE: this daemon is paper-only by nature (never trades), but pin paper so
 # nothing it spawns can ever read a stray live mode. The interactive scout session
 # is separately protected by .env.local (paper) + the assertScoutPaperMode guard.

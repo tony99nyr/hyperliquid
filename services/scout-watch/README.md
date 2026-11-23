@@ -1,7 +1,7 @@
 # Scout-Watch Daemon (autonomous PAPER scout — free trigger layer)
 
 The **deterministic, FREE, no-model** layer of the autonomous paper scout. Runs on
-your always-on **office dev machine** (paper-only: this box never touches real money).
+the office box until the NAS cut-over below (paper-only: it never touches real money).
 Every 120s by default it reads the latest rubric scores + fresh marks + open paper
 positions and writes *material triggers* to the Supabase `scout_triggers` table (JSONL
 is the offline fallback). Costs **zero model tokens**.
@@ -30,6 +30,49 @@ it: `start.sh` (`export TRADING_MODE=paper`), the systemd unit
 `src/lib/scout/scout-exit-enforcement-service.ts`.
 
 See `docs/scout/README.md` for the scout architecture and runbook.
+
+## Run it on the NAS (cut-over planned 2026-11-23)
+
+The office PC is to sleep at night, so scout-watch moves to the NAS. The NAS runs
+it from the admin crontab, beside trader-watch. `ops/nas/install.sh` does the
+install, and it also moves the Monday desk-retro reminder. The office box keeps
+the systemd unit only as a rollback.
+
+**Never run two copies.** Two daemons double-write triggers and can both open on
+the same directive. `install-scout` refuses while the `scout-watch` heartbeat is
+younger than 5 minutes and comes from another host. The heartbeat `detail` ends
+in `host=<hostname>`.
+
+What the NAS needs first (copy these by hand, never commit them):
+
+- `.env.local` in the repo, with the Supabase service-role keys,
+  `DISCORD_WEBHOOK_URL` and `AUTO_EXIT_CRON_SECRET`. The NAS copy may be older
+  than the office copy: `check` names each missing key.
+- The claude CLI under Node 24 (`npm i -g @anthropic-ai/claude-code` with
+  `/volume1/home/admin/.local/node/bin` first on PATH), and one interactive
+  `claude` sign-in as admin with the subscription. Never set `ANTHROPIC_API_KEY`.
+- Optional: `services/scout-watch/.env` with `HEALTHCHECKS_SCOUT_WATCH_URL`.
+  `install-scout` writes `CLAUDE_BIN` there.
+
+The daemon state file (`~/.hl-cockpit-scout-state.json`) does not move. The NAS
+daemon starts from a fresh baseline, so it can miss a trigger in its first cycle.
+
+Cut-over, in this order:
+
+1. NAS: `cd /volume1/home/admin/hyperliquid && git pull origin main && sh ops/nas/install.sh check --probe-claude`.
+   Fix each FAIL line.
+2. NAS: `sh ops/nas/install.sh install-retro`. Check Discord for the test ping.
+3. Office box: `systemctl --user stop scout-watch` (stop only, keep it enabled). Wait 5 minutes.
+4. NAS: `sh ops/nas/install.sh install-scout`. It starts the daemon and waits for the
+   first consumer cycle (up to 12 minutes).
+5. When the summary shows a NAS heartbeat and `consumer exit=0`, disable the office
+   units: `systemctl --user disable --now scout-watch desk-retro-reminder.timer`.
+
+Rollback: NAS `sh ops/nas/install.sh uninstall-scout`, then office box
+`systemctl --user enable --now scout-watch`.
+
+After a push that touches scout code: NAS `sh services/scout-watch/update.sh`
+(pull, install, restart). Check it any time with `sh ops/nas/install.sh status`.
 
 ## Supervise the daemon — option A: systemd --user (recommended on this box)
 

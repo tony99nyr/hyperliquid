@@ -25,6 +25,7 @@ import { spawn } from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { hostname } from 'node:os';
 import { parseArgs, optionalNumber, header, line, run } from './_skill-runtime';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import { nasCoversProdCrons, PROD_CRON_SOURCES } from '@/lib/auto-exit/cron-poke-business-logic';
@@ -298,7 +299,7 @@ async function oneCycle(state: ScoutState): Promise<ScoutState> {
     if (sinkNote) line(`[${ts}]${sinkNote} — triggers not in the table; a remote consumer cannot see them`);
     await writeScoutHeartbeat(
       degraded ? 'degraded' : sink === 'none' && triggers.length > 0 ? 'sink-failed' : 'ok',
-      degraded ? (degradedReason ?? 'degraded') : `${triggers.length} trigger(s)${sinkNote}`,
+      `${degraded ? (degradedReason ?? 'degraded') : `${triggers.length} trigger(s)${sinkNote}`} host=${hostname()}`,
     );
     return next;
   } catch (err) {

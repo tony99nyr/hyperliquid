@@ -99,6 +99,10 @@ separate `scout-headless.sh` cron:** two consumers can both open on the same dir
 A cron is only for a box that runs the consumer without the daemon. Consumer liveness is
 the `scout_heartbeat` row `source='scout-cycle'`. The office box runs scout-watch only;
 the other loops are NAS-owned.
+**Moving to the NAS:** scout-watch and the desk-retro reminder move to the NAS admin
+crontab through `ops/nas/install.sh`, so the office box can sleep at night. Cut-over
+steps: `services/scout-watch/README.md`, "Run it on the NAS". Until the cut-over, the
+office box runs both.
 
 **Timers:** `desk-retro-reminder.timer` sends a Discord ping on Mondays at 12:57 local
 that the weekly retro is due (`ops/systemd/desk-retro-reminder.service` has the install
