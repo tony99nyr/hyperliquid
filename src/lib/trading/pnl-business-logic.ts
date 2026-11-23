@@ -69,6 +69,8 @@ function clampReduceOnlySize(fill: CanonicalFill, beforeSigned: number): number 
  *  otherwise linger as a phantom open position. Cockpit positions are risk-based
  *  (≫ $1), so a sub-$1 residual is unambiguously dust, never a real position. */
 const DUST_NOTIONAL_USD = 1;
+/** A size this small after a close is floating-point error, not a position. */
+const SIZE_EPSILON = 1e-9;
 
 export function applyFill(pos: Position, fill: CanonicalFill): Position {
   if (fill.coin !== pos.coin) {
@@ -98,7 +100,10 @@ export function applyFill(pos: Position, fill: CanonicalFill): Position {
     return { ...pos, feesPaidUsd: pos.feesPaidUsd + fill.feeUsd };
   }
   const delta = fill.side === 'buy' ? effectiveSz : -effectiveSz;
-  const afterSigned = beforeSigned + delta;
+  let afterSigned = beforeSigned + delta;
+  // A close that should land on zero can leave a floating-point residual
+  // (0.04 - 0.03 - 0.01). Treat it as flat, or a phantom position stays open.
+  if (beforeSigned !== 0 && Math.sign(delta) !== Math.sign(beforeSigned) && Math.abs(afterSigned) < SIZE_EPSILON) afterSigned = 0;
 
   const feesPaidUsd = pos.feesPaidUsd + fill.feeUsd;
   let realizedPnlUsd = pos.realizedPnlUsd;
@@ -159,16 +164,18 @@ export function applyFills(coin: string, fills: CanonicalFill[]): Position {
  * filled_at of the fill that took the position flat→open (or flipped it), reset to
  * null whenever it returns to flat. PURE. Drives the position's "held" duration.
  * (The positions row is reused across reopens, so this can't be a created_at.)
+ * Walks the same applyFill fold as applyFills, so the reduce-only clamp and the
+ * dust guard apply here too: a flat fold always gives null.
  */
 export function computeOpenedAtMs(fills: CanonicalFill[]): number | null {
-  const EPS = 1e-9;
-  let pos = 0;
+  if (fills.length === 0) return null;
+  let pos = emptyPosition(fills[0].coin);
   let openedAt: number | null = null;
   for (const f of fills) {
     const prev = pos;
-    pos += f.side === 'buy' ? f.sz : -f.sz;
-    if (Math.abs(pos) < EPS) openedAt = null; // back to flat
-    else if (Math.abs(prev) < EPS || prev * pos < 0) openedAt = f.filledAt; // opened or flipped
+    pos = applyFill(pos, f);
+    if (pos.side === 'flat') openedAt = null;
+    else if (prev.side !== pos.side) openedAt = f.filledAt; // opened or flipped
   }
   return openedAt;
 }
