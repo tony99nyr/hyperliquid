@@ -50,7 +50,7 @@ describe('GET /api/cron/reconcile-positions', () => {
   it('writes a DEGRADED heartbeat when the reconcile skipped (an HL read fault must not look healthy)', async () => {
     reconcileLivePositions.mockResolvedValue({ skipped: true, reason: 'HL read stale', checked: 0, flattened: 0, resynced: 0 });
     await GET(req('nas'));
-    expect(writeScoutHeartbeat).toHaveBeenCalledWith('degraded', expect.stringContaining('reconcile SKIPPED (HL read stale)'), 'reconcile');
+    expect(writeScoutHeartbeat).toHaveBeenCalledWith('degraded', expect.stringMatching(/reconcile SKIPPED \(HL read stale\).*via nas$/), 'reconcile');
   });
 
   it('401s without a valid bearer and writes NO heartbeat (an unauthorised poke must not look alive)', async () => {

@@ -43,7 +43,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     await writeScoutHeartbeat(
       skips.length > 0 ? 'degraded' : 'ok',
       skips.length > 0
-        ? `reconcile ran but ${skips.join(', ')} via ${poker}`
+        ? `reconcile route ran but ${skips.join(', ')} via ${poker}`
         : `reconcile ran: checked ${summary.checked}, backfill scanned ${backfill.scanned} inserted ${backfill.inserted} via ${poker}`,
       'reconcile',
     ).catch(() => {});

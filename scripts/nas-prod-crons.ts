@@ -20,7 +20,7 @@
 
 import { run, line } from './_skill-runtime';
 import { countLiveOpenPositions } from '@/lib/auto-exit/auto-exit-scan';
-import { canSkipAutoExitPoke, NAS_POKE_FAILED, PROD_CRON_SOURCES, reconcileRanCompletely } from '@/lib/auto-exit/cron-poke-business-logic';
+import { canSkipAutoExitPoke, NAS_POKE_FAILED, PROD_CRON_SOURCES, reconcileRanCompletely, tickUtcMinute } from '@/lib/auto-exit/cron-poke-business-logic';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import { writeScoutHeartbeat } from '@/lib/scout/scout-heartbeat-service';
 import { extractErrorMessage } from '@/lib/infrastructure/logging/logger';
@@ -81,13 +81,6 @@ async function readAutoExitStatus(): Promise<string | null> {
   }
 }
 
-/** The UTC minute at the START of the nas-watch tick (NAS_TICK_UTC_MINUTE), so a slow
- * tick still lands its hourly probe. Falls back to the current minute. */
-function tickUtcMinute(): number {
-  const m = Number.parseInt(process.env.NAS_TICK_UTC_MINUTE ?? '', 10);
-  return Number.isInteger(m) && m >= 0 && m < 60 ? m : new Date().getUTCMinutes();
-}
-
 async function main(): Promise<void> {
   const reconcile = await poke('/api/cron/reconcile-positions');
   const reconcileComplete = reconcileRanCompletely(reconcile.ok, reconcile.body);
@@ -101,7 +94,7 @@ async function main(): Promise<void> {
 
   const lastAutoExitStatus = await readAutoExitStatus();
   let autoExitOk = true;
-  if (canSkipAutoExitPoke({ reconcileComplete, liveOpenPositions, lastAutoExitStatus, utcMinute: tickUtcMinute() })) {
+  if (canSkipAutoExitPoke({ reconcileComplete, liveOpenPositions, lastAutoExitStatus, utcMinute: tickUtcMinute(process.env.NAS_TICK_UTC_MINUTE, new Date().getUTCMinutes()) })) {
     line('[cron:nas] auto-exit: no live position open, Vercel poke skipped');
     await writeScoutHeartbeat('ok', 'auto-exit skipped: no live position open via nas-local', 'auto-exit-cron');
   } else {

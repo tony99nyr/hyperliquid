@@ -51,6 +51,12 @@ export function canSkipAutoExitPoke(input: {
   );
 }
 
+/** The UTC minute at the START of the nas-watch tick (`raw`, zero-padded "00".."59"),
+ * so a slow tick still lands its hourly probe. Anything else gives `fallback`. */
+export function tickUtcMinute(raw: string | undefined, fallback: number): number {
+  return raw !== undefined && /^\d{1,2}$/.test(raw) && Number(raw) < 60 ? Number(raw) : fallback;
+}
+
 export interface PokerHeartbeat {
   source: string;
   lastTickAtMs: number;

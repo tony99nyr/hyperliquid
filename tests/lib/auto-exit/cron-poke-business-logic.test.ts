@@ -3,6 +3,7 @@ import {
   canSkipAutoExitPoke,
   nasCoversProdCrons,
   reconcileRanCompletely,
+  tickUtcMinute,
   NAS_FRESH_MS,
   NAS_POKE_FAILED,
   PROBE_WINDOW_MINUTES,
@@ -71,5 +72,15 @@ describe('nasCoversProdCrons', () => {
     const stale = { source: 'auto-exit-cron', lastTickAtMs: now - NAS_FRESH_MS - 1, status: 'ok', detail: 'via nas' };
     expect(nasCoversProdCrons([row('reconcile', 'via nas'), stale], now)).toBe(false);
     expect(nasCoversProdCrons([row('reconcile', 'via nas')], now)).toBe(false);
+  });
+});
+
+describe('tickUtcMinute', () => {
+  it('reads the zero-padded tick-start minute and falls back on anything else', () => {
+    expect(tickUtcMinute('08', 30)).toBe(8);
+    expect(tickUtcMinute('', 30)).toBe(30);
+    expect(tickUtcMinute(undefined, 30)).toBe(30);
+    expect(tickUtcMinute('75', 30)).toBe(30);
+    expect(tickUtcMinute('5x', 30)).toBe(30);
   });
 });
