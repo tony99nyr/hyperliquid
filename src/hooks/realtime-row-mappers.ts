@@ -219,24 +219,19 @@ export interface RealtimeChangePayload {
   old?: unknown;
 }
 
-function asRow(v: unknown): RealtimeRow | null {
-  return v && typeof v === 'object' && Object.keys(v).length > 0 ? (v as RealtimeRow) : null;
-}
-
 /**
  * Apply one postgres_changes event to the hook's row list. PURE.
  *
  * - INSERT / UPDATE: map `new` and accumulate by id.
- * - DELETE: remove the row whose mapped id matches `old`. Every realtime table
- *   has REPLICA IDENTITY FULL, but with RLS on, Supabase sends only the primary
- *   key in `old`. So the delete matches only when the mapper builds its id from
- *   the primary key (`id`, or `source` for scout_heartbeat). The rubric_scores
- *   and leader_positions mappers build a synthetic id from other columns, so a
- *   delete there matches nothing and the next snapshot refresh removes the row.
- *   Neither table is in the realtime publication now (0014, 0024).
+ * - DELETE: remove the row whose mapped id matches `old`. With RLS on, Supabase
+ *   sends only the primary key in `old`, so this works only for a mapper that
+ *   builds its id from the primary key (`id` for every table in the realtime
+ *   publication). A DELETE that matches no row returns `prev` unchanged.
  *
- * realtime-js sends `new: {}` on a DELETE and `old: {}` on an INSERT, so an empty
- * object counts as absent.
+ * Supabase does not apply a channel filter to DELETE events ("Delete events are
+ * not filterable"). A session-filtered channel can get the delete of another
+ * session's row (a no-op here) or no event at all. The snapshot refresh stays the
+ * backstop. realtime-js sends `new: {}` on a DELETE, so a DELETE never reads `new`.
  */
 export function applyRealtimeChange<T extends { id: string }>(
   prev: T[],
@@ -246,15 +241,14 @@ export function applyRealtimeChange<T extends { id: string }>(
   limit: number,
 ): T[] {
   if (payload.eventType === 'DELETE') {
-    const old = asRow(payload.old);
-    if (!old) return prev;
-    const id = map(old).id;
-    const next = prev.filter((r) => r.id !== id);
-    return next.length === prev.length ? prev : next;
+    if (!payload.old) return prev;
+    const id = map(payload.old as RealtimeRow).id;
+    // Keep the same array when nothing matched, so React skips the re-render
+    // (a prune can send a burst of deletes for rows this list does not hold).
+    return prev.some((r) => r.id === id) ? prev.filter((r) => r.id !== id) : prev;
   }
-  const row = asRow(payload.new);
-  if (!row) return prev;
-  return accumulateById(prev, map(row), compare).slice(0, limit);
+  if (!payload.new) return prev;
+  return accumulateById(prev, map(payload.new as RealtimeRow), compare).slice(0, limit);
 }
 
 /**

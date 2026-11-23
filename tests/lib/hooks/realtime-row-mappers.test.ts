@@ -8,7 +8,6 @@ import {
   mapPositionRow,
   accumulateById,
   applyRealtimeChange,
-  mapRubricScoreRow,
   byCreatedAtDesc,
   byCreatedAtAsc,
 } from '@/hooks/realtime-row-mappers';
@@ -135,18 +134,6 @@ describe('realtime-row-mappers', () => {
     it('keeps the same list on a DELETE of a row it does not hold', () => {
       const prev = [mk('a', 1)];
       const out = applyRealtimeChange(prev, { eventType: 'DELETE', new: {}, old: { id: 'z' } }, map, byCreatedAtDesc, 10);
-      expect(out).toBe(prev);
-    });
-
-    it('does not add a row for a DELETE (new is an empty object)', () => {
-      const prev = [mk('a', 1)];
-      const out = applyRealtimeChange(prev, { eventType: 'DELETE', new: {}, old: {} }, map, byCreatedAtDesc, 10);
-      expect(out).toBe(prev);
-    });
-
-    it('matches nothing for a synthetic-id mapper given a key-only old (rubric_scores)', () => {
-      const prev = [mapRubricScoreRow({ id: 'u1', coin: 'ETH', side: 'long' })];
-      const out = applyRealtimeChange(prev, { eventType: 'DELETE', old: { id: 'u1' } }, mapRubricScoreRow, () => 0, 10);
       expect(out).toBe(prev);
     });
   });

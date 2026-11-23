@@ -3,7 +3,7 @@
 /**
  * Generic Supabase realtime subscription hook (CLIENT-ONLY).
  *
- * Subscribes to Postgres INSERT/UPDATE events on one `table`, filtered to a
+ * Subscribes to Postgres INSERT/UPDATE/DELETE events on one `table`, filtered to a
  * `sessionId`, via the anon browser client (RLS select-only). It also fetches an
  * initial snapshot so the panel is populated before the first realtime event.
  * Raw DB rows are mapped to domain objects by a PURE mapper (see

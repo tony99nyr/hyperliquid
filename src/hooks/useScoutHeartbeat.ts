@@ -18,7 +18,8 @@ export interface ScoutHeartbeat {
 }
 
 function mapHeartbeatRow(row: RealtimeRow): ScoutHeartbeat {
-  // source is the not-null primary key (migration 0010), so it is always a string.
+  // source is the not-null primary key (migration 0010): every row and every
+  // key-only DELETE `old` carries it, so the hook needs no default.
   const source = String(row.source);
   const t = row.last_tick_at;
   const lastTickMs = typeof t === 'string' ? new Date(t).getTime() : typeof t === 'number' ? t : 0;

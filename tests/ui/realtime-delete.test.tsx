@@ -59,6 +59,9 @@ describe('realtime hooks remove a row on DELETE', () => {
     expect(screen.getByTestId('ids').textContent).toBe('b');
   });
 
+  // scout_heartbeat left the realtime publication in 0024, so production sends no
+  // event here. The test covers the generic useRealtimeTable path and a mapper
+  // whose id is a non-`id` primary key.
   it('useRealtimeTable (scout_heartbeat) drops the row keyed by source', async () => {
     await act(async () => {
       render(<HeartbeatHarness />);
