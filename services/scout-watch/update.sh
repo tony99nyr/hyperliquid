@@ -16,9 +16,14 @@ if [ "$(id -u)" = 0 ] && [ "$owner" != root ]; then
     exec su -l -s /bin/sh "$owner" -c "sh '$SCRIPT_DIR/update.sh'"
 fi
 
-running="$(ps -ef 2>/dev/null | grep "[s]cripts/scout-watch.ts" | awk '{print $2}' | head -1)"
-if [ -n "$running" ] && [ "$(stat -c %u "/proc/$running")" != "$(id -u)" ]; then
-    echo "scout-watch runs as $(stat -c %U "/proc/$running") (PID $running). Run this as that user." >&2
+# PIDs of the running daemon, read from /proc (see ops/pids-of.sh).
+daemon_pids() { sh "$REPO_ROOT/ops/pids-of.sh" "[s]cripts/scout-watch.ts"; }
+
+running="$(daemon_pids | head -1)"
+# An empty uid means that the daemon stopped after the lookup: go on.
+running_uid="$([ -n "$running" ] && stat -c %u "/proc/$running" 2>/dev/null || true)"
+if [ -n "$running_uid" ] && [ "$running_uid" != "$(id -u)" ]; then
+    echo "scout-watch runs as $(stat -c %U "/proc/$running" 2>/dev/null) (PID $running). Run this as that user." >&2
     exit 1
 fi
 
@@ -31,7 +36,7 @@ echo "Installing deps…"
 echo "Restarting scout-watch…"
 ./stop.sh 2>/dev/null || true
 i=0
-while ps -ef 2>/dev/null | grep -q "[s]cripts/scout-watch.ts"; do
+while [ -n "$(daemon_pids)" ]; do
     i=$((i + 1))
     if [ "$i" -gt 60 ]; then
         echo "scout-watch did not stop within 60 s; not restarting. Check: sh status.sh" >&2
@@ -41,6 +46,6 @@ while ps -ef 2>/dev/null | grep -q "[s]cripts/scout-watch.ts"; do
 done
 ./start.sh
 sleep 15
-ps -ef 2>/dev/null | grep -q "[s]cripts/scout-watch.ts" || { echo "scout-watch did not stay up: see logs/scout-watch.log" >&2; exit 1; }
+[ -n "$(daemon_pids)" ] || { echo "scout-watch did not stay up: see logs/scout-watch.log" >&2; exit 1; }
 
 echo "Done!"

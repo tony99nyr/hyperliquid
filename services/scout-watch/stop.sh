@@ -25,14 +25,14 @@ fi
 
 # Fallback: find the loop by its script name.
 if [ $stopped -eq 0 ]; then
-    pids=$(ps -ef 2>/dev/null | grep "[s]cripts/scout-watch.ts" | awk '{print $2}')
+    pids=$(sh "$SCRIPT_DIR/../../ops/pids-of.sh" "[s]cripts/scout-watch.ts")
     for pid in $pids; do
         kill "$pid" 2>/dev/null && echo "Sent SIGTERM to process $pid (found by name)" && stopped=1
     done
 fi
 
 if [ "$FORCE" -eq 1 ]; then
-    pids=$(ps -ef 2>/dev/null | grep "[s]cripts/scout-watch.ts" | awk '{print $2}')
+    pids=$(sh "$SCRIPT_DIR/../../ops/pids-of.sh" "[s]cripts/scout-watch.ts")
     for pid in $pids; do
         sudo kill -9 "$pid" 2>/dev/null && echo "Force-killed process $pid" && stopped=1
     done

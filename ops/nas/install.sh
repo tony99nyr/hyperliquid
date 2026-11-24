@@ -115,10 +115,11 @@ need_root() {
   return 1
 }
 
-# Memory of every process that grep pattern $1 matches in `ps -ef`, in MB.
+# Memory of every process whose command line matches grep pattern $1, in MB.
+# Bracket the first letter of the pattern (see ops/pids-of.sh).
 rss_mb() {
   total=0
-  for pid in $(ps -ef 2>/dev/null | grep "$1" | awk '{print $2}'); do
+  for pid in $(sh "$REPO/ops/pids-of.sh" "$1"); do
     kb="$(awk '/^VmRSS:/ {print $2}' "/proc/$pid/status" 2>/dev/null)"
     total=$((total + ${kb:-0}))
   done
@@ -133,7 +134,7 @@ heartbeat() {
   [ -n "$HB_AGE" ] || HB_AGE="error"
 }
 
-scout_pid() { ps -ef 2>/dev/null | grep "[s]cripts/scout-watch.ts" | awk '{print $2}' | head -1; }
+scout_pid() { sh "$REPO/ops/pids-of.sh" "[s]cripts/scout-watch.ts" | head -1; }
 
 resolve_claude() {
   CLAUDE=""

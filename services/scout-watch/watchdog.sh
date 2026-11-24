@@ -25,7 +25,7 @@ if [ -f "$PID_FILE" ]; then
         echo "$(date): Daemon healthy (PID $PID)"
     fi
 else
-    PID=$(ps -ef 2>/dev/null | grep "[s]cripts/scout-watch.ts" | awk '{print $2}' | head -1)
+    PID=$(sh "$SCRIPT_DIR/../../ops/pids-of.sh" "[s]cripts/scout-watch.ts" | head -1)
     if [ -z "$PID" ]; then
         echo "$(date): Daemon not running, starting..."
         HAD_ERROR=1

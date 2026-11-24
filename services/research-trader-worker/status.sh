@@ -17,7 +17,7 @@ if [ -f "$PID_FILE" ]; then
         echo "Process: NOT RUNNING (stale PID file: $pid)"
     fi
 else
-    pid=$(ps -ef 2>/dev/null | grep "[s]cripts/research-trader-worker.ts" | awk '{print $2}' | head -1)
+    pid=$(sh "$SCRIPT_DIR/../../ops/pids-of.sh" "[s]cripts/research-trader-worker.ts" | head -1)
     if [ -n "$pid" ]; then
         echo "Process: RUNNING (PID $pid, no PID file)"
         running=1

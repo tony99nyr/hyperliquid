@@ -26,7 +26,7 @@ if [ -f "$PID_FILE" ]; then
         echo "$(date): Service healthy (PID $PID)"
     fi
 else
-    PID=$(ps -ef 2>/dev/null | grep "[s]cripts/trader-watch.ts" | awk '{print $2}' | head -1)
+    PID=$(sh "$SCRIPT_DIR/../../ops/pids-of.sh" "[s]cripts/trader-watch.ts" | head -1)
     if [ -z "$PID" ]; then
         echo "$(date): Service not running, starting..."
         HAD_ERROR=1
