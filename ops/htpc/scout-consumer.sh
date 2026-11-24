@@ -28,10 +28,17 @@ if ! flock -n 9; then
     exit 0
 fi
 
-VERDICT="$(pnpm --silent scout:consumer-due 2>&1)"
+# Attempt stamp: scout:trade writes the scout-cycle heartbeat only after a handled
+# decision, so a failing cycle must still count as a run, or it reruns every tick.
+STAMP="$HOME/.local/state/hl-scout/last-attempt"
+LAST_ATTEMPT="$(cat "$STAMP" 2>/dev/null || echo 0)"
+VERDICT="$(pnpm --silent scout:consumer-due --last-attempt "$LAST_ATTEMPT" 2>&1)"
 RC=$?
 echo "$VERDICT"
-[ "$RC" -eq 0 ] || exit 0
+# 3 = not due. Anything else is an error: exit non-zero so systemd records a failed tick.
+[ "$RC" -eq 3 ] && exit 0
+[ "$RC" -eq 0 ] || exit "$RC"
 
+mkdir -p "$(dirname "$STAMP")" && date +%s > "$STAMP"
 # Same hard limit the daemon used for its embedded consumer.
 timeout 600 sh scripts/scout-headless.sh

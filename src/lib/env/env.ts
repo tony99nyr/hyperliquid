@@ -110,7 +110,8 @@ const envSchema = z.object({
   IAMROSSI_STANCE_URL: z.string().url().optional(),
   IAMROSSI_STANCE_TOKEN: z.string().optional(),
   // Fast path (2026-11, Vercel Hobby Active-CPU cap): a Redis URL whose user may only GET
-  // the producer's stance cache key (Redis Cloud ACL `+get ~trading:stance:cache`). Read
+  // the producer's stance cache key (Redis Cloud ACL `+get ~trading:stance:cache`), over TLS
+  // (`rediss://` only; any other scheme is ignored). Read
   // first; the HTTP route above stays the fallback on a miss or any error. Loose on
   // purpose, like the URL above: a bad value degrades to the HTTP path, never throws.
   IAMROSSI_STANCE_REDIS_URL: z.string().optional(),

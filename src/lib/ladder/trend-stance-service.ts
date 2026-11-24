@@ -117,8 +117,19 @@ export async function fetchTrendStance(now: number = Date.now()): Promise<TrendS
  * missing/invalid URL or any error (the caller then uses the HTTP route). One short-lived
  * connection per read: the cockpit reads at most once per 2-min module-cache window.
  */
-export async function readStanceFromRedis(url: string | undefined): Promise<unknown | null> {
-  if (!url || !/^rediss?:\/\//.test(url)) return null;
+let warnedPlainRedis = false;
+
+async function readStanceFromRedis(url: string | undefined): Promise<unknown | null> {
+  // TLS only: the stance feeds the flip guard (disarm authority), so a plain-text
+  // connection would let an on-path attacker change it. A redis:// URL uses HTTPS instead.
+  if (!url) return null;
+  if (!url.startsWith('rediss://')) {
+    if (!warnedPlainRedis) {
+      warnedPlainRedis = true;
+      console.warn('[trend-stance] IAMROSSI_STANCE_REDIS_URL is not rediss://: ignored, using HTTP');
+    }
+    return null;
+  }
   let client: { destroy: () => void } | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {

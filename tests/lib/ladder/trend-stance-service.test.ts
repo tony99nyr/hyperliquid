@@ -37,7 +37,7 @@ beforeEach(() => {
   Object.assign(env, {
     IAMROSSI_STANCE_URL: 'https://iamrossi.example',
     IAMROSSI_STANCE_TOKEN: 'x'.repeat(32),
-    IAMROSSI_STANCE_REDIS_URL: 'redis://hl-stance:pw@redis.example:11301',
+    IAMROSSI_STANCE_REDIS_URL: 'rediss://hl-stance:pw@redis.example:11301',
   });
   redisConnect.mockResolvedValue(undefined);
   fetchMock.mockResolvedValue(new Response(JSON.stringify(body(NOW - 60_000, 'neutral'))));
@@ -67,6 +67,13 @@ describe('fetchTrendStance', () => {
   it('falls back to HTTP when the Redis body is older than the 9h gate', async () => {
     redisGet.mockResolvedValue(JSON.stringify(body(NOW - 10 * 3_600_000)));
     expect((await fetchTrendStance(NOW))?.stances[0].regime).toBe('neutral');
+  });
+
+  it('ignores a plain-text redis:// URL and uses HTTP', async () => {
+    env.IAMROSSI_STANCE_REDIS_URL = 'redis://hl-stance:pw@redis.example:11301';
+    redisGet.mockResolvedValue(JSON.stringify(body(NOW - 60_000)));
+    expect((await fetchTrendStance(NOW))?.stances[0].regime).toBe('neutral');
+    expect(redisGet).not.toHaveBeenCalled();
   });
 
   it('uses HTTP only when no Redis URL is set', async () => {
