@@ -35,12 +35,12 @@ Supervision and the paper-mode pins: `services/scout-watch/README.md`.
 
 Every scout open must carry a lane on `REGISTERED_LANES`, and a lane on `KILLED_LANES`
 is refused (`src/lib/scout/scout-execution-guard.ts`; that file is the truth).
-At 2026-10-24:
+At 2026-11-23:
 
-- **Registered:** `htf-trend`, `compression-straddle` (its KILL is pending the Monday
-  retro), `breakdown-short` / `reclaim-long` (rubric crossing), and the passive
+- **Registered:** `htf-trend`, `breakdown-short` / `reclaim-long` (rubric crossing), and the passive
   benchmarks `vault` (HLP) and `carry`.
-- **Killed:** `directional`, `reversion`, `trend-follow`, `leader-follow`.
+- **Killed:** `directional`, `reversion`, `trend-follow`, `leader-follow`,
+  `compression-straddle` (kill bar fired 2026-10-26).
 
 `pnpm scout:lanes` (on the NAS tick) persists per-lane scorecards to `lane_scorecards`;
 the cockpit Scout tab reads them. Env knobs for the benchmarks:

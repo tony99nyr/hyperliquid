@@ -18,6 +18,7 @@ import { run } from './_skill-runtime';
 import { fetchCandles } from '@/lib/hyperliquid/candle-service';
 import { getServiceRoleClient } from '@/lib/cockpit/supabase-server';
 import {
+  discardedAtMs,
   replayDiscardedEntry,
   summarizeDiscardVet,
   type DiscardedPlan,
@@ -66,15 +67,6 @@ function num(v: number | string | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** The earliest moment the plan was taken off the board (the decision under vet). */
-function discardedAtMs(l: LadderRow): number | null {
-  const stamps = [l.archived_at, l.disarmed_at]
-    .filter((s): s is string => s != null)
-    .map((s) => Date.parse(s))
-    .filter((n) => Number.isFinite(n));
-  return stamps.length ? Math.min(...stamps) : null;
-}
-
 const fmt = (ms: number | null): string => (ms == null ? '—' : new Date(ms).toISOString().slice(0, 16).replace('T', ' '));
 
 async function main(): Promise<void> {
@@ -86,7 +78,8 @@ async function main(): Promise<void> {
   }
   const json = process.argv.includes('--json');
   const now = Date.now();
-  const sinceIso = new Date(now - days * 86_400_000).toISOString();
+  const sinceMs = now - days * 86_400_000;
+  const sinceIso = new Date(sinceMs).toISOString();
 
   const db = getServiceRoleClient();
   const { data: ladders, error } = await db
@@ -111,6 +104,9 @@ async function main(): Promise<void> {
       rows.push({ ladder, reason, verdict: null, skip: 'no discard timestamp' });
       continue;
     }
+    // The query matches either stamp. A discard from before the window that was archived
+    // inside it belongs to an earlier retro: do not list it again.
+    if (at < sinceMs) continue;
     const { data: rungs, error: rErr } = await db
       .from('ladder_rungs')
       .select('seq, coin, side, action, trigger_kind, trigger_px, stop_px, stop_frac, target_px, status')

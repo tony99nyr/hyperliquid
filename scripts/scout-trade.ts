@@ -11,8 +11,8 @@
  * Entry:  pnpm scout:trade --coin ETH --side sell --risk 200 --stop-frac 0.02 \
  *           --thesis "…" --lane <lane> [--entry 1720] [--limit 1719] [--leverage 3] [--session <id>]
  *         --lane is REQUIRED (killed lanes are refused by assertLaneAlive; the old
- *         default 'directional' is killed). Live: htf-trend | compression-straddle |
- *         breakdown-short | reclaim-long | leader-follow | vault | carry.
+ *         default 'directional' is killed). Live: htf-trend |
+ *         breakdown-short | reclaim-long | vault | carry.
  * Exit:   pnpm scout:trade --exit --session <id> --coin ETH [--hypothesis <id>] \
  *           [--fraction 0.5] [--note "target hit"]
  */
@@ -113,7 +113,7 @@ async function runEntry(args: Record<string, string | boolean>): Promise<void> {
   if (lane === '') {
     throw new Error(
       "--lane is required for an open (the legacy default 'directional' is KILLED). " +
-        "Live lanes: 'htf-trend', 'compression-straddle', 'breakdown-short', 'reclaim-long', 'leader-follow', 'vault', 'carry'.",
+        "Live lanes: 'htf-trend', 'breakdown-short', 'reclaim-long', 'vault', 'carry'.",
     );
   }
   if (lane === 'htf-trend') {

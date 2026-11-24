@@ -40,7 +40,10 @@ export function assertScoutPaperMode(mode: TradingMode): void {
  * (a killed lane must still be able to flatten). Un-killing a lane is a deliberate
  * code change with a fresh pre-registration, never a runtime flag.
  */
-export const KILLED_LANES: ReadonlySet<string> = new Set(['directional', 'reversion', 'trend-follow', 'leader-follow']);
+export const KILLED_LANES: ReadonlySet<string> = new Set([
+  'directional', 'reversion', 'trend-follow', 'leader-follow',
+  'compression-straddle', // kill bar fired 2026-10-26 (PREREGISTRATION_compression-straddle.md)
+]);
 
 /**
  * REGISTERED lanes — the ONLY lanes a scout open may carry (allowlist; 08-15). The
@@ -52,7 +55,6 @@ export const KILLED_LANES: ReadonlySet<string> = new Set(['directional', 'revers
  */
 export const REGISTERED_LANES: ReadonlySet<string> = new Set([
   'htf-trend', // PREREGISTRATION_htf-trend.md
-  'compression-straddle', // PREREGISTRATION_compression-straddle.md
   'breakdown-short', // PREREGISTRATION_rubric-crossing.md (short side)
   'reclaim-long', // PREREGISTRATION_rubric-crossing.md (long side)
   'vault', // passive benchmark (HLP buy-hold)
@@ -152,16 +154,20 @@ export const SCOUT_MAX_RISK_USD = 15;
  *  sub-1% stops on majors are ~coin-flips intraday). */
 export const SCOUT_MIN_STOP_FRAC = 0.01;
 
-/** Throw if `lane` is killed. Call before any scout-initiated OPEN (never on exits).
+/** True when `lane` is killed. Check before any scout-initiated OPEN (never on exits).
  *  Matches a killed name exactly OR as a `<killed>-` prefix, so variant tags cannot
  *  resurrect a killed strategy under an alias — e.g. the daemon's old trigger wording
  *  said "reversion-extreme lane", and `--lane reversion-extreme` must die with
  *  `reversion` (a genuine successor gets a genuinely NEW name, like htf-trend). */
+export function isLaneKilled(lane: string): boolean {
+  const norm = lane.trim().toLowerCase();
+  return [...KILLED_LANES].some((killed) => norm === killed || norm.startsWith(`${killed}-`));
+}
+
+/** Throw if `lane` is killed or not registered. */
 export function assertLaneAlive(lane: string): void {
   const norm = lane.trim().toLowerCase();
-  for (const killed of KILLED_LANES) {
-    if (norm === killed || norm.startsWith(`${killed}-`)) throw new ScoutKilledLaneError(lane);
-  }
+  if (isLaneKilled(norm)) throw new ScoutKilledLaneError(lane);
   // Allowlist second (the killed check first gives the clearer message for known-dead
   // lanes): anything not explicitly registered is refused — no unregistered lane can
   // quietly start trading again.

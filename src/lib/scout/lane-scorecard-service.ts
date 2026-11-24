@@ -140,7 +140,7 @@ export async function computeScoutLaneCards(
     const r = h as { status: string; lane: string | null; realized_r: number | null; created_at: string };
     const registeredAt = registeredLaneBar(r.lane ?? 'directional')?.registeredAt;
     if (registeredAt && Date.parse(r.created_at) < Date.parse(`${registeredAt}T00:00:00Z`)) return null;
-    return { lane: r.lane ?? null, status: r.status, realizedR: r.realized_r };
+    return { lane: r.lane ?? null, status: r.status, realizedR: r.realized_r, createdAt: r.created_at };
   }).filter((row): row is LaneHypothesisRow => row !== null);
   // Keep or drop whole session+coin groups by their FIRST fill: a position opened
   // before registration and closed after it must not leave an orphan closing fill
@@ -162,6 +162,7 @@ export async function computeScoutLaneCards(
     periodDaysFor: (lane) => lanePeriodDays(lane, now, periodDays),
     configFor: (lane) => registeredLaneBar(lane)?.config ?? DEFAULT_SCORECARD_CONFIG,
     minExpectancyRFor: (lane) => registeredLaneBar(lane)?.minExpectancyR ?? null,
+    clusterCheckFor: (lane) => registeredLaneBar(lane)?.clusterCheck ?? null,
     tradeCountFor: (lane, count) => RUBRIC_CROSSING_LANES.includes(lane)
       ? laneHyps.filter((h) => RUBRIC_CROSSING_LANES.includes(h.lane ?? 'directional') && CLOSED_HYPOTHESIS_STATUSES.includes(h.status)).length
       : count,

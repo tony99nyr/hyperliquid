@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildScorecard,
   buildLaneScorecards,
+  meanRWithoutLargestCluster,
   DEFAULT_SCORECARD_CONFIG,
   DEFAULT_LANE,
   type ScorecardInput,
@@ -141,6 +142,67 @@ describe('buildLaneScorecards — per-lane grouping', () => {
     });
     expect(cards[0].card.verdict).toBe('continue');
     expect(cards[0].card.feeDragFrac).toBe(0.5);
+  });
+  describe('cluster-robust graduation check', () => {
+    const day = (n: number) => new Date(Date.UTC(2026, 7, 20) + n * 86_400_000).toISOString();
+    // 4 closes in one 5-day window carry the result; 16 later closes are near zero.
+    const clustered = [
+      ...[0, 0, 1, 2].map((d) => ({ lane: 'htf-trend', status: 'confirmed', realizedR: 2.1, createdAt: day(d) })),
+      ...Array.from({ length: 16 }, (_, i) => ({ lane: 'htf-trend', status: 'confirmed', realizedR: 0.08, createdAt: day(20 + i * 6) })),
+    ];
+    const build = (hypotheses: typeof clustered, clusterDays: number | null) => buildLaneScorecards({
+      positions: [{ lane: 'htf-trend', coin: 'ETH', side: 'flat', realizedPnlUsd: 120, feesPaidUsd: 2 }],
+      hypotheses, fundingByLane: {}, periodDays: 115, periodDaysFor: () => 115,
+      configFor: (lane) => registeredLaneBar(lane)?.config ?? DEFAULT_SCORECARD_CONFIG,
+      minExpectancyRFor: () => 0.25,
+      clusterCheckFor: () => (clusterDays == null ? null : { windowDays: clusterDays, multiplier: 0.7 }),
+    })[0].card;
+
+    it('graduates on the raw mean when the lane has no cluster check', () => {
+      expect(build(clustered, null).verdict).toBe('graduate');
+    });
+    it('holds at continue when the bar fails with the largest cluster removed', () => {
+      const card = build(clustered, 5);
+      expect(card.verdict).toBe('continue');
+      expect(card.reason).toContain('largest 5-day entry cluster removed (4 closes)');
+    });
+    it('applies the haircut to the mean without the cluster', () => {
+      // 0.30R without the cluster passes raw, but 0.30 x 0.7 = 0.21R is below the 0.25R bar.
+      const thin = clustered.map((h) => ({ ...h, realizedR: 0.3 }));
+      expect(build(thin, 5).verdict).toBe('continue');
+      expect(build(thin, 5).reason).toContain('0.21R after the x0.7 haircut');
+    });
+    it('graduates when the bar holds without the largest cluster', () => {
+      const even = clustered.map((h) => ({ ...h, realizedR: 0.5 }));
+      expect(build(even, 5).verdict).toBe('graduate');
+    });
+    it('fails closed when an entry time is unreadable', () => {
+      const even = clustered.map((h, i) => ({ ...h, realizedR: 0.5, createdAt: i === 3 ? 'not a date' : h.createdAt }));
+      expect(build(even, 5).verdict).toBe('continue');
+    });
+    it('the registered htf-trend bar carries the 5-day check and no other lane does', () => {
+      expect(registeredLaneBar('htf-trend')?.clusterCheck).toEqual({ windowDays: 5, multiplier: 0.7 });
+      expect(registeredLaneBar('breakdown-short')?.clusterCheck).toBeNull();
+    });
+    it('counts only closes with a measured R toward the trade bar', () => {
+      const even = clustered.map((h, i) => ({ ...h, realizedR: i === 19 ? null : 0.5 }));
+      const card = build(even as typeof clustered, 5);
+      expect(card.verdict).toBe('continue');
+      expect(card.reason).toContain('19 closes carry a measured R');
+    });
+    it('on an equal sum removes the earliest window, whatever the input order', () => {
+      const t = (n: number) => Date.parse(day(n));
+      // Late pair first in the input: both windows sum to 2R, the early single close must go.
+      const out = meanRWithoutLargestCluster([{ r: 1, at: t(40) }, { r: 1, at: t(41) }, { r: 2, at: t(0) }, { r: 0, at: t(80) }], 5);
+      expect(out.removed).toBe(1);
+      expect(out.meanR).toBeCloseTo(2 / 3);
+    });
+    it('removes the window with the largest summed R, half-open at the end', () => {
+      const t = (n: number) => Date.parse(day(n));
+      const out = meanRWithoutLargestCluster([{ r: 3, at: t(0) }, { r: 1, at: t(4) }, { r: 1, at: t(5) }, { r: -1, at: t(30) }], 5);
+      expect(out.removed).toBe(2); // day 0 and day 4; day 5 is outside [0, 5)
+      expect(out.meanR).toBe(0);
+    });
   });
   it('groups realised results and attributed funding by lane', () => {
     const cards = buildLaneScorecards({

@@ -7,6 +7,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  discardedAtMs,
   replayDiscardedEntry,
   summarizeDiscardVet,
   type DiscardedPlan,
@@ -151,5 +152,17 @@ describe('summarizeDiscardVet', () => {
     const s = summarizeDiscardVet(verdicts);
     expect(s).toMatchObject({ total: 4, neverTriggered: 1, dodgedStops: 2, missedTargets: 1, firedWithoutTarget: 1 });
     expect(s.netHindsightR).toBeCloseTo(-0.5, 6);
+  });
+});
+
+describe('discardedAtMs', () => {
+  it('takes the earliest stamp, so a late archive does not move an old discard', () => {
+    const at = discardedAtMs({ disarmed_at: '2026-10-28T17:34:00Z', archived_at: '2026-11-23T18:00:00Z' });
+    expect(at).toBe(Date.parse('2026-10-28T17:34:00Z'));
+  });
+  it('reads a single stamp and returns null when none is readable', () => {
+    expect(discardedAtMs({ disarmed_at: null, archived_at: '2026-11-20T00:00:00Z' })).toBe(Date.parse('2026-11-20T00:00:00Z'));
+    expect(discardedAtMs({ disarmed_at: null, archived_at: null })).toBeNull();
+    expect(discardedAtMs({ disarmed_at: 'bad', archived_at: null })).toBeNull();
   });
 });

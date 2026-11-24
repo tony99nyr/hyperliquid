@@ -126,8 +126,8 @@ the 0.7 haircut). The registered cluster-robust test fails. With the largest
 +0.08R, net $8.47 (+0.06R after the haircut), against a bar of +0.25R. The
 lane is not graduated. Its kill bar is not met, so it continues on paper under
 its frozen rules. The live drafter flag `HTF_TREND_ALERT_ENABLED` stays OFF
-unless the operator decides otherwise. The lane card prints GRADUATE because
-it does not apply the amended test; do not read that card as the verdict.
+unless the operator decides otherwise. The lane card printed GRADUATE because
+it did not apply the amended test. Lane bars v1.1.0 add the test to the card.
 
 The ladder ledger is at 30 closed, net $49.39, +0.03R. Every family is still
 COLLECT.

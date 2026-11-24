@@ -78,6 +78,18 @@ export interface DiscardVerdict {
 
 const round6 = (n: number): number => Math.round(n * 1e6) / 1e6;
 
+/**
+ * The earliest moment the plan was taken off the board (the decision under vet). A later
+ * archive of an old discard does not move this time, so the discard is vetted once.
+ */
+export function discardedAtMs(l: { archived_at: string | null; disarmed_at: string | null }): number | null {
+  const stamps = [l.archived_at, l.disarmed_at]
+    .filter((s): s is string => s != null)
+    .map((s) => Date.parse(s))
+    .filter((n) => Number.isFinite(n));
+  return stamps.length ? Math.min(...stamps) : null;
+}
+
 /** Replay one discarded entry plan over the completed bars since its discard. */
 export function replayDiscardedEntry(plan: DiscardedPlan, candles: RetroCandle[]): DiscardVerdict {
   const bars = candles

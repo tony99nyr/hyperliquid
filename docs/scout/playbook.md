@@ -665,8 +665,11 @@ the implementation with expectancy or amend the registered rule.
   +9.82R, +0.34R after the haircut). With the Aug 20 cluster removed (4
   closes): n=16, mean +0.08R, sum +1.30R, net $8.47 (+0.06R after the
   haircut). The lane fails the cluster-robust test. The kill bar is not met, so
-  the lane CONTINUES on paper under its frozen rules. The card's GRADUATE does
-  not apply the amended test (follow-up recorded). Side coverage: 6 longs sum
+  the lane CONTINUES on paper under its frozen rules. The card's GRADUATE did
+  not apply the amended test. Lane bars v1.1.0 (same day) add the check to the
+  card: htf-trend carries a 5-day window and the 0.7 multiplier. The
+  card applies the haircut to the mean without the cluster (the stricter reading
+  of the amendment). Side coverage: 6 longs sum
   +4.16R, 14 shorts sum +5.66R. `HTF_TREND_ALERT_ENABLED` stays OFF unless the
   operator decides otherwise.
 - **Shadow replay:** htf-trend 43 episodes, 13 matched, 30 missed (70%; two
@@ -677,8 +680,9 @@ the implementation with expectancy or amend the registered rule.
 - **Killed-lane trade (fault):** the scout opened a compression-straddle BTC
   short on Nov 18 16:47Z. The lane was KILLed on Oct 26, but the decision
   snapshot still showed its directive as live. The scout closed the position
-  before the BTC htf-trend entry of Nov 19 00:06Z. Paper only. Follow-up
-  recorded: remove the directives of killed lanes from the snapshot.
+  before the BTC htf-trend entry of Nov 19 00:06Z. Paper only. Fixed the same
+  day: the lane is on `KILLED_LANES` and the snapshot gives it no entry
+  directive.
 - **Perf report (since last retro), quoted:** "fade-short-pyramid | live |
   COLLECT | n/a | 2 | 1 | $9.69 | +0.10 r_slip | 2/10", "dip-long-pyramid |
   live | COLLECT | n/a | 1 | 1 | $0.74 | +0.02 r_slip | 1/10", "htf-trend |

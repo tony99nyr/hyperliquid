@@ -35,17 +35,18 @@ import { type HtfTrendCoinRead } from '@/lib/scout/htf-trend-scan-service';
 import { type CompressionCoinRead } from '@/lib/scout/compression-scan-service';
 import { upcomingEvents, calendarExhausted } from '@/lib/skills/event-calendar-business-logic';
 import { volNormalizedRiskUsd } from '@/lib/scout/scout-sizing-business-logic';
+import { isLaneKilled } from '@/lib/scout/scout-execution-guard';
 
 /** The FROZEN per-lane rules — ONE source of truth for the text section AND the
  *  headless JSON snapshot (08-20: the json snapshot missing these + the lane scans
  *  is why the consumer stood down through four explicit breakout directives). */
 const LANE_RULES: readonly string[] = [
   "htf-trend: enter ONLY on the htfTrend breakout directive (completed DAILY close through the 20d channel); ONE entry per coin per 24h (mechanically enforced — a stop-out is NOT re-entered while the directive persists); exit ONLY on the 10d-channel daily close-through or the stop (DAEMON-ENFORCED — the producer auto-closes on the frozen rule). NO fixed target, NO early exits. Risk = the directive's suggestedRiskUsd.",
-  "compression-straddle: enter ONLY on the compression breakout directive; ONE entry per squeeze episode per coin (12h cooldown mechanically enforced; a stopped break is NEVER re-entered); exit ONLY on the 4h close back through BBmid or the stop (DAEMON-ENFORCED). Risk = the directive's suggestedRiskUsd.",
+  "compression-straddle: KILLED 2026-10-26 (kill bar fired). NEVER enter. The scan below is context only; an open position still exits on the 4h close back through BBmid or the stop (DAEMON-ENFORCED).",
   "leader-follow: KILLED 2026-09-03 at its frozen bar (n=15 closed post-registration, net −$18.54; whale-conviction −0.12R at n=10) — can NEVER be opened.",
   "breakdown-short / reclaim-long: enter ONLY on a rubric GO directive; stop 2.5%; exit when the side drops out of GO.",
   'vault / carry: passive benchmarks — no active management.',
-  "A breakout directive with no open position on the coin is the DEFAULT action — standing down through one requires a concrete disqualifier (breaker halted, degraded feed, cooldown, already positioned, event blackout, portfolio cap). Killed lanes (directional, reversion, trend-follow) can NEVER be opened.",
+  "A breakout directive with no open position on the coin is the DEFAULT action — standing down through one requires a concrete disqualifier (breaker halted, degraded feed, cooldown, already positioned, event blackout, portfolio cap). Killed lanes (directional, reversion, trend-follow, leader-follow, compression-straddle) can NEVER be opened.",
   `PORTFOLIO CAP (mechanical): max 2 same-direction directional positions across the correlated majors (BTC/ETH/SOL/HYPE move as ONE beta bet) — the executor refuses a third.`,
   `EVENT BLACKOUT (mechanical): no new directional entries within 48h BEFORE or 4h AFTER a snapshot.events print — the executor refuses them. Within 24h of a print, PREFER closing directional positions (a binary print is a coin-flip on a mechanical lane's edge; the forward test should not contain it).`,
   `SIZING (mechanical + policy): use the directive's suggestedRiskUsd (vol-normalized, registered 08-24 — high-vol coins get proportionally fewer dollars so every position carries a comparable vol footprint). riskUsd is clamped to $15 at the executor; a stop tighter than 1% is refused. Expectancy is measured in R — oversizing only ends the test early.`,
@@ -130,7 +131,8 @@ run(async () => {
   try {
     const { scanCompressionSqueezes } = await import('@/lib/scout/compression-scan-service');
     const scan = await scanCompressionSqueezes(scanCoins, now);
-    squeezeReads = scan.reads;
+    // A killed lane gets no entry directive: the scan stays for context and for exits.
+    squeezeReads = isLaneKilled('compression-straddle') ? scan.reads.map((r) => ({ ...r, breakout: null })) : scan.reads;
   } catch { /* scan unavailable → section just prints empty */ }
 
   // 3b-iii) HOUSEHOLD EXPOSURE (Phase 3, Jul-21) — iamrossi's on-chain Base Safe
@@ -322,9 +324,9 @@ run(async () => {
             : null,
         };
       }),
-      // compression-straddle (4h BBW squeeze breakout, pre-reg 08-13): breakout !=
-      // null ⇒ an ENTER directive for lane 'compression-straddle', setupType
-      // 'squeeze-breakout' — one entry per squeeze episode per coin.
+      // compression-straddle (4h BBW squeeze breakout, pre-reg 08-13). The lane is
+      // KILLED: `breakout` is always null here (see the scan above), so the entry
+      // directive below is dead until a new pre-registration revives the lane.
       compression: squeezeReads.map((r) => {
         // Same vol-normalized suggestion, sourced from the htf scan's daily ATR for
         // the coin (both scans cover scanCoins; a missing htf read → the plain floor).
@@ -453,7 +455,7 @@ run(async () => {
     line(base + bo);
   }
 
-  header("COMPRESSION-SQUEEZE SCAN (4h BBW squeeze → breakout — PAPER lane compression-straddle, setupType 'squeeze-breakout'; pre-registered 2026-08-13)");
+  header("COMPRESSION-SQUEEZE SCAN (4h BBW squeeze → breakout — lane compression-straddle KILLED 2026-10-26: context and exits only, NO entries)");
   if (squeezeReads.length === 0) line('(4h squeeze scan unavailable this cycle)');
   for (const r of squeezeReads) {
     const px = (x: number) => (r.latestClose >= 1000 ? x.toFixed(0) : r.latestClose >= 10 ? x.toFixed(2) : x.toFixed(4));

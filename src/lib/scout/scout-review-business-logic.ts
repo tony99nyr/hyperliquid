@@ -232,6 +232,34 @@ export interface LaneHypothesisRow {
   lane: string | null;
   status: string; // 'open' | 'confirmed' | 'invalidated' | 'resolved'
   realizedR?: number | null;
+  /** Entry time (ISO). Needed only for a lane with a cluster-robust graduation check. */
+  createdAt?: string;
+}
+
+/**
+ * Mean R with the largest entry cluster removed: the closes whose entries fall inside the
+ * `windowDays` window (anchored at any entry) that holds the largest summed R. A close
+ * with no readable entry time cannot be placed, so the result is then null (unknown).
+ */
+export function meanRWithoutLargestCluster(
+  closes: ReadonlyArray<{ r: number; at: number }>,
+  windowDays: number,
+): { meanR: number | null; removed: number } {
+  if (closes.some((c) => !Number.isFinite(c.at))) return { meanR: null, removed: 0 };
+  const span = windowDays * 86_400_000;
+  let best: { sum: number; start: number } | null = null;
+  // Anchors in entry order: on an equal sum the earliest window wins, as in removeLargestCluster.
+  for (const anchor of [...closes].sort((a, b) => a.at - b.at)) {
+    const sum = closes.reduce((a, c) => (c.at >= anchor.at && c.at < anchor.at + span ? a + c.r : a), 0);
+    if (!best || sum > best.sum) best = { sum, start: anchor.at };
+  }
+  if (!best) return { meanR: null, removed: 0 };
+  const start = best.start;
+  const kept = closes.filter((c) => !(c.at >= start && c.at < start + span));
+  return {
+    meanR: kept.length ? kept.reduce((a, c) => a + c.r, 0) / kept.length : null,
+    removed: closes.length - kept.length,
+  };
 }
 
 export interface LaneScorecard {
@@ -261,6 +289,12 @@ export function buildLaneScorecards(args: {
   periodDays: number;
   periodDaysFor?: (lane: string) => number;
   minExpectancyRFor?: (lane: string) => number | null;
+  /**
+   * The cluster-robust graduation check of a lane, or null when the lane has none: the
+   * mean R without the largest `windowDays` entry cluster, times `multiplier` (the
+   * paper-to-live haircut), must still reach the lane's expectancy bar.
+   */
+  clusterCheckFor?: (lane: string) => { windowDays: number; multiplier: number } | null;
   tradeCountFor?: (lane: string, laneCount: number) => number;
   /** Optional per-lane config override (e.g. a lower bar for the passive vault lane). */
   configFor?: (lane: string) => ScorecardConfig;
@@ -270,7 +304,7 @@ export function buildLaneScorecards(args: {
   const feesPaid = new Map<string, number>();
   const grossWins = new Map<string, number>();
   const openCount = new Map<string, number>();
-  const realisedRs = new Map<string, number[]>();
+  const realisedRs = new Map<string, Array<{ r: number; at: number }>>();
   const wins = new Map<string, number>();
   const losses = new Map<string, number>();
   const closed = new Map<string, number>();
@@ -300,7 +334,7 @@ export function buildLaneScorecards(args: {
     else if (h.status === 'resolved') bump(closed, lane);
     if (h.realizedR != null && Number.isFinite(h.realizedR) && h.status !== 'open') {
       const values = realisedRs.get(lane) ?? [];
-      values.push(h.realizedR);
+      values.push({ r: h.realizedR, at: h.createdAt ? Date.parse(h.createdAt) : NaN });
       realisedRs.set(lane, values);
     }
   }
@@ -322,10 +356,22 @@ export function buildLaneScorecards(args: {
     const minimum = args.minExpectancyRFor?.(lane);
     if (minimum != null && card.verdict === 'graduate') {
       const values = realisedRs.get(lane) ?? [];
-      const mean = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+      const mean = values.length ? values.reduce((sum, value) => sum + value.r, 0) / values.length : null;
+      const check = args.clusterCheckFor?.(lane) ?? null;
       if (mean == null || mean < minimum) {
         card.verdict = 'continue';
         card.reason = `expectancy ${mean?.toFixed(2) ?? 'unknown'}R below registered +${minimum.toFixed(2)}R bar`;
+      } else if (check) {
+        // The bar must also hold without the best cluster. An unknown result fails closed.
+        const robust = meanRWithoutLargestCluster(values, check.windowDays);
+        const haircutR = robust.meanR == null ? null : robust.meanR * check.multiplier;
+        if (values.length < cfg.minTradesToGraduate) {
+          card.verdict = 'continue';
+          card.reason = `${values.length} closes carry a measured R; the bar needs ${cfg.minTradesToGraduate}`;
+        } else if (haircutR == null || haircutR < minimum) {
+          card.verdict = 'continue';
+          card.reason = `expectancy ${robust.meanR?.toFixed(2) ?? 'unknown'}R with the largest ${check.windowDays}-day entry cluster removed (${robust.removed} closes), ${haircutR?.toFixed(2) ?? 'unknown'}R after the x${check.multiplier} haircut, is below the registered +${minimum.toFixed(2)}R bar`;
+        }
       }
     }
     return { lane, openCount: openCount.get(lane) ?? 0, card };
