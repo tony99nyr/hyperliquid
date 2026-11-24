@@ -14,16 +14,19 @@ every 30 minutes, or after 10 minutes when an act trigger waits. Then it runs
 
 - WSL 2 with systemd on (`/etc/wsl.conf`) and `tony` as the default user.
 - The Windows task "WSL keepalive" runs at the `tactix` logon (the HTPC logs in
-  automatically). It starts `wsl.exe -d Ubuntu-24.04 --exec sleep infinity` with a
-  hidden window through `C:\Users\Tactix\wsl-keepalive.vbs`. Without it, WSL stops the
-  distro and the timer with it.
+  automatically) and every 10 minutes (multiple instances: IgnoreNew). It runs
+  `C:\Users\Tactix\wsl-keepalive.vbs`, which starts a hidden
+  `wsl.exe -d Ubuntu-24.04 --exec sleep infinity` only when none runs. Without it, WSL
+  stops the distro and the timer with it. A logon-only trigger is not enough: on
+  2026-11-24 the keepalive process ended, and the distro stayed stopped.
 - Node 24 (nvm), pnpm, and the claude CLI at `~/.local/bin/claude`.
 - The repo at `~/gitrepos/hyperliquid`, cloned with the read-only deploy key
   "HTPC scout (read-only)".
 - `.env.local` with `TRADING_MODE=paper` and only the Supabase, Discord and HL
   account keys. It holds no admin secret, no poke bearer and no agent key.
 - `~/.config/hl-scout/env` (mode 600) with `CLAUDE_CODE_OAUTH_TOKEN` from
-  `claude setup-token`. Never set `ANTHROPIC_API_KEY`.
+  `claude setup-token`. The token starts with `sk-ant-oat01-`. The terminal wraps it,
+  so copy all of it. Never set `ANTHROPIC_API_KEY`.
 
 ## Install the timer
 
