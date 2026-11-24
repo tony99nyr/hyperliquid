@@ -15,6 +15,13 @@
  * cost: since 2026-08 the producer serves a Redis-cached payload (its
  * stance-cache.ts, busted post-trade and on the cron beat), so each fetch here
  * is cheap for it — do not widen this TTL to "save" the producer.
+ *
+ * Redis fast path (2026-11, Vercel Hobby Active-CPU cap): with IAMROSSI_STANCE_REDIS_URL
+ * set, the reader GETs the producer's cache key straight from its Redis (a user that may
+ * only GET that one key). The iamrossi NAS cron keeps the key warm, so a tick makes no
+ * call to the iamrossi Vercel route. A miss or any Redis error falls back to the HTTP
+ * route, which recomputes and rewrites the key. Both paths go through the same parse,
+ * clean-up and age gate.
  */
 
 import 'server-only';
@@ -40,6 +47,9 @@ export interface TrendStanceSnapshot {
 export const TREND_BULLISH_CONF_MIN = 0.7;
 
 const FETCH_TIMEOUT_MS = 5_000;
+/** The producer's cache key (iamrossi stance-cache.ts, KV_KEYS.TRADING_STANCE_CACHE). */
+export const STANCE_REDIS_KEY = 'trading:stance:cache';
+const REDIS_TIMEOUT_MS = 3_000;
 const CACHE_TTL_MS = 2 * 60_000;
 /** A snapshot older than one 8h signal beat + grace is a FROZEN endpoint, not a
  *  stance — treat as unreadable (draft nothing; the flip guard can't verify). */
@@ -94,6 +104,48 @@ export async function fetchTrendStance(now: number = Date.now()): Promise<TrendS
   if (!baseUrl || !token || token.length < 16) return null; // same bar as isTrendStanceConfigured
   if (cache && now - cache.atMs < CACHE_TTL_MS) return cache.snapshot;
 
+  // A Redis body that fails the parse or the age gate also falls back to HTTP.
+  const snapshot =
+    parseStanceBody(await readStanceFromRedis(env.IAMROSSI_STANCE_REDIS_URL), now) ??
+    parseStanceBody(await fetchStanceOverHttp(baseUrl, token), now);
+  if (snapshot) cache = { snapshot, atMs: now };
+  return snapshot;
+}
+
+/**
+ * GET the producer's cache key. Returns the parsed JSON body, or null on a miss, a
+ * missing/invalid URL or any error (the caller then uses the HTTP route). One short-lived
+ * connection per read: the cockpit reads at most once per 2-min module-cache window.
+ */
+export async function readStanceFromRedis(url: string | undefined): Promise<unknown | null> {
+  if (!url || !/^rediss?:\/\//.test(url)) return null;
+  let client: { destroy: () => void } | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const { createClient } = await import('redis');
+    const c = createClient({ url, socket: { connectTimeout: REDIS_TIMEOUT_MS, reconnectStrategy: false } });
+    c.on('error', () => {}); // a dropped socket must not crash the tick; the read below fails instead
+    client = c;
+    const raw = await Promise.race([
+      c.connect().then(() => c.get(STANCE_REDIS_KEY)),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('stance redis timeout')), REDIS_TIMEOUT_MS);
+      }),
+    ]);
+    return typeof raw === 'string' && raw.length > 0 ? (JSON.parse(raw) as unknown) : null;
+  } catch {
+    return null; // fail over to HTTP
+  } finally {
+    clearTimeout(timer);
+    try {
+      client?.destroy();
+    } catch {
+      /* already closed */
+    }
+  }
+}
+
+async function fetchStanceOverHttp(baseUrl: string, token: string): Promise<unknown | null> {
   try {
     const url = `${baseUrl.replace(/\/$/, '')}/api/trading/stance`;
     const res = await fetch(url, {
@@ -102,28 +154,32 @@ export async function fetchTrendStance(now: number = Date.now()): Promise<TrendS
       cache: 'no-store',
     });
     if (!res.ok) return null;
-    const body = (await res.json()) as { ok?: boolean; generatedAt?: number; stances?: unknown[] };
-    if (body.ok !== true || !Array.isArray(body.stances)) return null;
-    // Staleness gate — since 2026-08 the producer stamps generatedAt at
-    // COMPUTATION time (its Redis payload cache writes it once and serves it
-    // for up to 15 min, busted post-trade and on the 8h beat), so this now
-    // measures real snapshot age instead of response time. In practice the
-    // producer's setEx TTL bounds age at ~15 min, so this 9h gate only fires
-    // on a frozen proxy/replayed payload. It still can't see a paused producer
-    // whose upstream candle store went stale — the recompute would stamp fresh
-    // over stale candles (a candle-age field is the remaining gap).
-    // A missing/garbage generatedAt is treated as unreadable (fail-closed).
-    const generatedAtMs = Number(body.generatedAt);
-    if (!Number.isFinite(generatedAtMs)) return null;
-    if (now - generatedAtMs > MAX_STANCE_AGE_MS) return null;
-    const stances = body.stances.map(sanitizeStance).filter((s): s is TrendStance => s !== null);
-    if (stances.length === 0) return null;
-    const snapshot: TrendStanceSnapshot = { generatedAtMs, fetchedAtMs: now, stances };
-    cache = { snapshot, atMs: now };
-    return snapshot;
+    return (await res.json()) as unknown;
   } catch {
     return null; // fail-open toward iamrossi, fail-closed toward drafting
   }
+}
+
+/**
+ * Validate a stance body from either path. Null on a malformed or stale body.
+ *
+ * Staleness gate: the producer stamps generatedAt at COMPUTATION time (its Redis
+ * payload cache writes it once and serves it for up to 60 min, busted post-trade and
+ * on the 8h beat), so this measures real snapshot age. The 9h gate fires only on a
+ * frozen proxy/replayed payload. It still can't see a paused producer whose upstream
+ * candle store went stale (a candle-age field is the remaining gap). A missing/garbage
+ * generatedAt is treated as unreadable (fail-closed).
+ */
+function parseStanceBody(raw: unknown, now: number): TrendStanceSnapshot | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const body = raw as { ok?: boolean; generatedAt?: number; stances?: unknown[] };
+  if (body.ok !== true || !Array.isArray(body.stances)) return null;
+  const generatedAtMs = Number(body.generatedAt);
+  if (!Number.isFinite(generatedAtMs)) return null;
+  if (now - generatedAtMs > MAX_STANCE_AGE_MS) return null;
+  const stances = body.stances.map(sanitizeStance).filter((s): s is TrendStance => s !== null);
+  if (stances.length === 0) return null;
+  return { generatedAtMs, fetchedAtMs: now, stances };
 }
 
 /** The stance for one asset (case-insensitive; 'ETH' matches 'eth'), or null. */
