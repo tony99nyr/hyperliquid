@@ -10,8 +10,8 @@ Design docs: [ARMED_LADDER_ARCHITECTURE.md](./ARMED_LADDER_ARCHITECTURE.md) ·
 DESKTOP / office box (you + Claude)   NAS (always-on, no keys)         CLOUD
 ───────────────────────────────────   ────────────────────────         ─────
 ad-hoc skills (pnpm skill:*)          pnpm trader-watch (daemon)       Vercel prod: the app +
-weekly desk retro                     pnpm scout:watch (embeds the       EXECUTORS (agent key lives
-authoring/reviewing ladders             scout consumer, pokes the        ONLY here; all real orders)
+weekly desk retro                     pnpm scout:watch (triggers,        EXECUTORS (agent key lives
+authoring/reviewing ladders             exit checks, pokes the           ONLY here; all real orders)
 dev / validate / deploy                 prod crons, 10 min)            cron-job.org → ladder-watch ~2min
                                       crontab: nas-watch.sh every      healthchecks.io → dead-man alert
                                         5 min (health, rubric, vault,  Supabase → shared DB/realtime
@@ -96,10 +96,11 @@ One `nas-watch.sh` tick runs these steps (see the script header):
 **Scout daemon:** since 2026-11-23, `pnpm scout:watch` runs on the NAS from root's
 crontab as admin (`ops/nas/install.sh`; steps and rollback in
 `services/scout-watch/README.md`, "Run it on the NAS"). It writes triggers to Supabase `scout_triggers`, runs
-the scout consumer (`scripts/scout-headless.sh`) EMBEDDED every
-`SCOUT_CONSUMER_INTERVAL_MIN` (default 30), and pokes the prod crons. **Do not add a
-separate `scout-headless.sh` cron:** two consumers can both open on the same directive.
-A cron is only for a box that runs the consumer without the daemon. Consumer liveness is
+exit enforcement, and pokes the prod crons. Its NAS `.env` sets
+`SCOUT_CONSUMER_INTERVAL_MIN=0`: since 2026-11-24 the HTPC runs the scout consumer
+(`scripts/scout-headless.sh`, the Sonnet step) from a 5-minute systemd timer
+(`ops/htpc/README.md`). **Run one consumer only:** two consumers can both open on the
+same directive. Consumer liveness is
 the `scout_heartbeat` row `source='scout-cycle'`. The office box runs no always-on job, so it can sleep at night. Never start a second
 scout-watch on it: two copies double-write.
 

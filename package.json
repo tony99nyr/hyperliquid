@@ -84,6 +84,7 @@
     "study:hip3-earnings": "tsx --tsconfig tsconfig.scripts.json scripts/hip3-earnings-straddle.ts",
     "retro:remind": "tsx --tsconfig tsconfig.scripts.json scripts/desk-retro-reminder.ts",
     "scout:heartbeat": "tsx --tsconfig tsconfig.scripts.json scripts/scout-heartbeat-check.ts",
+    "scout:consumer-due": "tsx --tsconfig tsconfig.scripts.json scripts/scout-consumer-due.ts",
     "test:sql": "bash scripts/test-fold-sql.sh"
   },
   "dependencies": {

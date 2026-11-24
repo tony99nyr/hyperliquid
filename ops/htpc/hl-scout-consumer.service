@@ -1,0 +1,14 @@
+# One HTPC scout consumer tick. Started by hl-scout-consumer.timer. See ops/htpc/README.md.
+[Unit]
+Description=HL scout consumer tick (paper-only headless Sonnet cycle)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/gitrepos/hyperliquid
+# systemd units get a minimal env: node, pnpm and the claude CLI live in user dirs.
+# Update the node folder when nvm moves to a new Node 24 release.
+Environment=PATH=%h/.nvm/versions/node/v24.22.3/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/sh %h/gitrepos/hyperliquid/ops/htpc/scout-consumer.sh
+TimeoutStartSec=660
+KillMode=control-group

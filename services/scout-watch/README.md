@@ -14,7 +14,8 @@ is the offline fallback). Costs **zero model tokens**.
 
 1. **The trigger producer** (`scout:watch`): supervise it with the scripts here or the
    `systemd --user` unit. Auto-restarts.
-2. **The embedded consumer**: every `SCOUT_CONSUMER_INTERVAL_MIN` (default 30) the
+2. **The embedded consumer** (off on the NAS since 2026-11-24: the HTPC runs it, see
+   `ops/htpc/README.md`, and the NAS `.env` sets `SCOUT_CONSUMER_INTERVAL_MIN=0`): every `SCOUT_CONSUMER_INTERVAL_MIN` (default 30) the
    daemon spawns `scripts/scout-headless.sh` (snapshot → headless Sonnet decision →
    strict-JSON paper trade). Do NOT add a separate consumer cron as well: two consumers
    can both open on the same directive.
