@@ -109,12 +109,6 @@ const envSchema = z.object({
   // is enforced in trend-stance-service, where too-short degrades to "unconfigured".
   IAMROSSI_STANCE_URL: z.string().url().optional(),
   IAMROSSI_STANCE_TOKEN: z.string().optional(),
-  // Fast path (2026-11, Vercel Hobby Active-CPU cap): a Redis URL whose user may only GET
-  // the producer's stance cache key (Redis Cloud ACL `+get ~trading:stance:cache`), over TLS
-  // (`rediss://` only; any other scheme is ignored). Read
-  // first; the HTTP route above stays the fallback on a miss or any error. Loose on
-  // purpose, like the URL above: a bad value degrades to the HTTP path, never throws.
-  IAMROSSI_STANCE_REDIS_URL: z.string().optional(),
 
   // --- Layer-1 auto-exit (exit-only safety net; see docs/LIVE_AUTO_EXIT.md) ---
   // Master kill-switch. Default OFF: the risk-exit endpoint refuses to fire and
@@ -222,7 +216,6 @@ export function validateEnv(source: NodeJS.ProcessEnv = process.env): CockpitEnv
     AGENT_ACTION_TOKEN: source.AGENT_ACTION_TOKEN,
     IAMROSSI_STANCE_URL: source.IAMROSSI_STANCE_URL,
     IAMROSSI_STANCE_TOKEN: source.IAMROSSI_STANCE_TOKEN,
-    IAMROSSI_STANCE_REDIS_URL: source.IAMROSSI_STANCE_REDIS_URL,
     LADDER_CRON_SECRET: source.LADDER_CRON_SECRET,
     LADDER_WATCH_HEALTHCHECK_URL: source.LADDER_WATCH_HEALTHCHECK_URL,
   });

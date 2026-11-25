@@ -1,6 +1,6 @@
 /**
- * Pins the stance reader's two paths: the Redis fast path (no call to the iamrossi
- * Vercel route) and the HTTP fallback on a Redis miss, error or bad body.
+ * Pins the stance reader: the HTTP route read, its 9h age gate, the module cache and
+ * fail-closed null on any failure.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -9,24 +9,13 @@ vi.mock('server-only', () => ({}));
 const env: Record<string, string | undefined> = {};
 vi.mock('@/lib/env/env', () => ({ validateEnv: () => env }));
 
-const redisGet = vi.fn();
-const redisConnect = vi.fn();
-vi.mock('redis', () => ({
-  createClient: () => ({
-    on: () => undefined,
-    connect: () => redisConnect(),
-    get: (k: string) => redisGet(k),
-    destroy: () => undefined,
-  }),
-}));
-
-import { clearTrendStanceCache, fetchTrendStance, STANCE_REDIS_KEY } from '@/lib/ladder/trend-stance-service';
+import { clearTrendStanceCache, fetchTrendStance } from '@/lib/ladder/trend-stance-service';
 
 const NOW = Date.UTC(2026, 10, 24, 12, 0, 0);
 const body = (generatedAt: number, regime = 'bullish') => ({
   ok: true,
   generatedAt,
-  stances: [{ asset: 'eth', enabled: true, position: 'holding', regime, regimeConfidence: 0.8 }],
+  stances: [{ asset: 'ETH', enabled: true, position: 'holding', regime, regimeConfidence: 0.8 }],
 });
 const fetchMock = vi.fn();
 
@@ -34,58 +23,42 @@ beforeEach(() => {
   clearTrendStanceCache();
   vi.clearAllMocks();
   vi.stubGlobal('fetch', fetchMock);
-  Object.assign(env, {
-    IAMROSSI_STANCE_URL: 'https://iamrossi.example',
-    IAMROSSI_STANCE_TOKEN: 'x'.repeat(32),
-    IAMROSSI_STANCE_REDIS_URL: 'rediss://hl-stance:pw@redis.example:11301',
-  });
-  redisConnect.mockResolvedValue(undefined);
-  fetchMock.mockResolvedValue(new Response(JSON.stringify(body(NOW - 60_000, 'neutral'))));
+  Object.assign(env, { IAMROSSI_STANCE_URL: 'https://iamrossi.example/', IAMROSSI_STANCE_TOKEN: 'x'.repeat(32) });
+  fetchMock.mockImplementation(async () => new Response(JSON.stringify(body(NOW - 60_000))));
 });
 
 describe('fetchTrendStance', () => {
-  it('reads the cache key from Redis and makes no HTTP call', async () => {
-    redisGet.mockResolvedValue(JSON.stringify(body(NOW - 60_000)));
+  it('reads the stance route with the bearer token and sanitises the body', async () => {
     const snap = await fetchTrendStance(NOW);
-    expect(redisGet).toHaveBeenCalledWith(STANCE_REDIS_KEY);
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(snap?.stances[0].regime).toBe('bullish');
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://iamrossi.example/api/trading/stance');
+    expect(init.headers).toEqual({ Authorization: `Bearer ${'x'.repeat(32)}` });
+    expect(snap?.stances[0]).toEqual({ asset: 'eth', enabled: true, position: 'holding', regime: 'bullish', regimeConfidence: 0.8 });
   });
 
-  it('falls back to HTTP on a Redis miss', async () => {
-    redisGet.mockResolvedValue(null);
-    const snap = await fetchTrendStance(NOW);
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(snap?.stances[0].regime).toBe('neutral');
-  });
-
-  it('falls back to HTTP when Redis fails to connect', async () => {
-    redisConnect.mockRejectedValue(new Error('ECONNREFUSED'));
-    expect((await fetchTrendStance(NOW))?.stances[0].regime).toBe('neutral');
-  });
-
-  it('falls back to HTTP when the Redis body is older than the 9h gate', async () => {
-    redisGet.mockResolvedValue(JSON.stringify(body(NOW - 10 * 3_600_000)));
-    expect((await fetchTrendStance(NOW))?.stances[0].regime).toBe('neutral');
-  });
-
-  it('ignores a plain-text redis:// URL and uses HTTP', async () => {
-    env.IAMROSSI_STANCE_REDIS_URL = 'redis://hl-stance:pw@redis.example:11301';
-    redisGet.mockResolvedValue(JSON.stringify(body(NOW - 60_000)));
-    expect((await fetchTrendStance(NOW))?.stances[0].regime).toBe('neutral');
-    expect(redisGet).not.toHaveBeenCalled();
-  });
-
-  it('uses HTTP only when no Redis URL is set', async () => {
-    env.IAMROSSI_STANCE_REDIS_URL = undefined;
+  it('serves the module cache for 2 min, then fetches again (flip-guard disarm latency)', async () => {
     await fetchTrendStance(NOW);
-    expect(redisGet).not.toHaveBeenCalled();
+    await fetchTrendStance(NOW + 2 * 60_000 - 1);
     expect(fetchMock).toHaveBeenCalledOnce();
+    await fetchTrendStance(NOW + 2 * 60_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('returns null when both paths fail (callers treat null as unknown)', async () => {
-    redisGet.mockResolvedValue(null);
-    fetchMock.mockResolvedValue(new Response('nope', { status: 500 }));
+  it('returns null for a body older than the 9h gate', async () => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify(body(NOW - 10 * 3_600_000))));
     expect(await fetchTrendStance(NOW)).toBeNull();
+  });
+
+  it('returns null on an HTTP error or a network failure (callers treat null as unknown)', async () => {
+    fetchMock.mockImplementationOnce(async () => new Response('nope', { status: 500 }));
+    expect(await fetchTrendStance(NOW)).toBeNull();
+    fetchMock.mockRejectedValueOnce(new Error('ECONNRESET'));
+    expect(await fetchTrendStance(NOW)).toBeNull();
+  });
+
+  it('returns null without a token, and makes no call', async () => {
+    env.IAMROSSI_STANCE_TOKEN = undefined;
+    expect(await fetchTrendStance(NOW)).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
