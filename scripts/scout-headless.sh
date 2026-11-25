@@ -118,6 +118,11 @@ case "$(printf '%s' "$DECISION" | tr -d '[:space:]')" in
   *) DECISION="$(printf '%s' "$RAW" | tr -d '\n' | grep -oE '\{.*\}' | tail -1)" ;;
 esac
 echo "[scout-headless] decision: $DECISION"
+# An empty decision hides the cause (the CLI printed an error text, or nothing). Log
+# the start of the raw reply: it is model or CLI output, on one line, 300 characters.
+if [ -z "$DECISION" ]; then
+  echo "[scout-headless] no JSON object in the reply. Raw reply starts: $(printf '%s' "$RAW" | tr '\n' ' ' | cut -c1-300)"
+fi
 pnpm --silent scout:trade -- --from-json "$DECISION"
 
 # Dead-man ping (healthchecks.io or similar): silence past the grace period pages
